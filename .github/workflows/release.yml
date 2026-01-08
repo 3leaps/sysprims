@@ -6,53 +6,207 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 jobs:
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            artifact_name: sysprims-linux-x64-musl
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: sysprims-linux-x64-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: sysprims-darwin-arm64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: sysprims-darwin-x64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: sysprims-windows-x64
-
+  # Validate tag matches VERSION file
+  validate-version:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install musl tools (Linux musl only)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Validate VERSION matches tag
+        id: version
+        run: |
+          FILE_VERSION=$(cat VERSION)
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "VERSION mismatch: file=$FILE_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+          echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version validated: $FILE_VERSION"
+
+  # Build Linux targets using cargo-zigbuild for glibc version targeting
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    needs: validate-version
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            glibc: "2.17"
+            artifact_suffix: linux-amd64
+          - target: x86_64-unknown-linux-musl
+            glibc: ""
+            artifact_suffix: linux-amd64-musl
+          - target: aarch64-unknown-linux-gnu
+            glibc: "2.17"
+            artifact_suffix: linux-arm64
+          - target: aarch64-unknown-linux-musl
+            glibc: ""
+            artifact_suffix: linux-arm64-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+
+      - name: Install musl tools (musl targets)
+        if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
+      - name: Build CLI
+        run: |
+          if [ -n "${{ matrix.glibc }}" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p sysprims-cli
+          else
+            cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-cli
+          fi
 
-      - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build FFI
+        run: |
+          if [ -n "${{ matrix.glibc }}" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p sysprims-ffi
+          else
+            cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-ffi
+          fi
 
-      - name: Upload artifact
+      - name: Package CLI
+        run: |
+          mkdir -p dist/cli
+          cp target/${{ matrix.target }}/release/sysprims-cli dist/cli/sysprims
+          cp LICENSE-MIT LICENSE-APACHE dist/cli/
+          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
+
+      - name: Package FFI
+        run: |
+          mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
+          cp target/${{ matrix.target }}/release/libsysprims_ffi.a dist/ffi/${{ matrix.artifact_suffix }}/
+
+      - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/sysprims-cli*
+          name: cli-${{ matrix.artifact_suffix }}
+          path: sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
 
-  generate-artifacts:
-    name: Generate Release Artifacts
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-${{ matrix.artifact_suffix }}
+          path: dist/ffi/${{ matrix.artifact_suffix }}
+
+  # Build macOS targets (native, no cross-compile needed for arm64 on macos-latest)
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    needs: validate-version
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            artifact_suffix: darwin-amd64
+          - target: aarch64-apple-darwin
+            artifact_suffix: darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build CLI
+        run: cargo build --release --target ${{ matrix.target }} -p sysprims-cli
+
+      - name: Build FFI
+        run: cargo build --release --target ${{ matrix.target }} -p sysprims-ffi
+
+      - name: Package CLI
+        run: |
+          mkdir -p dist/cli
+          cp target/${{ matrix.target }}/release/sysprims-cli dist/cli/sysprims
+          cp LICENSE-MIT LICENSE-APACHE dist/cli/
+          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
+
+      - name: Package FFI
+        run: |
+          mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
+          cp target/${{ matrix.target }}/release/libsysprims_ffi.a dist/ffi/${{ matrix.artifact_suffix }}/
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.artifact_suffix }}
+          path: sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
+
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-${{ matrix.artifact_suffix }}
+          path: dist/ffi/${{ matrix.artifact_suffix }}
+
+  # Build Windows targets via zigbuild cross-compilation
+  build-windows:
+    name: Build Windows
     runs-on: ubuntu-latest
-    needs: build
+    needs: validate-version
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install cargo-zigbuild
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+
+      - name: Build CLI
+        run: cargo zigbuild --release --target x86_64-pc-windows-gnu -p sysprims-cli
+
+      - name: Build FFI
+        run: cargo zigbuild --release --target x86_64-pc-windows-gnu -p sysprims-ffi
+
+      - name: Package CLI
+        run: |
+          mkdir -p dist/cli
+          cp target/x86_64-pc-windows-gnu/release/sysprims-cli.exe dist/cli/sysprims.exe
+          cp LICENSE-MIT LICENSE-APACHE dist/cli/
+          cd dist/cli && zip -r ../../sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip .
+
+      - name: Package FFI
+        run: |
+          mkdir -p dist/ffi/windows-amd64
+          cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-windows-amd64
+          path: sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip
+
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-windows-amd64
+          path: dist/ffi/windows-amd64
+
+  # Generate C header via cbindgen
+  cbindgen:
+    name: Generate C Header
+    runs-on: ubuntu-latest
+    needs: validate-version
     steps:
       - uses: actions/checkout@v4
 
@@ -60,25 +214,190 @@ jobs:
         run: cargo install cbindgen --locked
 
       - name: Generate C header
-        run: cbindgen --config cbindgen.toml -o ffi/sysprims.h
+        run: |
+          cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
+
+      - name: Upload header
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-header
+          path: sysprims.h
+
+  # Generate SBOM for compliance
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: validate-version
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install cargo-sbom
         run: cargo install cargo-sbom --locked
 
       - name: Generate SBOM
-        run: cargo sbom --output-format spdx > sbom-${{ github.ref_name }}.spdx.json
+        run: cargo sbom --output-format spdx > sbom-${{ needs.validate-version.outputs.version }}.spdx.json
 
-      - name: Download all artifacts
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-${{ needs.validate-version.outputs.version }}.spdx.json
+
+  # Package all FFI libs into single bundle
+  package-ffi-bundle:
+    name: Package FFI Bundle
+    runs-on: ubuntu-latest
+    needs: [validate-version, build-linux, build-macos, build-windows, cbindgen]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all FFI artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          pattern: ffi-*
+          path: ffi-libs
 
-      - name: Create release
-        uses: softprops/action-gh-release@v1
+      - name: Download C header
+        uses: actions/download-artifact@v4
         with:
-          files: |
-            artifacts/**/*
-            ffi/sysprims.h
-            sbom-${{ github.ref_name }}.spdx.json
-            LICENSE-MIT
-            LICENSE-APACHE
+          name: c-header
+          path: ffi-libs
+
+      - name: Package FFI bundle
+        run: |
+          VERSION=${{ needs.validate-version.outputs.version }}
+          mkdir -p bundle/lib bundle/include
+
+          # Organize libs by platform
+          for dir in ffi-libs/ffi-*/; do
+            platform=$(basename "$dir" | sed 's/ffi-//')
+            mkdir -p "bundle/lib/$platform"
+            cp "$dir"/*.a "bundle/lib/$platform/" 2>/dev/null || true
+          done
+
+          # Add header
+          cp ffi-libs/sysprims.h bundle/include/
+
+          # Add metadata
+          echo "$VERSION" > bundle/VERSION
+          cp LICENSE-MIT LICENSE-APACHE bundle/
+
+          # Create manifest
+          cat > bundle/MANIFEST.json << EOF
+          {
+            "name": "sysprims-ffi",
+            "version": "$VERSION",
+            "platforms": [
+              "linux-amd64",
+              "linux-amd64-musl",
+              "linux-arm64",
+              "linux-arm64-musl",
+              "darwin-amd64",
+              "darwin-arm64",
+              "windows-amd64"
+            ]
+          }
+          EOF
+
+          tar -czf sysprims-ffi-${VERSION}-libs.tar.gz -C bundle .
+
+      - name: Upload FFI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-bundle
+          path: sysprims-ffi-${{ needs.validate-version.outputs.version }}-libs.tar.gz
+
+  # Create GitHub release with all artifacts (unsigned - signing is manual)
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: [validate-version, build-linux, build-macos, build-windows, cbindgen, sbom, package-ffi-bundle]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: release-cli
+
+      - name: Download FFI bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ffi-bundle
+          path: release-ffi
+
+      - name: Download C header
+        uses: actions/download-artifact@v4
+        with:
+          name: c-header
+          path: release-header
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: release-sbom
+
+      - name: Organize release files
+        run: |
+          mkdir -p release
+
+          # CLI archives
+          find release-cli -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} release/ \;
+
+          # FFI bundle
+          mv release-ffi/*.tar.gz release/
+
+          # Header
+          mv release-header/sysprims.h release/
+
+          # SBOM
+          mv release-sbom/*.json release/
+
+          # Licenses
+          cp LICENSE-MIT LICENSE-APACHE release/
+
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          draft: true
+          body: |
+            ## sysprims v${{ needs.validate-version.outputs.version }}
+
+            GPL-free, cross-platform process utilities with group-by-default tree management.
+
+            ### Installation
+
+            Download the appropriate archive for your platform and extract.
+
+            ### Verification
+
+            **Note:** This release is unsigned. Signed checksums will be uploaded after manual signing.
+
+            Once signed artifacts are available:
+            ```bash
+            # Verify checksum signature
+            minisign -Vm SHA256SUMS -p sysprims-minisign.pub
+
+            # Verify file checksums
+            shasum -a 256 -c SHA256SUMS
+            ```
+
+            ### Platform Matrix
+
+            | Platform | CLI | FFI |
+            |----------|-----|-----|
+            | Linux x64 (glibc 2.17+) | `sysprims-*-linux-amd64.tar.gz` | In FFI bundle |
+            | Linux x64 (musl) | `sysprims-*-linux-amd64-musl.tar.gz` | In FFI bundle |
+            | Linux arm64 (glibc 2.17+) | `sysprims-*-linux-arm64.tar.gz` | In FFI bundle |
+            | Linux arm64 (musl) | `sysprims-*-linux-arm64-musl.tar.gz` | In FFI bundle |
+            | macOS x64 | `sysprims-*-darwin-amd64.tar.gz` | In FFI bundle |
+            | macOS arm64 | `sysprims-*-darwin-arm64.tar.gz` | In FFI bundle |
+            | Windows x64 | `sysprims-*-windows-amd64.zip` | In FFI bundle |

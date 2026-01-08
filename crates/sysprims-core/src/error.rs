@@ -269,7 +269,7 @@ mod tests {
     fn test_error_codes() {
         assert_eq!(SysprimsError::invalid_argument("").error_code(), 1);
         assert_eq!(
-            SysprimsError::spawn_failed(io::Error::new(io::ErrorKind::Other, "test")).error_code(),
+            SysprimsError::spawn_failed(io::Error::other("test")).error_code(),
             2
         );
         assert_eq!(SysprimsError::Timeout.error_code(), 3);
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_io_error_conversion() {
-        let io_err = io::Error::new(io::ErrorKind::Other, "test error");
+        let io_err = io::Error::other("test error");
         let sysprims_err: SysprimsError = io_err.into();
 
         match sysprims_err {

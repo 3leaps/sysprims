@@ -13,6 +13,10 @@
 .PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version
 .PHONY: precommit prepush deps-check audit deny
 .PHONY: build-release build-ffi cbindgen
+.PHONY: release-clean release-download release-checksums release-sign
+.PHONY: release-export-keys release-verify-checksums release-verify-signatures
+.PHONY: release-verify-keys release-notes release-upload
+.PHONY: version-patch version-minor version-major version-set
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -49,25 +53,40 @@ help: ## Show available targets
 	@echo "sysprims - GPL-free Process Utilities"
 	@echo "Group-by-default process tree management."
 	@echo ""
-	@echo "Required targets:"
+	@echo "Development:"
 	@echo "  help            Show this help message"
 	@echo "  bootstrap       Install tools (sfetch -> goneat)"
-	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
-	@echo "  test            Run test suite"
-	@echo "  fmt             Format code (cargo fmt)"
-	@echo "  lint            Run linting (cargo clippy)"
 	@echo "  build           Build all crates (debug)"
 	@echo "  build-release   Build all crates (release)"
 	@echo "  build-ffi       Build FFI library with C header"
 	@echo "  clean           Remove build artifacts"
-	@echo "  version         Print current version"
 	@echo ""
 	@echo "Quality gates:"
+	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
+	@echo "  test            Run test suite"
+	@echo "  fmt             Format code (cargo fmt)"
+	@echo "  lint            Run linting (cargo clippy)"
 	@echo "  precommit       Pre-commit checks (fast: fmt, clippy)"
 	@echo "  prepush         Pre-push checks (thorough: fmt, clippy, test, deny)"
 	@echo "  deny            Run cargo-deny license and advisory checks"
 	@echo "  audit           Run cargo-audit security scan"
-	@echo "  deps-check      Check dependencies for cooling violations"
+	@echo ""
+	@echo "Release (manual signing workflow):"
+	@echo "  release-download      Download CI artifacts from GitHub"
+	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
+	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
+	@echo "  release-export-keys   Export public signing keys"
+	@echo "  release-verify        Verify checksums, signatures, and keys"
+	@echo "  release-upload        Upload signed artifacts to GitHub"
+	@echo "  release               Full release workflow (all of the above)"
+	@echo ""
+	@echo "Version management:"
+	@echo "  version         Print current version"
+	@echo "  version-patch   Bump patch version (0.1.0 -> 0.1.1)"
+	@echo "  version-minor   Bump minor version (0.1.0 -> 0.2.0)"
+	@echo "  version-major   Bump major version (0.1.0 -> 1.0.0)"
+	@echo "  version-set     Set explicit version (V=X.Y.Z)"
+	@echo "  version-sync    Sync VERSION to Cargo.toml"
 	@echo ""
 	@echo "Current version: $(VERSION)"
 
@@ -324,3 +343,150 @@ deps-check: ## Check dependencies for cooling violations
 
 version: ## Print current version
 	@echo "$(VERSION)"
+
+# -----------------------------------------------------------------------------
+# Release Workflow
+# -----------------------------------------------------------------------------
+#
+# Manual signing workflow (CI builds unsigned, human signs locally):
+#
+# 1. CI creates draft release on tag push
+# 2. Download artifacts: make release-download
+# 3. Generate checksums: make release-checksums
+# 4. Sign checksums: make release-sign (requires SYSPRIMS_MINISIGN_KEY)
+# 5. Export public keys: make release-export-keys
+# 6. Verify everything: make release-verify
+# 7. Upload signed artifacts: make release-upload
+
+DIST_RELEASE := dist/release
+RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
+
+# Signing keys (set these environment variables)
+SYSPRIMS_MINISIGN_KEY ?=
+SYSPRIMS_MINISIGN_PUB ?=
+SYSPRIMS_PGP_KEY_ID ?=
+SYSPRIMS_GPG_HOMEDIR ?=
+
+release-clean: ## Remove dist/release contents
+	@echo "Cleaning release directory..."
+	rm -rf $(DIST_RELEASE)
+	@echo "[ok] Release directory cleaned"
+
+release-download: ## Download release assets from GitHub
+	@if [ -z "$(RELEASE_TAG)" ] || [ "$(RELEASE_TAG)" = "v" ]; then \
+		echo "Error: No release tag found. Set RELEASE_TAG=vX.Y.Z"; \
+		exit 1; \
+	fi
+	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release-checksums: ## Generate SHA256SUMS and SHA512SUMS
+	./scripts/generate-checksums.sh $(DIST_RELEASE)
+
+release-sign: ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
+	@if [ -z "$(SYSPRIMS_MINISIGN_KEY)" ]; then \
+		echo "Error: SYSPRIMS_MINISIGN_KEY not set"; \
+		echo ""; \
+		echo "Set the path to your minisign secret key:"; \
+		echo "  export SYSPRIMS_MINISIGN_KEY=/path/to/sysprims.key"; \
+		exit 1; \
+	fi
+	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
+	SYSPRIMS_PGP_KEY_ID=$(SYSPRIMS_PGP_KEY_ID) \
+	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
+	./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release-export-keys: ## Export public signing keys
+	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
+	SYSPRIMS_MINISIGN_PUB=$(SYSPRIMS_MINISIGN_PUB) \
+	SYSPRIMS_PGP_KEY_ID=$(SYSPRIMS_PGP_KEY_ID) \
+	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
+	./scripts/export-release-keys.sh $(DIST_RELEASE)
+
+release-verify-checksums: ## Verify checksums match artifacts
+	@echo "Verifying checksums..."
+	cd $(DIST_RELEASE) && shasum -a 256 -c SHA256SUMS
+	@echo "[ok] Checksums verified"
+
+release-verify-signatures: ## Verify minisign/PGP signatures
+	./scripts/verify-signatures.sh $(DIST_RELEASE)
+
+release-verify-keys: ## Verify exported keys are public-only
+	./scripts/verify-public-keys.sh $(DIST_RELEASE)
+
+release-verify: release-verify-checksums release-verify-signatures release-verify-keys ## Run all release verification
+	@echo "[ok] All release verifications passed"
+
+release-notes: ## Copy release notes to dist
+	@src="docs/releases/$(RELEASE_TAG).md"; \
+	if [ -f "$$src" ]; then \
+		cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"; \
+		echo "[ok] Copied release notes"; \
+	else \
+		echo "[--] No release notes found at $$src"; \
+	fi
+
+release-upload: release-verify release-notes ## Upload signed artifacts to GitHub release
+	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release: release-clean release-download release-checksums release-sign release-export-keys release-upload ## Full release workflow (after CI build)
+	@echo "[ok] Release $(RELEASE_TAG) complete"
+
+# -----------------------------------------------------------------------------
+# Version Management
+# -----------------------------------------------------------------------------
+#
+# Version SSOT is the VERSION file (not Cargo.toml).
+# Cargo.toml workspace version should match VERSION file.
+#
+# Usage:
+#   make version-patch    # 0.1.0 -> 0.1.1
+#   make version-minor    # 0.1.0 -> 0.2.0
+#   make version-major    # 0.1.0 -> 1.0.0
+#   make version-set V=1.2.3
+
+VERSION_FILE := VERSION
+
+version-patch: ## Bump patch version (0.1.0 -> 0.1.1)
+	@current=$$(cat $(VERSION_FILE)); \
+	major=$$(echo $$current | cut -d. -f1); \
+	minor=$$(echo $$current | cut -d. -f2); \
+	patch=$$(echo $$current | cut -d. -f3); \
+	new_patch=$$((patch + 1)); \
+	new_version="$$major.$$minor.$$new_patch"; \
+	echo "$$new_version" > $(VERSION_FILE); \
+	echo "Version bumped: $$current -> $$new_version"
+
+version-minor: ## Bump minor version (0.1.0 -> 0.2.0)
+	@current=$$(cat $(VERSION_FILE)); \
+	major=$$(echo $$current | cut -d. -f1); \
+	minor=$$(echo $$current | cut -d. -f2); \
+	new_minor=$$((minor + 1)); \
+	new_version="$$major.$$new_minor.0"; \
+	echo "$$new_version" > $(VERSION_FILE); \
+	echo "Version bumped: $$current -> $$new_version"
+
+version-major: ## Bump major version (0.1.0 -> 1.0.0)
+	@current=$$(cat $(VERSION_FILE)); \
+	major=$$(echo $$current | cut -d. -f1); \
+	new_major=$$((major + 1)); \
+	new_version="$$new_major.0.0"; \
+	echo "$$new_version" > $(VERSION_FILE); \
+	echo "Version bumped: $$current -> $$new_version"
+
+version-set: ## Set explicit version (V=X.Y.Z)
+	@if [ -z "$(V)" ]; then \
+		echo "Usage: make version-set V=1.2.3"; \
+		exit 1; \
+	fi
+	@echo "$(V)" > $(VERSION_FILE)
+	@echo "Version set to $(V)"
+
+version-sync: ## Sync VERSION file to Cargo.toml (requires cargo-edit)
+	@ver=$$(cat $(VERSION_FILE)); \
+	if command -v cargo-set-version >/dev/null 2>&1; then \
+		cargo set-version --workspace "$$ver"; \
+		echo "[ok] Synced Cargo.toml to $$ver"; \
+	else \
+		echo "[!!] cargo-edit not installed (cargo install cargo-edit)"; \
+		echo "Manual update required: set version = \"$$ver\" in Cargo.toml"; \
+	fi

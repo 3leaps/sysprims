@@ -2,10 +2,16 @@
 
 ## Read First
 
-1. Check `AGENTS.local.md` if it exists (gitignored, tactical session guidance)
-2. Read `MAINTAINERS.md` for contacts and governance
-3. Review this document for operational protocols
-4. Understand: this is a **Rust library with cross-language bindings** - correctness is paramount
+1. **READ [`REPOSITORY_SAFETY_PROTOCOLS.md`](REPOSITORY_SAFETY_PROTOCOLS.md) IMMEDIATELY** - this library kills processes; incorrect code kills everything
+2. Check `AGENTS.local.md` if it exists (gitignored, tactical session guidance)
+3. Read `MAINTAINERS.md` for contacts and governance
+4. Review this document for operational protocols
+5. Understand: this is a **Rust library with cross-language bindings** - correctness is paramount
+
+> **WARNING**: This repository contains process control code. Tests that use incorrect
+> PIDs can terminate system processes including Finder, Terminal, and init. See
+> [ADR-0011](docs/architecture/adr/0011-pid-validation-safety.md) for a real incident
+> where `u32::MAX` caused `kill(-1, SIGTERM)` and crashed a desktop session.
 
 ## Operating Model
 
@@ -99,6 +105,34 @@ Role: devlead
 Committer-of-Record: @3leapsdave
 ```
 
+## Safety Protocols (MANDATORY)
+
+This library terminates processes. Read [`REPOSITORY_SAFETY_PROTOCOLS.md`](REPOSITORY_SAFETY_PROTOCOLS.md) in full.
+
+### Pre-Flight Checklist for Signal-Sending Code
+
+Before writing or modifying any code that **sends signals** or **terminates processes** (`sysprims-signal`, `sysprims-timeout`):
+
+- [ ] I have read [ADR-0011: PID Validation Safety](docs/architecture/adr/0011-pid-validation-safety.md)
+- [ ] I understand `u32::MAX as i32 == -1` (integer overflow)
+- [ ] I understand `kill(-1, sig)` broadcasts to ALL processes
+- [ ] My tests use safe PIDs: `99999`, `std::process::id()`, or spawned children
+- [ ] I am NOT using PID 0, PID 1, or `u32::MAX` in tests
+- [ ] I am NOT bypassing public API validation without explicit justification
+
+### Dangerous PID Reference
+
+| Value | Cast to i32 | POSIX Semantics | Safety |
+|-------|-------------|-----------------|--------|
+| `0` | `0` | Signal caller's process group | **FORBIDDEN** |
+| `1` | `1` | Signal init/launchd | **FORBIDDEN** |
+| `u32::MAX` | `-1` | Signal ALL processes | **CATASTROPHIC** |
+| `> i32::MAX` | Negative | Various broadcast semantics | **FORBIDDEN** |
+
+**If unsure, ask the maintainer before running tests.**
+
+---
+
 ## DO / DO NOT
 
 ### DO
@@ -124,6 +158,9 @@ Committer-of-Record: @3leapsdave
 - Assume platform behavior without testing
 - Commit `.plans/` directory (gitignored - planning docs stay local)
 - Commit `AGENTS.local.md` (gitignored - session-specific guidance)
+- **Use PID 0, 1, or u32::MAX in signal-sending tests** (see Safety Protocols above)
+- **Bypass PID validation in signal code without explicit maintainer approval**
+- **Run signal-sending tests without verifying target PIDs are safe**
 
 ## Critical Rules
 
@@ -171,6 +208,7 @@ See [ADR-0007](docs/architecture/adr/0007-platform-abstraction.md).
 
 | Path                        | Purpose                                    |
 | --------------------------- | ------------------------------------------ |
+| `REPOSITORY_SAFETY_PROTOCOLS.md` | **MANDATORY** - Process control safety rules |
 | `crates/sysprims-core/`     | Shared types, errors, telemetry            |
 | `crates/sysprims-timeout/`  | Process timeout with group-by-default      |
 | `crates/sysprims-signal/`   | Signal dispatch and process groups         |
@@ -179,9 +217,9 @@ See [ADR-0007](docs/architecture/adr/0007-platform-abstraction.md).
 | `ffi/sysprims-ffi/`         | C-ABI exports via cbindgen                 |
 | `bindings/`                 | Go, Python, TypeScript wrappers            |
 | `docs/architecture/adr/`    | Architecture Decision Records              |
+| `docs/safety/`              | Safety guides (signal dispatch, etc.)      |
 | `docs/standards/`           | Repository conventions and policies        |
 | `deny.toml`                 | License and security policy                |
-| `SAFETY.md`                 | Operational safety protocols               |
 
 ## Roles
 
@@ -304,6 +342,7 @@ Key architectural decisions:
 | [0006](docs/architecture/adr/0006-dependency-governance.md) | Dependency Governance | SBOM and compliance |
 | [0007](docs/architecture/adr/0007-platform-abstraction.md) | Platform Abstraction | Cross-platform strategy |
 | [0008](docs/architecture/adr/0008-error-handling.md) | Error Handling | Error taxonomy |
+| [0011](docs/architecture/adr/0011-pid-validation-safety.md) | **PID Validation Safety** | **CRITICAL** - Prevents kill(-1) disasters |
 
 ## Standards Reference
 
