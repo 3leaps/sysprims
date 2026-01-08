@@ -63,6 +63,68 @@ mod windows;
 // root is intentional and ergonomic.
 pub use rsfulmen::foundry::signals::*;
 
+fn resolve_signal_number(signal_name: &str) -> Option<i32> {
+    let trimmed = signal_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(num) = get_signal_number(trimmed) {
+        return Some(num);
+    }
+
+    let upper = trimmed.to_ascii_uppercase();
+    if let Some(num) = get_signal_number(&upper) {
+        return Some(num);
+    }
+
+    if !upper.starts_with("SIG") {
+        let with_sig = format!("SIG{upper}");
+        if let Some(num) = get_signal_number(&with_sig) {
+            return Some(num);
+        }
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    lookup_signal_by_id(&lower).and_then(|signal| get_signal_number(&signal.name))
+}
+
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    let mut p_idx = 0;
+    let mut t_idx = 0;
+    let mut star_idx: Option<usize> = None;
+    let mut match_idx = 0;
+
+    while t_idx < text.len() {
+        if p_idx < pattern.len() && (pattern[p_idx] == b'?' || pattern[p_idx] == text[t_idx]) {
+            p_idx += 1;
+            t_idx += 1;
+            continue;
+        }
+        if p_idx < pattern.len() && pattern[p_idx] == b'*' {
+            star_idx = Some(p_idx);
+            match_idx = t_idx;
+            p_idx += 1;
+            continue;
+        }
+        if let Some(star) = star_idx {
+            p_idx = star + 1;
+            match_idx += 1;
+            t_idx = match_idx;
+            continue;
+        }
+        return false;
+    }
+
+    while p_idx < pattern.len() && pattern[p_idx] == b'*' {
+        p_idx += 1;
+    }
+
+    p_idx == pattern.len()
+}
+
 /// Send a signal to a process.
 ///
 /// # Errors
@@ -80,6 +142,20 @@ pub fn kill(pid: u32, signal: i32) -> SysprimsResult<()> {
 
     #[cfg(windows)]
     return windows::kill_impl(pid, signal);
+}
+
+/// Send a signal to a process, resolving the signal number by name.
+///
+/// This uses rsfulmen's catalog plus a small normalization layer:
+/// - Accepts `SIGTERM`, `TERM`, or `sigterm`
+/// - Accepts short IDs like `term` or `int`
+pub fn kill_by_name(pid: u32, signal_name: &str) -> SysprimsResult<()> {
+    let signal = resolve_signal_number(signal_name).ok_or_else(|| {
+        SysprimsError::invalid_argument(format!(
+            "unknown signal name: {signal_name}"
+        ))
+    })?;
+    kill(pid, signal)
 }
 
 /// Send a signal to a process group.
@@ -101,6 +177,32 @@ pub fn killpg(pgid: u32, signal: i32) -> SysprimsResult<()> {
 
     #[cfg(windows)]
     return Err(SysprimsError::not_supported("killpg", "windows"));
+}
+
+/// Return signal names that match a simple glob pattern.
+///
+/// Supports `*` (any sequence) and `?` (single char). Matching is
+/// ASCII case-insensitive and checks both the signal name and short ID.
+pub fn match_signal_names(pattern: &str) -> Vec<&'static str> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let pattern = trimmed.to_ascii_lowercase();
+    let mut matches = Vec::new();
+
+    for signal in list_signals() {
+        let name = signal.name.to_ascii_lowercase();
+        let id = signal.id.to_ascii_lowercase();
+        if glob_match(&pattern, &name) || glob_match(&pattern, &id) {
+            if !matches.iter().any(|&item| item == signal.name) {
+                matches.push(signal.name.as_str());
+            }
+        }
+    }
+
+    matches
 }
 
 /// Convenience wrapper: send `SIGTERM` (or Windows terminate).
@@ -194,6 +296,29 @@ mod tests {
     fn rsfulmen_constants_available() {
         assert_eq!(SIGTERM, 15);
         assert_eq!(SIGKILL, 9);
+    }
+
+    // ========================================================================
+    // Signal Name Resolution Tests
+    // ========================================================================
+
+    #[test]
+    fn resolve_signal_number_accepts_common_variants() {
+        assert_eq!(resolve_signal_number("SIGTERM"), Some(SIGTERM));
+        assert_eq!(resolve_signal_number("term"), Some(SIGTERM));
+        assert_eq!(resolve_signal_number("TERM"), Some(SIGTERM));
+        assert_eq!(resolve_signal_number(" sigterm "), Some(SIGTERM));
+    }
+
+    #[test]
+    fn resolve_signal_number_accepts_short_id() {
+        assert_eq!(resolve_signal_number("int"), Some(SIGINT));
+    }
+
+    #[test]
+    fn match_signal_names_glob_matches_names() {
+        let matches = match_signal_names("SIGT*");
+        assert!(matches.iter().any(|&name| name == "SIGTERM"));
     }
 
     // ========================================================================

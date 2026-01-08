@@ -354,9 +354,9 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "rsfulmen"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0382b4a11353c628666d6ecc905f64940c0220963712bb12ac2f4df2cc4cc27d"
+checksum = "b03534bfe07d23752219c1c987d56806207e01ec91b118a3597e837c1ee86fcb"
 dependencies = [
  "once_cell",
  "serde",

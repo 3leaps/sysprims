@@ -167,6 +167,8 @@ This is the only safe way to test:
 - `kill()` maps to `TerminateProcess()` for SIGTERM/SIGKILL
 - `killpg()` returns `NotSupported`
 - No broadcast signal semantics
+- `SIGINT` uses `GenerateConsoleCtrlEvent` and is best-effort; it only works
+  when the target is in the same console/process group and may fail otherwise
 
 ## Summary
 

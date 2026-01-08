@@ -145,7 +145,7 @@ let config = TimeoutConfig {
 Cross-platform signal dispatch.
 
 ```rust
-use sysprims_signal::{kill, terminate, force_kill, Signal};
+use sysprims_signal::{kill, kill_by_name, match_signal_names, terminate, force_kill, Signal};
 
 // Send specific signal
 kill(pid, Signal::Term)?;
@@ -153,6 +153,12 @@ kill(pid, Signal::Term)?;
 // Platform-agnostic helpers
 terminate(pid)?;    // SIGTERM on Unix, TerminateProcess on Windows
 force_kill(pid)?;   // SIGKILL on Unix, TerminateProcess on Windows
+
+// Resolve by name (accepts "SIGTERM", "TERM", "term")
+kill_by_name(pid, "TERM")?;
+
+// List available signals matching a glob pattern
+let matches = match_signal_names("SIGT*");
 
 // Process group operations (Unix only)
 #[cfg(unix)]
@@ -167,6 +173,9 @@ killpg(pgid, Signal::Term)?;
 | KILL | SIGKILL | TerminateProcess |
 | INT | SIGINT | GenerateConsoleCtrlEvent (best-effort) |
 | HUP, USR1, USR2 | Native | Not supported (returns error) |
+
+Note: On Windows, `SIGINT` delivery is best-effort and depends on console
+attachment and process group membership.
 
 ### sysprims-proc
 
