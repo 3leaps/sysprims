@@ -1,0 +1,54 @@
+# Schema definition for a structured log event.
+# Adheres to JSON Schema Draft 2020-12.
+$schema: "https://json-schema.org/draft/2020-12/schema"
+
+# Unique identifier for this version of the schema.
+# The 'v0' identifier signifies that this schema is for the alpha/MVP release
+# and is explicitly decoupled from the repository's SemVer. It is subject to change.
+# See ADR-0010 for the full versioning strategy.
+$id: "https://schemas.sysprims.dev/observability/log-event/v0"
+
+title: "Sysprims Log Event"
+description: "Schema for a single structured log event emitted by sysprims components."
+type: "object"
+required:
+  - "schema_id"
+  - "timestamp"
+  - "level"
+  - "target"
+  - "message"
+  - "fields"
+properties:
+  schema_id:
+    description: "The unique identifier for the schema."
+    type: "string"
+    const: "https://schemas.sysprims.dev/observability/log-event/v0"
+  timestamp:
+    description: "The ISO 8601 timestamp of when the event occurred."
+    type: "string"
+    format: "date-time"
+  level:
+    description: "The severity level of the event, corresponding to tracing levels."
+    type: "string"
+    enum: ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]
+  target:
+    description: "The Rust module path where the event originated (e.g., 'sysprims_timeout::api')."
+    type: "string"
+  message:
+    description: "The primary, human-readable log message."
+    type: "string"
+  fields:
+    description: "A key-value map of structured data associated with the event (e.g., pid, signal)."
+    type: "object"
+    additionalProperties: true
+  span:
+    description: "An optional object describing the execution span this event is part of."
+    type: "object"
+    properties:
+      name:
+        type: "string"
+      id:
+        type: "integer"
+    required:
+      - "name"
+      - "id"

@@ -1,0 +1,29 @@
+[package]
+name = "sysprims-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "CLI tools for sysprims process utilities"
+
+[[bin]]
+name = "sysprims-cli"
+path = "src/main.rs"
+
+[dependencies]
+sysprims-core.workspace = true
+sysprims-timeout.workspace = true
+sysprims-signal.workspace = true
+sysprims-proc.workspace = true
+
+clap = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"

@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sysprims-core",
+    "crates/sysprims-timeout",
+    "crates/sysprims-signal",
+    "crates/sysprims-proc",
+    "crates/sysprims-cli",
+    "ffi/sysprims-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/3leaps/sysprims"
+authors = ["3leaps Architecture Council"]
+
+[workspace.dependencies]
+sysprims-core = { path = "crates/sysprims-core" }
+sysprims-timeout = { path = "crates/sysprims-timeout" }
+sysprims-signal = { path = "crates/sysprims-signal" }
+sysprims-proc = { path = "crates/sysprims-proc" }
+
+# Fulmen Ecosystem
+# NOTE: Pinned to ensure stable semantics across bindings and avoid accidental
+# API changes before sysprims v0.1.0 ships.
+# See .plans/active/v0.1.0/release-checklist.md
+rsfulmen = { version = "=0.1.0", default-features = false, features = ["foundry-core"] }
+
+# Core Platform Abstractions
+libc = "0.2"
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_System_ProcessStatus",
+    "Win32_Security",
+] }
+
+# Minimal Tier Serialization & Time
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+time = { version = "0.3", features = ["formatting"] } # Replaces Chrono
+
+# Feature-gated Observability
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3" }
+
+# CLI Dependencies
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Error Handling
+thiserror = "1.0"

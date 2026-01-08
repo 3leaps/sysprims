@@ -1,0 +1,19 @@
+[package]
+name = "sysprims-signal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Signal dispatch and process group management"
+
+[dependencies]
+sysprims-core.workspace = true
+rsfulmen = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }

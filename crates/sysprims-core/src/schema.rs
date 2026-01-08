@@ -1,0 +1,177 @@
+//! Schema ID constants for JSON output contracts.
+//!
+//! All sysprims JSON outputs include a `schema_id` field that references
+//! the corresponding schema. These constants define the canonical schema URLs.
+//!
+//! ## Schema Hosting
+//!
+//! sysprims schemas are hosted at `schemas.3leaps.dev/sysprims/` (not fulmenhq.dev).
+//! While sysprims uses rsfulmen for signal/exit code constants from the Fulmen
+//! ecosystem, sysprims itself is a 3leaps project aimed at wider community use.
+//!
+//! For Crucible/Fulmen schemas consumed via rsfulmen, use rsfulmen's resolver.
+//!
+//! ## URI Structure
+//!
+//! Follows the Canonical URI Resolution Standard:
+//! ```text
+//! https://schemas.3leaps.dev/<module>/<topic>/<version>/<filename>
+//! ```
+//!
+//! Where:
+//! - `module` = `sysprims` (source repository)
+//! - `topic` = feature area (e.g., `timeout`, `process`, `signal`)
+//! - `version` = SemVer (e.g., `v1.0.0`)
+//! - `filename` = schema file with `.schema.json` suffix
+//!
+//! ## Validation Strategy
+//!
+//! sysprims does NOT perform runtime JSON schema validation (too heavy).
+//! Instead:
+//! - Input validation: `serde(deny_unknown_fields)` + manual range checks
+//! - Output validation: goneat CLI in CI pipeline
+//! - Schema ID verification: Unit tests against SSOT
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use sysprims_core::schema::TIMEOUT_RESULT_V1;
+//! use serde::Serialize;
+//!
+//! #[derive(Serialize)]
+//! struct TimeoutResult {
+//!     schema_id: &'static str,
+//!     status: String,
+//!     // ... other fields
+//! }
+//!
+//! let result = TimeoutResult {
+//!     schema_id: TIMEOUT_RESULT_V1,
+//!     status: "completed".into(),
+//! };
+//! ```
+
+/// Schema ID for timeout result JSON output (v1.0.0).
+///
+/// This schema defines the structure of `sysprims timeout --json` output.
+///
+/// Schema location: `schemas/timeout/v1.0.0/timeout-result.schema.json`
+pub const TIMEOUT_RESULT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/timeout-result.schema.json";
+
+/// Schema ID for process info JSON output (v1.0.0).
+///
+/// This schema defines the structure of `sysprims pstat --json` output.
+///
+/// Schema location: `schemas/process/v1.0.0/process-info.schema.json`
+pub const PROCESS_INFO_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info.schema.json";
+
+/// Schema ID for process filter input (v1.0.0).
+///
+/// This schema defines the structure of filter JSON accepted by
+/// `sysprims_proc_list()` FFI function.
+///
+/// Schema location: `schemas/process/v1.0.0/process-filter.schema.json`
+pub const PROC_FILTER_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-filter.schema.json";
+
+// ============================================================================
+// Schema Host Constants
+// ============================================================================
+
+/// Base URL for sysprims schemas.
+pub const SCHEMA_HOST: &str = "https://schemas.3leaps.dev";
+
+/// Module name for sysprims in schema URIs.
+pub const SCHEMA_MODULE: &str = "sysprims";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_schema_ids_are_valid_urls() {
+        // All schema IDs should be valid HTTPS URLs
+        assert!(TIMEOUT_RESULT_V1.starts_with("https://"));
+        assert!(PROCESS_INFO_V1.starts_with("https://"));
+        assert!(PROC_FILTER_V1.starts_with("https://"));
+    }
+
+    #[test]
+    fn test_schema_ids_use_3leaps_host() {
+        // sysprims schemas live at schemas.3leaps.dev, not fulmenhq.dev
+        let expected_prefix = "https://schemas.3leaps.dev/sysprims/";
+
+        assert!(
+            TIMEOUT_RESULT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            PROCESS_INFO_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            PROC_FILTER_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+    }
+
+    #[test]
+    fn test_schema_ids_follow_canonical_uri_pattern() {
+        // Pattern: https://schemas.3leaps.dev/sysprims/<topic>/<version>/<filename>.schema.json
+
+        // All should end with .schema.json
+        assert!(TIMEOUT_RESULT_V1.ends_with(".schema.json"));
+        assert!(PROCESS_INFO_V1.ends_with(".schema.json"));
+        assert!(PROC_FILTER_V1.ends_with(".schema.json"));
+
+        // All v1.0.0 schemas should have version in path
+        assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
+        assert!(PROCESS_INFO_V1.contains("/v1.0.0/"));
+        assert!(PROC_FILTER_V1.contains("/v1.0.0/"));
+    }
+
+    #[test]
+    fn test_schema_ids_have_correct_topics() {
+        // Verify topic segments are correct
+        assert!(
+            TIMEOUT_RESULT_V1.contains("/timeout/"),
+            "timeout schema should have timeout topic"
+        );
+        assert!(
+            PROCESS_INFO_V1.contains("/process/"),
+            "process-info schema should have process topic"
+        );
+        assert!(
+            PROC_FILTER_V1.contains("/process/"),
+            "process-filter schema should have process topic"
+        );
+    }
+
+    #[test]
+    fn test_schema_ids_are_unique() {
+        let ids = [TIMEOUT_RESULT_V1, PROCESS_INFO_V1, PROC_FILTER_V1];
+
+        // Check all pairs are different
+        for (i, a) in ids.iter().enumerate() {
+            for (j, b) in ids.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "Schema IDs must be unique");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_schema_host_constants() {
+        assert_eq!(SCHEMA_HOST, "https://schemas.3leaps.dev");
+        assert_eq!(SCHEMA_MODULE, "sysprims");
+
+        // All schema IDs should start with host/module
+        let prefix = format!("{}/{}/", SCHEMA_HOST, SCHEMA_MODULE);
+        assert!(TIMEOUT_RESULT_V1.starts_with(&prefix));
+        assert!(PROCESS_INFO_V1.starts_with(&prefix));
+        assert!(PROC_FILTER_V1.starts_with(&prefix));
+    }
+}

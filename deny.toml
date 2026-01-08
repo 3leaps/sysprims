@@ -1,0 +1,154 @@
+# sysprims cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+# Note: This configuration enforces sysprims license and security policies.
+# See ADR-0001 (License Policy) and ADR-0006 (Dependency Governance).
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+# ============================================================================
+# Licenses
+# ============================================================================
+[licenses]
+version = 2
+
+# Confidence threshold for license detection (0.0 - 1.0)
+confidence-threshold = 0.93
+
+# Allow licenses that are permissive and compatible with static linking
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+]
+
+# Explicitly deny copyleft licenses
+deny = [
+    "GPL-2.0",
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "GPL-3.0",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "LGPL-2.0",
+    "LGPL-2.0-only",
+    "LGPL-2.0-or-later",
+    "LGPL-2.1",
+    "LGPL-2.1-only",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    "AGPL-3.0",
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+]
+
+# Blanket deny for copyleft
+copyleft = "deny"
+
+# How to handle licenses that don't match allow/deny
+unlicensed = "deny"
+
+# Private crates (internal) don't need licenses
+private = { ignore = true }
+
+# Clarifications for crates with non-standard license files
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# ============================================================================
+# Bans
+# ============================================================================
+[bans]
+# Lint level for multiple versions of the same crate
+multiple-versions = "warn"
+
+# Lint level for crates from git repos
+wildcards = "allow"
+
+# Highlight crates that are in multiple versions
+highlight = "all"
+
+# Allow specific crates from git (if needed)
+allow-git = []
+
+# Deny specific crates entirely
+deny = [
+    # Add problematic crates here
+    # { name = "problematic-crate", reason = "Known issues with X" }
+]
+
+# Skip specific crates from duplicate checking
+skip = []
+
+# Skip specific crate trees from duplicate checking
+skip-tree = []
+
+# ============================================================================
+# Advisories (Security)
+# ============================================================================
+[advisories]
+version = 2
+
+# Path to local advisory database (uses default if not specified)
+# db-path = "~/.cargo/advisory-db"
+
+# URL to advisory database
+# db-urls = ["https://github.com/RustSec/advisory-db"]
+
+# How to handle crates with known vulnerabilities
+vulnerability = "deny"
+
+# How to handle crates that have been yanked
+yanked = "warn"
+
+# How to handle crates that are unmaintained
+unmaintained = "warn"
+
+# How to handle crates with unsound code
+unsound = "deny"
+
+# Ignore specific advisories (use sparingly, with justification)
+ignore = [
+    # Example:
+    # { id = "RUSTSEC-2020-0001", reason = "Not exploitable in our use case" }
+]
+
+# ============================================================================
+# Sources
+# ============================================================================
+[sources]
+# Lint level for crates not from an allowed source
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# List of allowed registries
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# List of allowed git hosts
+allow-git = [
+    "https://github.com/3leaps",
+    "https://github.com/fulmenhq",
+]
+
+# Allow specific crates from org repos (future fast-follow deps)
+[sources.allow-org]
+github = ["3leaps", "fulmenhq"]

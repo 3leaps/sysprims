@@ -1,0 +1,189 @@
+# =============================================================================
+# sysprims .gitignore
+# Rust library with Go, Python, TypeScript bindings
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Rust
+# -----------------------------------------------------------------------------
+target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is committed for binaries/applications, but for libraries
+# it's often gitignored. For sysprims (library-first), we commit it for
+# reproducible CI builds. Comment out if you prefer otherwise:
+# Cargo.lock
+
+# -----------------------------------------------------------------------------
+# Planning and Local Configuration (NEVER COMMIT)
+# -----------------------------------------------------------------------------
+# Session planning documents - always local, never committed
+.plans/
+
+# Local agent instructions - per-session tactical guidance
+AGENTS.local.md
+
+# Local overrides
+*.local.yaml
+*.local.yml
+*.local.json
+*.local.toml
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# -----------------------------------------------------------------------------
+# Python (bindings/python/)
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.whl
+.venv/
+venv/
+ENV/
+env/
+.python-version
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+.hypothesis/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Maturin (Python-Rust bindings)
+bindings/python/target/
+
+# -----------------------------------------------------------------------------
+# Go (bindings/go/)
+# -----------------------------------------------------------------------------
+# Local build outputs (prebuilt libs may be committed under bindings/go/lib/<platform>/)
+bindings/go/lib/local/
+
+# Go workspace
+go.work
+go.work.sum
+
+# -----------------------------------------------------------------------------
+# TypeScript/Node.js (bindings/typescript/)
+# -----------------------------------------------------------------------------
+node_modules/
+*.node
+.npm/
+*.tsbuildinfo
+.eslintcache
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# NAPI-RS build artifacts
+bindings/typescript/target/
+bindings/typescript/*.node
+
+# -----------------------------------------------------------------------------
+# IDE and Editors
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# -----------------------------------------------------------------------------
+# OS Generated
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Build and Distribution
+# -----------------------------------------------------------------------------
+dist/
+bin/
+/build/
+*.exe
+*.exe~
+*.dll
+*.dylib
+
+# Generated headers (cbindgen output is typically committed, but intermediate files are not)
+# ffi/sysprims-ffi/sysprims.h is committed; temp files are not
+*.h.tmp
+
+# -----------------------------------------------------------------------------
+# Testing and Coverage
+# -----------------------------------------------------------------------------
+coverage/
+coverage.html
+coverage.out
+coverage.xml
+*.gcno
+*.gcda
+*.gcov
+lcov.info
+tarpaulin-report.html
+tarpaulin-report.json
+
+# Test fixtures that are generated
+test_temp/
+test_output/
+*.test
+
+# -----------------------------------------------------------------------------
+# SBOM and Generated Docs
+# -----------------------------------------------------------------------------
+# Root-level SBOM directory (generated per-build)
+/sbom/
+
+# Generated third-party notices (committed version is THIRD_PARTY_NOTICES.md)
+third_party_notices.tmp
+
+# -----------------------------------------------------------------------------
+# Logs and Temporary Files
+# -----------------------------------------------------------------------------
+*.log
+*.tmp
+*.temp
+.scratchpad/
+tmp/
+.tmp/
+
+# -----------------------------------------------------------------------------
+# Environment and Secrets (NEVER COMMIT)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.yaml
+secrets.yml
+
+# -----------------------------------------------------------------------------
+# goneat (if used for quality checks)
+# -----------------------------------------------------------------------------
+.goneat/hooks/
+.goneat/*.backup

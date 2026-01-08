@@ -1,0 +1,16 @@
+[package]
+name = "sysprims-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Core types, errors, and platform abstractions for sysprims"
+
+[dependencies]
+rsfulmen = { workspace = true }
+thiserror = { workspace = true }
+
+# Note: serde_json removed - not needed in core error types
+# Note: tracing removed - core utilities should be pure (per ADR-0006)

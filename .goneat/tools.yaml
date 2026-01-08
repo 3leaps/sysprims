@@ -1,0 +1,401 @@
+# goneat Tools Configuration (v1.0.0)
+# sysprims - GPL-free process utilities library
+#
+# This file is the SINGLE SOURCE OF TRUTH for tools configuration.
+# There are NO hidden defaults or runtime merging.
+#
+# Edit this file to:
+# - Add/remove tools
+# - Change tool detection commands
+# - Modify installer priorities
+# - Define custom scopes
+#
+# Validate changes with: goneat doctor tools validate
+# See schema: schemas/tools/tools.v1.0.0.json
+
+scopes:
+  all:
+    description: All tools from all scopes
+    tools:
+      # Foundation
+      - checkmake
+      - ripgrep
+      - jq
+      - yq
+      - yamlfmt
+      - yamllint
+      - prettier
+      - actionlint
+      # Rust
+      - cargo-deny
+      - cargo-audit
+      - cargo-nextest
+      - cbindgen
+      # Languages (bindings)
+      - go
+      - uv
+      - bun
+      # Security
+      - gitleaks
+      - syft
+      # CI/CD
+      - act
+
+  foundation:
+    description: Core foundation tools required for goneat and basic AI agent operation
+    tools:
+      - checkmake
+      - ripgrep
+      - jq
+      - yq
+      - yamlfmt
+      - yamllint
+      - prettier
+      - actionlint
+
+  rust:
+    description: Rust development and quality tools
+    tools:
+      - cargo-deny
+      - cargo-audit
+      - cargo-nextest
+      - cbindgen
+
+  bindings:
+    description: Language toolchains for FFI bindings (Go, Python, TypeScript)
+    tools:
+      - go
+      - uv
+      - bun
+
+  security:
+    description: Security scanning tools
+    tools:
+      - gitleaks
+      - cargo-audit
+      - cargo-deny
+
+  sbom:
+    description: Software Bill of Materials (SBOM) generation tools
+    tools:
+      - syft
+
+  cicd:
+    description: CI/CD testing tools
+    tools:
+      - act
+
+tools:
+  # ==========================================================================
+  # Foundation Tools
+  # ==========================================================================
+
+  checkmake:
+    name: checkmake
+    description: Makefile linter
+    kind: go
+    detect_command: checkmake -v
+    install_package: github.com/mrtazz/checkmake/cmd/checkmake@latest
+    version_args:
+      - -v
+    check_args:
+      - -h
+    installer_priority:
+      all:
+        - go-install
+
+  ripgrep:
+    name: ripgrep
+    description: Fast text search - used by goneat for license auditing
+    kind: system
+    detect_command: rg --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+
+  jq:
+    name: jq
+    description: JSON processor - used in CI/CD scripts and cargo metadata parsing
+    kind: system
+    detect_command: jq --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+
+  yq:
+    name: yq
+    description: YAML processor
+    kind: system
+    detect_command: yq --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+
+  yamlfmt:
+    name: yamlfmt
+    description: YAML formatter
+    kind: go
+    detect_command: yamlfmt --version
+    install_package: github.com/google/yamlfmt/cmd/yamlfmt@latest
+    version_args:
+      - --version
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - go-install
+
+  yamllint:
+    name: yamllint
+    description: YAML linter
+    kind: system
+    detect_command: yamllint --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      all:
+        - manual
+    install_commands:
+      manual: uv tool install yamllint
+
+  prettier:
+    name: prettier
+    description: Opinionated code formatter for markdown and JSON
+    kind: node
+    detect_command: prettier --version
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - bun
+        - npm
+
+  actionlint:
+    name: actionlint
+    description: GitHub Actions workflow linter
+    kind: go
+    detect_command: actionlint -version
+    install_package: github.com/rhysd/actionlint/cmd/actionlint@latest
+    version_args:
+      - -version
+    check_args:
+      - -h
+    installer_priority:
+      all:
+        - go-install
+
+  # ==========================================================================
+  # Rust Tools
+  # ==========================================================================
+
+  cargo-deny:
+    name: cargo-deny
+    description: Cargo plugin for license and advisory checks (ADR-0001, ADR-0006)
+    kind: cargo
+    detect_command: cargo-deny --version
+    version_args:
+      - --version
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - cargo-install
+    install_commands:
+      cargo-install: cargo install cargo-deny --locked
+
+  cargo-audit:
+    name: cargo-audit
+    description: Cargo plugin for security vulnerability auditing
+    kind: cargo
+    detect_command: cargo-audit --version
+    version_args:
+      - --version
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - cargo-install
+    install_commands:
+      cargo-install: cargo install cargo-audit --locked
+
+  cargo-nextest:
+    name: cargo-nextest
+    description: Next-generation Cargo test runner (faster, better output)
+    kind: cargo
+    detect_command: cargo-nextest --version
+    version_args:
+      - --version
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - cargo-install
+    install_commands:
+      cargo-install: cargo install cargo-nextest --locked
+
+  cbindgen:
+    name: cbindgen
+    description: Generate C headers from Rust FFI code
+    kind: cargo
+    detect_command: cbindgen --version
+    version_args:
+      - --version
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - cargo-install
+    install_commands:
+      cargo-install: cargo install cbindgen --locked
+
+  # ==========================================================================
+  # Language Toolchains (for bindings)
+  # ==========================================================================
+
+  go:
+    name: go
+    description: Go toolchain - required for Go bindings
+    kind: system
+    detect_command: go version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+    version_scheme: semver
+    minimum_version: 1.21.0
+    recommended_version: 1.23.0
+
+  uv:
+    name: uv
+    description: Fast Python package installer - required for Python bindings
+    kind: system
+    detect_command: uv --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+
+  bun:
+    name: bun
+    description: Fast JavaScript runtime - required for TypeScript bindings
+    kind: system
+    detect_command: bun --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - manual
+      windows:
+        - scoop
+    install_commands:
+      manual: curl -fsSL https://bun.sh/install | bash
+
+  # ==========================================================================
+  # Security Tools
+  # ==========================================================================
+
+  gitleaks:
+    name: gitleaks
+    description: Git secrets scanner
+    kind: go
+    detect_command: gitleaks version
+    install_package: github.com/zricethezav/gitleaks/v8@latest
+    version_args:
+      - version
+    check_args:
+      - help
+    installer_priority:
+      all:
+        - go-install
+
+  syft:
+    name: syft
+    description: SBOM generator for software supply chain security
+    kind: system
+    detect_command: syft version
+    version_args:
+      - version
+    check_args:
+      - --help
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+
+  # ==========================================================================
+  # CI/CD Tools
+  # ==========================================================================
+
+  act:
+    name: act
+    description: Run GitHub Actions locally
+    kind: system
+    detect_command: act --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
