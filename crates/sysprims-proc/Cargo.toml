@@ -10,3 +10,14 @@ description = "Process inspection and enumeration utilities"
 
 [dependencies]
 sysprims-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[dev-dependencies]

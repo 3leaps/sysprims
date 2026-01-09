@@ -108,8 +108,7 @@ pub fn run_setsid(
 
     #[cfg(windows)]
     return Err(sysprims_core::SysprimsError::not_supported(
-        "setsid",
-        "windows",
+        "setsid", "windows",
     ));
 }
 
@@ -118,7 +117,7 @@ pub fn run_setsid(
 // ============================================================================
 
 /// Configuration for nohup execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NohupConfig {
     /// File to redirect stdout to when stdout is a terminal.
     ///
@@ -127,15 +126,6 @@ pub struct NohupConfig {
 
     /// Wait for the child process to exit.
     pub wait: bool,
-}
-
-impl Default for NohupConfig {
-    fn default() -> Self {
-        Self {
-            output_file: None,
-            wait: false,
-        }
-    }
 }
 
 /// Outcome of nohup execution.
@@ -189,8 +179,7 @@ pub fn run_nohup(
 
     #[cfg(windows)]
     return Err(sysprims_core::SysprimsError::not_supported(
-        "nohup",
-        "windows",
+        "nohup", "windows",
     ));
 }
 

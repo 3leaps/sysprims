@@ -151,9 +151,7 @@ pub fn kill(pid: u32, signal: i32) -> SysprimsResult<()> {
 /// - Accepts short IDs like `term` or `int`
 pub fn kill_by_name(pid: u32, signal_name: &str) -> SysprimsResult<()> {
     let signal = resolve_signal_number(signal_name).ok_or_else(|| {
-        SysprimsError::invalid_argument(format!(
-            "unknown signal name: {signal_name}"
-        ))
+        SysprimsError::invalid_argument(format!("unknown signal name: {signal_name}"))
     })?;
     kill(pid, signal)
 }
@@ -195,10 +193,10 @@ pub fn match_signal_names(pattern: &str) -> Vec<&'static str> {
     for signal in list_signals() {
         let name = signal.name.to_ascii_lowercase();
         let id = signal.id.to_ascii_lowercase();
-        if glob_match(&pattern, &name) || glob_match(&pattern, &id) {
-            if !matches.iter().any(|&item| item == signal.name) {
-                matches.push(signal.name.as_str());
-            }
+        if (glob_match(&pattern, &name) || glob_match(&pattern, &id))
+            && !matches.iter().any(|&item| item == signal.name)
+        {
+            matches.push(signal.name.as_str());
         }
     }
 
@@ -279,7 +277,10 @@ mod tests {
         // i32::MAX is the last safe value (will return NotFound, not validation error)
         let result = kill(MAX_SAFE_PID, SIGTERM);
         // Should NOT be InvalidArgument - should be NotFound or PermissionDenied
-        assert!(!matches!(result, Err(SysprimsError::InvalidArgument { .. })));
+        assert!(!matches!(
+            result,
+            Err(SysprimsError::InvalidArgument { .. })
+        ));
     }
 
     #[test]

@@ -490,11 +490,12 @@ fn print_process_table(processes: &[sysprims_proc::ProcessInfo]) {
     }
 }
 
-/// Truncate string to max length.
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..max]
+/// Truncate string to max characters (not bytes).
+///
+/// Safe for UTF-8 strings with multi-byte characters.
+fn truncate(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s, // String has fewer than max_chars characters
     }
 }
