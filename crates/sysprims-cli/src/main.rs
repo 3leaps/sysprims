@@ -3,6 +3,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use sysprims_core::get_platform;
 use sysprims_core::SysprimsError;
+use sysprims_proc::{get_process, snapshot, snapshot_filtered, ProcessFilter};
 use sysprims_signal::{kill, kill_by_name, match_signal_names};
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
 use tracing::info;
@@ -35,6 +36,12 @@ enum Command {
     /// terminated. By default, the entire process tree is killed (not just
     /// the direct child).
     Timeout(TimeoutArgs),
+
+    /// Display process information.
+    ///
+    /// Lists processes with optional filtering. Output is JSON by default
+    /// for automation, or table format for human consumption.
+    Pstat(PstatArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -43,7 +50,12 @@ struct KillArgs {
     pid: u32,
 
     /// Signal name, pattern, or number (default: TERM).
-    #[arg(short = 's', long = "signal", value_name = "SIGNAL", default_value = "TERM")]
+    #[arg(
+        short = 's',
+        long = "signal",
+        value_name = "SIGNAL",
+        default_value = "TERM"
+    )]
     signal: String,
 }
 
@@ -65,7 +77,12 @@ struct TimeoutArgs {
     args: Vec<String>,
 
     /// Signal to send on timeout (default: TERM).
-    #[arg(short = 's', long = "signal", value_name = "SIGNAL", default_value = "TERM")]
+    #[arg(
+        short = 's',
+        long = "signal",
+        value_name = "SIGNAL",
+        default_value = "TERM"
+    )]
     signal: String,
 
     /// Send SIGKILL if command still running after this duration.
@@ -82,8 +99,45 @@ struct TimeoutArgs {
     foreground: bool,
 
     /// Exit with the same status as the command, even on timeout.
+    ///
+    /// When a timeout occurs, returns 128+signal (SIGKILL if escalation occurs).
     #[arg(long)]
     preserve_status: bool,
+}
+
+#[derive(Parser, Debug)]
+struct PstatArgs {
+    /// Output as JSON (default for automation).
+    #[arg(long)]
+    json: bool,
+
+    /// Output as human-readable table.
+    #[arg(long, conflicts_with = "json")]
+    table: bool,
+
+    /// Show only a specific process by PID.
+    #[arg(long, value_name = "PID")]
+    pid: Option<u32>,
+
+    /// Filter by process name (substring match, case-insensitive).
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+
+    /// Filter by username.
+    #[arg(long, value_name = "USER")]
+    user: Option<String>,
+
+    /// Filter by minimum CPU usage (0-100).
+    #[arg(long, value_name = "PERCENT")]
+    cpu_above: Option<f64>,
+
+    /// Filter by minimum memory usage in KB.
+    #[arg(long, value_name = "KB")]
+    memory_above: Option<u64>,
+
+    /// Sort by field (pid, name, cpu, memory).
+    #[arg(long, value_name = "FIELD", default_value = "pid")]
+    sort: String,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
@@ -140,6 +194,7 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
             Ok(0)
         }
         Command::Timeout(args) => run_timeout(args),
+        Command::Pstat(args) => run_pstat(args),
     }
 }
 
@@ -151,9 +206,7 @@ enum SignalTarget {
 fn parse_signal_arg(signal_arg: &str) -> Result<SignalTarget, SysprimsError> {
     let trimmed = signal_arg.trim();
     if trimmed.is_empty() {
-        return Err(SysprimsError::invalid_argument(
-            "signal cannot be empty",
-        ));
+        return Err(SysprimsError::invalid_argument("signal cannot be empty"));
     }
 
     if trimmed.contains('*') || trimmed.contains('?') {
@@ -260,8 +313,12 @@ fn run_timeout(args: TimeoutArgs) -> Result<i32, SysprimsError> {
             );
 
             if args.preserve_status {
-                // Return 128 + signal number
-                Ok(128 + signal_sent)
+                let exit_signal = if escalated {
+                    sysprims_signal::SIGKILL
+                } else {
+                    signal_sent
+                };
+                Ok(128 + exit_signal)
             } else {
                 Ok(exit_codes::TIMEOUT)
             }
@@ -282,7 +339,9 @@ fn parse_duration(s: &str) -> Result<Duration, SysprimsError> {
     // Try to parse as plain number (seconds)
     if let Ok(secs) = s.parse::<f64>() {
         if secs < 0.0 {
-            return Err(SysprimsError::invalid_argument("duration cannot be negative"));
+            return Err(SysprimsError::invalid_argument(
+                "duration cannot be negative",
+            ));
         }
         return Ok(Duration::from_secs_f64(secs));
     }
@@ -308,7 +367,9 @@ fn parse_duration(s: &str) -> Result<Duration, SysprimsError> {
     })?;
 
     if num < 0.0 {
-        return Err(SysprimsError::invalid_argument("duration cannot be negative"));
+        return Err(SysprimsError::invalid_argument(
+            "duration cannot be negative",
+        ));
     }
 
     Ok(Duration::from_secs_f64(num * multiplier))
@@ -326,6 +387,114 @@ fn resolve_signal(s: &str) -> Result<i32, SysprimsError> {
     // Try as signal name (supports "TERM", "SIGTERM", "term", etc.)
     sysprims_signal::get_signal_number(trimmed)
         .or_else(|| sysprims_signal::get_signal_number(&trimmed.to_ascii_uppercase()))
-        .or_else(|| sysprims_signal::get_signal_number(&format!("SIG{}", trimmed.to_ascii_uppercase())))
+        .or_else(|| {
+            sysprims_signal::get_signal_number(&format!("SIG{}", trimmed.to_ascii_uppercase()))
+        })
         .ok_or_else(|| SysprimsError::invalid_argument(format!("unknown signal '{}'", trimmed)))
+}
+
+// ============================================================================
+// Pstat command
+// ============================================================================
+
+fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
+    // If specific PID requested, just get that one
+    if let Some(pid) = args.pid {
+        let proc_info = get_process(pid)?;
+        if args.table {
+            print_process_table(&[proc_info]);
+        } else {
+            // Default to JSON
+            println!("{}", serde_json::to_string_pretty(&proc_info).unwrap());
+        }
+        return Ok(0);
+    }
+
+    // Build filter from args
+    let filter = ProcessFilter {
+        name_contains: args.name,
+        user_equals: args.user,
+        cpu_above: args.cpu_above,
+        memory_above_kb: args.memory_above,
+        ..Default::default()
+    };
+
+    // Get processes
+    let mut snap = if filter.name_contains.is_some()
+        || filter.user_equals.is_some()
+        || filter.cpu_above.is_some()
+        || filter.memory_above_kb.is_some()
+    {
+        snapshot_filtered(&filter)?
+    } else {
+        snapshot()?
+    };
+
+    // Sort processes
+    sort_processes(&mut snap.processes, &args.sort);
+
+    // Output
+    if args.table {
+        print_process_table(&snap.processes);
+    } else {
+        // Default to JSON
+        println!("{}", serde_json::to_string_pretty(&snap).unwrap());
+    }
+
+    Ok(0)
+}
+
+/// Sort processes by the specified field.
+fn sort_processes(processes: &mut [sysprims_proc::ProcessInfo], field: &str) {
+    match field.to_lowercase().as_str() {
+        "pid" => processes.sort_by_key(|p| p.pid),
+        "name" => processes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+        "cpu" => processes.sort_by(|a, b| {
+            b.cpu_percent
+                .partial_cmp(&a.cpu_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        "memory" | "mem" => processes.sort_by(|a, b| b.memory_kb.cmp(&a.memory_kb)),
+        _ => processes.sort_by_key(|p| p.pid),
+    }
+}
+
+/// Print processes in table format.
+fn print_process_table(processes: &[sysprims_proc::ProcessInfo]) {
+    // Header
+    println!(
+        "{:>7} {:>7} {:>6} {:>10} {:>8} {:<16} NAME",
+        "PID", "PPID", "CPU%", "MEM(KB)", "STATE", "USER"
+    );
+    println!("{:-<80}", "");
+
+    for p in processes {
+        let user = p.user.as_deref().unwrap_or("-");
+        let state = match p.state {
+            sysprims_proc::ProcessState::Running => "R",
+            sysprims_proc::ProcessState::Sleeping => "S",
+            sysprims_proc::ProcessState::Stopped => "T",
+            sysprims_proc::ProcessState::Zombie => "Z",
+            sysprims_proc::ProcessState::Unknown => "?",
+        };
+        println!(
+            "{:>7} {:>7} {:>6.1} {:>10} {:>8} {:<16} {}",
+            p.pid,
+            p.ppid,
+            p.cpu_percent,
+            p.memory_kb,
+            state,
+            truncate(user, 16),
+            truncate(&p.name, 32)
+        );
+    }
+}
+
+/// Truncate string to max length.
+fn truncate(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        s
+    } else {
+        &s[..max]
+    }
 }

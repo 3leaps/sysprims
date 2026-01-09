@@ -53,7 +53,7 @@ fn timeout_duration_parsing_seconds() {
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
-        .arg("1")  // Plain number = seconds
+        .arg("1") // Plain number = seconds
         .arg("echo")
         .arg("test");
 
@@ -146,7 +146,7 @@ fn timeout_passes_args_to_command() {
         .arg("error")
         .arg("timeout")
         .arg("5s")
-        .arg("--")  // End of CLI options
+        .arg("--") // End of CLI options
         .arg("sh")
         .arg("-c")
         .arg("echo hello world");
@@ -170,7 +170,6 @@ fn timeout_preserve_status() {
         .arg("sleep")
         .arg("60");
 
-    // Should return 128 + signal (SIGTERM=15 -> 143, or SIGKILL=9 -> 137)
-    cmd.assert()
-        .code(predicate::in_iter([137, 143]));
+    // When escalation happens, we return 128 + SIGKILL (9 -> 137).
+    cmd.assert().code(137);
 }

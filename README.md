@@ -72,25 +72,26 @@ sysprims-proc = "0.1"
 ```
 
 ```rust
-use sysprims_timeout::{run_with_timeout, TimeoutConfig, TimeoutOutcome, GroupingMode};
+use sysprims_timeout::{
+    run_with_timeout, TimeoutConfig, TimeoutOutcome,
+    GroupingMode, TreeKillReliability, SIGTERM,
+};
 use std::time::Duration;
-use std::process::Command;
 
-let mut cmd = Command::new("./build.sh");
 let config = TimeoutConfig {
-    signal: sysprims_signal::Signal::Term,
+    signal: SIGTERM,
     kill_after: Duration::from_secs(10),
     grouping: GroupingMode::GroupByDefault,
     preserve_status: false,
 };
 
-match run_with_timeout(&mut cmd, Duration::from_secs(30), config)? {
-    TimeoutOutcome::Completed(status) => {
-        println!("Build finished with status: {}", status);
+match run_with_timeout("./build.sh", &[], Duration::from_secs(30), config)? {
+    TimeoutOutcome::Completed { exit_status } => {
+        println!("Build finished with status: {:?}", exit_status);
     }
     TimeoutOutcome::TimedOut { signal_sent, escalated, tree_kill_reliability } => {
-        println!("Build timed out, killed with {}", signal_sent);
-        if tree_kill_reliability == "best_effort" {
+        println!("Build timed out, sent signal {}, escalated: {}", signal_sent, escalated);
+        if tree_kill_reliability == TreeKillReliability::BestEffort {
             eprintln!("Warning: tree kill may be incomplete");
         }
     }
@@ -101,19 +102,23 @@ match run_with_timeout(&mut cmd, Duration::from_secs(30), config)? {
 
 ```bash
 # Run command with 30 second timeout
-sysprims timeout 30s -- ./long-build.sh
+sysprims-cli timeout 30s -- ./long-build.sh
 
 # Send signal to process
-sysprims kill -s TERM 1234
+sysprims-cli kill -s TERM 1234
+
+# Run timeout with custom signal and escalation delay
+sysprims-cli timeout --signal TERM --kill-after 2s 5s -- ./long-build.sh
 
 # List processes as JSON
-sysprims pstat --json
+sysprims-cli pstat --json
 ```
 
 ### Exit Codes
 
 | Condition | Exit Code |
 |-----------|-----------|
+| Command completed (default) | 0 |
 | Command completed (with `--preserve-status`) | Child's exit code |
 | Command timed out | 124 |
 | sysprims itself failed | 125 |
@@ -128,16 +133,18 @@ sysprims pstat --json
 Process execution with deadlines and reliable tree-kill.
 
 ```rust
-use sysprims_timeout::{run_with_timeout, TimeoutConfig, GroupingMode};
+use sysprims_timeout::{run_with_timeout, run_with_timeout_default, TimeoutConfig, GroupingMode};
+use std::time::Duration;
 
-// Default: kill entire process tree on timeout
-let config = TimeoutConfig::default();
+// Quick usage with defaults (SIGTERM, 10s escalation, group-by-default)
+let result = run_with_timeout_default("make", &["build"], Duration::from_secs(300))?;
 
-// Opt-out for legacy compatibility
+// Or configure explicitly
 let config = TimeoutConfig {
-    grouping: GroupingMode::Foreground,
+    grouping: GroupingMode::Foreground,  // Opt-out of tree-kill for legacy compat
     ..Default::default()
 };
+let result = run_with_timeout("make", &["build"], Duration::from_secs(300), config)?;
 ```
 
 ### sysprims-signal
@@ -145,10 +152,10 @@ let config = TimeoutConfig {
 Cross-platform signal dispatch.
 
 ```rust
-use sysprims_signal::{kill, kill_by_name, match_signal_names, terminate, force_kill, Signal};
+use sysprims_signal::{kill, kill_by_name, killpg, match_signal_names, terminate, force_kill, SIGTERM};
 
-// Send specific signal
-kill(pid, Signal::Term)?;
+// Send specific signal (using rsfulmen constants)
+kill(pid, SIGTERM)?;
 
 // Platform-agnostic helpers
 terminate(pid)?;    // SIGTERM on Unix, TerminateProcess on Windows
@@ -162,7 +169,7 @@ let matches = match_signal_names("SIGT*");
 
 // Process group operations (Unix only)
 #[cfg(unix)]
-killpg(pgid, Signal::Term)?;
+killpg(pgid, SIGTERM)?;
 ```
 
 **Signal mapping:**
@@ -238,6 +245,15 @@ if (err == SYSPRIMS_OK) {
 - Python: `pip install sysprims`
 - TypeScript: `npm install @3leaps/sysprims`
 
+## Ecosystem
+
+sysprims integrates with the [Fulmen](https://github.com/fulmenhq) ecosystem:
+
+- **[rsfulmen](https://github.com/fulmenhq/rsfulmen)**: sysprims uses rsfulmen's signal constants (`SIGTERM`, `SIGKILL`, etc.) for cross-platform consistency
+- **Language bindings**: When shipped, `sysprims-go`, `sysprims-py`, and `@3leaps/sysprims` will integrate with their respective fulmen libraries
+
+This ensures signal semantics and exit codes are consistent whether you're writing Rust, Go, Python, or TypeScript.
+
 ## Prior Art
 
 sysprims builds on the work of others in this space:
@@ -307,5 +323,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [MAINTAINERS.md](MAINT
 <div align="center">
 
 **Built by the [3 Leaps](https://3leaps.net) team**
+
+Part of the [Fulmen Ecosystem](https://github.com/fulmenhq)
 
 </div>
