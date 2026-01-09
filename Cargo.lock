@@ -498,6 +498,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysprims-session"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "sysprims-core",
+]
+
+[[package]]
 name = "sysprims-signal"
 version = "0.1.0"
 dependencies = [
@@ -511,8 +519,13 @@ dependencies = [
 name = "sysprims-timeout"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "rsfulmen",
+ "serde",
  "sysprims-core",
+ "sysprims-session",
  "sysprims-signal",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

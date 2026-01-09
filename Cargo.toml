@@ -4,6 +4,7 @@ members = [
     "crates/sysprims-core",
     "crates/sysprims-timeout",
     "crates/sysprims-signal",
+    "crates/sysprims-session",
     "crates/sysprims-proc",
     "crates/sysprims-cli",
     "ffi/sysprims-ffi",
@@ -22,6 +23,7 @@ sysprims-core = { path = "crates/sysprims-core" }
 sysprims-timeout = { path = "crates/sysprims-timeout" }
 sysprims-signal = { path = "crates/sysprims-signal" }
 sysprims-proc = { path = "crates/sysprims-proc" }
+sysprims-session = { path = "crates/sysprims-session" }
 
 # Fulmen Ecosystem
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental

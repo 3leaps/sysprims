@@ -1,0 +1,17 @@
+[package]
+name = "sysprims-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "GPL-free session and process group management (setsid, nohup)"
+
+[dependencies]
+sysprims-core.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]

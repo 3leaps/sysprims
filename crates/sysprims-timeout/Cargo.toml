@@ -10,6 +10,15 @@ description = "Process timeout with group-by-default tree management"
 
 [dependencies]
 sysprims-core.workspace = true
+sysprims-signal.workspace = true
+rsfulmen = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
 
 [dev-dependencies]
-sysprims-signal.workspace = true
+sysprims-session = { workspace = true }

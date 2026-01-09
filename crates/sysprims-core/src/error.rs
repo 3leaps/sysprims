@@ -85,6 +85,24 @@ pub enum SysprimsError {
         pid: u32,
     },
 
+    /// Command not found.
+    ///
+    /// The specified command could not be found in PATH.
+    #[error("Command '{command}' not found")]
+    NotFoundCommand {
+        /// The command that was not found.
+        command: String,
+    },
+
+    /// Permission denied for command execution.
+    ///
+    /// The specified command exists but cannot be executed (e.g., not executable).
+    #[error("Permission denied: cannot execute '{command}'")]
+    PermissionDeniedCommand {
+        /// The command that could not be executed.
+        command: String,
+    },
+
     /// Operation not supported on the current platform.
     ///
     /// Some operations are platform-specific (e.g., `killpg` on Windows).
@@ -137,7 +155,9 @@ impl SysprimsError {
             SysprimsError::SpawnFailed { .. } => 2,
             SysprimsError::Timeout => 3,
             SysprimsError::PermissionDenied { .. } => 4,
+            SysprimsError::PermissionDeniedCommand { .. } => 4,
             SysprimsError::NotFound { .. } => 5,
+            SysprimsError::NotFoundCommand { .. } => 5,
             SysprimsError::NotSupported { .. } => 6,
             SysprimsError::GroupCreationFailed { .. } => 7,
             SysprimsError::System { .. } => 8,
@@ -159,7 +179,7 @@ impl SysprimsError {
     }
 
     /// Create a `SpawnFailed` error from an IO error.
-    pub fn spawn_failed(source: io::Error) -> Self {
+    pub fn spawn_failed_io(source: io::Error) -> Self {
         SysprimsError::SpawnFailed { source }
     }
 
@@ -174,6 +194,28 @@ impl SysprimsError {
     /// Create a `NotFound` error.
     pub fn not_found(pid: u32) -> Self {
         SysprimsError::NotFound { pid }
+    }
+
+    /// Create a `NotFoundCommand` error.
+    pub fn not_found_command(command: impl Into<String>) -> Self {
+        SysprimsError::NotFoundCommand {
+            command: command.into(),
+        }
+    }
+
+    /// Create a `PermissionDeniedCommand` error.
+    pub fn permission_denied_command(command: impl Into<String>) -> Self {
+        SysprimsError::PermissionDeniedCommand {
+            command: command.into(),
+        }
+    }
+
+    /// Create a `SpawnFailed` error with a command and reason.
+    pub fn spawn_failed(command: impl Into<String>, reason: impl Into<String>) -> Self {
+        let msg = format!("{}: {}", command.into(), reason.into());
+        SysprimsError::SpawnFailed {
+            source: io::Error::other(msg),
+        }
     }
 
     /// Create a `NotSupported` error.
@@ -269,7 +311,7 @@ mod tests {
     fn test_error_codes() {
         assert_eq!(SysprimsError::invalid_argument("").error_code(), 1);
         assert_eq!(
-            SysprimsError::spawn_failed(io::Error::other("test")).error_code(),
+            SysprimsError::spawn_failed_io(io::Error::other("test")).error_code(),
             2
         );
         assert_eq!(SysprimsError::Timeout.error_code(), 3);
@@ -284,7 +326,7 @@ mod tests {
     #[test]
     fn test_spawn_failed_source() {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "command not found");
-        let err = SysprimsError::spawn_failed(io_err);
+        let err = SysprimsError::spawn_failed_io(io_err);
 
         // Verify source is accessible
         match err {
