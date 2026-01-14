@@ -4,14 +4,14 @@ use clap::{Parser, Subcommand};
 use sysprims_core::get_platform;
 use sysprims_core::SysprimsError;
 use sysprims_proc::{get_process, snapshot, snapshot_filtered, ProcessFilter};
-use sysprims_signal::{kill, kill_by_name, match_signal_names};
+use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
 use tracing::info;
 use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
 
 /// A cross-platform process utility toolkit.
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(name = "sysprims", version, about, long_about = None)]
 struct Cli {
     /// The format for log output.
     #[arg(long, value_name = "FORMAT", default_value = "text")]
@@ -46,8 +46,11 @@ enum Command {
 
 #[derive(Parser, Debug)]
 struct KillArgs {
-    /// Target process ID.
-    pid: u32,
+    /// Target process ID (or process group ID with --group).
+    ///
+    /// Not required when using --list.
+    #[arg(required_unless_present = "list")]
+    pid: Option<u32>,
 
     /// Signal name, pattern, or number (default: TERM).
     #[arg(
@@ -57,6 +60,20 @@ struct KillArgs {
         default_value = "TERM"
     )]
     signal: String,
+
+    /// List signal names, or get number for a signal name.
+    ///
+    /// Without argument: list all signals in table format.
+    /// With argument: print the signal number for the given name.
+    #[arg(short = 'l', long = "list", value_name = "SIGNAL", num_args = 0..=1)]
+    list: Option<Option<String>>,
+
+    /// Send signal to process group instead of single process.
+    ///
+    /// On Unix, uses killpg() to signal all processes in the group.
+    /// On Windows, returns an error (process groups not supported).
+    #[arg(short = 'g', long = "group")]
+    group: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -231,10 +248,74 @@ fn parse_signal_arg(signal_arg: &str) -> Result<SignalTarget, SysprimsError> {
 }
 
 fn run_kill(args: KillArgs) -> Result<(), SysprimsError> {
+    // Handle --list flag
+    if let Some(list_arg) = args.list {
+        return run_kill_list(list_arg);
+    }
+
+    // PID is required when not listing
+    let pid = args
+        .pid
+        .ok_or_else(|| SysprimsError::invalid_argument("PID is required when not using --list"))?;
+
+    // Parse signal
     let signal = parse_signal_arg(&args.signal)?;
-    match signal {
-        SignalTarget::Number(number) => kill(args.pid, number),
-        SignalTarget::Name(name) => kill_by_name(args.pid, &name),
+    let signal_num = match signal {
+        SignalTarget::Number(n) => n,
+        SignalTarget::Name(ref name) => sysprims_signal::get_signal_number(name)
+            .or_else(|| sysprims_signal::get_signal_number(&name.to_ascii_uppercase()))
+            .or_else(|| {
+                sysprims_signal::get_signal_number(&format!("SIG{}", name.to_ascii_uppercase()))
+            })
+            .ok_or_else(|| SysprimsError::invalid_argument(format!("unknown signal '{}'", name)))?,
+    };
+
+    // Send signal to process or process group
+    if args.group {
+        sysprims_signal::killpg(pid, signal_num)
+    } else {
+        sysprims_signal::kill(pid, signal_num)
+    }
+}
+
+/// Handle `kill --list` command.
+fn run_kill_list(signal_name: Option<String>) -> Result<(), SysprimsError> {
+    if let Some(name) = signal_name {
+        // Print signal number for a specific signal name
+        let num = sysprims_signal::get_signal_number(&name)
+            .or_else(|| sysprims_signal::get_signal_number(&name.to_ascii_uppercase()))
+            .or_else(|| {
+                sysprims_signal::get_signal_number(&format!("SIG{}", name.to_ascii_uppercase()))
+            })
+            .ok_or_else(|| SysprimsError::invalid_argument(format!("unknown signal '{}'", name)))?;
+        println!("{}", num);
+    } else {
+        // Print all signals in table format
+        print_signal_table();
+    }
+    Ok(())
+}
+
+/// Print all signals in table format (similar to `kill -l`).
+fn print_signal_table() {
+    use sysprims_signal::list_signals;
+
+    let signals = list_signals();
+    let mut col = 0;
+
+    for signal in signals {
+        if let Some(num) = sysprims_signal::get_signal_number(&signal.name) {
+            print!("{:>2}) {:<10}", num, &signal.name);
+            col += 1;
+            if col % 4 == 0 {
+                println!();
+            }
+        }
+    }
+
+    // Print final newline if we didn't end on a full row
+    if col % 4 != 0 {
+        println!();
     }
 }
 
@@ -497,5 +578,46 @@ fn truncate(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((byte_idx, _)) => &s[..byte_idx],
         None => s, // String has fewer than max_chars characters
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kill_requires_pid_unless_list_present() {
+        assert!(Cli::try_parse_from(["sysprims", "kill"]).is_err());
+    }
+
+    #[test]
+    fn kill_list_parses_without_pid() {
+        let cli = Cli::try_parse_from(["sysprims", "kill", "-l"]).unwrap();
+        let Command::Kill(args) = cli.command.unwrap() else {
+            panic!("expected kill command");
+        };
+        assert_eq!(args.pid, None);
+        assert!(matches!(args.list, Some(None)));
+    }
+
+    #[test]
+    fn kill_list_parses_with_signal_name_arg() {
+        let cli = Cli::try_parse_from(["sysprims", "kill", "-l", "TERM"]).unwrap();
+        let Command::Kill(args) = cli.command.unwrap() else {
+            panic!("expected kill command");
+        };
+        assert_eq!(args.pid, None);
+        assert!(matches!(args.list, Some(Some(ref s)) if s == "TERM"));
+    }
+
+    #[test]
+    fn kill_group_parses() {
+        let cli = Cli::try_parse_from(["sysprims", "kill", "--group", "1234"]).unwrap();
+        let Command::Kill(args) = cli.command.unwrap() else {
+            panic!("expected kill command");
+        };
+        assert_eq!(args.pid, Some(1234));
+        assert!(args.group);
+        assert_eq!(args.list, None);
     }
 }
