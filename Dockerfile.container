@@ -1,0 +1,51 @@
+# sysprims-test-fixture
+# Container for running privileged/dangerous signal tests
+#
+# This container provides an isolated environment for tests that cannot
+# safely run on the host machine, including:
+# - Broadcast signal tests (kill(-1, sig) semantics)
+# - Cross-user permission tests
+# - Process group edge cases
+# - Tree-kill verification
+#
+# Build: docker build -t sysprims-test-fixture -f Dockerfile.container .
+# Run:   docker run --rm -v $(pwd):/workspace:ro -v $(pwd)/target:/workspace/target sysprims-test-fixture
+#
+# See: .plans/active/v0.1.1/03-container-test-fixture.md
+# See: docs/architecture/adr/0011-pid-validation-safety.md
+
+FROM alpine:3.19
+
+# Install base tools for process testing
+RUN apk add --no-cache \
+    bash \
+    busybox-extras \
+    coreutils \
+    procps-ng \
+    util-linux \
+    tini \
+    curl \
+    git \
+    build-base
+
+# Create test users for cross-user permission tests
+RUN adduser -D -u 1000 testuser && \
+    adduser -D -u 1001 testuser2
+
+# Install Rust toolchain (MSRV 1.81)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain 1.81 --profile minimal && \
+    /root/.cargo/bin/rustup target add x86_64-unknown-linux-musl
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_TARGET_DIR=/workspace/target/container
+
+# Copy test runner script
+COPY scripts/container-test-runner.sh /usr/local/bin/run-tests
+RUN chmod +x /usr/local/bin/run-tests
+
+WORKDIR /workspace
+
+# Use tini as init for proper zombie reaping
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["run-tests"]

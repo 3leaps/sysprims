@@ -8,6 +8,13 @@ authors.workspace = true
 rust-version.workspace = true
 description = "Signal dispatch and process group management"
 
+[features]
+default = []
+# Enables tests that require root and container isolation (broadcast signal tests)
+privileged-tests = []
+# Enables tests that require multiple user accounts (permission tests)
+cross-user-tests = []
+
 [dependencies]
 sysprims-core.workspace = true
 rsfulmen = { workspace = true }

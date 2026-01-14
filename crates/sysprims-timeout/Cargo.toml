@@ -8,6 +8,13 @@ authors.workspace = true
 rust-version.workspace = true
 description = "Process timeout with group-by-default tree management"
 
+[features]
+default = []
+# Enables tests that require container isolation (tree-kill verification)
+privileged-tests = []
+# Enables tests that require multiple user accounts
+cross-user-tests = []
+
 [dependencies]
 sysprims-core.workspace = true
 sysprims-signal.workspace = true
