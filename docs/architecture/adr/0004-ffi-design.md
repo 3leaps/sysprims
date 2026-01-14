@@ -1,7 +1,7 @@
 # ADR-0004: FFI Design
 
-> **Status**: Accepted  
-> **Date**: 2025-12-31  
+> **Status**: Accepted
+> **Date**: 2025-12-31
 > **Authors**: Architecture Council
 
 ## Context
@@ -155,7 +155,7 @@ void sysprims_destroy_handle(SysprimsHandle* handle);
 
 Return native C structs for process info, etc.
 
-**Rejected**: 
+**Rejected**:
 - Memory ownership unclear (who frees nested pointers?)
 - Struct layout versioning is fragile
 - Different padding/alignment across platforms
@@ -164,7 +164,7 @@ Return native C structs for process info, etc.
 
 Use a binary serialization format.
 
-**Rejected**: 
+**Rejected**:
 - Adds dependency complexity
 - JSON is human-readable for debugging
 - Target languages already have JSON parsing

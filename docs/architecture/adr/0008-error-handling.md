@@ -1,7 +1,7 @@
 # ADR-0008: Error Handling Strategy
 
-> **Status**: Accepted  
-> **Date**: 2025-12-31  
+> **Status**: Accepted
+> **Date**: 2025-12-31
 > **Authors**: Architecture Council
 
 ## Context
@@ -29,25 +29,25 @@ Core error type using `thiserror`:
 pub enum SysprimsError {
     #[error("Invalid argument: {message}")]
     InvalidArgument { message: String },
-    
+
     #[error("Failed to spawn process: {source}")]
-    SpawnFailed { 
+    SpawnFailed {
         #[source]
-        source: std::io::Error 
+        source: std::io::Error
     },
-    
+
     #[error("Operation timed out")]
     Timeout,
-    
+
     #[error("Permission denied for {operation} on PID {pid}")]
     PermissionDenied { pid: u32, operation: String },
-    
+
     #[error("Process {pid} not found")]
     NotFound { pid: u32 },
-    
+
     #[error("Operation '{feature}' not supported on {platform}")]
     NotSupported { feature: String, platform: String },
-    
+
     #[error("Internal error: {message}")]
     Internal { message: String },
 }

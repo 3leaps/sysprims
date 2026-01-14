@@ -1,7 +1,7 @@
 # ADR-0006: Dependency Governance
 
-> **Status**: Accepted  
-> **Date**: 2025-12-31  
+> **Status**: Accepted
+> **Date**: 2025-12-31
 > **Authors**: Architecture Council
 
 ## Context
@@ -112,15 +112,15 @@ jobs:
     steps:
       - name: License check
         run: cargo deny check licenses
-      
+
       - name: Security audit
         run: cargo audit
-      
+
       - name: goneat analysis
         run: |
           goneat analyze --format sbom --output sbom.json
           goneat check --policy deny.toml
-      
+
       - name: Size check
         run: |
           cargo build --release --target x86_64-unknown-linux-musl

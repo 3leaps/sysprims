@@ -1,7 +1,7 @@
 # ADR-0007: Platform Abstraction Strategy
 
-> **Status**: Accepted  
-> **Date**: 2025-12-31  
+> **Status**: Accepted
+> **Date**: 2025-12-31
 > **Authors**: Architecture Council
 
 ## Context
@@ -163,7 +163,7 @@ Platform differences are observable in output:
 
 Hide all platform differences behind unified API.
 
-**Rejected**: 
+**Rejected**:
 - Some features can't be abstracted (Unix signals)
 - Hides important behavioral differences
 - Leads to surprises when deploying cross-platform
