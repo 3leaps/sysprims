@@ -104,5 +104,5 @@ jobs:
       - name: Security audit
         run: cargo audit
 
-  # NOTE: MSRV and Miri checks available locally via `make msrv` and `make miri`
-  # Add to CI after runner image supports these toolchains
+# NOTE: MSRV and Miri checks available locally via `make msrv` and `make miri`
+# Add to CI after runner image supports these toolchains

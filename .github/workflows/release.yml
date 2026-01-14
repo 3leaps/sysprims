@@ -77,7 +77,8 @@ jobs:
           mkdir -p dist/cli
           cp target/${{ matrix.target }}/release/sysprims dist/cli/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
-          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
+          VERSION=${{ needs.validate-version.outputs.version }}
+          tar -czf sysprims-${VERSION}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
 
       - name: Package FFI
         run: |
