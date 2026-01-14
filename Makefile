@@ -10,7 +10,7 @@
 #   make fmt        - Format code (cargo fmt)
 #   make build      - Build all crates and FFI
 
-.PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version
+.PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version install
 .PHONY: precommit prepush deps-check audit deny miri msrv
 .PHONY: build-release build-ffi cbindgen
 .PHONY: release-clean release-download release-checksums release-sign
@@ -59,6 +59,7 @@ help: ## Show available targets
 	@echo "  build           Build all crates (debug)"
 	@echo "  build-release   Build all crates (release)"
 	@echo "  build-ffi       Build FFI library with C header"
+	@echo "  install         Install sysprims binary to ~/.local/bin"
 	@echo "  clean           Remove build artifacts"
 	@echo ""
 	@echo "Quality gates:"
@@ -330,6 +331,27 @@ clean: ## Remove build artifacts
 	$(CARGO) clean
 	@rm -rf bin/
 	@echo "[ok] Clean complete"
+
+# -----------------------------------------------------------------------------
+# Install
+# -----------------------------------------------------------------------------
+#
+# Install sysprims binary to user-space bin directory.
+# Default: ~/.local/bin (macOS/Linux)
+#
+# Override with: make install INSTALL_BINDIR=/usr/local/bin
+
+INSTALL_BINDIR ?= $(HOME)/.local/bin
+
+install: build-release ## Install sysprims binary to INSTALL_BINDIR
+	@echo "Installing sysprims to $(INSTALL_BINDIR)..."
+	@mkdir -p "$(INSTALL_BINDIR)"
+	@cp target/release/sysprims "$(INSTALL_BINDIR)/sysprims"
+	@chmod 755 "$(INSTALL_BINDIR)/sysprims"
+	@echo "[ok] Installed sysprims to $(INSTALL_BINDIR)/sysprims"
+	@echo ""
+	@echo "Ensure $(INSTALL_BINDIR) is in your PATH:"
+	@echo '  export PATH="$$HOME/.local/bin:$$PATH"'
 
 # -----------------------------------------------------------------------------
 # Pre-commit / Pre-push Hooks
