@@ -13,3 +13,8 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 sysprims-core.workspace = true
+sysprims-signal.workspace = true
+sysprims-proc.workspace = true
+sysprims-timeout.workspace = true
+serde.workspace = true
+serde_json.workspace = true
