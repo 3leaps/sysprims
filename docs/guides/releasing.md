@@ -40,7 +40,7 @@ sysprims-${VERSION}/
 │   └── libsysprims.so (Linux) / .dylib (macOS)
 ├── include/
 │   └── sysprims.h
-├── sbom-${VERSION}.spdx.json
+├── sbom-${VERSION}.cdx.json
 ├── THIRD_PARTY_NOTICES.md
 ├── LICENSE-MIT
 └── LICENSE-APACHE

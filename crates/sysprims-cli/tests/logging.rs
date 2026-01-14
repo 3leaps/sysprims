@@ -4,7 +4,7 @@ use serde_json::Value;
 
 #[test]
 fn test_log_format_text() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-format")
         .arg("text")
         .arg("--log-level")
@@ -19,7 +19,7 @@ fn test_log_format_text() {
 
 #[test]
 fn test_log_format_json() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-format")
         .arg("json")
         .arg("--log-level")
@@ -54,7 +54,7 @@ fn test_log_format_json() {
 
 #[test]
 fn test_log_level_debug() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level").arg("debug");
 
     cmd.assert()

@@ -9,13 +9,14 @@
 
 use crate::{make_snapshot, ProcessInfo, ProcessSnapshot, ProcessState};
 use std::mem;
-use std::ptr;
 use sysprims_core::{SysprimsError, SysprimsResult};
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
-    CreateToolhelp32Snapshot, GetProcessTimes, OpenProcess, Process32FirstW, Process32NextW,
-    PROCESSENTRY32W, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, TH32CS_SNAPPROCESS,
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
 };
 
 // ============================================================================

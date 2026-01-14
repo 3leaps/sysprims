@@ -107,9 +107,12 @@ pub fn run_setsid(
     return unix::run_setsid_impl(command, args, &config);
 
     #[cfg(windows)]
-    return Err(sysprims_core::SysprimsError::not_supported(
-        "setsid", "windows",
-    ));
+    {
+        let _ = (command, args, config); // Unused on Windows
+        return Err(sysprims_core::SysprimsError::not_supported(
+            "setsid", "windows",
+        ));
+    }
 }
 
 // ============================================================================
@@ -178,9 +181,12 @@ pub fn run_nohup(
     return unix::run_nohup_impl(command, args, &config);
 
     #[cfg(windows)]
-    return Err(sysprims_core::SysprimsError::not_supported(
-        "nohup", "windows",
-    ));
+    {
+        let _ = (command, args, config); // Unused on Windows
+        return Err(sysprims_core::SysprimsError::not_supported(
+            "nohup", "windows",
+        ));
+    }
 }
 
 // ============================================================================

@@ -1,9 +1,12 @@
 # sysprims cargo-deny configuration
 # https://embarkstudios.github.io/cargo-deny/
-
+#
 # Note: This configuration enforces sysprims license and security policies.
 # See ADR-0001 (License Policy) and ADR-0006 (Dependency Governance).
 
+# ============================================================================
+# Graph Configuration
+# ============================================================================
 [graph]
 targets = [
     "x86_64-unknown-linux-musl",
@@ -15,15 +18,30 @@ targets = [
 ]
 
 # ============================================================================
+# Output Configuration
+# ============================================================================
+[output]
+feature-depth = 1
+
+# ============================================================================
+# Advisories (Security)
+# ============================================================================
+[advisories]
+# Ignore specific advisories (use sparingly, with justification)
+ignore = [
+    # Example:
+    # { id = "RUSTSEC-2020-0001", reason = "Not exploitable in our use case" },
+]
+
+# ============================================================================
 # Licenses
 # ============================================================================
 [licenses]
-version = 2
-
 # Confidence threshold for license detection (0.0 - 1.0)
 confidence-threshold = 0.93
 
-# Allow licenses that are permissive and compatible with static linking
+# Allow licenses that are permissive and compatible with static linking.
+# Any license NOT in this list will be denied (deny-by-default).
 allow = [
     "MIT",
     "Apache-2.0",
@@ -35,44 +53,24 @@ allow = [
     "0BSD",
     "Unlicense",
     "CC0-1.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
 ]
 
-# Explicitly deny copyleft licenses
-deny = [
-    "GPL-2.0",
-    "GPL-2.0-only",
-    "GPL-2.0-or-later",
-    "GPL-3.0",
-    "GPL-3.0-only",
-    "GPL-3.0-or-later",
-    "LGPL-2.0",
-    "LGPL-2.0-only",
-    "LGPL-2.0-or-later",
-    "LGPL-2.1",
-    "LGPL-2.1-only",
-    "LGPL-2.1-or-later",
-    "LGPL-3.0",
-    "LGPL-3.0-only",
-    "LGPL-3.0-or-later",
-    "AGPL-3.0",
-    "AGPL-3.0-only",
-    "AGPL-3.0-or-later",
+# Crate-specific license exceptions
+exceptions = [
+    # Example: { allow = ["LGPL-2.1"], crate = "some-crate" },
 ]
-
-# Blanket deny for copyleft
-copyleft = "deny"
-
-# How to handle licenses that don't match allow/deny
-unlicensed = "deny"
-
-# Private crates (internal) don't need licenses
-private = { ignore = true }
 
 # Clarifications for crates with non-standard license files
 [[licenses.clarify]]
-name = "ring"
+crate = "ring"
 expression = "MIT AND ISC AND OpenSSL"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[licenses.private]
+# Private/unpublished workspace crates don't need licenses
+ignore = true
 
 # ============================================================================
 # Bans
@@ -81,19 +79,16 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 # Lint level for multiple versions of the same crate
 multiple-versions = "warn"
 
-# Lint level for crates from git repos
+# Lint level for crates with wildcard version requirements
 wildcards = "allow"
 
 # Highlight crates that are in multiple versions
 highlight = "all"
 
-# Allow specific crates from git (if needed)
-allow-git = []
-
 # Deny specific crates entirely
 deny = [
     # Add problematic crates here
-    # { name = "problematic-crate", reason = "Known issues with X" }
+    # { crate = "problematic-crate", reason = "Known issues with X" },
 ]
 
 # Skip specific crates from duplicate checking
@@ -101,36 +96,6 @@ skip = []
 
 # Skip specific crate trees from duplicate checking
 skip-tree = []
-
-# ============================================================================
-# Advisories (Security)
-# ============================================================================
-[advisories]
-version = 2
-
-# Path to local advisory database (uses default if not specified)
-# db-path = "~/.cargo/advisory-db"
-
-# URL to advisory database
-# db-urls = ["https://github.com/RustSec/advisory-db"]
-
-# How to handle crates with known vulnerabilities
-vulnerability = "deny"
-
-# How to handle crates that have been yanked
-yanked = "warn"
-
-# How to handle crates that are unmaintained
-unmaintained = "warn"
-
-# How to handle crates with unsound code
-unsound = "deny"
-
-# Ignore specific advisories (use sparingly, with justification)
-ignore = [
-    # Example:
-    # { id = "RUSTSEC-2020-0001", reason = "Not exploitable in our use case" }
-]
 
 # ============================================================================
 # Sources

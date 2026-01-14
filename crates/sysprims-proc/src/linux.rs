@@ -11,7 +11,7 @@ use std::ffi::CStr;
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use sysprims_core::{SysprimsError, SysprimsResult};
 
 // ============================================================================
@@ -359,7 +359,7 @@ mod tests {
         let ticks = get_clock_ticks();
         assert!(ticks > 0, "Clock ticks should be positive");
         // Common values are 100 or 1000
-        assert!(ticks >= 100 && ticks <= 10000);
+        assert!((100..=10000).contains(&ticks));
     }
 
     #[test]

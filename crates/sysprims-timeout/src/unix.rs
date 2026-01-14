@@ -67,12 +67,7 @@ pub fn run_with_timeout_impl(
                 // Still running - check timeout
                 if start.elapsed() >= timeout {
                     // Timeout! Kill the tree
-                    return kill_tree(
-                        child_pid,
-                        &mut child,
-                        config,
-                        use_process_group,
-                    );
+                    return kill_tree(child_pid, &mut child, config, use_process_group);
                 }
                 std::thread::sleep(POLL_INTERVAL);
             }
@@ -206,10 +201,7 @@ mod tests {
             &TimeoutConfig::default(),
         );
 
-        assert!(matches!(
-            result,
-            Err(SysprimsError::NotFoundCommand { .. })
-        ));
+        assert!(matches!(result, Err(SysprimsError::NotFoundCommand { .. })));
     }
 
     #[test]
@@ -220,13 +212,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result = run_with_timeout_impl(
-            "sleep",
-            &["60"],
-            Duration::from_millis(100),
-            &config,
-        )
-        .unwrap();
+        let result =
+            run_with_timeout_impl("sleep", &["60"], Duration::from_millis(100), &config).unwrap();
 
         if let TimeoutOutcome::TimedOut {
             tree_kill_reliability,

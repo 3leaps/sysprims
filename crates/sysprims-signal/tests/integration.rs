@@ -14,16 +14,24 @@
 //! This ensures we cannot accidentally signal Finder, init, or other
 //! critical processes even if tests are run with elevated privileges.
 
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
-use sysprims_signal::{kill, terminate, force_kill, SIGTERM, SIGKILL};
+// Used by both Unix and Windows tests
+use std::process::{Command, Stdio};
+use sysprims_signal::{kill, SIGTERM};
 
+// Unix-only imports
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
+#[cfg(unix)]
+use std::process::Child;
+#[cfg(unix)]
+use std::time::Duration;
+#[cfg(unix)]
+use sysprims_signal::{force_kill, terminate, SIGKILL};
 
 /// Helper to spawn a sleep process that we control.
 ///
 /// Returns the Child handle. The caller is responsible for cleanup.
+#[cfg(unix)]
 fn spawn_sleep(seconds: u32) -> Child {
     Command::new("sleep")
         .arg(seconds.to_string())
@@ -35,11 +43,12 @@ fn spawn_sleep(seconds: u32) -> Child {
 }
 
 /// Helper to verify a child process is still running.
+#[cfg(unix)]
 fn is_running(child: &mut Child) -> bool {
     match child.try_wait() {
-        Ok(None) => true,      // Still running
-        Ok(Some(_)) => false,  // Exited
-        Err(_) => false,       // Error checking, assume not running
+        Ok(None) => true,     // Still running
+        Ok(Some(_)) => false, // Exited
+        Err(_) => false,      // Error checking, assume not running
     }
 }
 
@@ -65,7 +74,11 @@ fn kill_terminates_spawned_child_with_sigterm() {
 
     // Verify it was killed by SIGTERM
     assert!(!status.success(), "Child should not exit successfully");
-    assert_eq!(status.signal(), Some(SIGTERM), "Child should be killed by SIGTERM");
+    assert_eq!(
+        status.signal(),
+        Some(SIGTERM),
+        "Child should be killed by SIGTERM"
+    );
 }
 
 #[test]
@@ -86,7 +99,11 @@ fn kill_terminates_spawned_child_with_sigkill() {
 
     // Verify it was killed by SIGKILL
     assert!(!status.success(), "Child should not exit successfully");
-    assert_eq!(status.signal(), Some(SIGKILL), "Child should be killed by SIGKILL");
+    assert_eq!(
+        status.signal(),
+        Some(SIGKILL),
+        "Child should be killed by SIGKILL"
+    );
 }
 
 #[test]
@@ -103,7 +120,11 @@ fn terminate_wrapper_kills_spawned_child() {
     let status = child.wait().expect("Failed to wait for child");
 
     // Verify it was killed by SIGTERM
-    assert_eq!(status.signal(), Some(SIGTERM), "terminate() should send SIGTERM");
+    assert_eq!(
+        status.signal(),
+        Some(SIGTERM),
+        "terminate() should send SIGTERM"
+    );
 }
 
 #[test]
@@ -120,10 +141,15 @@ fn force_kill_wrapper_kills_spawned_child() {
     let status = child.wait().expect("Failed to wait for child");
 
     // Verify it was killed by SIGKILL
-    assert_eq!(status.signal(), Some(SIGKILL), "force_kill() should send SIGKILL");
+    assert_eq!(
+        status.signal(),
+        Some(SIGKILL),
+        "force_kill() should send SIGKILL"
+    );
 }
 
 #[test]
+#[cfg(unix)]
 fn kill_returns_not_found_for_exited_process() {
     // SAFETY: We spawn this process ourselves, let it exit, then try to signal.
     let mut child = spawn_sleep(0); // Exits immediately
@@ -191,8 +217,8 @@ fn kill_by_name_case_insensitive() {
 #[test]
 #[cfg(unix)]
 fn killpg_terminates_process_group() {
-    use sysprims_signal::killpg;
     use std::os::unix::process::CommandExt;
+    use sysprims_signal::killpg;
 
     // SAFETY: We spawn this process in a new process group we control.
     // The child becomes the leader of its own process group.
@@ -224,7 +250,11 @@ fn killpg_terminates_process_group() {
     let status = child.wait().expect("Failed to wait for child");
 
     // Verify it was killed by SIGTERM
-    assert_eq!(status.signal(), Some(SIGTERM), "Process group should be killed by SIGTERM");
+    assert_eq!(
+        status.signal(),
+        Some(SIGTERM),
+        "Process group should be killed by SIGTERM"
+    );
 }
 
 // ============================================================================
@@ -234,8 +264,8 @@ fn killpg_terminates_process_group() {
 #[test]
 #[cfg(unix)]
 fn terminate_group_wrapper_kills_process_group() {
-    use sysprims_signal::terminate_group;
     use std::os::unix::process::CommandExt;
+    use sysprims_signal::terminate_group;
 
     // SAFETY: We spawn this process in a new process group we control.
     let mut child = unsafe {
@@ -259,14 +289,18 @@ fn terminate_group_wrapper_kills_process_group() {
     terminate_group(pid).expect("terminate_group() should succeed");
 
     let status = child.wait().expect("Failed to wait for child");
-    assert_eq!(status.signal(), Some(SIGTERM), "terminate_group() should send SIGTERM");
+    assert_eq!(
+        status.signal(),
+        Some(SIGTERM),
+        "terminate_group() should send SIGTERM"
+    );
 }
 
 #[test]
 #[cfg(unix)]
 fn force_kill_group_wrapper_kills_process_group() {
-    use sysprims_signal::force_kill_group;
     use std::os::unix::process::CommandExt;
+    use sysprims_signal::force_kill_group;
 
     // SAFETY: We spawn this process in a new process group we control.
     let mut child = unsafe {
@@ -290,7 +324,11 @@ fn force_kill_group_wrapper_kills_process_group() {
     force_kill_group(pid).expect("force_kill_group() should succeed");
 
     let status = child.wait().expect("Failed to wait for child");
-    assert_eq!(status.signal(), Some(SIGKILL), "force_kill_group() should send SIGKILL");
+    assert_eq!(
+        status.signal(),
+        Some(SIGKILL),
+        "force_kill_group() should send SIGKILL"
+    );
 }
 
 // ============================================================================
@@ -304,7 +342,10 @@ fn kill_rejects_zero_pid_at_api_boundary() {
     let result = kill(0, SIGTERM);
 
     assert!(
-        matches!(result, Err(sysprims_core::SysprimsError::InvalidArgument { .. })),
+        matches!(
+            result,
+            Err(sysprims_core::SysprimsError::InvalidArgument { .. })
+        ),
         "PID 0 must be rejected per ADR-0011"
     );
 }
@@ -316,7 +357,10 @@ fn kill_rejects_overflow_pid_at_api_boundary() {
     let result = kill(u32::MAX, SIGTERM);
 
     assert!(
-        matches!(result, Err(sysprims_core::SysprimsError::InvalidArgument { .. })),
+        matches!(
+            result,
+            Err(sysprims_core::SysprimsError::InvalidArgument { .. })
+        ),
         "PID u32::MAX must be rejected per ADR-0011"
     );
 

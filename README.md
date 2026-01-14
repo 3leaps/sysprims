@@ -1,7 +1,7 @@
 # sysprims
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
-[![Rust: 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust: 1.81+](https://img.shields.io/badge/rust-1.81%2B-orange.svg)](https://www.rust-lang.org/)
 
 **Reliable process control without license toxicity.**
 
@@ -102,16 +102,19 @@ match run_with_timeout("./build.sh", &[], Duration::from_secs(30), config)? {
 
 ```bash
 # Run command with 30 second timeout
-sysprims-cli timeout 30s -- ./long-build.sh
+sysprims timeout 30s -- ./long-build.sh
 
 # Send signal to process
-sysprims-cli kill -s TERM 1234
+sysprims kill -s TERM 1234
 
 # Run timeout with custom signal and escalation delay
-sysprims-cli timeout --signal TERM --kill-after 2s 5s -- ./long-build.sh
+sysprims timeout --signal TERM --kill-after 2s 5s -- ./long-build.sh
 
 # List processes as JSON
-sysprims-cli pstat --json
+sysprims pstat --json
+
+# List processes with filters and table output
+sysprims pstat --name nginx --cpu-above 5 --table
 ```
 
 ### Exit Codes
@@ -204,6 +207,27 @@ let filter = ProcessFilter::builder()
     .build();
 let filtered = snapshot_filtered(&filter)?;
 ```
+
+**CLI:**
+```bash
+sysprims pstat [OPTIONS]
+sysprims pstat --json                          # JSON output (default)
+sysprims pstat --table                         # Human-readable table
+sysprims pstat --pid 1234                      # Single process by PID
+sysprims pstat --name nginx --cpu-above 10    # Filter by name and CPU
+sysprims pstat --sort cpu                      # Sort by CPU usage
+```
+
+**Filter options:**
+
+| Option | Description |
+|--------|-------------|
+| `--pid <PID>` | Show only a specific process |
+| `--name <NAME>` | Filter by name (substring, case-insensitive) |
+| `--user <USER>` | Filter by username |
+| `--cpu-above <PERCENT>` | Filter by minimum CPU usage (0-100) |
+| `--memory-above <KB>` | Filter by minimum memory in KB |
+| `--sort <FIELD>` | Sort by: pid, name, cpu, memory (default: pid) |
 
 ## Platform Support
 

@@ -12,8 +12,8 @@ set -euo pipefail
 DIR=${1:-dist/release}
 
 if [ ! -d "$DIR" ]; then
-  echo "Error: Directory $DIR does not exist"
-  exit 1
+	echo "Error: Directory $DIR does not exist"
+	exit 1
 fi
 
 echo "Exporting public keys to $DIR..."
@@ -26,38 +26,38 @@ MINISIGN_PUB="${SYSPRIMS_MINISIGN_PUB:-}"
 
 # Try to derive from secret key path if not explicitly set
 if [ -z "$MINISIGN_PUB" ] && [ -n "${SYSPRIMS_MINISIGN_KEY:-}" ]; then
-  # Replace .key with .pub
-  MINISIGN_PUB="${SYSPRIMS_MINISIGN_KEY%.key}.pub"
+	# Replace .key with .pub
+	MINISIGN_PUB="${SYSPRIMS_MINISIGN_KEY%.key}.pub"
 fi
 
 if [ -n "$MINISIGN_PUB" ] && [ -f "$MINISIGN_PUB" ]; then
-  cp "$MINISIGN_PUB" "$DIR/sysprims-minisign.pub"
-  echo "[ok] Exported $DIR/sysprims-minisign.pub"
-  cat "$DIR/sysprims-minisign.pub"
+	cp "$MINISIGN_PUB" "$DIR/sysprims-minisign.pub"
+	echo "[ok] Exported $DIR/sysprims-minisign.pub"
+	cat "$DIR/sysprims-minisign.pub"
 else
-  echo "[!!] Minisign public key not found"
-  echo "Set SYSPRIMS_MINISIGN_PUB or ensure .pub file exists alongside .key"
+	echo "[!!] Minisign public key not found"
+	echo "Set SYSPRIMS_MINISIGN_PUB or ensure .pub file exists alongside .key"
 fi
 
 # Export PGP public key
 if [ -n "${SYSPRIMS_PGP_KEY_ID:-}" ]; then
-  echo ""
-  echo "=== PGP Public Key ==="
+	echo ""
+	echo "=== PGP Public Key ==="
 
-  GPG_OPTS=()
-  if [ -n "${SYSPRIMS_GPG_HOMEDIR:-}" ]; then
-    GPG_OPTS+=("--homedir" "$SYSPRIMS_GPG_HOMEDIR")
-  fi
+	GPG_OPTS=()
+	if [ -n "${SYSPRIMS_GPG_HOMEDIR:-}" ]; then
+		GPG_OPTS+=("--homedir" "$SYSPRIMS_GPG_HOMEDIR")
+	fi
 
-  gpg "${GPG_OPTS[@]}" \
-    --armor \
-    --export "$SYSPRIMS_PGP_KEY_ID" \
-    > "$DIR/sysprims-release-signing-key.asc"
+	gpg "${GPG_OPTS[@]}" \
+		--armor \
+		--export "$SYSPRIMS_PGP_KEY_ID" \
+		>"$DIR/sysprims-release-signing-key.asc"
 
-  echo "[ok] Exported $DIR/sysprims-release-signing-key.asc"
+	echo "[ok] Exported $DIR/sysprims-release-signing-key.asc"
 else
-  echo ""
-  echo "[--] PGP key export skipped (SYSPRIMS_PGP_KEY_ID not set)"
+	echo ""
+	echo "[--] PGP key export skipped (SYSPRIMS_PGP_KEY_ID not set)"
 fi
 
 echo ""

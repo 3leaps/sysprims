@@ -74,14 +74,14 @@ jobs:
       - name: Test with musl
         run: cargo test --workspace --target x86_64-unknown-linux-musl
 
-  audit:
-    name: License & Security Audit
+  license-check:
+    name: License & Dependency Check
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      options: --user root
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
 
       - name: License check
         run: cargo deny check licenses
@@ -89,8 +89,20 @@ jobs:
       - name: Advisory check
         run: cargo deny check advisories
 
+      - name: Dependency assessment
+        run: goneat assess --categories dependencies --fail-on high
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
       - name: Security audit
         run: cargo audit
+
+  # NOTE: MSRV and Miri checks available locally via `make msrv` and `make miri`
+  # Add to CI after runner image supports these toolchains

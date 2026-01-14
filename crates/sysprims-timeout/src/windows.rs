@@ -47,22 +47,19 @@ pub fn run_with_timeout_impl(
     };
 
     // Spawn the child process
-    let mut child = Command::new(command)
-        .args(args)
-        .spawn()
-        .map_err(|e| {
-            // Clean up job handle on error
-            if let Some(job) = job_handle {
-                unsafe { CloseHandle(job) };
-            }
-            if e.kind() == std::io::ErrorKind::NotFound {
-                SysprimsError::not_found_command(command)
-            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                SysprimsError::permission_denied_command(command)
-            } else {
-                SysprimsError::spawn_failed(command, e.to_string())
-            }
-        })?;
+    let mut child = Command::new(command).args(args).spawn().map_err(|e| {
+        // Clean up job handle on error
+        if let Some(job) = job_handle {
+            unsafe { CloseHandle(job) };
+        }
+        if e.kind() == std::io::ErrorKind::NotFound {
+            SysprimsError::not_found_command(command)
+        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+            SysprimsError::permission_denied_command(command)
+        } else {
+            SysprimsError::spawn_failed(command, e.to_string())
+        }
+    })?;
 
     // Assign process to Job Object if available
     if let Some(job) = job_handle {

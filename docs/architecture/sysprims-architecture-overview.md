@@ -403,7 +403,7 @@ sysprims-pstat --json            ┌──────────────�
 |--------|--------|
 | Test coverage | ≥ 80% |
 | Documentation coverage | 100% public API |
-| MSRV stability | 1.75.0 (policy: announce bumps) |
+| MSRV stability | 1.81.0 (policy: announce bumps) |
 
 ## Cross-References
 

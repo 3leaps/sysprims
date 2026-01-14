@@ -17,23 +17,28 @@
 //! 2. **nohup comparison** - Verify SIGHUP handling
 //! 3. **Low-level API tests** - Verify getsid/getpgid against system queries
 
+#[cfg(unix)]
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ============================================================================
-// Helper Functions
+// Helper Functions (Unix only)
 // ============================================================================
 
 /// Check if a system tool exists at the expected path.
+#[cfg(unix)]
 fn tool_exists(path: &str) -> bool {
     std::path::Path::new(path).exists()
 }
 
 /// Get current process ID.
+#[cfg(unix)]
 fn getpid() -> u32 {
     std::process::id()
 }
 
+#[cfg(unix)]
 fn temp_path(tag: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -85,8 +90,7 @@ fn setsid_creates_new_session() {
         );
     }
 
-    let child_sid_raw =
-        std::fs::read_to_string(&output_path).expect("Should read child SID");
+    let child_sid_raw = std::fs::read_to_string(&output_path).expect("Should read child SID");
     let child_sid: u32 = child_sid_raw
         .trim()
         .parse()
@@ -119,7 +123,7 @@ fn setsid_process_becomes_session_leader() {
 
     let result = run_setsid(
         "sh",
-        &["-c", script],
+        &["-c", &script],
         SetsidConfig {
             wait: true,
             ..Default::default()
@@ -128,8 +132,7 @@ fn setsid_process_becomes_session_leader() {
 
     assert!(result.is_ok(), "run_setsid should succeed");
 
-    let content =
-        std::fs::read_to_string(&output_path).expect("Should read leader output");
+    let content = std::fs::read_to_string(&output_path).expect("Should read leader output");
     let fields: Vec<&str> = content.split_whitespace().collect();
     assert_eq!(fields.len(), 3, "Expected PID SID PGID");
     let pid: u32 = fields[0].parse().expect("PID should parse");
@@ -261,8 +264,7 @@ fn setsid_session_differs_from_parent() {
     // The important thing is that we can successfully create a new session
     assert!(result.is_ok(), "Should be able to create new session");
 
-    let child_sid_raw =
-        std::fs::read_to_string(&output_path).expect("Should read child SID");
+    let child_sid_raw = std::fs::read_to_string(&output_path).expect("Should read child SID");
     let child_sid: u32 = child_sid_raw
         .trim()
         .parse()
@@ -297,10 +299,7 @@ fn nohup_ignores_sighup() {
 
     // Send SIGHUP to self. If SIGHUP is ignored, we continue and write output.
     // If not ignored, the process terminates before writing.
-    let script = format!(
-        "kill -HUP $$; echo survived > \"{}\"",
-        output_path_str
-    );
+    let script = format!("kill -HUP $$; echo survived > \"{}\"", output_path_str);
 
     let result = run_nohup(
         "sh",
@@ -603,10 +602,7 @@ fn getsid_nonexistent_pid_fails() {
     let fake_pid = 99_999_u32;
     let result = getsid(fake_pid);
 
-    assert!(
-        result.is_err(),
-        "getsid should fail for non-existent PID"
-    );
+    assert!(result.is_err(), "getsid should fail for non-existent PID");
 }
 
 /// Test that getpgid fails for non-existent PID.
@@ -619,10 +615,7 @@ fn getpgid_nonexistent_pid_fails() {
     let fake_pid = 99_999_u32;
     let result = getpgid(fake_pid);
 
-    assert!(
-        result.is_err(),
-        "getpgid should fail for non-existent PID"
-    );
+    assert!(result.is_err(), "getpgid should fail for non-existent PID");
 }
 
 // ============================================================================
@@ -818,7 +811,10 @@ fn setsid_nonexistent_command() {
         SetsidConfig::default(),
     );
 
-    assert!(result.is_err(), "setsid should fail for nonexistent command");
+    assert!(
+        result.is_err(),
+        "setsid should fail for nonexistent command"
+    );
 }
 
 /// Test nohup with command that doesn't exist.

@@ -1,48 +1,17 @@
-# goneat hooks configuration for sysprims
-#
-# Pre-commit: Fast checks (format, lint ancillary files)
-# Pre-push: Thorough checks (all ancillary + defer to Makefile for Rust)
-#
-# NOTE: Rust checks are handled by Makefile targets (precommit, prepush).
-# goneat assess handles ancillary files (YAML, shell, GitHub Actions).
-#
-# Install hooks:
-#   goneat hooks init
-#   goneat hooks generate
-#   goneat hooks install
-#
-# Or manually add to .git/hooks/pre-commit:
-#   make precommit
-
 version: "1.0.0"
-
 hooks:
   pre-commit:
-    # goneat assess for ancillary files
     - command: "assess"
-      args: ["--categories", "format,lint", "--fail-on", "critical", "--package-mode"]
-      priority: 10
-      timeout: "60s"
-    # Rust checks via Makefile
-    - command: "shell"
-      args: ["make", "precommit"]
-      priority: 20
-      timeout: "120s"
-
-  pre-push:
-    # goneat assess for ancillary files (thorough)
-    - command: "assess"
-      args: ["--categories", "format,lint,security", "--fail-on", "high", "--package-mode"]
+      args: ["--check", "--categories", "format,lint,dependencies", "--fail-on", "critical"]
       priority: 10
       timeout: "90s"
-    # Full Rust checks via Makefile
-    - command: "shell"
-      args: ["make", "prepush"]
-      priority: 20
-      timeout: "5m"
-
+  pre-push:
+    - command: "assess"
+      args: ["--check", "--categories", "format,lint,security,dependencies,repo-status", "--fail-on", "high"]
+      priority: 10
+      timeout: "2m"
 optimization:
   cache_results: true
   content_source: working
-  only_changed_files: true
+  only_changed_files: false
   parallel: auto

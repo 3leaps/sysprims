@@ -4,7 +4,7 @@ use predicates::prelude::*;
 /// Test that timeout completes successfully for fast commands.
 #[test]
 fn timeout_fast_command_succeeds() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -19,8 +19,9 @@ fn timeout_fast_command_succeeds() {
 
 /// Test that timeout returns exit code 124 when command times out.
 #[test]
+#[cfg(unix)]
 fn timeout_slow_command_returns_124() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -36,7 +37,7 @@ fn timeout_slow_command_returns_124() {
 /// Test that timeout returns exit code 127 for command not found.
 #[test]
 fn timeout_command_not_found_returns_127() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -49,7 +50,7 @@ fn timeout_command_not_found_returns_127() {
 /// Test duration parsing with various formats.
 #[test]
 fn timeout_duration_parsing_seconds() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -62,7 +63,7 @@ fn timeout_duration_parsing_seconds() {
 
 #[test]
 fn timeout_duration_parsing_milliseconds() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -75,7 +76,7 @@ fn timeout_duration_parsing_milliseconds() {
 
 #[test]
 fn timeout_duration_parsing_minutes() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -89,7 +90,7 @@ fn timeout_duration_parsing_minutes() {
 /// Test invalid duration is rejected.
 #[test]
 fn timeout_invalid_duration_rejected() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -104,8 +105,9 @@ fn timeout_invalid_duration_rejected() {
 
 /// Test that --signal option works.
 #[test]
+#[cfg(unix)]
 fn timeout_custom_signal() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -122,8 +124,9 @@ fn timeout_custom_signal() {
 
 /// Test that --foreground option is accepted.
 #[test]
+#[cfg(unix)]
 fn timeout_foreground_mode() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")
@@ -139,8 +142,9 @@ fn timeout_foreground_mode() {
 
 /// Test that command arguments are passed through correctly.
 #[test]
+#[cfg(unix)]
 fn timeout_passes_args_to_command() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     // Use -- to separate CLI options from command and its arguments
     cmd.arg("--log-level")
         .arg("error")
@@ -158,8 +162,9 @@ fn timeout_passes_args_to_command() {
 
 /// Test --preserve-status returns signal-based exit code.
 #[test]
+#[cfg(unix)]
 fn timeout_preserve_status() {
-    let mut cmd = cargo_bin_cmd!("sysprims-cli");
+    let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")
         .arg("error")
         .arg("timeout")

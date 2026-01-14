@@ -174,7 +174,10 @@ pub fn killpg(pgid: u32, signal: i32) -> SysprimsResult<()> {
     return unix::killpg_impl(pgid, signal);
 
     #[cfg(windows)]
-    return Err(SysprimsError::not_supported("killpg", "windows"));
+    {
+        let _ = signal; // Unused on Windows
+        return Err(SysprimsError::not_supported("killpg", "windows"));
+    }
 }
 
 /// Return signal names that match a simple glob pattern.
@@ -319,7 +322,7 @@ mod tests {
     #[test]
     fn match_signal_names_glob_matches_names() {
         let matches = match_signal_names("SIGT*");
-        assert!(matches.iter().any(|&name| name == "SIGTERM"));
+        assert!(matches.contains(&"SIGTERM"));
     }
 
     // ========================================================================

@@ -19,10 +19,14 @@
 //!
 //! These tests are critical and NON-NEGOTIABLE for v0.1.0 release.
 
+#[cfg(unix)]
 use std::process::Command;
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 use sysprims_timeout::{run_with_timeout, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
 
 /// Helper to count processes matching a pattern.
@@ -49,11 +53,16 @@ fn count_processes_matching(pattern: &str) -> usize {
 /// Kill any processes matching a pattern (cleanup helper).
 #[cfg(unix)]
 fn cleanup_processes(pattern: &str) {
-    let _ = Command::new("pkill").arg("-9").arg("-f").arg(pattern).output();
+    let _ = Command::new("pkill")
+        .arg("-9")
+        .arg("-f")
+        .arg(pattern)
+        .output();
     thread::sleep(Duration::from_millis(100));
 }
 
 /// Generate a unique marker for this test run.
+#[cfg(unix)]
 fn unique_marker() -> String {
     format!(
         "sysprims_escape_{}_{}",
@@ -407,7 +416,7 @@ fn behavioral_comparison_with_gnu_timeout() {
 
     // System timeout (shelling out - no GPL contamination)
     let sys_result = Command::new("timeout")
-        .args(&["--kill-after=0.05", "0.1", "sleep", "60"])
+        .args(["--kill-after=0.05", "0.1", "sleep", "60"])
         .output();
 
     // Both should timeout

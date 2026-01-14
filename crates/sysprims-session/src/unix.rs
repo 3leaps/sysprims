@@ -100,9 +100,10 @@ pub fn run_nohup_impl(
                         e.raw_os_error().unwrap_or(0),
                     )
                 })?;
-            cmd.stdout(file.try_clone().map_err(|e| {
-                SysprimsError::system(format!("cannot dup stdout: {}", e), 0)
-            })?);
+            cmd.stdout(
+                file.try_clone()
+                    .map_err(|e| SysprimsError::system(format!("cannot dup stdout: {}", e), 0))?,
+            );
 
             // If stderr is also a tty, redirect it to the same file
             if stderr_is_tty {
@@ -286,12 +287,8 @@ mod tests {
 
     #[test]
     fn setsid_not_found_command() {
-        let result =
-            run_setsid_impl("nonexistent_command_xyz", &[], &SetsidConfig::default());
-        assert!(matches!(
-            result,
-            Err(SysprimsError::NotFoundCommand { .. })
-        ));
+        let result = run_setsid_impl("nonexistent_command_xyz", &[], &SetsidConfig::default());
+        assert!(matches!(result, Err(SysprimsError::NotFoundCommand { .. })));
     }
 
     #[test]

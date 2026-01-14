@@ -402,9 +402,12 @@ mod tests {
         assert!(info.memory_kb < u64::MAX);
 
         // State should be running (we're executing)
+        // Note: Windows reports Unknown as it doesn't expose process state simply
         assert!(
-            info.state == ProcessState::Running || info.state == ProcessState::Sleeping,
-            "Test process should be running or sleeping"
+            info.state == ProcessState::Running
+                || info.state == ProcessState::Sleeping
+                || info.state == ProcessState::Unknown,
+            "Test process should be running, sleeping, or unknown (Windows)"
         );
     }
 

@@ -34,6 +34,9 @@ jobs:
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      options: --user root
     needs: validate-version
     strategy:
       matrix:
@@ -52,19 +55,6 @@ jobs:
             artifact_suffix: linux-arm64-musl
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install cargo-zigbuild
-        run: |
-          pip install ziglang
-          cargo install cargo-zigbuild --locked
-
-      - name: Install musl tools (musl targets)
-        if: contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build CLI
         run: |
@@ -85,7 +75,7 @@ jobs:
       - name: Package CLI
         run: |
           mkdir -p dist/cli
-          cp target/${{ matrix.target }}/release/sysprims-cli dist/cli/sysprims
+          cp target/${{ matrix.target }}/release/sysprims dist/cli/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
           tar -czf sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
 
@@ -106,89 +96,103 @@ jobs:
           name: ffi-${{ matrix.artifact_suffix }}
           path: dist/ffi/${{ matrix.artifact_suffix }}
 
-  # Build macOS targets (native, no cross-compile needed for arm64 on macos-latest)
+  # Build macOS targets (cross-compile both from arm64 runner)
   build-macos:
     name: Build macOS
     runs-on: macos-latest
     needs: validate-version
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-apple-darwin
-            artifact_suffix: darwin-amd64
-          - target: aarch64-apple-darwin
-            artifact_suffix: darwin-arm64
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
-      - name: Build CLI
-        run: cargo build --release --target ${{ matrix.target }} -p sysprims-cli
-
-      - name: Build FFI
-        run: cargo build --release --target ${{ matrix.target }} -p sysprims-ffi
-
-      - name: Package CLI
+      - name: Build CLI (both targets)
         run: |
-          mkdir -p dist/cli
-          cp target/${{ matrix.target }}/release/sysprims-cli dist/cli/sysprims
-          cp LICENSE-MIT LICENSE-APACHE dist/cli/
-          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
+          cargo build --release --target x86_64-apple-darwin -p sysprims-cli
+          cargo build --release --target aarch64-apple-darwin -p sysprims-cli
+
+      - name: Build FFI (both targets)
+        run: |
+          cargo build --release --target x86_64-apple-darwin -p sysprims-ffi
+          cargo build --release --target aarch64-apple-darwin -p sysprims-ffi
+
+      - name: Package CLI (darwin-amd64)
+        run: |
+          mkdir -p dist/cli-amd64
+          cp target/x86_64-apple-darwin/release/sysprims dist/cli-amd64/sysprims
+          cp LICENSE-MIT LICENSE-APACHE dist/cli-amd64/
+          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-amd64.tar.gz -C dist/cli-amd64 .
+
+      - name: Package CLI (darwin-arm64)
+        run: |
+          mkdir -p dist/cli-arm64
+          cp target/aarch64-apple-darwin/release/sysprims dist/cli-arm64/sysprims
+          cp LICENSE-MIT LICENSE-APACHE dist/cli-arm64/
+          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz -C dist/cli-arm64 .
 
       - name: Package FFI
         run: |
-          mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
-          cp target/${{ matrix.target }}/release/libsysprims_ffi.a dist/ffi/${{ matrix.artifact_suffix }}/
+          mkdir -p dist/ffi/darwin-amd64 dist/ffi/darwin-arm64
+          cp target/x86_64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-amd64/
+          cp target/aarch64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-arm64/
 
-      - name: Upload CLI artifact
+      - name: Upload CLI artifact (darwin-amd64)
         uses: actions/upload-artifact@v4
         with:
-          name: cli-${{ matrix.artifact_suffix }}
-          path: sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
+          name: cli-darwin-amd64
+          path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-amd64.tar.gz
 
-      - name: Upload FFI artifact
+      - name: Upload CLI artifact (darwin-arm64)
         uses: actions/upload-artifact@v4
         with:
-          name: ffi-${{ matrix.artifact_suffix }}
-          path: dist/ffi/${{ matrix.artifact_suffix }}
+          name: cli-darwin-arm64
+          path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz
 
-  # Build Windows targets via zigbuild cross-compilation
+      - name: Upload FFI artifact (darwin-amd64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-darwin-amd64
+          path: dist/ffi/darwin-amd64
+
+      - name: Upload FFI artifact (darwin-arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-darwin-arm64
+          path: dist/ffi/darwin-arm64
+
+  # Build Windows targets natively on Windows runner
   build-windows:
     name: Build Windows
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
-
-      - name: Install cargo-zigbuild
-        run: |
-          pip install ziglang
-          cargo install cargo-zigbuild --locked
 
       - name: Build CLI
-        run: cargo zigbuild --release --target x86_64-pc-windows-gnu -p sysprims-cli
+        run: cargo build --release -p sysprims-cli
 
       - name: Build FFI
-        run: cargo zigbuild --release --target x86_64-pc-windows-gnu -p sysprims-ffi
+        run: cargo build --release -p sysprims-ffi
 
       - name: Package CLI
+        shell: bash
         run: |
           mkdir -p dist/cli
-          cp target/x86_64-pc-windows-gnu/release/sysprims-cli.exe dist/cli/sysprims.exe
+          cp target/release/sysprims.exe dist/cli/sysprims.exe
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
-          cd dist/cli && zip -r ../../sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip .
+          cd dist/cli && 7z a -tzip ../../sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip .
 
       - name: Package FFI
+        shell: bash
         run: |
           mkdir -p dist/ffi/windows-amd64
-          cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
+          cp target/release/sysprims_ffi.lib dist/ffi/windows-amd64/
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
@@ -206,12 +210,12 @@ jobs:
   cbindgen:
     name: Generate C Header
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      options: --user root
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install cbindgen
-        run: cargo install cbindgen --locked
 
       - name: Generate C header
         run: |
@@ -223,25 +227,26 @@ jobs:
           name: c-header
           path: sysprims.h
 
-  # Generate SBOM for compliance
+  # Generate SBOM for compliance (CycloneDX format via Syft)
   sbom:
     name: Generate SBOM
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/sbom-tools:latest
+      options: --user 1001
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cargo-sbom
-        run: cargo install cargo-sbom --locked
-
-      - name: Generate SBOM
-        run: cargo sbom --output-format spdx > sbom-${{ needs.validate-version.outputs.version }}.spdx.json
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          syft dir:. -o cyclonedx-json > sysprims-${{ needs.validate-version.outputs.version }}.cdx.json
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: sbom-${{ needs.validate-version.outputs.version }}.spdx.json
+          path: sysprims-${{ needs.validate-version.outputs.version }}.cdx.json
 
   # Package all FFI libs into single bundle
   package-ffi-bundle:

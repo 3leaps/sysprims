@@ -381,7 +381,7 @@ mod tests {
         let pids = list_all_pids().unwrap();
         assert!(!pids.is_empty());
         // Should contain at least PID 1 (launchd)
-        assert!(pids.iter().any(|&p| p == 1));
+        assert!(pids.contains(&1));
     }
 
     #[test]

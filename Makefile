@@ -11,7 +11,7 @@
 #   make build      - Build all crates and FFI
 
 .PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version
-.PHONY: precommit prepush deps-check audit deny
+.PHONY: precommit prepush deps-check audit deny miri msrv
 .PHONY: build-release build-ffi cbindgen
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
@@ -70,6 +70,8 @@ help: ## Show available targets
 	@echo "  prepush         Pre-push checks (thorough: fmt, clippy, test, deny)"
 	@echo "  deny            Run cargo-deny license and advisory checks"
 	@echo "  audit           Run cargo-audit security scan"
+	@echo "  miri            Run Miri UB detection on unsafe code (nightly)"
+	@echo "  msrv            Verify build with MSRV (Rust 1.81)"
 	@echo ""
 	@echo "Release (manual signing workflow):"
 	@echo "  release-download      Download CI artifacts from GitHub"
@@ -267,6 +269,30 @@ audit: ## Run cargo-audit security scan
 		exit 1; \
 	fi
 	@echo "[ok] cargo-audit passed"
+
+miri: ## Run Miri to detect undefined behavior in unsafe code (requires nightly)
+	@echo "Running Miri..."
+	@if rustup run nightly cargo miri --version >/dev/null 2>&1; then \
+		rustup run nightly cargo miri test -p sysprims-core --lib && \
+		rustup run nightly cargo miri test -p sysprims-ffi --lib; \
+	else \
+		echo "[!!] Miri not installed. Install with:"; \
+		echo "  rustup +nightly component add miri"; \
+		exit 1; \
+	fi
+	@echo "[ok] Miri passed"
+
+msrv: ## Verify build with Minimum Supported Rust Version (1.81)
+	@echo "Checking MSRV (1.81)..."
+	@if rustup run 1.81 cargo --version >/dev/null 2>&1; then \
+		rustup run 1.81 cargo build --workspace && \
+		rustup run 1.81 cargo test --workspace; \
+	else \
+		echo "[!!] Rust 1.81 not installed. Install with:"; \
+		echo "  rustup install 1.81"; \
+		exit 1; \
+	fi
+	@echo "[ok] MSRV check passed"
 
 # -----------------------------------------------------------------------------
 # Build
