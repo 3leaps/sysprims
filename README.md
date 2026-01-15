@@ -264,8 +264,8 @@ if (err == SYSPRIMS_OK) {
 }
 ```
 
-**Language bindings** (shipping with v0.2):
-- Go: `github.com/3leaps/sysprims-go`
+**Language bindings** (shipping across the v0.1.x series; feature-complete when all are available):
+- Go: `github.com/3leaps/sysprims/bindings/go/sysprims`
 - Python: `pip install sysprims`
 - TypeScript: `npm install @3leaps/sysprims`
 
@@ -274,7 +274,7 @@ if (err == SYSPRIMS_OK) {
 sysprims integrates with the [Fulmen](https://github.com/fulmenhq) ecosystem:
 
 - **[rsfulmen](https://github.com/fulmenhq/rsfulmen)**: sysprims uses rsfulmen's signal constants (`SIGTERM`, `SIGKILL`, etc.) for cross-platform consistency
-- **Language bindings**: When shipped, `sysprims-go`, `sysprims-py`, and `@3leaps/sysprims` will integrate with their respective fulmen libraries
+- **Language bindings**: When shipped, the Go/Python/TypeScript bindings will integrate with their respective fulmen libraries
 
 This ensures signal semantics and exit codes are consistent whether you're writing Rust, Go, Python, or TypeScript.
 

@@ -13,6 +13,7 @@
 .PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version install
 .PHONY: precommit prepush deps-check audit deny miri msrv
 .PHONY: build-release build-ffi cbindgen
+.PHONY: go-build-local go-test go-header go-prebuilt-darwin
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-verify-keys release-notes release-upload
@@ -61,6 +62,12 @@ help: ## Show available targets
 	@echo "  build-ffi       Build FFI library with C header"
 	@echo "  install         Install sysprims binary to ~/.local/bin"
 	@echo "  clean           Remove build artifacts"
+	@echo ""
+	@echo "Go bindings:"
+	@echo "  go-build-local      Build FFI for local Go development"
+	@echo "  go-test             Run Go binding tests"
+	@echo "  go-header           Generate C header for Go bindings"
+	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
@@ -331,6 +338,78 @@ clean: ## Remove build artifacts
 	$(CARGO) clean
 	@rm -rf bin/
 	@echo "[ok] Clean complete"
+
+# -----------------------------------------------------------------------------
+# Go Bindings
+# -----------------------------------------------------------------------------
+#
+# Build and test Go bindings for sysprims.
+# Prebuilt static libraries are committed at release tags.
+# Local development uses lib/local/ (gitignored).
+
+GO_BINDINGS_DIR := bindings/go/sysprims
+GO_LIB_ROOT := $(GO_BINDINGS_DIR)/lib
+
+# Detect current platform
+UNAME_S := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+UNAME_M := $(shell uname -m)
+
+# Normalize architecture names for Go
+ifeq ($(UNAME_M),x86_64)
+    GO_ARCH := amd64
+endif
+ifeq ($(UNAME_M),aarch64)
+    GO_ARCH := arm64
+endif
+ifeq ($(UNAME_M),arm64)
+    GO_ARCH := arm64
+endif
+
+# Normalize OS names
+ifeq ($(UNAME_S),darwin)
+    GO_OS := darwin
+    GO_LIB_EXT := .a
+    GO_LIB_PREFIX := lib
+endif
+ifeq ($(UNAME_S),linux)
+    GO_OS := linux
+    GO_LIB_EXT := .a
+    GO_LIB_PREFIX := lib
+endif
+
+GO_LOCAL_LIB := $(GO_LIB_ROOT)/local/$(GO_OS)-$(GO_ARCH)
+
+go-build-local: ## Build FFI for local Go development
+	@echo "Building FFI for local Go development ($(GO_OS)-$(GO_ARCH))..."
+	$(CARGO) build --release -p sysprims-ffi
+	@mkdir -p $(GO_LOCAL_LIB)
+	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(GO_LOCAL_LIB)/
+	@echo "[ok] FFI library copied to $(GO_LOCAL_LIB)/"
+
+go-test: go-build-local ## Run Go binding tests
+	@echo "Running Go tests..."
+	cd $(GO_BINDINGS_DIR) && go test -v ./...
+	@echo "[ok] Go tests passed"
+
+go-header: ## Generate C header for Go bindings
+	@echo "Generating C header for Go bindings..."
+	@if command -v cbindgen >/dev/null 2>&1; then \
+		cbindgen --config cbindgen.toml --crate sysprims-ffi --output $(GO_BINDINGS_DIR)/include/sysprims.h; \
+		echo "[ok] Generated $(GO_BINDINGS_DIR)/include/sysprims.h"; \
+	else \
+		echo "[!!] cbindgen not found (cargo install cbindgen)"; \
+		exit 1; \
+	fi
+
+go-prebuilt-darwin: ## Build prebuilt libs for macOS (maintainer use)
+	@echo "Building prebuilt libs for macOS (both architectures)..."
+	rustup target add aarch64-apple-darwin x86_64-apple-darwin
+	@mkdir -p $(GO_LIB_ROOT)/darwin-arm64 $(GO_LIB_ROOT)/darwin-amd64
+	MACOSX_DEPLOYMENT_TARGET=11.0 $(CARGO) build --release --target aarch64-apple-darwin -p sysprims-ffi
+	@cp target/aarch64-apple-darwin/release/libsysprims_ffi.a $(GO_LIB_ROOT)/darwin-arm64/
+	MACOSX_DEPLOYMENT_TARGET=11.0 $(CARGO) build --release --target x86_64-apple-darwin -p sysprims-ffi
+	@cp target/x86_64-apple-darwin/release/libsysprims_ffi.a $(GO_LIB_ROOT)/darwin-amd64/
+	@echo "[ok] Built prebuilt libs for darwin-arm64 and darwin-amd64"
 
 # -----------------------------------------------------------------------------
 # Install

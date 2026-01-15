@@ -71,6 +71,7 @@ bindings/python/target/
 # -----------------------------------------------------------------------------
 # Local build outputs (prebuilt libs may be committed under bindings/go/lib/<platform>/)
 bindings/go/lib/local/
+bindings/go/**/lib/local/
 
 # Go workspace
 go.work

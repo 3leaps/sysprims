@@ -51,7 +51,7 @@ mod privileged {
     #[test]
     fn tree_kill_terminates_all_descendants() {
         // Spawn a process that spawns children in the same process group
-        let mut parent = unsafe {
+        let parent = unsafe {
             Command::new("sh")
                 .args([
                     "-c",

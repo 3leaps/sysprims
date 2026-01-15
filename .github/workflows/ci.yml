@@ -74,6 +74,85 @@ jobs:
       - name: Test with musl
         run: cargo test --workspace --target x86_64-unknown-linux-musl
 
+  # Go bindings tests
+  # Windows uses MinGW (GNU target) for CGo compatibility
+  test-go:
+    name: Test Go Bindings (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            lib_dir: linux-amd64
+            lib_name: libsysprims_ffi.a
+          - os: macos-latest
+            lib_dir: darwin-arm64
+            lib_name: libsysprims_ffi.a
+          - os: windows-latest
+            lib_dir: windows-amd64
+            lib_name: libsysprims_ffi.a
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target (Windows GNU)
+        if: runner.os == 'Windows'
+        run: rustup target add x86_64-pc-windows-gnu
+
+      # Windows: Install MinGW for GNU target build
+      - name: Install MinGW (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Build FFI library (Unix)
+        if: runner.os != 'Windows'
+        run: cargo build --release -p sysprims-ffi
+
+      - name: Build FFI library (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-ffi
+
+      - name: Copy FFI to local lib (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
+          cp target/release/${{ matrix.lib_name }} bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
+
+      - name: Copy FFI to local lib (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
+          cp target/x86_64-pc-windows-gnu/release/${{ matrix.lib_name }} bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
+
+      - name: Run Go tests
+        if: runner.os != 'Windows'
+        run: |
+          cd bindings/go/sysprims
+          go test -v ./...
+
+      - name: Run Go tests (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          CGO_ENABLED: "1"
+          CC: gcc
+        run: |
+          cd bindings/go/sysprims
+          go test -v ./...
+
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-latest

@@ -15,6 +15,10 @@ This directory contains Architecture Decision Records (ADRs) for the sysprims pr
 | [0006](./0006-dependency-governance.md) | Dependency Governance | Accepted | 2025-12-31 |
 | [0007](./0007-platform-abstraction.md) | Platform Abstraction Strategy | Accepted | 2025-12-31 |
 | [0008](./0008-error-handling.md) | Error Handling Strategy | Accepted | 2025-12-31 |
+| [0009](./0009-logging-strategy.md) | Logging Strategy | Accepted | 2025-12-31 |
+| [0010](./0010-schema-management-and-versioning.md) | Schema Management and Versioning | Accepted | 2025-12-31 |
+| [0011](./0011-pid-validation-safety.md) | PID Validation Safety | Accepted | 2025-12-31 |
+| [0012](./0012-language-bindings-distribution.md) | Language Bindings Distribution | **Proposed** | 2026-01-15 |
 
 ## Status Definitions
 
