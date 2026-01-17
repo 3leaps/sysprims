@@ -53,6 +53,10 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   - SBOM (sysprims-X.Y.Z.cdx.json)
   - Licenses (LICENSE-MIT, LICENSE-APACHE)
 
+  Go bindings:
+  - Confirm `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a` is present in the tagged commit so `go get` works without Rust.
+  - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
+
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 
 ## 2. Manual Signing (Local Machine)

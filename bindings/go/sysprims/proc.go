@@ -165,8 +165,18 @@ func ProcessGet(pid uint32) (*ProcessInfo, error) {
 
 // ListeningPorts returns a snapshot of listening ports, optionally filtered.
 //
-// Best-effort: the snapshot may contain warnings and may omit PIDs for some
-// bindings if the platform restricts attribution.
+// Best-effort behavior:
+//   - If successful, the returned snapshot may include warnings and may omit PIDs
+//     or process attribution for some bindings.
+//   - On macOS, SIP/TCC can restrict socket attribution even for same-user
+//     processes. In those environments, callers should treat results as best-effort
+//     and fall back to platform tooling if required.
+//
+// # Errors
+//
+//   - [ErrInvalidArgument]: Filter is invalid
+//   - [ErrPermissionDenied]: The platform denies even self inspection
+//   - [ErrNotSupported]: Port attribution is not supported on this platform
 func ListeningPorts(filter *PortFilter) (*PortBindingsSnapshot, error) {
 	var filterCStr *C.char
 	if filter != nil {

@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- CHANGELOG.md and RELEASE_NOTES.md documentation
+- Port-to-PID lookup via `sysprims-proc` listening ports (best-effort, schema-backed)
+- Go bindings: `ListeningPorts()` wrapper for port-to-process mapping
 
 ### Changed
-- Updated CONTRIBUTING.md with comprehensive contributor guidelines
+- Release asset integrity: checksum manifests now include published headers and other sidecar assets
 
 ## [0.1.0] - 2026-01-14
 

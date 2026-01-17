@@ -43,6 +43,8 @@ Initial release validating CI/CD pipeline and release signing workflow. Not inte
 ### What's Next (v0.1.1)
 
 - Complete FFI surface (13 functions)
+- `sysprims-proc` listening ports: best-effort port-to-PID mapping with schema-backed JSON output
+- Go bindings: `ListeningPorts()` wrapper for port-to-process mapping
 - CLI polish (`kill -l`, `kill --group`)
 - Container test fixture for privileged tests
 - Language binding scaffolds
