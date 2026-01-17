@@ -29,6 +29,13 @@ mod privileged {
     use sysprims_signal::SIGKILL;
     use sysprims_timeout::{run_with_timeout, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
 
+    /// Check if we're running in the container test environment.
+    /// Container tests mount workspace at /workspace and set SYSPRIMS_CONTAINER_TEST=1.
+    fn in_container_environment() -> bool {
+        std::env::var("SYSPRIMS_CONTAINER_TEST").is_ok()
+            || std::path::Path::new("/workspace/Cargo.toml").exists()
+    }
+
     /// Count processes in a process group.
     fn count_processes_in_group(pgid: u32) -> usize {
         let output = Command::new("ps")
@@ -50,6 +57,11 @@ mod privileged {
     /// 3. Container will be destroyed after tests complete
     #[test]
     fn tree_kill_terminates_all_descendants() {
+        if !in_container_environment() {
+            eprintln!("SKIP: tree_kill test requires container environment");
+            return;
+        }
+
         // Spawn a process that spawns children in the same process group
         let parent = unsafe {
             Command::new("sh")

@@ -153,6 +153,9 @@ jobs:
           install: mingw-w64-x86_64-gcc
           path-type: inherit
 
+      - name: Install cbindgen
+        run: cargo install cbindgen --locked
+
       - name: Build FFI library (Unix)
         if: runner.os != 'Windows'
         run: cargo build --release -p sysprims-ffi
