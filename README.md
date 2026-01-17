@@ -7,7 +7,7 @@
 
 sysprims provides GPL-free, cross-platform process utilities that can be statically or dynamically linked into your applications. When you need process control primitives but can't accept copyleft obligations, sysprims offers a straightforward solution.
 
-**Lifecycle Phase**: `alpha` | **Version**: 0.1.0
+**Lifecycle Phase**: `alpha` | See [RELEASE_NOTES.md](RELEASE_NOTES.md) for current version
 
 ## The Problem
 
@@ -264,17 +264,47 @@ if (err == SYSPRIMS_OK) {
 }
 ```
 
-**Language bindings** (shipping across the v0.1.x series; feature-complete when all are available):
-- Go: `github.com/3leaps/sysprims/bindings/go/sysprims`
-- Python: `pip install sysprims`
-- TypeScript: `npm install @3leaps/sysprims`
+**Language bindings:**
+
+| Language | Status | Package |
+|----------|--------|---------|
+| Go | ✅ Available | `github.com/3leaps/sysprims/bindings/go/sysprims` |
+| Python | 🚧 Planned (v0.1.x) | `pip install sysprims` |
+| TypeScript | 🚧 Planned (v0.1.x) | `npm install @3leaps/sysprims` |
+
+### As a Go Library
+
+```go
+import "github.com/3leaps/sysprims/bindings/go/sysprims"
+
+// Send signal to process
+sysprims.Kill(pid, sysprims.SIGTERM)
+
+// Run command with timeout
+result, err := sysprims.RunWithTimeout(
+    "make", []string{"build"},
+    5*time.Minute,
+    sysprims.DefaultTimeoutConfig(),
+)
+
+// Map listening port to owning process
+proto := sysprims.ProtocolTCP
+port := uint16(8080)
+snap, _ := sysprims.ListeningPorts(&sysprims.PortFilter{
+    Protocol: &proto,
+    LocalPort: &port,
+})
+```
+
+See [docs/guides/language-bindings.md](docs/guides/language-bindings.md) for build requirements and platform details.
 
 ## Ecosystem
 
 sysprims integrates with the [Fulmen](https://github.com/fulmenhq) ecosystem:
 
 - **[rsfulmen](https://github.com/fulmenhq/rsfulmen)**: sysprims uses rsfulmen's signal constants (`SIGTERM`, `SIGKILL`, etc.) for cross-platform consistency
-- **Language bindings**: When shipped, the Go/Python/TypeScript bindings will integrate with their respective fulmen libraries
+- **Go bindings**: Available with consistent signal semantics
+- **Python/TypeScript bindings**: Planned for v0.1.x series, will integrate with respective fulmen libraries
 
 This ensures signal semantics and exit codes are consistent whether you're writing Rust, Go, Python, or TypeScript.
 

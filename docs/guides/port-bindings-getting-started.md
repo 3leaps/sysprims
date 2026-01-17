@@ -1,6 +1,6 @@
 ---
 title: "Port Bindings: Getting Started"
-status: "Draft"
+status: "Published"
 last_updated: "2026-01-17"
 ---
 
@@ -41,21 +41,26 @@ Example (FFI bundle):
 
 ## Go usage
 
-### Install (preview)
+### Install
 
-In your consumer repository `go.mod`, add a temporary replace to use the local Go bindings:
+For released versions, add to your `go.mod` (replace with latest version from [releases](https://github.com/3leaps/sysprims/releases)):
 
 ```go
-require github.com/3leaps/sysprims/bindings/go/sysprims v0.0.0
-
-replace github.com/3leaps/sysprims/bindings/go/sysprims => /Users/davethompson/dev/3leaps/sysprims/bindings/go/sysprims
+require github.com/3leaps/sysprims/bindings/go/sysprims v0.1.x
 ```
 
-Then ensure the local static library exists for your platform:
+For local development, clone the repository and build:
 
 ```bash
-cd /Users/davethompson/dev/3leaps/sysprims
+git clone https://github.com/3leaps/sysprims
+cd sysprims
 make build-local-go
+```
+
+Then add a replace directive in your consumer's `go.mod`:
+
+```go
+replace github.com/3leaps/sysprims/bindings/go/sysprims => /path/to/sysprims/bindings/go/sysprims
 ```
 
 ### Example: find PID on a port
