@@ -13,7 +13,7 @@
 .PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version install
 .PHONY: precommit prepush deps-check audit deny miri msrv
 .PHONY: build-release build-ffi cbindgen
-.PHONY: go-build-local go-test go-header go-prebuilt-darwin
+.PHONY: build-local-go go-test header-go go-header go-prebuilt-darwin
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-verify-keys release-notes release-upload
@@ -64,9 +64,9 @@ help: ## Show available targets
 	@echo "  clean           Remove build artifacts"
 	@echo ""
 	@echo "Go bindings:"
-	@echo "  go-build-local      Build FFI for local Go development"
+	@echo "  build-local-go      Build FFI for local Go development"
 	@echo "  go-test             Run Go binding tests"
-	@echo "  go-header           Generate C header for Go bindings"
+	@echo "  header-go           Generate C header for Go bindings"
 	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
 	@echo ""
 	@echo "Quality gates:"
@@ -379,19 +379,27 @@ endif
 
 GO_LOCAL_LIB := $(GO_LIB_ROOT)/local/$(GO_OS)-$(GO_ARCH)
 
-go-build-local: ## Build FFI for local Go development
+build-local-go: ## Build FFI for local Go development
 	@echo "Building FFI for local Go development ($(GO_OS)-$(GO_ARCH))..."
 	$(CARGO) build --release -p sysprims-ffi
 	@mkdir -p $(GO_LOCAL_LIB)
 	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(GO_LOCAL_LIB)/
 	@echo "[ok] FFI library copied to $(GO_LOCAL_LIB)/"
 
-go-test: go-build-local ## Run Go binding tests
+	@echo "Staging local release-like assets in $(DIST_LOCAL)/release/sysprims-ffi/..."
+	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/include
+	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(DIST_LOCAL)/release/sysprims-ffi/libsysprims_ffi.a
+	@cp ffi/sysprims-ffi/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims.h
+	@cp $(GO_BINDINGS_DIR)/include/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims-go.h
+	@echo "Built locally from working tree." > $(DIST_LOCAL)/release/sysprims-ffi/LOCAL.txt
+	@echo "[ok] Local assets staged at $(DIST_LOCAL)/release/sysprims-ffi/"
+
+go-test: build-local-go ## Run Go binding tests
 	@echo "Running Go tests..."
 	cd $(GO_BINDINGS_DIR) && go test -v ./...
 	@echo "[ok] Go tests passed"
 
-go-header: ## Generate C header for Go bindings
+header-go: ## Generate C header for Go bindings
 	@echo "Generating C header for Go bindings..."
 	@if command -v cbindgen >/dev/null 2>&1; then \
 		cbindgen --config cbindgen.toml --crate sysprims-ffi --output $(GO_BINDINGS_DIR)/include/sysprims.h; \
@@ -400,6 +408,9 @@ go-header: ## Generate C header for Go bindings
 		echo "[!!] cbindgen not found (cargo install cbindgen)"; \
 		exit 1; \
 	fi
+
+go-header: header-go ## Back-compat alias
+	@echo "[--] go-header is deprecated; use header-go"
 
 go-prebuilt-darwin: ## Build prebuilt libs for macOS (maintainer use)
 	@echo "Building prebuilt libs for macOS (both architectures)..."
@@ -486,6 +497,7 @@ version: ## Print current version
 # 7. Upload signed artifacts: make release-upload
 
 DIST_RELEASE := dist/release
+DIST_LOCAL := dist/local
 RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
 
 # Signing keys (set these environment variables)
@@ -498,6 +510,11 @@ release-clean: ## Remove dist/release contents
 	@echo "Cleaning release directory..."
 	rm -rf $(DIST_RELEASE)
 	@echo "[ok] Release directory cleaned"
+
+dist-local-clean: ## Remove dist/local contents
+	@echo "Cleaning local dist directory..."
+	rm -rf $(DIST_LOCAL)
+	@echo "[ok] Local dist directory cleaned"
 
 release-download: ## Download release assets from GitHub
 	@if [ -z "$(RELEASE_TAG)" ] || [ "$(RELEASE_TAG)" = "v" ]; then \

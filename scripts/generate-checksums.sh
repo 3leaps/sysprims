@@ -16,14 +16,28 @@ cd "$DIR"
 
 echo "Generating checksums in $DIR..."
 
-# Files to checksum: archives, header, SBOM, licenses
+# Files to checksum: archives, headers, libraries, SBOM/metadata, licenses, release notes
 # Exclude: checksum files, signatures, public keys
 CHECKSUM_PATTERNS=(
 	'*.tar.gz'
 	'*.zip'
+
+	# Standalone headers
 	'*.h'
+
+	# Standalone libraries (rare; usually shipped inside archives)
+	'*.a'
+	'*.lib'
+	'*.so'
+	'*.dylib'
+	'*.dll'
+
+	# Metadata
 	'*.json'
 	'LICENSE-*'
+
+	# Human-readable release notes (when copied into dist/release)
+	'release-notes-*.md'
 )
 
 # Build find patterns

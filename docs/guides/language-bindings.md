@@ -137,7 +137,7 @@ version that includes the merged artifacts).
 When adding new FFI functions:
 
 1. **Rust FFI**: Add function to `ffi/sysprims-ffi/src/`
-2. **Regenerate header**: `make cbindgen` or `make go-header`
+2. **Regenerate header**: `make cbindgen` or `make header-go`
 3. **Go wrapper**: Add wrapper function in appropriate Go file
 4. **Tests**: Add tests in `sysprims_test.go`
 5. **Documentation**: Update this guide if platform-specific behavior

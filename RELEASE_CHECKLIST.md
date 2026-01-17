@@ -53,6 +53,8 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   - SBOM (sysprims-X.Y.Z.cdx.json)
   - Licenses (LICENSE-MIT, LICENSE-APACHE)
 
+  Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
+
 ## 2. Manual Signing (Local Machine)
 
 ### Set Environment Variables
@@ -86,6 +88,11 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
    make release-checksums
    ```
    Produces: `SHA256SUMS`, `SHA512SUMS`
+
+   Notes:
+   - Release assets are expected to be flat at the top-level of `dist/release/` (matching GitHub release assets).
+   - The checksum manifests intentionally include archives, standalone headers (e.g. `sysprims.h`), any standalone libs,
+     SBOM/metadata JSON, licenses, and copied release notes.
 
 4. **Sign checksum manifests** (minisign + PGP)
    ```bash
