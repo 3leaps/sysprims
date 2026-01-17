@@ -300,10 +300,10 @@ fn parse_ipv6(addr_hex: &str) -> SysprimsResult<Ipv6Addr> {
         return Err(SysprimsError::internal("invalid IPv6 hex length"));
     }
     let mut bytes = [0u8; 16];
-    for i in 0..16 {
+    for (i, byte) in bytes.iter_mut().enumerate() {
         let start = i * 2;
         let slice = &addr_hex[start..start + 2];
-        bytes[i] = u8::from_str_radix(slice, 16)
+        *byte = u8::from_str_radix(slice, 16)
             .map_err(|_| SysprimsError::internal("invalid IPv6 hex"))?;
     }
 
