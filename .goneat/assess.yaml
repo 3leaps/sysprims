@@ -37,6 +37,18 @@ lint:
       - ".goneat/**/*.yaml"
     ignore: []
 
+  # Go linting note:
+  # sysprims is not a Go module at the repo root; the only Go module is the binding
+  # under bindings/go/sysprims/. Some tools (e.g., golangci-lint defaults) assume
+  # a root go.mod and will error when run from '.'.
+  #
+  # We intentionally scope Go linting to the bindings module.
+  golangci_lint:
+    enabled: true
+    paths:
+      - "bindings/go/sysprims"
+    ignore: []
+
   # Shell script linting
   shell:
     shfmt:

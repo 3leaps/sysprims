@@ -157,10 +157,18 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo build --release -p sysprims-ffi
 
+      - name: Regenerate Go header
+        if: runner.os != 'Windows'
+        run: make header-go
+
       - name: Build FFI library (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-ffi
+
+      - name: Regenerate Go header
+        if: runner.os == 'Windows'
+        run: make header-go
 
       - name: Copy FFI to local lib (Unix)
         if: runner.os != 'Windows'

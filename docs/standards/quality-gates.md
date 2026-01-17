@@ -14,6 +14,8 @@ A PR is mergeable only if all gates pass.
 | Schema validation | Golden tests + meta-validation | Block merge |
 | FFI smoke | C + Go + Python + TypeScript | Block merge |
 
+Note: Go linting is scoped to `bindings/go/sysprims/` because the repository root is not a Go module.
+
 ## Review Gates (Humans)
 
 ### FFI Surface Changes
