@@ -14,7 +14,8 @@ A PR is mergeable only if all gates pass.
 | Schema validation | Golden tests + meta-validation | Block merge |
 | FFI smoke | C + Go + Python + TypeScript | Block merge |
 
-Note: Go linting is scoped to `bindings/go/sysprims/` because the repository root is not a Go module.
+Note: The repo includes a minimal root `go.mod` plus `go.work` to support repo-root Go tooling (goneat/golangci-lint).
+Go sources live under `bindings/go/sysprims/`, plus a small placeholder package under `internal/gowork/`.
 
 ## Review Gates (Humans)
 

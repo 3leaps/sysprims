@@ -74,7 +74,7 @@ bindings/go/lib/local/
 bindings/go/**/lib/local/
 
 # Go workspace
-go.work
+# go.work is committed to support repo-root tooling; go.work.sum is not.
 go.work.sum
 
 # -----------------------------------------------------------------------------

@@ -104,6 +104,13 @@ The `lib/local/` path is checked first (for development), then `lib/<platform>/`
 
 ### CI: Testing Go Bindings
 
+Note: sysprims is a Rust repo with Go bindings in a submodule (`bindings/go/sysprims`).
+We keep a minimal root `go.mod` plus a `go.work` that lists `bindings/go/sysprims` so
+repo-root tooling (e.g. goneat / golangci-lint) can lint and typecheck the Go module.
+
+We also include a tiny placeholder Go package under `internal/gowork/` so repo-root
+`./...` patterns resolve to at least one package.
+
 The CI workflow builds the FFI library and runs Go tests on all platforms:
 
 ```yaml

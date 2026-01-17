@@ -187,7 +187,7 @@ func TestListeningPortsSelfListener(t *testing.T) {
 		}
 		t.Fatalf("net.Listen failed: %v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	addr := listener.Addr().(*net.TCPAddr)
 	port := uint16(addr.Port)

@@ -478,7 +478,8 @@ jobs:
           body: |
             ## Go Bindings Update
 
-            This PR updates the prebuilt FFI libraries for the Go bindings to v${{ needs.validate-version.outputs.version }}.
+            This PR updates the prebuilt FFI libraries for the Go bindings to:
+            v${{ needs.validate-version.outputs.version }}
 
             ### Platforms Updated
             - linux-amd64 (glibc)

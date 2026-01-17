@@ -181,7 +181,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
-          cp target/x86_64-pc-windows-gnu/release/${{ matrix.lib_name }} bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
+          cp target/x86_64-pc-windows-gnu/release/${{ matrix.lib_name }} \
+            bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
 
       - name: Run Go tests
         if: runner.os != 'Windows'

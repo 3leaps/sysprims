@@ -2,7 +2,19 @@ version: "1.0.0"
 hooks:
   pre-commit:
     - command: "assess"
-      args: ["--check", "--categories", "format,lint,dependencies", "--fail-on", "critical"]
+      # NOTE: Go bindings live under bindings/go/sysprims (not repo root). We explicitly
+      # scope golangci-lint to that module to avoid running `golangci-lint ./...` at the
+      # repo root.
+      args:
+        - "--check"
+        - "--categories"
+        - "format,lint,dependencies"
+        - "--fail-on"
+        - "critical"
+        - "--lint-new-from-rev"
+        - "HEAD~"
+        - "--"
+        - "./bindings/go/sysprims/..."
       priority: 10
       timeout: "90s"
   pre-push:
