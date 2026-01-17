@@ -261,7 +261,6 @@ fn parse_proc_net(
             process: None,
             inode,
         });
-        found_file = true;
     }
 
     Ok(found_file)
