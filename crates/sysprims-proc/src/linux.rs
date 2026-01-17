@@ -6,10 +6,15 @@
 //! - `/proc/[pid]/statm` - memory statistics
 //! - `/proc/[pid]/cmdline` - command line arguments
 
-use crate::{make_snapshot, ProcessInfo, ProcessSnapshot, ProcessState};
+use crate::{
+    aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
+    PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+};
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs;
 use std::io;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use sysprims_core::{SysprimsError, SysprimsResult};
@@ -62,6 +67,45 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
 
 pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
     read_process_info(pid)
+}
+
+pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
+    let mut warnings = Vec::new();
+    let mut bindings = collect_socket_bindings()?;
+
+    if bindings.is_empty() {
+        return Ok(make_port_snapshot(bindings, warnings));
+    }
+
+    let inode_to_pid = match map_inodes_to_pids(&bindings) {
+        Ok((map, permission_denied, read_errors)) => {
+            if let Some(warning) = aggregate_permission_warning(permission_denied, "pid entries") {
+                warnings.push(warning);
+            }
+            if let Some(warning) = aggregate_error_warning(read_errors, "pid entries") {
+                warnings.push(warning);
+            }
+            map
+        }
+        Err(err) => {
+            warnings.push(format!("Failed to map socket inodes to PIDs: {}", err));
+            HashMap::new()
+        }
+    };
+
+    for binding in &mut bindings {
+        if let Some(inode) = binding_inode(binding) {
+            if let Some(pid) = inode_to_pid.get(&inode) {
+                binding.pid = Some(*pid);
+                if let Ok(process) = read_process_info(*pid) {
+                    binding.process = Some(process);
+                }
+            }
+        }
+        binding.inode = None;
+    }
+
+    Ok(make_port_snapshot(bindings, warnings))
 }
 
 /// Read process information from /proc/[pid]/*.
@@ -137,6 +181,216 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         state,
         cmdline,
     })
+}
+
+fn collect_socket_bindings() -> SysprimsResult<Vec<PortBinding>> {
+    let mut bindings = Vec::new();
+
+    let tcp = parse_proc_net("/proc/net/tcp", Protocol::Tcp, &mut bindings)?;
+    let tcp6 = parse_proc_net("/proc/net/tcp6", Protocol::Tcp, &mut bindings)?;
+    let udp = parse_proc_net("/proc/net/udp", Protocol::Udp, &mut bindings)?;
+    let udp6 = parse_proc_net("/proc/net/udp6", Protocol::Udp, &mut bindings)?;
+
+    if !(tcp || tcp6 || udp || udp6) {
+        return Err(SysprimsError::not_supported("port bindings", "linux"));
+    }
+
+    Ok(bindings)
+}
+
+fn parse_proc_net(
+    path: &str,
+    protocol: Protocol,
+    bindings: &mut Vec<PortBinding>,
+) -> SysprimsResult<bool> {
+    let content = match fs::read_to_string(path) {
+        Ok(data) => data,
+        Err(err) => {
+            if err.kind() == io::ErrorKind::NotFound {
+                return Ok(false);
+            }
+            return Err(SysprimsError::internal(format!(
+                "Failed to read {}: {}",
+                path, err
+            )));
+        }
+    };
+
+    let found_file = true;
+
+    for (line_idx, line) in content.lines().enumerate() {
+        if line_idx == 0 {
+            continue;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 10 {
+            continue;
+        }
+
+        let local = parts[1];
+        let state = parts[3];
+        let inode = parts[9];
+
+        let (local_addr, local_port) = parse_local_socket(local)?;
+        if local_port == 0 {
+            continue;
+        }
+
+        if protocol == Protocol::Tcp && state != "0A" {
+            continue;
+        }
+
+        let state = if protocol == Protocol::Tcp {
+            Some("listen".to_string())
+        } else {
+            None
+        };
+
+        let inode = inode.parse::<u64>().ok();
+
+        bindings.push(PortBinding {
+            protocol,
+            local_addr,
+            local_port,
+            state,
+            pid: None,
+            process: None,
+            inode,
+        });
+        found_file = true;
+    }
+
+    Ok(found_file)
+}
+
+fn parse_local_socket(local: &str) -> SysprimsResult<(Option<IpAddr>, u16)> {
+    let mut parts = local.split(':');
+    let addr_hex = parts
+        .next()
+        .ok_or_else(|| SysprimsError::internal("missing local address"))?;
+    let port_hex = parts
+        .next()
+        .ok_or_else(|| SysprimsError::internal("missing local port"))?;
+
+    let port_raw = u16::from_str_radix(port_hex, 16)
+        .map_err(|_| SysprimsError::internal("invalid port hex"))?;
+    let port = u16::from_be(port_raw);
+
+    let addr = match addr_hex.len() {
+        8 => Some(IpAddr::V4(parse_ipv4(addr_hex)?)),
+        32 => Some(IpAddr::V6(parse_ipv6(addr_hex)?)),
+        _ => None,
+    };
+
+    Ok((addr, port))
+}
+
+fn parse_ipv4(addr_hex: &str) -> SysprimsResult<Ipv4Addr> {
+    let raw = u32::from_str_radix(addr_hex, 16)
+        .map_err(|_| SysprimsError::internal("invalid IPv4 hex"))?;
+    let bytes = raw.to_le_bytes();
+    Ok(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]))
+}
+
+fn parse_ipv6(addr_hex: &str) -> SysprimsResult<Ipv6Addr> {
+    if addr_hex.len() != 32 {
+        return Err(SysprimsError::internal("invalid IPv6 hex length"));
+    }
+    let mut bytes = [0u8; 16];
+    for i in 0..16 {
+        let start = i * 2;
+        let slice = &addr_hex[start..start + 2];
+        bytes[i] = u8::from_str_radix(slice, 16)
+            .map_err(|_| SysprimsError::internal("invalid IPv6 hex"))?;
+    }
+
+    for chunk in bytes.chunks_exact_mut(4) {
+        chunk.reverse();
+    }
+
+    Ok(Ipv6Addr::from(bytes))
+}
+
+fn binding_inode(binding: &PortBinding) -> Option<u64> {
+    binding.inode
+}
+
+fn map_inodes_to_pids(
+    bindings: &[PortBinding],
+) -> SysprimsResult<(HashMap<u64, u32>, usize, usize)> {
+    let mut candidate_inodes = HashMap::new();
+    for binding in bindings {
+        if let Some(inode) = binding_inode(binding) {
+            candidate_inodes.insert(inode, ());
+        }
+    }
+
+    if candidate_inodes.is_empty() {
+        return Ok((HashMap::new(), 0, 0));
+    }
+
+    let mut inode_to_pid = HashMap::new();
+    let mut permission_denied = 0usize;
+    let mut read_errors = 0usize;
+
+    let proc_dir = fs::read_dir("/proc")
+        .map_err(|e| SysprimsError::internal(format!("Failed to read /proc: {}", e)))?;
+
+    for entry in proc_dir.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if !name_str.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let pid: u32 = match name_str.parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if pid == 0 {
+            continue;
+        }
+
+        let fd_dir = entry.path().join("fd");
+        let entries = match fs::read_dir(&fd_dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                if err.kind() == io::ErrorKind::PermissionDenied {
+                    permission_denied += 1;
+                } else {
+                    read_errors += 1;
+                }
+                continue;
+            }
+        };
+
+        for fd_entry in entries.flatten() {
+            let target = match fs::read_link(fd_entry.path()) {
+                Ok(target) => target,
+                Err(_) => continue,
+            };
+            let target_str = target.to_string_lossy();
+            if let Some(inode) = parse_socket_inode(&target_str) {
+                if candidate_inodes.contains_key(&inode) {
+                    inode_to_pid.entry(inode).or_insert(pid);
+                }
+            }
+        }
+    }
+
+    Ok((inode_to_pid, permission_denied, read_errors))
+}
+
+fn parse_socket_inode(target: &str) -> Option<u64> {
+    let prefix = "socket:[";
+    if !target.starts_with(prefix) || !target.ends_with(']') {
+        return None;
+    }
+    let inode_str = &target[prefix.len()..target.len() - 1];
+    inode_str.parse::<u64>().ok()
 }
 
 /// Parsed /proc/[pid]/stat fields.

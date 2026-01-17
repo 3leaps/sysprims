@@ -68,6 +68,9 @@ Standard `-o` field names:
 
 ### 4.1 Core Types
 
+This module also provides a port-to-process lookup API (v0.1.1+): best-effort enumeration
+of listening sockets with optional ownership attribution.
+
 ```rust
 /// Snapshot of all processes at a point in time.
 #[derive(Debug, Clone, Serialize)]
@@ -137,6 +140,46 @@ pub struct ProcessFilter {
     pub cpu_above: Option<f64>,        // Must be 0-100
     pub memory_above_kb: Option<u64>,
 }
+
+/// Snapshot of listening ports at a point in time.
+#[derive(Debug, Clone, Serialize)]
+pub struct PortBindingsSnapshot {
+    pub schema_id: &'static str,
+    pub timestamp: String,
+    pub platform: &'static str,
+    pub bindings: Vec<PortBinding>,
+    pub warnings: Vec<String>,
+}
+
+/// Listening socket binding information.
+#[derive(Debug, Clone, Serialize)]
+pub struct PortBinding {
+    pub protocol: Protocol,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_addr: Option<IpAddr>,
+    pub local_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process: Option<ProcessInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Protocol {
+    Tcp,
+    Udp,
+}
+
+/// Filter for port bindings queries.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortFilter {
+    pub protocol: Option<Protocol>,
+    pub local_port: Option<u16>,
+}
 ```
 
 ### 4.2 Public Functions
@@ -150,6 +193,14 @@ pub fn snapshot_filtered(filter: &ProcessFilter) -> SysprimsResult<ProcessSnapsh
 
 /// Get information for a single process.
 pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo>;
+
+/// Get a snapshot of listening ports.
+pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindingsSnapshot>;
+
+/// Resolve a process by port and protocol.
+///
+/// This is a convenience wrapper over `listening_ports`.
+pub fn process_by_port(port: u16, protocol: Protocol) -> SysprimsResult<ProcessInfo>;
 ```
 
 ### 4.3 Error Handling
@@ -161,6 +212,10 @@ Per ADR-0008, this module returns:
 | `InvalidArgument` | PID is 0, filter has unknown fields, cpu_above out of range |
 | `NotFound` | Process does not exist |
 | `PermissionDenied` | Process cannot be read due to permissions |
+
+**Best-effort policy (ports):** `listening_ports` returns partial results whenever possible.
+It returns `PermissionDenied` only when the platform denies even self-process socket inspection;
+otherwise it returns whatever it can and includes `warnings` describing omissions.
 
 ### 4.4 Invariants
 
@@ -243,6 +298,12 @@ SysprimsErrorCode sysprims_proc_get(
     uint32_t pid,
     char** result_json_out    // Caller must free via sysprims_free_string
 );
+
+// List listening ports with optional filter
+SysprimsErrorCode sysprims_proc_listening_ports(
+    const char* filter_json,  // NULL for no filter
+    char** result_json_out    // Caller must free via sysprims_free_string
+);
 ```
 
 **Memory ownership:** Caller owns returned strings; must free via `sysprims_free_string()`.
@@ -257,6 +318,14 @@ SysprimsErrorCode sysprims_proc_get(
 | Memory | `/proc/[pid]/statm` | `proc_pidinfo` | `GetProcessMemoryInfo` |
 | cmdline | `/proc/[pid]/cmdline` | Best-effort (name only) | `QueryFullProcessImageName` |
 | User | `/proc/[pid]/status` Uid | `proc_pidinfo` | Token queries |
+
+Port bindings:
+
+| Platform | Port listing | Ownership attribution |
+|----------|--------------|----------------------|
+| Linux | `/proc/net/{tcp,tcp6,udp,udp6}` | inode map via `/proc/<pid>/fd` symlinks |
+| macOS | `proc_pidinfo(PROC_PIDLISTFDS)` + `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` | best-effort; SIP/TCC may deny per-PID |
+| Windows | `GetExtendedTcpTable` / `GetExtendedUdpTable` | provides owning PID for listeners |
 
 ## 8) Traceability Matrix
 

@@ -250,6 +250,32 @@ char *sysprims_last_error(void);
 void sysprims_clear_error(void);
 
 /**
+ * List listening ports, optionally filtered.
+ *
+ * Returns a JSON object containing a port bindings snapshot.
+ *
+ * # Arguments
+ *
+ * * `filter_json` - JSON filter object (may be NULL for no filtering)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Filter JSON Format
+ *
+ * ```json
+ * {
+ *   "protocol": "tcp",    // Optional: "tcp" or "udp"
+ *   "local_port": 8080    // Optional: local port to filter
+ * }
+ * ```
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_listening_ports(const char *filter_json, char **result_json_out);
+
+/**
  * List processes, optionally filtered.
  *
  * Returns a JSON object containing a process snapshot. The JSON format matches

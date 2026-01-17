@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-filter.schema.json",
+  "title": "sysprims process filter",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name_contains": { "type": "string" },
+    "name_equals": { "type": "string" },
+    "user_equals": { "type": "string" },
+    "pid_in": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+    },
+    "state_in": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["running", "sleeping", "stopped", "zombie", "unknown"]
+      }
+    },
+    "cpu_above": { "type": "number", "minimum": 0, "maximum": 100 },
+    "memory_above_kb": { "type": "integer", "minimum": 0 }
+  }
+}

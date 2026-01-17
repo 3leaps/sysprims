@@ -7,10 +7,25 @@
 //! - `GetProcessMemoryInfo` - memory usage
 //! - `QueryFullProcessImageName` - process path
 
-use crate::{make_snapshot, ProcessInfo, ProcessSnapshot, ProcessState};
+use crate::{
+    aggregate_error_warning, make_port_snapshot, make_snapshot, PortBinding, PortBindingsSnapshot,
+    ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+};
 use std::mem;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use sysprims_core::{SysprimsError, SysprimsResult};
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER,
+    INVALID_HANDLE_VALUE, NO_ERROR,
+};
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID,
+    MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_LISTEN, MIB_UDP6ROW_OWNER_PID,
+    MIB_UDP6TABLE_OWNER_PID, MIB_UDPROW_OWNER_PID, MIB_UDPTABLE_OWNER_PID,
+    TCP_TABLE_OWNER_PID_LISTENER, UDP_TABLE_OWNER_PID,
+};
+
+use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
@@ -65,6 +80,37 @@ pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
         .ok_or_else(|| SysprimsError::not_found(pid))
 }
 
+pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
+    let mut warnings = Vec::new();
+    let mut bindings = Vec::new();
+
+    let (tcp_bindings, tcp_errors) = read_tcp_table(AF_INET)?;
+    bindings.extend(tcp_bindings);
+    if let Some(warning) = aggregate_error_warning(tcp_errors, "TCP entries") {
+        warnings.push(warning);
+    }
+
+    let (tcp6_bindings, tcp6_errors) = read_tcp_table(AF_INET6)?;
+    bindings.extend(tcp6_bindings);
+    if let Some(warning) = aggregate_error_warning(tcp6_errors, "TCP6 entries") {
+        warnings.push(warning);
+    }
+
+    let (udp_bindings, udp_errors) = read_udp_table(AF_INET)?;
+    bindings.extend(udp_bindings);
+    if let Some(warning) = aggregate_error_warning(udp_errors, "UDP entries") {
+        warnings.push(warning);
+    }
+
+    let (udp6_bindings, udp6_errors) = read_udp_table(AF_INET6)?;
+    bindings.extend(udp6_bindings);
+    if let Some(warning) = aggregate_error_warning(udp6_errors, "UDP6 entries") {
+        warnings.push(warning);
+    }
+
+    Ok(make_port_snapshot(bindings, warnings))
+}
+
 /// Convert PROCESSENTRY32W to ProcessInfo.
 unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<ProcessInfo> {
     let pid = entry.th32ProcessID;
@@ -93,6 +139,276 @@ unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<Proce
         elapsed_seconds,
         state: ProcessState::Unknown, // Windows doesn't expose this simply
         cmdline: vec![name],
+    })
+}
+
+fn read_tcp_table(af: u16) -> SysprimsResult<(Vec<PortBinding>, usize)> {
+    let mut buffer_size: u32 = 0;
+    let mut result = unsafe {
+        GetExtendedTcpTable(
+            std::ptr::null_mut(),
+            &mut buffer_size,
+            0,
+            af as u32,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        )
+    };
+
+    if result != ERROR_INSUFFICIENT_BUFFER {
+        if result == ERROR_ACCESS_DENIED {
+            return Err(SysprimsError::permission_denied(0, "list tcp table"));
+        }
+        if result != NO_ERROR {
+            return Err(SysprimsError::system(
+                "GetExtendedTcpTable failed",
+                result as i32,
+            ));
+        }
+    }
+
+    let mut buffer = vec![0u8; buffer_size as usize];
+    result = unsafe {
+        GetExtendedTcpTable(
+            buffer.as_mut_ptr() as *mut _,
+            &mut buffer_size,
+            0,
+            af as u32,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        )
+    };
+
+    if result != NO_ERROR {
+        if result == ERROR_ACCESS_DENIED {
+            return Err(SysprimsError::permission_denied(0, "list tcp table"));
+        }
+        return Err(SysprimsError::system(
+            "GetExtendedTcpTable failed",
+            result as i32,
+        ));
+    }
+
+    match af {
+        AF_INET6 => read_tcp_table_v6(&buffer),
+        _ => read_tcp_table_v4(&buffer),
+    }
+}
+
+fn read_tcp_table_v4(buffer: &[u8]) -> SysprimsResult<(Vec<PortBinding>, usize)> {
+    let table = unsafe { &*(buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID) };
+    let entries =
+        unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
+
+    let mut bindings = Vec::new();
+    let mut skipped = 0usize;
+
+    for row in entries {
+        if row.dwState != MIB_TCP_STATE_LISTEN as u32 {
+            continue;
+        }
+        if let Some(binding) = tcp_row_to_binding(row, AF_INET) {
+            bindings.push(binding);
+        } else {
+            skipped += 1;
+        }
+    }
+
+    Ok((bindings, skipped))
+}
+
+fn read_tcp_table_v6(buffer: &[u8]) -> SysprimsResult<(Vec<PortBinding>, usize)> {
+    let table = unsafe { &*(buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID) };
+    let entries =
+        unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
+
+    let mut bindings = Vec::new();
+    let mut skipped = 0usize;
+
+    for row in entries {
+        if row.dwState != MIB_TCP_STATE_LISTEN as u32 {
+            continue;
+        }
+        if let Some(binding) = tcp6_row_to_binding(row) {
+            bindings.push(binding);
+        } else {
+            skipped += 1;
+        }
+    }
+
+    Ok((bindings, skipped))
+}
+
+fn read_udp_table(af: u16) -> SysprimsResult<(Vec<PortBinding>, usize)> {
+    let mut buffer_size: u32 = 0;
+    let mut result = unsafe {
+        GetExtendedUdpTable(
+            std::ptr::null_mut(),
+            &mut buffer_size,
+            0,
+            af as u32,
+            UDP_TABLE_OWNER_PID,
+            0,
+        )
+    };
+
+    if result != ERROR_INSUFFICIENT_BUFFER {
+        if result == ERROR_ACCESS_DENIED {
+            return Err(SysprimsError::permission_denied(0, "list udp table"));
+        }
+        if result != NO_ERROR {
+            return Err(SysprimsError::system(
+                "GetExtendedUdpTable failed",
+                result as i32,
+            ));
+        }
+    }
+
+    let mut buffer = vec![0u8; buffer_size as usize];
+    result = unsafe {
+        GetExtendedUdpTable(
+            buffer.as_mut_ptr() as *mut _,
+            &mut buffer_size,
+            0,
+            af as u32,
+            UDP_TABLE_OWNER_PID,
+            0,
+        )
+    };
+
+    if result != NO_ERROR {
+        if result == ERROR_ACCESS_DENIED {
+            return Err(SysprimsError::permission_denied(0, "list udp table"));
+        }
+        return Err(SysprimsError::system(
+            "GetExtendedUdpTable failed",
+            result as i32,
+        ));
+    }
+
+    match af {
+        AF_INET6 => read_udp_table_v6(&buffer),
+        _ => read_udp_table_v4(&buffer),
+    }
+}
+
+fn read_udp_table_v4(buffer: &[u8]) -> SysprimsResult<(Vec<PortBinding>, usize)> {
+    let table = unsafe { &*(buffer.as_ptr() as *const MIB_UDPTABLE_OWNER_PID) };
+    let entries =
+        unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
+
+    let mut bindings = Vec::new();
+    let mut skipped = 0usize;
+
+    for row in entries {
+        if let Some(binding) = udp_row_to_binding(row, AF_INET) {
+            bindings.push(binding);
+        } else {
+            skipped += 1;
+        }
+    }
+
+    Ok((bindings, skipped))
+}
+
+fn read_udp_table_v6(buffer: &[u8]) -> SysprimsResult<(Vec<PortBinding>, usize)> {
+    let table = unsafe { &*(buffer.as_ptr() as *const MIB_UDP6TABLE_OWNER_PID) };
+    let entries =
+        unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
+
+    let mut bindings = Vec::new();
+    let mut skipped = 0usize;
+
+    for row in entries {
+        if let Some(binding) = udp6_row_to_binding(row) {
+            bindings.push(binding);
+        } else {
+            skipped += 1;
+        }
+    }
+
+    Ok((bindings, skipped))
+}
+
+fn tcp_row_to_binding(row: &MIB_TCPROW_OWNER_PID, af: u16) -> Option<PortBinding> {
+    let local_port = u16::from_be(row.dwLocalPort as u16);
+    if local_port == 0 {
+        return None;
+    }
+
+    let local_addr = match af {
+        AF_INET => Some(IpAddr::V4(Ipv4Addr::from(row.dwLocalAddr.to_ne_bytes()))),
+        _ => None,
+    };
+
+    Some(PortBinding {
+        protocol: Protocol::Tcp,
+        local_addr,
+        local_port,
+        state: Some("listen".to_string()),
+        pid: Some(row.dwOwningPid),
+        process: None,
+        inode: None,
+    })
+}
+
+fn tcp6_row_to_binding(row: &MIB_TCP6ROW_OWNER_PID) -> Option<PortBinding> {
+    let local_port = u16::from_be(row.dwLocalPort as u16);
+    if local_port == 0 {
+        return None;
+    }
+
+    let local_addr = Some(IpAddr::V6(Ipv6Addr::from(row.ucLocalAddr)));
+
+    Some(PortBinding {
+        protocol: Protocol::Tcp,
+        local_addr,
+        local_port,
+        state: Some("listen".to_string()),
+        pid: Some(row.dwOwningPid),
+        process: None,
+        inode: None,
+    })
+}
+
+fn udp_row_to_binding(row: &MIB_UDPROW_OWNER_PID, af: u16) -> Option<PortBinding> {
+    let local_port = u16::from_be(row.dwLocalPort as u16);
+    if local_port == 0 {
+        return None;
+    }
+
+    let local_addr = match af {
+        AF_INET => Some(IpAddr::V4(Ipv4Addr::from(row.dwLocalAddr.to_ne_bytes()))),
+        _ => None,
+    };
+
+    Some(PortBinding {
+        protocol: Protocol::Udp,
+        local_addr,
+        local_port,
+        state: None,
+        pid: Some(row.dwOwningPid),
+        process: None,
+        inode: None,
+    })
+}
+
+fn udp6_row_to_binding(row: &MIB_UDP6ROW_OWNER_PID) -> Option<PortBinding> {
+    let local_port = u16::from_be(row.dwLocalPort as u16);
+    if local_port == 0 {
+        return None;
+    }
+
+    let local_addr = Some(IpAddr::V6(Ipv6Addr::from(row.ucLocalAddr)));
+
+    Some(PortBinding {
+        protocol: Protocol::Udp,
+        local_addr,
+        local_port,
+        state: None,
+        pid: Some(row.dwOwningPid),
+        process: None,
+        inode: None,
     })
 }
 

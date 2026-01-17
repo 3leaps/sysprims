@@ -6,10 +6,14 @@
 //! - `proc_pidinfo()` with `PROC_PIDTASKINFO` - resource info (CPU, memory)
 //! - `proc_name()` - get process name
 
-use crate::{make_snapshot, ProcessInfo, ProcessSnapshot, ProcessState};
+use crate::{
+    aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
+    PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+};
 use libc::{c_int, c_void, pid_t, uid_t};
 use std::ffi::CStr;
 use std::mem;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysprims_core::{SysprimsError, SysprimsResult};
 
@@ -23,6 +27,18 @@ const PROC_PIDTBSDINFO: c_int = 3;
 const PROC_PIDTASKINFO: c_int = 4;
 const MAXCOMLEN: usize = 16;
 const MAXPATHLEN: usize = 1024;
+
+const PROC_PIDLISTFDS: c_int = 1;
+const PROC_PIDFDSOCKETINFO: c_int = 3;
+const PROX_FDTYPE_SOCKET: u32 = 2;
+
+const SOCKINFO_IN: i32 = 1;
+const SOCKINFO_TCP: i32 = 2;
+
+const INI_IPV4: u8 = 0x1;
+const INI_IPV6: u8 = 0x2;
+
+const TSI_S_LISTEN: i32 = 1;
 
 // Process status values from <sys/proc.h>
 const SIDL: u32 = 1; // Process being created
@@ -57,6 +73,122 @@ struct ProcBsdInfo {
     pbi_nice: i32,
     pbi_start_tvsec: u64,
     pbi_start_tvusec: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+struct ProcFdInfo {
+    proc_fd: i32,
+    proc_fdtype: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+struct ProcFileInfo {
+    fi_openflags: u32,
+    fi_status: u32,
+    fi_offset: i64,
+    fi_type: i32,
+    fi_guardflags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct In4In6Addr {
+    i46a_pad32: [u32; 3],
+    i46a_addr4: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct InSockInfo {
+    insi_fport: i32,
+    insi_lport: i32,
+    insi_gencnt: u64,
+    insi_flags: u32,
+    insi_flow: u32,
+    insi_vflag: u8,
+    insi_ip_ttl: u8,
+    rfu_1: u32,
+    insi_faddr: InSockAddr,
+    insi_laddr: InSockAddr,
+    insi_v4: InSockV4,
+    insi_v6: InSockV6,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union InSockAddr {
+    ina_46: In4In6Addr,
+    ina_6: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct InSockV4 {
+    in4_tos: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct InSockV6 {
+    in6_hlim: u8,
+    in6_cksum: i32,
+    in6_ifindex: u16,
+    in6_hops: i16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TcpSockInfo {
+    tcpsi_ini: InSockInfo,
+    tcpsi_state: i32,
+    tcpsi_timer: [i32; 4],
+    tcpsi_mss: i32,
+    tcpsi_flags: u32,
+    rfu_1: u32,
+    tcpsi_tp: u64,
+}
+
+#[repr(C)]
+struct SocketInfo {
+    soi_stat: [u8; 144],
+    soi_so: u64,
+    soi_pcb: u64,
+    soi_type: i32,
+    soi_protocol: i32,
+    soi_family: i32,
+    soi_options: i16,
+    soi_linger: i16,
+    soi_state: i16,
+    soi_qlen: i16,
+    soi_incqlen: i16,
+    soi_qlimit: i16,
+    soi_timeo: i16,
+    soi_error: u16,
+    soi_oobmark: u32,
+    soi_rcv: [u8; 24],
+    soi_snd: [u8; 24],
+    soi_kind: i32,
+    rfu_1: u32,
+    soi_proto: SocketProto,
+}
+
+#[repr(C)]
+union SocketProto {
+    pri_in: InSockInfo,
+    pri_tcp: TcpSockInfo,
+    pri_un: [u8; 106],
+    pri_ndrv: [u8; 16],
+    pri_kern_event: [u8; 12],
+    pri_kern_ctl: [u8; 68],
+    pri_vsock: [u8; 40],
+}
+
+#[repr(C)]
+struct SocketFdInfo {
+    pfi: ProcFileInfo,
+    psi: SocketInfo,
 }
 
 /// Task info structure returned by proc_pidinfo with PROC_PIDTASKINFO
@@ -94,6 +226,14 @@ extern "C" {
         buffersize: c_int,
     ) -> c_int;
 
+    fn proc_pidfdinfo(
+        pid: c_int,
+        fd: c_int,
+        flavor: c_int,
+        buffer: *mut c_void,
+        buffersize: c_int,
+    ) -> c_int;
+
     fn proc_name(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
 }
 
@@ -120,6 +260,43 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
 
 pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
     read_process_info(pid)
+}
+
+pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
+    let pids = list_all_pids()?;
+    let mut bindings = Vec::new();
+    let mut permission_denied = 0usize;
+    let mut read_errors = 0usize;
+
+    for pid in pids {
+        if pid <= 0 {
+            continue;
+        }
+
+        match list_socket_fds(pid) {
+            Ok(fds) => {
+                for fd in fds {
+                    if let Ok(binding) = read_socket_binding(pid, fd) {
+                        bindings.push(binding);
+                    }
+                }
+            }
+            Err(err) => match err {
+                SysprimsError::PermissionDenied { .. } => permission_denied += 1,
+                _ => read_errors += 1,
+            },
+        }
+    }
+
+    let mut warnings = Vec::new();
+    if let Some(warning) = aggregate_permission_warning(permission_denied, "pid entries") {
+        warnings.push(warning);
+    }
+    if let Some(warning) = aggregate_error_warning(read_errors, "pid entries") {
+        warnings.push(warning);
+    }
+
+    Ok(make_port_snapshot(bindings, warnings))
 }
 
 /// Get list of all PIDs on the system.
@@ -152,6 +329,147 @@ fn list_all_pids() -> SysprimsResult<Vec<pid_t>> {
     pids.truncate(actual_count);
 
     Ok(pids)
+}
+
+fn list_socket_fds(pid: pid_t) -> SysprimsResult<Vec<i32>> {
+    // libproc does not provide a reliable "size query" mode for PROC_PIDLISTFDS.
+    // Instead, allocate a buffer and retry with growth if the result indicates truncation.
+    let mut buffer_size: usize = 4096;
+    let max_buffer_size: usize = 1024 * 1024;
+
+    loop {
+        let count = buffer_size / mem::size_of::<ProcFdInfo>();
+        let mut fdinfo = vec![ProcFdInfo::default(); count];
+
+        let actual = unsafe {
+            proc_pidinfo(
+                pid,
+                PROC_PIDLISTFDS,
+                0,
+                fdinfo.as_mut_ptr() as *mut c_void,
+                buffer_size as c_int,
+            )
+        };
+
+        if actual <= 0 {
+            let errno = unsafe { *libc::__error() };
+            if errno == libc::EPERM || errno == libc::EACCES {
+                return Err(SysprimsError::permission_denied(
+                    pid as u32,
+                    "list socket fds",
+                ));
+            }
+            return Err(SysprimsError::internal("proc_pidinfo list fds failed"));
+        }
+
+        // proc_pidinfo returns the number of bytes written.
+        let actual_bytes = actual as usize;
+        if actual_bytes < buffer_size || buffer_size >= max_buffer_size {
+            let actual_count = actual_bytes / mem::size_of::<ProcFdInfo>();
+            fdinfo.truncate(actual_count);
+            return Ok(fdinfo
+                .into_iter()
+                .filter(|info| info.proc_fdtype == PROX_FDTYPE_SOCKET)
+                .map(|info| info.proc_fd)
+                .collect());
+        }
+
+        buffer_size = (buffer_size * 2).min(max_buffer_size);
+    }
+}
+
+fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {
+    let mut info: SocketFdInfo = unsafe { mem::zeroed() };
+    let size = mem::size_of::<SocketFdInfo>() as c_int;
+    let result = unsafe {
+        proc_pidfdinfo(
+            pid,
+            fd,
+            PROC_PIDFDSOCKETINFO,
+            &mut info as *mut _ as *mut c_void,
+            size,
+        )
+    };
+
+    if result <= 0 {
+        let errno = unsafe { *libc::__error() };
+        if errno == libc::EPERM || errno == libc::EACCES {
+            return Err(SysprimsError::permission_denied(
+                pid as u32,
+                "read socket info",
+            ));
+        }
+        return Err(SysprimsError::internal("proc_pidfdinfo socket failed"));
+    }
+
+    let protocol = match info.psi.soi_kind {
+        SOCKINFO_TCP => Protocol::Tcp,
+        SOCKINFO_IN => Protocol::Udp,
+        _ => {
+            return Err(SysprimsError::internal(
+                "unsupported socket kind for port bindings",
+            ))
+        }
+    };
+
+    let (local_addr, local_port) = unsafe {
+        match protocol {
+            Protocol::Tcp => read_tcp_binding(&info.psi.soi_proto.pri_tcp)?,
+            Protocol::Udp => read_in_binding(&info.psi.soi_proto.pri_in)?,
+        }
+    };
+
+    if local_port == 0 {
+        return Err(SysprimsError::internal("socket has no local port"));
+    }
+
+    let state = if protocol == Protocol::Tcp
+        && unsafe { info.psi.soi_proto.pri_tcp.tcpsi_state } == TSI_S_LISTEN
+    {
+        Some("listen".to_string())
+    } else {
+        None
+    };
+
+    let process = read_process_info(pid as u32).ok();
+
+    Ok(PortBinding {
+        protocol,
+        local_addr,
+        local_port,
+        state,
+        pid: Some(pid as u32),
+        process,
+        inode: None,
+    })
+}
+
+fn read_tcp_binding(info: &TcpSockInfo) -> SysprimsResult<(Option<IpAddr>, u16)> {
+    let port = u16::from_be(info.tcpsi_ini.insi_lport as u16);
+    let addr = read_in_addr(&info.tcpsi_ini)?;
+    Ok((addr, port))
+}
+
+fn read_in_binding(info: &InSockInfo) -> SysprimsResult<(Option<IpAddr>, u16)> {
+    let port = u16::from_be(info.insi_lport as u16);
+    let addr = read_in_addr(info)?;
+    Ok((addr, port))
+}
+
+fn read_in_addr(info: &InSockInfo) -> SysprimsResult<Option<IpAddr>> {
+    if info.insi_vflag & INI_IPV4 == INI_IPV4 {
+        let addr = unsafe { info.insi_laddr.ina_46.i46a_addr4 };
+        return Ok(Some(IpAddr::V4(Ipv4Addr::new(
+            addr[0], addr[1], addr[2], addr[3],
+        ))));
+    }
+
+    if info.insi_vflag & INI_IPV6 == INI_IPV6 {
+        let addr = unsafe { info.insi_laddr.ina_6 };
+        return Ok(Some(IpAddr::V6(Ipv6Addr::from(addr))));
+    }
+
+    Ok(None)
 }
 
 /// Read process information for a single PID.

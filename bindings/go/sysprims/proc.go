@@ -42,6 +42,39 @@ type ProcessSnapshot struct {
 	Processes []ProcessInfo `json:"processes"`
 }
 
+type Protocol string
+
+const (
+	ProtocolTCP Protocol = "tcp"
+	ProtocolUDP Protocol = "udp"
+)
+
+// PortBinding contains information about a listening socket binding.
+type PortBinding struct {
+	Protocol  Protocol     `json:"protocol"`
+	LocalAddr *string      `json:"local_addr,omitempty"`
+	LocalPort uint16       `json:"local_port"`
+	State     *string      `json:"state,omitempty"`
+	PID       *uint32      `json:"pid,omitempty"`
+	Process   *ProcessInfo `json:"process,omitempty"`
+	// NOTE: warnings and best-effort behavior are surfaced at snapshot level.
+}
+
+// PortBindingsSnapshot represents a point-in-time listing of listening ports.
+type PortBindingsSnapshot struct {
+	SchemaID  string        `json:"schema_id"`
+	Timestamp string        `json:"timestamp"`
+	Platform  string        `json:"platform"`
+	Bindings  []PortBinding `json:"bindings"`
+	Warnings  []string      `json:"warnings"`
+}
+
+// PortFilter specifies criteria for filtering port bindings.
+type PortFilter struct {
+	Protocol  *Protocol `json:"protocol,omitempty"`
+	LocalPort *uint16   `json:"local_port,omitempty"`
+}
+
 // ProcessFilter specifies criteria for filtering processes.
 //
 // All fields are optional. When multiple fields are set, they are ANDed together.
@@ -128,4 +161,35 @@ func ProcessGet(pid uint32) (*ProcessInfo, error) {
 	}
 
 	return &info, nil
+}
+
+// ListeningPorts returns a snapshot of listening ports, optionally filtered.
+//
+// Best-effort: the snapshot may contain warnings and may omit PIDs for some
+// bindings if the platform restricts attribution.
+func ListeningPorts(filter *PortFilter) (*PortBindingsSnapshot, error) {
+	var filterCStr *C.char
+	if filter != nil {
+		filterJSON, err := json.Marshal(filter)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+		}
+		filterCStr = C.CString(string(filterJSON))
+		defer C.free(unsafe.Pointer(filterCStr))
+	}
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_listening_ports(filterCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var snapshot PortBindingsSnapshot
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &snapshot); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &snapshot, nil
 }

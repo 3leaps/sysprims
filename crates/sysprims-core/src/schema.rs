@@ -76,6 +76,23 @@ pub const PROCESS_INFO_V1: &str =
 pub const PROC_FILTER_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-filter.schema.json";
 
+/// Schema ID for port binding snapshot output (v1.0.0).
+///
+/// This schema defines the structure of `listening_ports()` output.
+///
+/// Schema location: `schemas/process/v1.0.0/port-bindings.schema.json`
+pub const PORT_BINDINGS_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-bindings.schema.json";
+
+/// Schema ID for port filter input (v1.0.0).
+///
+/// This schema defines the structure of filter JSON accepted by
+/// `sysprims_proc_listening_ports()` FFI function.
+///
+/// Schema location: `schemas/process/v1.0.0/port-filter.schema.json`
+pub const PORT_FILTER_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-filter.schema.json";
+
 // ============================================================================
 // Schema Host Constants
 // ============================================================================
@@ -96,6 +113,8 @@ mod tests {
         assert!(TIMEOUT_RESULT_V1.starts_with("https://"));
         assert!(PROCESS_INFO_V1.starts_with("https://"));
         assert!(PROC_FILTER_V1.starts_with("https://"));
+        assert!(PORT_BINDINGS_V1.starts_with("https://"));
+        assert!(PORT_FILTER_V1.starts_with("https://"));
     }
 
     #[test]
@@ -115,6 +134,14 @@ mod tests {
             PROC_FILTER_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
+        assert!(
+            PORT_BINDINGS_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            PORT_FILTER_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
     }
 
     #[test]
@@ -125,11 +152,15 @@ mod tests {
         assert!(TIMEOUT_RESULT_V1.ends_with(".schema.json"));
         assert!(PROCESS_INFO_V1.ends_with(".schema.json"));
         assert!(PROC_FILTER_V1.ends_with(".schema.json"));
+        assert!(PORT_BINDINGS_V1.ends_with(".schema.json"));
+        assert!(PORT_FILTER_V1.ends_with(".schema.json"));
 
         // All v1.0.0 schemas should have version in path
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
         assert!(PROCESS_INFO_V1.contains("/v1.0.0/"));
         assert!(PROC_FILTER_V1.contains("/v1.0.0/"));
+        assert!(PORT_BINDINGS_V1.contains("/v1.0.0/"));
+        assert!(PORT_FILTER_V1.contains("/v1.0.0/"));
     }
 
     #[test]
@@ -147,11 +178,25 @@ mod tests {
             PROC_FILTER_V1.contains("/process/"),
             "process-filter schema should have process topic"
         );
+        assert!(
+            PORT_BINDINGS_V1.contains("/process/"),
+            "port-bindings schema should have process topic"
+        );
+        assert!(
+            PORT_FILTER_V1.contains("/process/"),
+            "port-filter schema should have process topic"
+        );
     }
 
     #[test]
     fn test_schema_ids_are_unique() {
-        let ids = [TIMEOUT_RESULT_V1, PROCESS_INFO_V1, PROC_FILTER_V1];
+        let ids = [
+            TIMEOUT_RESULT_V1,
+            PROCESS_INFO_V1,
+            PROC_FILTER_V1,
+            PORT_BINDINGS_V1,
+            PORT_FILTER_V1,
+        ];
 
         // Check all pairs are different
         for (i, a) in ids.iter().enumerate() {
@@ -173,5 +218,7 @@ mod tests {
         assert!(TIMEOUT_RESULT_V1.starts_with(&prefix));
         assert!(PROCESS_INFO_V1.starts_with(&prefix));
         assert!(PROC_FILTER_V1.starts_with(&prefix));
+        assert!(PORT_BINDINGS_V1.starts_with(&prefix));
+        assert!(PORT_FILTER_V1.starts_with(&prefix));
     }
 }

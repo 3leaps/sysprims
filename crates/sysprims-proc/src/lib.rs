@@ -42,8 +42,9 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use sysprims_core::schema::PROCESS_INFO_V1;
-use sysprims_core::{SysprimsError, SysprimsResult};
+use std::net::IpAddr;
+use sysprims_core::schema::{PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1};
+use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
 // Platform-specific implementations
 #[cfg(target_os = "linux")]
@@ -78,6 +79,74 @@ pub struct ProcessSnapshot {
 
     /// List of processes.
     pub processes: Vec<ProcessInfo>,
+}
+
+/// Snapshot of listening ports at a point in time.
+#[derive(Debug, Clone, Serialize)]
+pub struct PortBindingsSnapshot {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+
+    /// Timestamp of snapshot (ISO 8601).
+    pub timestamp: String,
+
+    /// Current platform (e.g., "linux", "macos", "windows").
+    pub platform: &'static str,
+
+    /// List of socket bindings.
+    pub bindings: Vec<PortBinding>,
+
+    /// Warnings about partial visibility or skipped entries.
+    pub warnings: Vec<String>,
+}
+
+/// Listening socket binding information.
+#[derive(Debug, Clone, Serialize)]
+pub struct PortBinding {
+    /// Protocol for the socket.
+    pub protocol: Protocol,
+
+    /// Local address (None if unknown).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_addr: Option<IpAddr>,
+
+    /// Local port for the socket.
+    pub local_port: u16,
+
+    /// Socket state (e.g., "listen" for TCP).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+
+    /// Owning process ID (None if attribution not available).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+
+    /// Owning process info (best-effort).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process: Option<ProcessInfo>,
+
+    /// Socket inode when available (Linux-only).
+    #[serde(skip)]
+    pub inode: Option<u64>,
+}
+
+/// Protocol for a socket binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Protocol {
+    Tcp,
+    Udp,
+}
+
+/// Filter for port queries.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortFilter {
+    /// Filter by protocol (tcp/udp).
+    pub protocol: Option<Protocol>,
+
+    /// Filter by local port.
+    pub local_port: Option<u16>,
 }
 
 /// Information about a single process.
@@ -181,7 +250,45 @@ impl ProcessFilter {
         }
         Ok(())
     }
+}
 
+impl PortFilter {
+    /// Validate filter values.
+    pub fn validate(&self) -> SysprimsResult<()> {
+        if let Some(port) = self.local_port {
+            if port == 0 {
+                return Err(SysprimsError::invalid_argument(
+                    "local_port must be between 1 and 65535",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn schema_id() -> &'static str {
+        PORT_FILTER_V1
+    }
+}
+
+impl PortBinding {
+    fn matches(&self, filter: &PortFilter) -> bool {
+        if let Some(protocol) = filter.protocol {
+            if self.protocol != protocol {
+                return false;
+            }
+        }
+
+        if let Some(port) = filter.local_port {
+            if self.local_port != port {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl ProcessFilter {
     /// Check if a process matches this filter.
     fn matches(&self, proc: &ProcessInfo) -> bool {
         // Name contains (case-insensitive)
@@ -259,6 +366,72 @@ pub fn snapshot() -> SysprimsResult<ProcessSnapshot> {
     platform::snapshot_impl()
 }
 
+/// Get a snapshot of listening ports.
+pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindingsSnapshot> {
+    let filter = filter.cloned().unwrap_or_default();
+    filter.validate()?;
+
+    let mut snapshot = platform::listening_ports_impl()?;
+    if filter.protocol.is_some() || filter.local_port.is_some() {
+        snapshot.bindings.retain(|binding| binding.matches(&filter));
+    }
+
+    if snapshot.bindings.is_empty() && snapshot.warnings.is_empty() {
+        let platform = get_platform();
+        return Err(SysprimsError::not_supported("port bindings", platform));
+    }
+
+    Ok(snapshot)
+}
+
+/// Resolve a process by port and protocol.
+pub fn process_by_port(port: u16, protocol: Protocol) -> SysprimsResult<ProcessInfo> {
+    if port == 0 {
+        return Err(SysprimsError::invalid_argument(
+            "port must be between 1 and 65535",
+        ));
+    }
+
+    let filter = PortFilter {
+        protocol: Some(protocol),
+        local_port: Some(port),
+    };
+    let snapshot = listening_ports(Some(&filter))?;
+    let binding = snapshot
+        .bindings
+        .into_iter()
+        .find(|binding| binding.pid.is_some())
+        .ok_or_else(|| SysprimsError::not_found(port as u32))?;
+
+    match binding.process {
+        Some(process) => Ok(process),
+        None => binding
+            .pid
+            .map(get_process)
+            .unwrap_or_else(|| Err(SysprimsError::not_found(port as u32))),
+    }
+}
+
+#[cfg(unix)]
+fn aggregate_permission_warning(skipped: usize, label: &str) -> Option<String> {
+    if skipped == 0 {
+        None
+    } else {
+        Some(format!(
+            "Skipped {} {} due to permission errors",
+            skipped, label
+        ))
+    }
+}
+
+fn aggregate_error_warning(skipped: usize, label: &str) -> Option<String> {
+    if skipped == 0 {
+        None
+    } else {
+        Some(format!("Skipped {} {} due to read errors", skipped, label))
+    }
+}
+
 /// Get a snapshot with filter applied.
 ///
 /// Filters are applied after enumeration. All filter criteria must match (AND logic).
@@ -306,6 +479,21 @@ pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+fn make_port_snapshot(bindings: Vec<PortBinding>, warnings: Vec<String>) -> PortBindingsSnapshot {
+    let mut warnings = warnings;
+    if bindings.is_empty() {
+        warnings.push("No listening ports found".to_string());
+    }
+
+    PortBindingsSnapshot {
+        schema_id: PORT_BINDINGS_V1,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+        bindings,
+        warnings,
+    }
+}
 
 /// Get current timestamp in ISO 8601 format.
 fn current_timestamp() -> String {
@@ -529,6 +717,18 @@ mod tests {
         let json = r#"{"unknown_field": "value"}"#;
         let result: Result<ProcessFilter, _> = serde_json::from_str(json);
         assert!(result.is_err(), "Unknown fields should be rejected");
+    }
+
+    #[test]
+    fn test_port_filter_unknown_field_rejected() {
+        let json = r#"{"unknown_field": true}"#;
+        let result: Result<PortFilter, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "Unknown fields should be rejected");
+    }
+
+    #[test]
+    fn test_port_filter_schema_id() {
+        assert!(PortFilter::schema_id().contains("port-filter"));
     }
 
     #[test]

@@ -1,8 +1,11 @@
 package sysprims_test
 
 import (
+	"errors"
+	"net"
 	"os"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -172,6 +175,51 @@ func TestProcessGetNonexistent(t *testing.T) {
 	}
 	if sErr.Code != sysprims.ErrNotFound {
 		t.Errorf("Expected ErrNotFound, got %d (%s)", sErr.Code, sErr.Code)
+	}
+}
+
+func TestListeningPortsSelfListener(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && (errors.Is(opErr.Err, syscall.EPERM) || errors.Is(opErr.Err, syscall.EACCES)) {
+			t.Skipf("net.Listen denied in this environment: %v", err)
+		}
+		t.Fatalf("net.Listen failed: %v", err)
+	}
+	defer listener.Close()
+
+	addr := listener.Addr().(*net.TCPAddr)
+	port := uint16(addr.Port)
+	pid := uint32(os.Getpid())
+
+	proto := sysprims.ProtocolTCP
+	filter := &sysprims.PortFilter{Protocol: &proto, LocalPort: &port}
+
+	snap, err := sysprims.ListeningPorts(filter)
+	if err != nil {
+		// Best-effort: on macOS SIP/TCC or constrained runners, this may fail.
+		if sErr, ok := err.(*sysprims.Error); ok && sErr.Code == sysprims.ErrPermissionDenied {
+			t.Skipf("ListeningPorts PermissionDenied in this environment: %v", err)
+		}
+		t.Fatalf("ListeningPorts failed: %v", err)
+	}
+
+	found := false
+	for _, b := range snap.Bindings {
+		if b.LocalPort == port && b.PID != nil && *b.PID == pid {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		// Best-effort: allow omission on macOS due to SIP/TCC and other runner constraints.
+		if runtime.GOOS == "darwin" {
+			t.Logf("Did not find self listener pid=%d port=%d; warnings=%v bindings=%d", pid, port, snap.Warnings, len(snap.Bindings))
+			return
+		}
+		t.Fatalf("Did not find self listener pid=%d port=%d; warnings=%v bindings=%d", pid, port, snap.Warnings, len(snap.Bindings))
 	}
 }
 
