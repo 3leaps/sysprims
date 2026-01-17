@@ -28,6 +28,10 @@ repeatable integrity and provenance model.
 
 - Build outputs and release artifacts are **not** committed to the repository.
 - All build and release artifacts are written under `dist/` (which is gitignored).
+- Generated headers produced during local builds (e.g. `ffi/sysprims-ffi/sysprims.h`) are treated as build artifacts
+  and MUST NOT be committed.
+
+Note: Binding-facing headers may still be committed when they define the stable language surface (see ADR-0012).
 
 Rationale:
 - Keeps the repo lean and source-focused

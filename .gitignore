@@ -129,8 +129,10 @@ bin/
 *.dll
 *.dylib
 
-# Generated headers (cbindgen output is typically committed, but intermediate files are not)
-# ffi/sysprims-ffi/sysprims.h is committed; temp files are not
+# Generated headers
+# - bindings/go/sysprims/include/sysprims.h is committed (Go binding surface)
+# - ffi/sysprims-ffi/sysprims.h is generated for local builds / release assets
+ffi/sysprims-ffi/sysprims.h
 *.h.tmp
 
 # -----------------------------------------------------------------------------
