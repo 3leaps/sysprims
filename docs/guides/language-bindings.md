@@ -54,11 +54,13 @@ No GPL license toxicity issues with static linking.
 
 ## Go Bindings
 
+For port-to-process mapping (listening ports), see `docs/guides/port-bindings-getting-started.md`.
+
 ### Local Development
 
 ```bash
 # Build FFI for your platform
-make go-build-local
+make build-local-go
 
 # Run tests
 make go-test

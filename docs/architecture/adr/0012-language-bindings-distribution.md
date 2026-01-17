@@ -135,7 +135,7 @@ Developers building from source use `lib/local/` directory:
 
 ```bash
 # Build FFI for current platform
-make go-build-local
+make build-local-go
 
 # Run Go tests
 make go-test
@@ -191,7 +191,7 @@ func KillGroup(pgid uint32, signal int) error
 ### Neutral
 
 - Header committed to bindings directory (not ffi/)
-- Local development requires initial `make go-build-local`
+- Local development requires initial `make build-local-go`
 - CI must test bindings on all target platforms
 
 ## Alternatives Considered
