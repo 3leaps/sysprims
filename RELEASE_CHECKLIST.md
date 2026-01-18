@@ -17,6 +17,14 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 - [ ] Run pre-push checks: `make prepush` passes
 - [ ] Run full test suite: `cargo test --workspace`
 - [ ] Verify cargo-deny passes: `cargo deny check`
+- [ ] (Recommended) Run container tests locally:
+  ```bash
+  docker build -t sysprims-test-fixture -f Dockerfile.container .
+  docker run --rm -v $(pwd):/workspace:ro -v $(pwd)/target:/workspace/target sysprims-test-fixture
+  ```
+  This catches Linux-specific issues (musl builds, `/proc` behavior), privileged test edge cases,
+  and cross-user permission scenarios that can't be tested on macOS. Particularly valuable when
+  changes touch platform-specific code paths or signal/process handling.
 
 ### Version & Documentation
 

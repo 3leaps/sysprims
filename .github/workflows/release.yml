@@ -473,6 +473,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
           branch: go-bindings/v${{ needs.validate-version.outputs.version }}
           title: "feat(bindings): update Go prebuilt libs for v${{ needs.validate-version.outputs.version }}"
           body: |
