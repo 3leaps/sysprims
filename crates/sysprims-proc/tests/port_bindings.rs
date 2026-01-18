@@ -1,5 +1,6 @@
 use std::net::TcpListener;
 
+use sysprims_core::SysprimsError;
 use sysprims_proc::{listening_ports, PortFilter, Protocol};
 
 #[test]
@@ -23,7 +24,14 @@ fn test_listening_ports_self_listener_tcp() {
         local_port: Some(port),
     };
 
-    let snapshot = listening_ports(Some(&filter)).expect("listening_ports");
+    let snapshot = match listening_ports(Some(&filter)) {
+        Ok(s) => s,
+        Err(SysprimsError::NotSupported { .. }) => {
+            eprintln!("SKIP: listening_ports returned NotSupported (container/musl environment)");
+            return;
+        }
+        Err(e) => panic!("listening_ports: {e}"),
+    };
     let found = snapshot
         .bindings
         .iter()
