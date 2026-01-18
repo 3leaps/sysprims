@@ -8,7 +8,7 @@ package sysprims
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/include
-#cgo LDFLAGS: -L${SRCDIR}/lib/local/windows-amd64 -L${SRCDIR}/lib/windows-amd64 -lsysprims_ffi -lws2_32 -luserenv -lbcrypt
+#cgo LDFLAGS: -L${SRCDIR}/lib/local/windows-amd64 -L${SRCDIR}/lib/windows-amd64 -lsysprims_ffi -lws2_32 -luserenv -lbcrypt -lkernel32 -lntdll -ladvapi32 -liphlpapi
 #include "sysprims.h"
 */
 import "C"

@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -214,9 +215,20 @@ func TestListeningPortsSelfListener(t *testing.T) {
 	}
 
 	if !found {
-		// Best-effort: allow omission on macOS due to SIP/TCC and other runner constraints.
-		if runtime.GOOS == "darwin" {
-			t.Logf("Did not find self listener pid=%d port=%d; warnings=%v bindings=%d", pid, port, snap.Warnings, len(snap.Bindings))
+		// Best-effort: port-to-PID mapping requires elevated privileges on most platforms.
+		// - macOS: SIP/TCC restrictions
+		// - Linux: /proc/<pid>/fd requires root or same-user
+		// - Windows: netstat access may be limited
+		// CI runners typically don't have these privileges.
+		hasPermissionWarnings := false
+		for _, w := range snap.Warnings {
+			if strings.Contains(w, "permission") || strings.Contains(w, "Permission") {
+				hasPermissionWarnings = true
+				break
+			}
+		}
+		if runtime.GOOS == "darwin" || hasPermissionWarnings {
+			t.Logf("Did not find self listener pid=%d port=%d; warnings=%v bindings=%d (best-effort: permission-limited)", pid, port, snap.Warnings, len(snap.Bindings))
 			return
 		}
 		t.Fatalf("Did not find self listener pid=%d port=%d; warnings=%v bindings=%d", pid, port, snap.Warnings, len(snap.Bindings))

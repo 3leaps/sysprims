@@ -32,9 +32,9 @@ RUN apk add --no-cache \
 RUN adduser -D -u 1000 testuser && \
     adduser -D -u 1001 testuser2
 
-# Install Rust toolchain (MSRV 1.81)
+# Install Rust toolchain (1.85 - required by rsfulmen 0.1.2 and indexmap 2.12)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain 1.81 --profile minimal && \
+    sh -s -- -y --default-toolchain 1.85 --profile minimal && \
     /root/.cargo/bin/rustup target add x86_64-unknown-linux-musl
 
 ENV PATH="/root/.cargo/bin:${PATH}"
