@@ -37,12 +37,15 @@ mod privileged {
     }
 
     /// Count processes in a process group.
+    /// Note: `ps -g` on Alpine/procps-ng selects by real group ID (GID), not process group.
+    /// Use `pgrep -g` which correctly selects by PGID.
     fn count_processes_in_group(pgid: u32) -> usize {
-        let output = Command::new("ps")
-            .args(["-o", "pid=", "-g", &pgid.to_string()])
+        let output = Command::new("pgrep")
+            .args(["-g", &pgid.to_string()])
             .output()
-            .expect("Failed to run ps");
+            .expect("Failed to run pgrep");
 
+        // pgrep returns exit code 1 if no processes found, which is not an error
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter(|line| !line.trim().is_empty())
