@@ -15,13 +15,27 @@
 
 set -euo pipefail
 
+# Auto-detect architecture for musl target
+ARCH=$(uname -m)
+case "$ARCH" in
+x86_64) TARGET="x86_64-unknown-linux-musl" ;;
+aarch64) TARGET="aarch64-unknown-linux-musl" ;;
+arm64) TARGET="aarch64-unknown-linux-musl" ;;
+*)
+	echo "Unsupported architecture: $ARCH"
+	exit 1
+	;;
+esac
+
 echo "=== sysprims Container Test Fixture ==="
 echo "User: $(whoami)"
 echo "Rust: $(rustc --version)"
-echo "Target: x86_64-unknown-linux-musl"
+echo "Arch: $ARCH"
+echo "Target: $TARGET"
 echo ""
 
-TARGET="x86_64-unknown-linux-musl"
+# Ensure musl target is installed
+rustup target add "$TARGET" 2>/dev/null || true
 
 # Create fixture processes for cross-user permission tests.
 # We avoid PID 1 in tests (forbidden by safety protocols).
@@ -76,8 +90,15 @@ mkdir -p /workspace/target/container
 chmod -R a+rwx /workspace/target/container 2>/dev/null || true
 chown -R testuser:testuser /workspace/target/container 2>/dev/null || true
 
+# Make cargo accessible to all users (root home is 700 by default)
+chmod 755 /root
+chmod -R a+rX /root/.cargo 2>/dev/null || true
+chmod -R a+rX /root/.rustup 2>/dev/null || true
+
 su testuser -c "
     export PATH=\"/root/.cargo/bin:\$PATH\"
+    export CARGO_HOME=/root/.cargo
+    export RUSTUP_HOME=/root/.rustup
     export CARGO_TARGET_DIR=/workspace/target/container
     cargo test --workspace --target $TARGET \
         --features cross-user-tests \

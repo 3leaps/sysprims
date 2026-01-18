@@ -111,6 +111,11 @@ mod privileged {
         // Kill the entire process group with SIGKILL
         sysprims_signal::killpg(parent_pid, SIGKILL).expect("killpg should succeed");
 
+        // Reap the parent process to prevent zombie
+        // (we hold the Child handle, so the parent becomes a zombie until we wait)
+        let mut parent = parent;
+        let _ = parent.wait();
+
         // Wait for OS to clean up
         thread::sleep(Duration::from_millis(200));
 
