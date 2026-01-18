@@ -395,6 +395,15 @@ mod tests {
         let mut result: *mut c_char = std::ptr::null_mut();
 
         let code = unsafe { sysprims_proc_listening_ports(filter.as_ptr(), &mut result) };
+
+        // NotSupported is acceptable in container/CI environments where
+        // port introspection may not be available.
+        if code == SysprimsErrorCode::NotSupported {
+            eprintln!("SKIP: listening_ports returned NotSupported (container/CI environment)");
+            drop(listener);
+            return;
+        }
+
         assert_eq!(code, SysprimsErrorCode::Ok);
         assert!(!result.is_null());
 
