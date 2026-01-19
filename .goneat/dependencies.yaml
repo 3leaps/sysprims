@@ -1,0 +1,55 @@
+# goneat Dependencies Policy Configuration
+# sysprims - GPL-free process utilities library
+#
+# This policy enforces license compliance and supply chain security.
+# See ADR-0001 (license-policy.md) for approved licenses.
+
+version: v1
+
+# License compliance policy
+# Aligned with deny.toml and ADR-0001
+licenses:
+  forbidden:
+    - GPL-2.0
+    - GPL-3.0
+    - AGPL-3.0
+    - LGPL-2.1
+    - LGPL-3.0
+  allowed:
+    - MIT
+    - Apache-2.0
+    - BSD-2-Clause
+    - BSD-3-Clause
+    - ISC
+    - Zlib
+    - Unlicense
+    - CC0-1.0
+    - BSL-1.0
+    - Unicode-3.0
+    - Unicode-DFS-2016
+
+# Supply chain security (cooling policy)
+cooling:
+  enabled: true
+  min_age_days: 7
+  min_downloads: 100
+  alert_only: false
+  grace_period_days: 3
+  exceptions:
+    - pattern: "github.com/3leaps/*"
+      reason: "Internal packages"
+    - pattern: "github.com/fulmenhq/*"
+      reason: "Fulmen ecosystem packages"
+
+# Policy engine configuration
+policy_engine:
+  type: embedded
+
+# Language-specific settings
+languages:
+  - language: go
+    paths:
+      - bindings/go/go.mod
+  - language: rust
+    paths:
+      - Cargo.toml

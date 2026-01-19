@@ -38,6 +38,7 @@ scopes:
       # Security
       - gitleaks
       - syft
+      - grype
       # CI/CD
       - act
 
@@ -76,9 +77,10 @@ scopes:
       - cargo-deny
 
   sbom:
-    description: Software Bill of Materials (SBOM) generation tools
+    description: Software Bill of Materials (SBOM) and vulnerability scanning tools
     tools:
       - syft
+      - grype
 
   cicd:
     description: CI/CD testing tools
@@ -363,6 +365,27 @@ tools:
     description: SBOM generator for software supply chain security
     kind: system
     detect_command: syft version
+    version_args:
+      - version
+    check_args:
+      - --help
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+
+  grype:
+    name: grype
+    description: Vulnerability scanner for container images and filesystems
+    kind: system
+    detect_command: grype version
     version_args:
       - version
     check_args:

@@ -33,7 +33,7 @@ BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions for reproducibility
 SFETCH_VERSION := latest
-GONEAT_VERSION := v0.3.21
+GONEAT_VERSION ?= v0.5.1
 
 # Tool paths
 # sfetch: repo-local (trust anchor) or PATH
@@ -498,7 +498,7 @@ version: ## Print current version
 
 DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
-RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
+SYSPRIMS_RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
 
 # Signing keys (set these environment variables)
 SYSPRIMS_MINISIGN_KEY ?=
@@ -517,11 +517,11 @@ dist-local-clean: ## Remove dist/local contents
 	@echo "[ok] Local dist directory cleaned"
 
 release-download: ## Download release assets from GitHub
-	@if [ -z "$(RELEASE_TAG)" ] || [ "$(RELEASE_TAG)" = "v" ]; then \
-		echo "Error: No release tag found. Set RELEASE_TAG=vX.Y.Z"; \
+	@if [ -z "$(SYSPRIMS_RELEASE_TAG)" ] || [ "$(SYSPRIMS_RELEASE_TAG)" = "v" ]; then \
+		echo "Error: No release tag found. Set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; \
 		exit 1; \
 	fi
-	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	./scripts/download-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
 release-checksums: ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE)
@@ -537,7 +537,7 @@ release-sign: ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
 	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
 	SYSPRIMS_PGP_KEY_ID=$(SYSPRIMS_PGP_KEY_ID) \
 	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
-	./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	./scripts/sign-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-keys: ## Export public signing keys
 	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
@@ -561,19 +561,19 @@ release-verify: release-verify-checksums release-verify-signatures release-verif
 	@echo "[ok] All release verifications passed"
 
 release-notes: ## Copy release notes to dist
-	@src="docs/releases/$(RELEASE_TAG).md"; \
+	@src="docs/releases/$(SYSPRIMS_RELEASE_TAG).md"; \
 	if [ -f "$$src" ]; then \
-		cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"; \
+		cp "$$src" "$(DIST_RELEASE)/release-notes-$(SYSPRIMS_RELEASE_TAG).md"; \
 		echo "[ok] Copied release notes"; \
 	else \
 		echo "[--] No release notes found at $$src"; \
 	fi
 
 release-upload: release-verify release-notes ## Upload signed artifacts to GitHub release
-	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	./scripts/upload-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
 release: release-clean release-download release-checksums release-sign release-export-keys release-upload ## Full release workflow (after CI build)
-	@echo "[ok] Release $(RELEASE_TAG) complete"
+	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) complete"
 
 # -----------------------------------------------------------------------------
 # Version Management

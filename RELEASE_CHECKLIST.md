@@ -76,7 +76,7 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 source ~/devsecops/vars/3leaps-sysprims-cicd.sh
 
 # Or set individually:
-export RELEASE_TAG=v$(cat VERSION)
+export SYSPRIMS_RELEASE_TAG=v$(cat VERSION)
 export SYSPRIMS_MINISIGN_KEY=/path/to/signing.key
 export SYSPRIMS_MINISIGN_PUB=/path/to/signing.pub
 export SYSPRIMS_PGP_KEY_ID="keyid!"
