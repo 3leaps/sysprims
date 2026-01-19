@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rsfulmen",
  "thiserror",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-ffi"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-proc"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libc",
  "serde",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-session"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libc",
  "sysprims-core",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-signal"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libc",
  "rsfulmen",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-timeout"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libc",
  "rsfulmen",

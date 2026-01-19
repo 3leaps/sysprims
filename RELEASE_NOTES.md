@@ -6,6 +6,45 @@
 
 ---
 
+## v0.1.3 - 2026-01-19
+
+**Status:** Go Bindings Infrastructure Release
+
+First fully working Go bindings release. Prebuilt static libraries now included in release tags.
+
+### Highlights
+
+- **Prebuilt Libs in Tags**: Go bindings now ship with static libraries in the tagged commit
+- **Manual Prep Workflow**: New `go-bindings.yml` workflow builds libs before tagging
+- **Release Gate**: CI verifies Go libs present before publishing
+- **Dual-Tag Policy**: Both `vX.Y.Z` and `bindings/go/sysprims/vX.Y.Z` tags required
+
+### Go Bindings (Now Working)
+
+v0.1.1/v0.1.2 had empty lib directories. v0.1.3 is the first release where Go bindings work via `go get`:
+
+```bash
+go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.1.3
+```
+
+### Release Process Changes
+
+The Go bindings prep is now a manual pre-release step:
+
+1. Run `go-bindings.yml` workflow (manual dispatch)
+2. Merge the resulting PR
+3. Tag with both `vX.Y.Z` and `bindings/go/sysprims/vX.Y.Z`
+4. Push tags; release workflow verifies libs are present
+
+See `RELEASE_CHECKLIST.md` for full instructions.
+
+### What's Next
+
+- Python bindings (cffi + wheel packaging)
+- TypeScript bindings (C-ABI approach)
+
+---
+
 ## v0.1.2 - 2026-01-19
 
 **Status:** Security & CI/CD Maintenance Release
@@ -20,15 +59,9 @@ Security patch addressing a high-severity vulnerability in CI/CD dependencies, p
 
 ### CI/CD Improvements
 
-- Renamed `RELEASE_TAG` → `SYSPRIMS_RELEASE_TAG` to prevent cross-repo confusion
+- Renamed `RELEASE_TAG` to `SYSPRIMS_RELEASE_TAG` to prevent cross-repo confusion
 - Added goneat/grype integration for SBOM-based vulnerability scanning
 - Updated `GONEAT_VERSION` to v0.5.1
-
-### What's Next
-
-- Python bindings (cffi/PyO3 + wheel packaging)
-- TypeScript bindings (napi-rs + npm packaging)
-- C conformance test suite
 
 ---
 
@@ -64,85 +97,7 @@ import "github.com/3leaps/sysprims/bindings/go/sysprims"
 | `ListeningPorts(filter)` | Map listening ports to PIDs (best-effort) |
 | `RunWithTimeout(cmd, args, timeout, config)` | Run command with timeout and tree-kill |
 
-**Supported Platforms:**
-
-- Linux x64 (glibc + musl)
-- Linux arm64 (glibc + musl)
-- macOS x64 + arm64
-- Windows x64 (via MinGW)
-
-### Listening Ports API
-
-Map a TCP/UDP port to its owning process:
-
-```go
-proto := sysprims.ProtocolTCP
-port := uint16(8080)
-snap, err := sysprims.ListeningPorts(&sysprims.PortFilter{
-    Protocol: &proto,
-    LocalPort: &port,
-})
-for _, b := range snap.Bindings {
-    if b.PID != nil {
-        fmt.Printf("Port %d owned by PID %d\n", b.LocalPort, *b.PID)
-    }
-}
-```
-
-**Platform behavior:**
-- Linux + Windows: Reliably attributes self-listeners; partial attribution for other processes based on privileges
-- macOS: Best-effort; SIP/TCC can restrict socket enumeration
-
-### CLI Enhancements
-
-```bash
-# List all available signals
-sysprims kill -l
-
-# Get signal number
-sysprims kill -l TERM
-# Output: 15
-
-# Send signal to process group (Unix only)
-sysprims kill --group 1234
-```
-
-### What's Next (v0.1.2+)
-
-- Python bindings (cffi/PyO3 + wheel packaging)
-- TypeScript bindings (napi-rs + npm packaging)
-- C conformance test suite
-- Additional CLI polish
-
----
-
-## v0.1.0 - 2026-01-14
-
-**Status:** Internal (pipeline validation)
-
-Initial release validating CI/CD pipeline and release signing workflow.
-
-### Highlights
-
-- **Group-by-default tree-kill**: When you timeout a process, the entire process tree terminates together
-- **Cross-platform support**: Linux (glibc + musl), macOS (x64 + arm64), Windows (x64)
-- **License-clean**: MIT/Apache-2.0 dual licensed, no GPL dependencies
-
-### CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `sysprims timeout` | Run commands with timeout and reliable tree-kill |
-| `sysprims kill` | Send signals to processes |
-| `sysprims pstat` | Process inspection and listing |
-
-### Libraries
-
-- `sysprims-core` - Core types and platform detection
-- `sysprims-signal` - Cross-platform signal dispatch
-- `sysprims-timeout` - Timeout execution with process group management
-- `sysprims-proc` - Process enumeration
-- `sysprims-session` - Session/setsid helpers
+**Note:** v0.1.1 Go bindings had empty lib directories. Use v0.1.3+ for working `go get`.
 
 ---
 

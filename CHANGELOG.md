@@ -10,6 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-01-19
+
+Go bindings infrastructure release. Prebuilt static libraries now included in release tags.
+
+### Added
+
+- **Go Bindings Prep Workflow** (`go-bindings.yml`)
+  - Manual `workflow_dispatch` trigger to build FFI libs before tagging
+  - Creates PR with prebuilt libs for all 7 platforms
+  - Must be merged before release tag to ensure `go get` works
+
+- **Release Verification Gate** (`verify-go-bindings-assets`)
+  - Fails release early if Go prebuilt libs missing from tagged commit
+  - Prevents publishing versions that can't link
+
+- **Go Submodule Tagging** (ADR-0012 section 6.1)
+  - Dual-tag policy: `vX.Y.Z` + `bindings/go/sysprims/vX.Y.Z`
+  - Both tags point to same commit
+  - Enables proper `go get` semver resolution for subdirectory modules
+
+### Changed
+
+- Release workflow no longer auto-generates Go bindings PR on tag push
+- Go bindings prep is now a manual pre-release step
+- Updated release checklist with dual-tag instructions
+
+### Fixed
+
+- Go bindings now actually usable via `go get` (prebuilt libs included in tags)
+- v0.1.1/v0.1.2 had empty lib directories; v0.1.3 is first working Go release
+
+### Deferred
+
+- Python bindings (moved to v0.1.4+)
+- TypeScript bindings (moved to v0.1.4+)
+
 ## [0.1.2] - 2026-01-19
 
 Security and CI/CD maintenance release.
@@ -118,7 +154,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/3leaps/sysprims/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/3leaps/sysprims/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/3leaps/sysprims/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/3leaps/sysprims/releases/tag/v0.1.0
