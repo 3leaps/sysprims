@@ -170,11 +170,11 @@ CGo LDFLAGS search order: `lib/local/<platform>` first, then `lib/<platform>`.
 
 ### 8. Release Flow
 
-1. Release pipeline builds FFI libs for all platforms (CI)
-2. `update-go-bindings` job copies libs to `bindings/go/sysprims/lib/`
-3. A commit containing the updated binding artifacts is created on the release branch/main
-4. The canonical release tag `vX.Y.Z` points at that commit (tags remain immutable)
-5. A Go module tag `bindings/go/sysprims/vX.Y.Z` is created pointing at the same commit
+1. Run the Go bindings prep workflow (`.github/workflows/go-bindings.yml`) to generate prebuilt libs and open a PR
+2. Merge the PR so the prebuilt libs are present under `bindings/go/sysprims/lib/`
+3. Create the canonical release tag `vX.Y.Z` pointing at that commit (tags remain immutable)
+4. Create the Go module tag `bindings/go/sysprims/vX.Y.Z` pointing at the same commit
+5. Push tags to trigger the release workflow (`.github/workflows/release.yml`)
 6. Go users can `go get github.com/3leaps/sysprims/bindings/go/sysprims@vX.Y.Z` without pseudo-versions
 
 ### 9. Module Path Convention

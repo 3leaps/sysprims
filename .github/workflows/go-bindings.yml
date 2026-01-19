@@ -1,0 +1,258 @@
+name: Go Bindings (Prep)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.3)"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version matches VERSION file
+        id: version
+        run: |
+          set -euo pipefail
+          INPUT_VERSION="${{ inputs.version }}"
+          FILE_VERSION=$(cat VERSION)
+          if [ "$INPUT_VERSION" != "$FILE_VERSION" ]; then
+            echo "ERROR: input version=$INPUT_VERSION does not match VERSION file=$FILE_VERSION"
+            echo "Update VERSION first, or rerun with the correct input."
+            exit 1
+          fi
+          echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    name: Build FFI (Linux)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      options: --user root
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            glibc: "2.17"
+            artifact_suffix: linux-amd64
+          - target: x86_64-unknown-linux-musl
+            glibc: ""
+            artifact_suffix: linux-amd64-musl
+          - target: aarch64-unknown-linux-gnu
+            glibc: "2.17"
+            artifact_suffix: linux-arm64
+          - target: aarch64-unknown-linux-musl
+            glibc: ""
+            artifact_suffix: linux-arm64-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build FFI
+        run: |
+          set -euo pipefail
+          if [ -n "${{ matrix.glibc }}" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p sysprims-ffi
+          else
+            cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-ffi
+          fi
+
+      - name: Package FFI
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
+          cp target/${{ matrix.target }}/release/libsysprims_ffi.a dist/ffi/${{ matrix.artifact_suffix }}/
+
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-${{ matrix.artifact_suffix }}
+          path: dist/ffi/${{ matrix.artifact_suffix }}
+
+  build-macos:
+    name: Build FFI (macOS)
+    runs-on: macos-latest
+    needs: validate
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Build FFI (both targets)
+        run: |
+          set -euo pipefail
+          cargo build --release --target x86_64-apple-darwin -p sysprims-ffi
+          cargo build --release --target aarch64-apple-darwin -p sysprims-ffi
+
+      - name: Package FFI
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ffi/darwin-amd64 dist/ffi/darwin-arm64
+          cp target/x86_64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-amd64/
+          cp target/aarch64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-arm64/
+
+      - name: Upload FFI artifact (darwin-amd64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-darwin-amd64
+          path: dist/ffi/darwin-amd64
+
+      - name: Upload FFI artifact (darwin-arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-darwin-arm64
+          path: dist/ffi/darwin-arm64
+
+  build-windows:
+    name: Build FFI (Windows GNU)
+    runs-on: windows-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Build FFI (GNU target)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cargo build --release --target x86_64-pc-windows-gnu -p sysprims-ffi
+
+      - name: Package FFI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ffi/windows-amd64
+          cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
+
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-windows-amd64
+          path: dist/ffi/windows-amd64
+
+  cbindgen:
+    name: Generate C Header
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      options: --user root
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate C header
+        run: |
+          set -euo pipefail
+          cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
+
+      - name: Upload header
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-header
+          path: sysprims.h
+
+  update-go-bindings:
+    name: Create Go Bindings PR
+    runs-on: ubuntu-latest
+    needs: [validate, build-linux, build-macos, build-windows, cbindgen]
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all FFI artifacts
+        uses: actions/download-artifact@v4.1.3
+        with:
+          pattern: ffi-*
+          path: ffi-libs
+
+      - name: Download C header
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: c-header
+          path: ffi-libs
+
+      - name: Update Go bindings directory
+        run: |
+          set -euo pipefail
+          VERSION=${{ needs.validate.outputs.version }}
+
+          HEADER_PATH="$(find ffi-libs -maxdepth 2 -name sysprims.h | head -n 1)"
+          if [ -z "$HEADER_PATH" ]; then
+            echo "ERROR: sysprims.h not found in downloaded artifacts"
+            exit 1
+          fi
+          cp "$HEADER_PATH" bindings/go/sysprims/include/sysprims.h
+
+          for dir in ffi-libs/ffi-*/; do
+            platform=$(basename "$dir" | sed 's/ffi-//')
+            mkdir -p "bindings/go/sysprims/lib/$platform"
+            cp "$dir/libsysprims_ffi.a" "bindings/go/sysprims/lib/$platform/"
+          done
+
+          echo "Go bindings updated for $VERSION"
+          ls -la bindings/go/sysprims/lib/*/
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: go-bindings/v${{ needs.validate.outputs.version }}
+          title: "feat(bindings): update Go prebuilt libs for v${{ needs.validate.outputs.version }}"
+          body: |
+            ## Go Bindings Update
+
+            This PR updates the prebuilt FFI libraries for the Go bindings to:
+            v${{ needs.validate.outputs.version }}
+
+            Merge this PR BEFORE tagging so the release tags include the prebuilt libs and `go get` works.
+
+            ### Platforms Updated
+            - linux-amd64 (glibc)
+            - linux-amd64-musl
+            - linux-arm64 (glibc)
+            - linux-arm64-musl
+            - darwin-amd64
+            - darwin-arm64
+            - windows-amd64
+
+            ### Testing
+            After merging:
+            ```bash
+            cd bindings/go/sysprims
+            go test -v ./...
+            ```
+
+            ---
+            Auto-generated by Go bindings prep workflow for v${{ needs.validate.outputs.version }}
+          commit-message: "feat(bindings): update Go prebuilt libs for v${{ needs.validate.outputs.version }}"
+          delete-branch: true

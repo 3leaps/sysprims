@@ -129,11 +129,11 @@ test-go:
 Prebuilt libraries must be present in the repository at the commit a tag points to
 so `go get` works without requiring Rust.
 
-The release workflow builds artifacts and creates a PR with updated prebuilt libs:
+The Go bindings prep workflow builds artifacts and creates a PR with updated prebuilt libs:
 
 1. Builds FFI libraries for all 7 platforms
 2. Creates a PR with updated prebuilt libs in `bindings/go/sysprims/lib/`
-3. PR is reviewed and merged after release verification
+3. PR is reviewed and merged BEFORE tagging so `go get` works at the release tag
 
 After the PR is merged, create the release tag so it points at the commit that contains
 the binding artifacts (tags remain immutable; if you already tagged, publish a patch

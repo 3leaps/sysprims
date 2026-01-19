@@ -44,6 +44,24 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   ```bash
   git push origin main
   ```
+
+- [ ] Go bindings prep (required):
+  - Run the workflow `.github/workflows/go-bindings.yml` for this version (manual; do not run on every push).
+    ```bash
+    VERSION=$(cat VERSION)
+    gh workflow run "Go Bindings (Prep)" -f version="${VERSION}"
+    ```
+  - Find the created PR and review/merge it:
+    ```bash
+    VERSION=$(cat VERSION)
+    gh pr list --search "go-bindings/v${VERSION}" --state open
+    gh pr view --web "go-bindings/v${VERSION}"
+    ```
+  - Confirm the PR actually adds the platform libs before merging:
+    - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
+    - `bindings/go/sysprims/include/sysprims.h`
+  - Merge the PR so the prebuilt libs are present on `main` before tagging.
+
 - [ ] Create and push tags (must point to the SAME commit):
   ```bash
   VERSION=$(cat VERSION)
@@ -81,6 +99,7 @@ Notes:
     VERSION=$(cat VERSION)
     git ls-tree -r --name-only "v${VERSION}" bindings/go/sysprims/lib | sed -n '1,20p'
     ```
+    If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
   - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
