@@ -76,6 +76,11 @@ Notes:
 
   Go bindings:
   - Confirm `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a` is present in the tagged commit so `go get` works without Rust.
+    Quick check:
+    ```bash
+    VERSION=$(cat VERSION)
+    git ls-tree -r --name-only "v${VERSION}" bindings/go/sysprims/lib | sed -n '1,20p'
+    ```
   - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
