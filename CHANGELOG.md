@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-01-19
+
+Security and CI/CD maintenance release.
+
+### Security
+
+- **GHSA-cxww-7g56-2vh6** (High): Updated `actions/download-artifact` from `@v4` to `@v4.1.3`
+  - Path traversal vulnerability in GitHub Actions artifact downloads
+  - Impact: CI/CD pipeline only; no impact on library code or released binaries
+
+### Changed
+
+- Renamed `RELEASE_TAG` to `SYSPRIMS_RELEASE_TAG` in Makefile and release workflow
+  - Prevents cross-repo confusion when working with multiple repositories
+- Updated `GONEAT_VERSION` to v0.5.1
+
+### Added
+
+- Vulnerability scanning via goneat/grype integration
+  - New `.goneat/dependencies.yaml` with license policy aligned to ADR-0001
+  - Added grype to `.goneat/tools.yaml` sbom scope
+  - Enables `goneat dependencies --vuln` for SBOM-based vulnerability detection
+
 ## [0.1.1] - 2026-01-17
 
 First language bindings release. Completes the FFI surface and ships Go bindings.
@@ -95,6 +118,7 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/3leaps/sysprims/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/3leaps/sysprims/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/3leaps/sysprims/releases/tag/v0.1.0

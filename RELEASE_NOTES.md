@@ -6,6 +6,32 @@
 
 ---
 
+## v0.1.2 - 2026-01-19
+
+**Status:** Security & CI/CD Maintenance Release
+
+Security patch addressing a high-severity vulnerability in CI/CD dependencies, plus infrastructure improvements.
+
+### Security
+
+- **GHSA-cxww-7g56-2vh6** (High): Updated `actions/download-artifact` from `@v4` to `@v4.1.3`
+  - Path traversal vulnerability in GitHub Actions artifact downloads
+  - Impact: CI/CD pipeline only; no impact on library code or released binaries
+
+### CI/CD Improvements
+
+- Renamed `RELEASE_TAG` → `SYSPRIMS_RELEASE_TAG` to prevent cross-repo confusion
+- Added goneat/grype integration for SBOM-based vulnerability scanning
+- Updated `GONEAT_VERSION` to v0.5.1
+
+### What's Next
+
+- Python bindings (cffi/PyO3 + wheel packaging)
+- TypeScript bindings (napi-rs + npm packaging)
+- C conformance test suite
+
+---
+
 ## v0.1.1 - 2026-01-17
 
 **Status:** First Language Bindings Release
