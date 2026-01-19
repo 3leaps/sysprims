@@ -118,9 +118,8 @@ bindings/go/sysprims/lib/
 
 ### 6. Version Synchronization
 
-- Binding version matches core sysprims version
-- Go module uses git tags: `github.com/3leaps/sysprims/bindings/go/sysprims@v0.1.1`
-- ABI version checked at runtime via `sysprims_abi_version()`
+- Binding versions track the core sysprims version (same X.Y.Z)
+- ABI compatibility is checked at runtime via `sysprims_abi_version()`
 
 ```go
 // Go example
@@ -128,6 +127,28 @@ if sysprims.ABIVersion() != expectedABI {
     return errors.New("ABI version mismatch")
 }
 ```
+
+### 6.1 Go Submodule Tagging (Required)
+
+sysprims uses a Go module in a subdirectory:
+
+- Module path: `github.com/3leaps/sysprims/bindings/go/sysprims`
+
+Per the Go module versioning rules for repositories containing modules in subdirectories,
+we MUST create an additional tag that is prefixed by the module subdirectory:
+
+- Canonical repo tag: `vX.Y.Z`
+- Go module tag: `bindings/go/sysprims/vX.Y.Z`
+
+Rules:
+- Both tags MUST point at the same git commit.
+- The Go module tag exists solely to let `go get` resolve a semantic version for the submodule.
+- If the Go module tag is missing, consumers will fall back to pseudo-versions.
+
+Notes on other bindings:
+- Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
+  They should still use the same X.Y.Z version numbers for ecosystem consistency, but they do not
+  require path-prefixed git tags.
 
 ### 7. Local Development Flow
 
@@ -152,8 +173,9 @@ CGo LDFLAGS search order: `lib/local/<platform>` first, then `lib/<platform>`.
 1. Release pipeline builds FFI libs for all platforms (CI)
 2. `update-go-bindings` job copies libs to `bindings/go/sysprims/lib/`
 3. A commit containing the updated binding artifacts is created on the release branch/main
-4. The release tag points at that commit (tags remain immutable)
-5. Go users can `go get` the tagged version
+4. The canonical release tag `vX.Y.Z` points at that commit (tags remain immutable)
+5. A Go module tag `bindings/go/sysprims/vX.Y.Z` is created pointing at the same commit
+6. Go users can `go get github.com/3leaps/sysprims/bindings/go/sysprims@vX.Y.Z` without pseudo-versions
 
 ### 9. Module Path Convention
 

@@ -10,6 +10,11 @@ env:
 
 jobs:
   # Validate tag matches VERSION file
+  #
+  # IMPORTANT: VERSION mismatch is not "just cosmetics".
+  # The tag is the canonical semver coordinate for downstream consumers, including
+  # language bindings that track X.Y.Z. A mismatch can lead to ambiguous or
+  # incorrect version resolution.
   validate-version:
     name: Validate Version
     runs-on: ubuntu-latest

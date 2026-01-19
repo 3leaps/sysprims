@@ -44,11 +44,24 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   ```bash
   git push origin main
   ```
-- [ ] Create and push tag:
+- [ ] Create and push tags (must point to the SAME commit):
   ```bash
-  git tag -a v$(cat VERSION) -m "vX.Y.Z: <brief description>"
-  git push origin v$(cat VERSION)
+  VERSION=$(cat VERSION)
+
+  # Canonical repo tag (drives .github/workflows/release.yml)
+  git tag -a "v${VERSION}" -m "v${VERSION}: <brief description>"
+
+  # Go submodule tag (required so Go resolves semver for subdir module)
+  git tag -a "bindings/go/sysprims/v${VERSION}" -m "bindings/go/sysprims/v${VERSION}"
+
+  # Push both tags
+  git push origin "v${VERSION}" "bindings/go/sysprims/v${VERSION}"
   ```
+
+Notes:
+- Go requires the path-prefixed tag because the module is `github.com/3leaps/sysprims/bindings/go/sysprims`.
+- Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
+- See `docs/architecture/adr/0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
 
 ### CI Verification
 

@@ -139,6 +139,26 @@ After the PR is merged, create the release tag so it points at the commit that c
 the binding artifacts (tags remain immutable; if you already tagged, publish a patch
 version that includes the merged artifacts).
 
+### Go Submodule Tags (Required)
+
+Because the Go module lives in a subdirectory (`bindings/go/sysprims`), Go expects a
+path-prefixed tag for semantic version resolution.
+
+For every release `vX.Y.Z`, create BOTH tags pointing at the same commit:
+
+- `vX.Y.Z`
+- `bindings/go/sysprims/vX.Y.Z`
+
+This is required so consumers can do:
+
+```bash
+go get github.com/3leaps/sysprims/bindings/go/sysprims@vX.Y.Z
+```
+
+and get a proper semantic version instead of a pseudo-version.
+
+See `docs/architecture/adr/0012-language-bindings-distribution.md` for the policy.
+
 ## Adding New Features
 
 When adding new FFI functions:
