@@ -59,6 +59,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build FFI
+        shell: bash
         run: |
           set -euo pipefail
           if [ -n "${{ matrix.glibc }}" ]; then
@@ -68,6 +69,7 @@ jobs:
           fi
 
       - name: Package FFI
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
@@ -166,6 +168,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Generate C header
+        shell: bash
         run: |
           set -euo pipefail
           cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
