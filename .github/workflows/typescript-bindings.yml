@@ -206,7 +206,8 @@ jobs:
 
           tar -xzf (Join-Path 'release-assets' $asset) -C extracted
 
-          $src = Join-Path 'extracted' (Join-Path 'lib' (Join-Path '${{ matrix.platform_id }}' (Join-Path 'shared' '${{ matrix.shared_name }}')))
+          $libPath = "lib/${{ matrix.platform_id }}/shared/${{ matrix.shared_name }}"
+          $src = Join-Path 'extracted' $libPath
           if (-Not (Test-Path $src)) {
             Write-Error "Missing shared lib in bundle: $src"
           }

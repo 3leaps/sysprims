@@ -490,7 +490,14 @@ jobs:
   package-ffi-bundle:
     name: Package FFI Bundle
     runs-on: ubuntu-latest
-    needs: [validate-version, build-linux, build-macos, build-windows, build-windows-msvc, cbindgen, verify-ffi-shared-assets]
+    needs:
+      - validate-version
+      - build-linux
+      - build-macos
+      - build-windows
+      - build-windows-msvc
+      - cbindgen
+      - verify-ffi-shared-assets
     steps:
       - uses: actions/checkout@v4
 
