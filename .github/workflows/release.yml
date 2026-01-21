@@ -433,13 +433,13 @@ jobs:
 
       - name: Generate SBOM (CycloneDX)
         run: |
-          syft dir:. -o cyclonedx-json > sysprims-${{ needs.validate-version.outputs.version }}.cdx.json
+          syft dir:. -o cyclonedx-json > sbom-${{ needs.validate-version.outputs.version }}.cdx.json
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: sysprims-${{ needs.validate-version.outputs.version }}.cdx.json
+          path: sbom-${{ needs.validate-version.outputs.version }}.cdx.json
 
   # Package all FFI libs into single bundle
   package-ffi-bundle:

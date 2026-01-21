@@ -73,7 +73,25 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
-          cp target/${{ matrix.target }}/release/libsysprims_ffi.a dist/ffi/${{ matrix.artifact_suffix }}/
+          resolve_target() {
+            file="$1"
+            candidates=("${{ matrix.target }}")
+            if [ -n "${{ matrix.glibc }}" ]; then
+              candidates+=("${{ matrix.target }}.${{ matrix.glibc }}")
+            fi
+            for c in "${candidates[@]}"; do
+              if [ -f "target/${c}/release/${file}" ]; then
+                echo "$c"
+                return 0
+              fi
+            done
+            echo "ERROR: ${file} not found for candidates: ${candidates[*]}" >&2
+            find target -maxdepth 4 -path "*/release/${file}" -print || true
+            exit 1
+          }
+
+          TARGET_DIR="$(resolve_target libsysprims_ffi.a)"
+          cp "target/${TARGET_DIR}/release/libsysprims_ffi.a" "dist/ffi/${{ matrix.artifact_suffix }}/"
 
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4

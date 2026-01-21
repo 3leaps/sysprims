@@ -386,7 +386,17 @@ mod tests {
         use serde_json::Value;
         use std::net::TcpListener;
 
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!(
+                    "SKIP: net.Listen denied in this environment: {}",
+                    e
+                );
+                return;
+            }
+            Err(e) => panic!("TcpListener::bind failed unexpectedly: {}", e),
+        };
         let port = listener.local_addr().unwrap().port();
         let pid = std::process::id();
 
