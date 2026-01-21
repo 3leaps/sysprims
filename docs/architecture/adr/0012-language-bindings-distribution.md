@@ -72,7 +72,7 @@ bindings/go/sysprims/lib/
 ├── linux-arm64-musl/
 │   └── libsysprims_ffi.a
 ├── windows-amd64/
-│   └── sysprims_ffi.lib
+│   └── libsysprims_ffi.a
 └── local/            # Gitignored, for local development
 ```
 
@@ -92,7 +92,7 @@ bindings/go/sysprims/lib/
 | Linux | aarch64 | musl | ✅ | ❌ | ❌ |
 | macOS | x86_64 | - | ✅ | ✅ | ✅ |
 | macOS | aarch64 | - | ✅ | ✅ | ✅ |
-| Windows | x86_64 | MSVC | ✅ | ✅ | ✅ |
+| Windows | x86_64 | GNU (Go) / MSVC (shared) | ✅ | ✅ | ✅ |
 
 **Notes**:
 - Linux musl targets are Go-only (Alpine containers, static binaries)
@@ -100,10 +100,15 @@ bindings/go/sysprims/lib/
 
 ### 4. Library Naming Convention
 
-| Platform | Static Library | Notes |
-|----------|----------------|-------|
-| Linux/macOS | `libsysprims_ffi.a` | Unix convention |
-| Windows | `sysprims_ffi.lib` | MSVC convention |
+sysprims supports multiple binding consumers with different toolchain needs.
+
+| Consumer | Platform | Primary Artifact | Notes |
+|----------|----------|------------------|-------|
+| Go (cgo) | Linux/macOS | `libsysprims_ffi.a` | Static linking |
+| Go (cgo) | Windows | `libsysprims_ffi.a` | Built for `x86_64-pc-windows-gnu` (MinGW) |
+| TypeScript/Python (runtime load) | Linux | `libsysprims_ffi.so` | Shared library |
+| TypeScript/Python (runtime load) | macOS | `libsysprims_ffi.dylib` | Shared library |
+| TypeScript/Python (runtime load) | Windows | `sysprims_ffi.dll` | Built for `x86_64-pc-windows-msvc` |
 
 ### 5. CGo Link Flags by Platform
 

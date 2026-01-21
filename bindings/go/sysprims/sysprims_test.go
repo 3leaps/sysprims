@@ -179,6 +179,46 @@ func TestProcessGetNonexistent(t *testing.T) {
 	}
 }
 
+func TestSelfSessionIDs(t *testing.T) {
+	pgid, err := sysprims.SelfPGID()
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Fatalf("expected SelfPGID to fail on windows")
+		}
+		if sErr, ok := err.(*sysprims.Error); ok {
+			if sErr.Code != sysprims.ErrNotSupported {
+				t.Fatalf("expected ErrNotSupported, got %d (%s)", sErr.Code, sErr.Code)
+			}
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("SelfPGID failed: %v", err)
+		}
+		if pgid == 0 {
+			t.Fatalf("SelfPGID returned 0")
+		}
+	}
+
+	sid, err := sysprims.SelfSID()
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Fatalf("expected SelfSID to fail on windows")
+		}
+		if sErr, ok := err.(*sysprims.Error); ok {
+			if sErr.Code != sysprims.ErrNotSupported {
+				t.Fatalf("expected ErrNotSupported, got %d (%s)", sErr.Code, sErr.Code)
+			}
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("SelfSID failed: %v", err)
+		}
+		if sid == 0 {
+			t.Fatalf("SelfSID returned 0")
+		}
+	}
+}
+
 func TestListeningPortsSelfListener(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

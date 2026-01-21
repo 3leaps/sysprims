@@ -512,6 +512,7 @@ dependencies = [
  "serde_json",
  "sysprims-core",
  "sysprims-proc",
+ "sysprims-session",
  "sysprims-signal",
  "sysprims-timeout",
 ]
