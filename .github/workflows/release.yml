@@ -442,10 +442,55 @@ jobs:
           path: sbom-${{ needs.validate-version.outputs.version }}.cdx.json
 
   # Package all FFI libs into single bundle
+  verify-ffi-shared-assets:
+    name: Verify FFI Shared Artifacts
+    runs-on: ubuntu-latest
+    needs: [validate-version, build-linux, build-macos, build-windows-msvc]
+    steps:
+      - name: Download shared-lib artifacts
+        uses: actions/download-artifact@v4.1.3
+        with:
+          pattern: ffi-shared-*
+          path: ffi-shared-libs
+
+      - name: Verify expected shared libs present
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          require_file() {
+            local path="$1"
+            if [ ! -f "$path" ]; then
+              echo "ERROR: missing required shared lib: $path" >&2
+              echo "Available files:" >&2
+              find ffi-shared-libs -type f -maxdepth 4 -print || true
+              exit 1
+            fi
+          }
+
+          # Expected shared libs (ADR-0012/ADR-0014):
+          # - Linux glibc only
+          # - macOS
+          # - Windows MSVC
+          require_file "ffi-shared-libs/ffi-shared-linux-amd64/libsysprims_ffi.so"
+          require_file "ffi-shared-libs/ffi-shared-linux-arm64/libsysprims_ffi.so"
+          require_file "ffi-shared-libs/ffi-shared-darwin-amd64/libsysprims_ffi.dylib"
+          require_file "ffi-shared-libs/ffi-shared-darwin-arm64/libsysprims_ffi.dylib"
+          require_file "ffi-shared-libs/ffi-shared-windows-amd64/sysprims_ffi.dll"
+
+          # Must not exist (musl is Go-only).
+          if find ffi-shared-libs -maxdepth 2 -type d -name 'ffi-shared-*-musl' | grep -q .; then
+            echo "ERROR: unexpected musl shared-lib artifacts present" >&2
+            find ffi-shared-libs -maxdepth 2 -type d -name 'ffi-shared-*-musl' -print >&2 || true
+            exit 1
+          fi
+
+          echo "[ok] Shared-lib artifacts verified"
+
   package-ffi-bundle:
     name: Package FFI Bundle
     runs-on: ubuntu-latest
-    needs: [validate-version, build-linux, build-macos, build-windows, build-windows-msvc, cbindgen]
+    needs: [validate-version, build-linux, build-macos, build-windows, build-windows-msvc, cbindgen, verify-ffi-shared-assets]
     steps:
       - uses: actions/checkout@v4
 
@@ -464,32 +509,75 @@ jobs:
       - name: Package FFI bundle
         run: |
           set -euo pipefail
-          shopt -s nullglob
           VERSION=${{ needs.validate-version.outputs.version }}
           mkdir -p bundle/lib bundle/include
 
-          # Organize libs by platform, split by linkage type.
-          for dir in ffi-libs/ffi-*/; do
-            artifact=$(basename "$dir")
-
-            # Skip shared artifacts in the static loop.
-            if [[ "$artifact" == ffi-shared-* ]]; then
-              continue
+          require_file() {
+            local path="$1"
+            if [ ! -f "$path" ]; then
+              echo "ERROR: required file missing: $path" >&2
+              exit 1
             fi
+          }
 
-            platform=${artifact#ffi-}
-            mkdir -p "bundle/lib/$platform/static"
-            cp "$dir"/* "bundle/lib/$platform/static/" 2>/dev/null || true
-          done
+          copy_static() {
+            local platform="$1"
+            local src="ffi-libs/ffi-${platform}/libsysprims_ffi.a"
+            require_file "$src"
+            mkdir -p "bundle/lib/${platform}/static"
+            cp "$src" "bundle/lib/${platform}/static/"
+          }
 
-          for dir in ffi-libs/ffi-shared-*/; do
-            artifact=$(basename "$dir")
-            platform=${artifact#ffi-shared-}
-            mkdir -p "bundle/lib/$platform/shared"
-            cp "$dir"/* "bundle/lib/$platform/shared/" 2>/dev/null || true
-          done
+          copy_shared_linux() {
+            local platform="$1"
+            local src="ffi-libs/ffi-shared-${platform}/libsysprims_ffi.so"
+            require_file "$src"
+            mkdir -p "bundle/lib/${platform}/shared"
+            cp "$src" "bundle/lib/${platform}/shared/"
+          }
+
+          copy_shared_darwin() {
+            local platform="$1"
+            local src="ffi-libs/ffi-shared-${platform}/libsysprims_ffi.dylib"
+            require_file "$src"
+            mkdir -p "bundle/lib/${platform}/shared"
+            cp "$src" "bundle/lib/${platform}/shared/"
+          }
+
+          copy_shared_windows() {
+            local platform="$1"
+            local dll="ffi-libs/ffi-shared-${platform}/sysprims_ffi.dll"
+            require_file "$dll"
+            mkdir -p "bundle/lib/${platform}/shared"
+            cp "$dll" "bundle/lib/${platform}/shared/"
+
+            # Optional MSVC import library (kept if present).
+            if [ -f "ffi-libs/ffi-shared-${platform}/sysprims_ffi.lib" ]; then
+              cp "ffi-libs/ffi-shared-${platform}/sysprims_ffi.lib" "bundle/lib/${platform}/shared/"
+            fi
+            if [ -f "ffi-libs/ffi-shared-${platform}/sysprims_ffi.dll.lib" ]; then
+              cp "ffi-libs/ffi-shared-${platform}/sysprims_ffi.dll.lib" "bundle/lib/${platform}/shared/"
+            fi
+          }
+
+          # Static libs (Go/cgo + static consumers): all platforms including musl.
+          copy_static linux-amd64
+          copy_static linux-amd64-musl
+          copy_static linux-arm64
+          copy_static linux-arm64-musl
+          copy_static darwin-amd64
+          copy_static darwin-arm64
+          copy_static windows-amd64
+
+          # Shared libs (runtime loaders): glibc Linux, macOS, Windows MSVC.
+          copy_shared_linux linux-amd64
+          copy_shared_linux linux-arm64
+          copy_shared_darwin darwin-amd64
+          copy_shared_darwin darwin-arm64
+          copy_shared_windows windows-amd64
 
           # Add header
+          require_file ffi-libs/sysprims.h
           cp ffi-libs/sysprims.h bundle/include/
 
           # Add metadata
@@ -535,6 +623,7 @@ jobs:
       - sbom
       - package-ffi-bundle
       - build-windows-msvc
+      - verify-ffi-shared-assets
     permissions:
       contents: write
     steps:
