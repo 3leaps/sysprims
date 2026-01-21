@@ -1,0 +1,8 @@
+dist/
+dist-test/
+node_modules/
+package-lock.json
+
+_lib/*/*
+!_lib/.gitkeep
+

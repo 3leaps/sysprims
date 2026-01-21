@@ -89,6 +89,7 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+bindings/typescript/**/package-lock.json
 
 # NAPI-RS build artifacts
 bindings/typescript/target/
@@ -128,6 +129,8 @@ bin/
 *.exe~
 *.dll
 *.dylib
+*.so
+*.lib
 
 # Generated headers
 # - bindings/go/sysprims/include/sysprims.h is committed (Go binding surface)
