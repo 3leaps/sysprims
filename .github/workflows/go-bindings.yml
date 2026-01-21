@@ -216,7 +216,12 @@ jobs:
           cp "$HEADER_PATH" bindings/go/sysprims/include/sysprims.h
 
           for dir in ffi-libs/ffi-*/; do
-            platform=$(basename "$dir" | sed 's/ffi-//')
+            artifact=$(basename "$dir")
+            if [[ "$artifact" == ffi-shared-* ]]; then
+              continue
+            fi
+
+            platform=${artifact#ffi-}
             mkdir -p "bindings/go/sysprims/lib/$platform"
             cp "$dir/libsysprims_ffi.a" "bindings/go/sysprims/lib/$platform/"
           done

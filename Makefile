@@ -13,7 +13,7 @@
 .PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version install
 .PHONY: precommit prepush deps-check audit deny miri msrv
 .PHONY: build-release build-ffi cbindgen
-.PHONY: build-local-go go-test header-go go-header go-prebuilt-darwin
+.PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-verify-keys release-notes release-upload
@@ -65,6 +65,7 @@ help: ## Show available targets
 	@echo ""
 	@echo "Go bindings:"
 	@echo "  build-local-go      Build FFI for local Go development"
+	@echo "  build-local-ffi-shared  Build shared FFI for local consumers"
 	@echo "  go-test             Run Go binding tests"
 	@echo "  header-go           Generate C header for Go bindings"
 	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
@@ -369,11 +370,13 @@ endif
 ifeq ($(UNAME_S),darwin)
     GO_OS := darwin
     GO_LIB_EXT := .a
+    GO_SHARED_EXT := .dylib
     GO_LIB_PREFIX := lib
 endif
 ifeq ($(UNAME_S),linux)
     GO_OS := linux
     GO_LIB_EXT := .a
+    GO_SHARED_EXT := .so
     GO_LIB_PREFIX := lib
 endif
 
@@ -391,8 +394,37 @@ build-local-go: ## Build FFI for local Go development
 	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(DIST_LOCAL)/release/sysprims-ffi/libsysprims_ffi.a
 	@cp ffi/sysprims-ffi/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims.h
 	@cp $(GO_BINDINGS_DIR)/include/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims-go.h
+	@shared_root="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
+	if [ -f "$$shared_root" ]; then \
+		cp "$$shared_root" "$(DIST_LOCAL)/release/sysprims-ffi/"; \
+	fi
+
+	@# Also stage a release-like layout (static + shared split) for local consumers.
+	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/static
+	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/static/
+	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared
+	@shared="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
+	if [ -f "$$shared" ]; then \
+		cp "$$shared" "$(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared/"; \
+	else \
+		echo "[--] Shared library not produced at $$shared (skipping)"; \
+	fi
 	@echo "Built locally from working tree." > $(DIST_LOCAL)/release/sysprims-ffi/LOCAL.txt
 	@echo "[ok] Local assets staged at $(DIST_LOCAL)/release/sysprims-ffi/"
+
+build-local-ffi-shared: ## Build shared FFI library and stage it locally
+	@echo "Building shared FFI library for local consumers ($(GO_OS)-$(GO_ARCH))..."
+	$(CARGO) build --release -p sysprims-ffi
+	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared
+	@shared="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
+	if [ -f "$$shared" ]; then \
+		cp "$$shared" "$(DIST_LOCAL)/release/sysprims-ffi/"; \
+		cp "$$shared" "$(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared/"; \
+		echo "[ok] Shared library copied to $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared/"; \
+	else \
+		echo "[!!] Shared library not produced at $$shared"; \
+		exit 1; \
+	fi
 
 go-test: build-local-go ## Run Go binding tests
 	@echo "Running Go tests..."

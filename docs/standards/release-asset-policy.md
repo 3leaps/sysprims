@@ -54,6 +54,7 @@ bundles, but will be incomplete.
 Minimum expectation for FFI preview testing (single-platform):
 - `dist/local/release/sysprims-ffi/`
   - `libsysprims_ffi.a`
+  - `libsysprims_ffi.dylib` / `libsysprims_ffi.so` / `sysprims_ffi.dll` (when building shared artifacts)
   - `include/sysprims.h`
   - `include/sysprims-go.h`
   - `LOCAL.txt`
@@ -72,3 +73,13 @@ Minimum expectation for FFI preview testing (single-platform):
 
 - If we change the structure of release assets (e.g. nested directories), we must update
   `scripts/generate-checksums.sh` accordingly so all assets remain covered by signed checksums.
+
+## FFI Bundle Contents
+
+The `sysprims-ffi-<version>-libs.tar.gz` bundle is expected to contain:
+
+- `include/sysprims.h`
+- Static libraries for binding consumers that link at build time (Go/cgo)
+- Shared libraries for binding consumers that load at runtime (TypeScript/Python)
+
+See `docs/architecture/adr/0014-ffi-artifact-groups-and-binding-consumers.md`.
