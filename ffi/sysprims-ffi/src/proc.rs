@@ -389,10 +389,7 @@ mod tests {
         let listener = match TcpListener::bind("127.0.0.1:0") {
             Ok(listener) => listener,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                eprintln!(
-                    "SKIP: net.Listen denied in this environment: {}",
-                    e
-                );
+                eprintln!("SKIP: net.Listen denied in this environment: {}", e);
                 return;
             }
             Err(e) => panic!("TcpListener::bind failed unexpectedly: {}", e),
