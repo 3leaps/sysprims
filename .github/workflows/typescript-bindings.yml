@@ -19,6 +19,11 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to validate (e.g. v0.1.4)"
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -100,6 +105,116 @@ jobs:
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
+
+      - name: Test
+        working-directory: bindings/typescript/sysprims
+        run: npm run test:ci
+
+  test-from-release:
+    name: Test From Release (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform_id: linux-amd64
+            shared_name: libsysprims_ffi.so
+          - os: macos-13
+            platform_id: darwin-amd64
+            shared_name: libsysprims_ffi.dylib
+          - os: macos-14
+            platform_id: darwin-arm64
+            shared_name: libsysprims_ffi.dylib
+          - os: windows-latest
+            platform_id: windows-amd64
+            shared_name: sysprims_ffi.dll
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Download FFI bundle from release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"
+          ASSET="sysprims-ffi-${VERSION}-libs.tar.gz"
+
+          mkdir -p release-assets
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets \
+            --clobber \
+            --pattern "$ASSET"
+
+          test -f "release-assets/$ASSET"
+          ls -la release-assets
+
+      - name: Extract and stage shared library
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"
+          ASSET="sysprims-ffi-${VERSION}-libs.tar.gz"
+
+          rm -rf extracted
+          mkdir -p extracted
+          tar -xzf "release-assets/${ASSET}" -C extracted
+
+          src="extracted/lib/${{ matrix.platform_id }}/shared/${{ matrix.shared_name }}"
+          if [ ! -f "$src" ]; then
+            echo "ERROR: missing shared lib in bundle: $src" >&2
+            find extracted/lib -maxdepth 4 -type f -print || true
+            exit 1
+          fi
+
+          dest_dir="bindings/typescript/sysprims/_lib/${{ matrix.platform_id }}"
+          mkdir -p "$dest_dir"
+          cp "$src" "$dest_dir/${{ matrix.shared_name }}"
+          ls -la "$dest_dir"
+
+      - name: Extract and stage shared library (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ inputs.tag }}'
+          $version = $tag.TrimStart('v')
+          $asset = "sysprims-ffi-$version-libs.tar.gz"
+
+          Remove-Item -Recurse -Force extracted -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path extracted | Out-Null
+
+          tar -xzf (Join-Path 'release-assets' $asset) -C extracted
+
+          $src = Join-Path 'extracted' (Join-Path 'lib' (Join-Path '${{ matrix.platform_id }}' (Join-Path 'shared' '${{ matrix.shared_name }}')))
+          if (-Not (Test-Path $src)) {
+            Write-Error "Missing shared lib in bundle: $src"
+          }
+
+          $destDir = Join-Path 'bindings/typescript/sysprims/_lib' '${{ matrix.platform_id }}'
+          New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+          Copy-Item $src (Join-Path $destDir '${{ matrix.shared_name }}')
+          Get-ChildItem -Force $destDir
 
       - name: Test
         working-directory: bindings/typescript/sysprims

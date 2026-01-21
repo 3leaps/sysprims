@@ -102,6 +102,16 @@ Notes:
     If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
   - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
 
+  TypeScript bindings (recommended):
+  - Validate that the published FFI bundle contains the shared libraries the TypeScript package expects.
+    Run the workflow `.github/workflows/typescript-bindings.yml` in "from-release" mode against the draft release:
+    ```bash
+    VERSION=$(cat VERSION)
+    gh workflow run "TypeScript Bindings" -f tag="v${VERSION}"
+    ```
+    This downloads `sysprims-ffi-${VERSION}-libs.tar.gz` from the draft release, extracts the platform shared lib
+    into `bindings/typescript/sysprims/_lib/<platform>/`, and runs the TS test suite on each OS runner.
+
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 
 ## 2. Manual Signing (Local Machine)
