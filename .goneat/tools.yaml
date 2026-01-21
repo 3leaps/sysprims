@@ -35,6 +35,7 @@ scopes:
       - go
       - uv
       - bun
+      - tsc
       # Security
       - gitleaks
       - syft
@@ -68,6 +69,7 @@ scopes:
       - go
       - uv
       - bun
+      - tsc
 
   security:
     description: Security scanning tools
@@ -422,3 +424,24 @@ tools:
         - brew
       windows:
         - scoop
+
+  # ==========================================================================
+  # TypeScript Tools
+  # ==========================================================================
+
+  tsc:
+    name: tsc
+    description: TypeScript compiler - used for type checking TypeScript bindings
+    kind: node
+    detect_command: tsc --version
+    version_args:
+      - --version
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - npm
+        - bun
+    install_commands:
+      npm: npm install -g typescript
+      bun: bun install -g typescript

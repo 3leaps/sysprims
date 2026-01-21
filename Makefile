@@ -259,6 +259,11 @@ lint: ## Run linting (cargo clippy)
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 	@echo "[ok] Linting passed"
 
+typecheck: ## Run TypeScript type checking
+	@echo "Type checking TypeScript bindings..."
+	@cd bindings/typescript/sysprims && npx tsc --noEmit -p tsconfig.test.json
+	@echo "[ok] TypeScript type check passed"
+
 deny: ## Run cargo-deny license and advisory checks
 	@echo "Running cargo-deny..."
 	@if command -v cargo-deny >/dev/null 2>&1; then \
