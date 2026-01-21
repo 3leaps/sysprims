@@ -1,0 +1,106 @@
+name: TypeScript Bindings
+
+on:
+  pull_request:
+    paths:
+      - 'bindings/typescript/**'
+      - 'ffi/**'
+      - 'crates/**'
+      - '.github/workflows/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  push:
+    branches: [main]
+    paths:
+      - 'bindings/typescript/**'
+      - 'ffi/**'
+      - 'crates/**'
+      - '.github/workflows/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform_id: linux-amd64
+            lib_src: target/release/libsysprims_ffi.so
+            lib_dst: libsysprims_ffi.so
+            build_cmd: cargo build --release -p sysprims-ffi
+          - os: macos-13
+            platform_id: darwin-amd64
+            lib_src: target/release/libsysprims_ffi.dylib
+            lib_dst: libsysprims_ffi.dylib
+            build_cmd: cargo build --release -p sysprims-ffi
+          - os: macos-14
+            platform_id: darwin-arm64
+            lib_src: target/release/libsysprims_ffi.dylib
+            lib_dst: libsysprims_ffi.dylib
+            build_cmd: cargo build --release -p sysprims-ffi
+          - os: windows-latest
+            platform_id: windows-amd64
+            lib_src: target/x86_64-pc-windows-msvc/release/sysprims_ffi.dll
+            lib_dst: sysprims_ffi.dll
+            build_cmd: cargo build --release --target x86_64-pc-windows-msvc -p sysprims-ffi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build sysprims FFI shared library
+        run: ${{ matrix.build_cmd }}
+
+      - name: Stage shared library into TS package
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_dir="bindings/typescript/sysprims"
+          dest_dir="${pkg_dir}/_lib/${{ matrix.platform_id }}"
+          mkdir -p "$dest_dir"
+          if [ ! -f "${{ matrix.lib_src }}" ]; then
+            echo "ERROR: missing built library at ${{ matrix.lib_src }}" >&2
+            exit 1
+          fi
+          cp "${{ matrix.lib_src }}" "${dest_dir}/${{ matrix.lib_dst }}"
+          ls -la "$dest_dir"
+
+      - name: Stage shared library into TS package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkgDir = 'bindings/typescript/sysprims'
+          $destDir = Join-Path $pkgDir (Join-Path '_lib' '${{ matrix.platform_id }}')
+          New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+          if (-Not (Test-Path '${{ matrix.lib_src }}')) {
+            throw "Missing built library at ${{ matrix.lib_src }}"
+          }
+          Copy-Item '${{ matrix.lib_src }}' (Join-Path $destDir '${{ matrix.lib_dst }}')
+          Get-ChildItem -Force $destDir
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Test
+        working-directory: bindings/typescript/sysprims
+        run: npm run test:ci
