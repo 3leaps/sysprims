@@ -22,12 +22,19 @@
 #[cfg(unix)]
 use std::process::Command;
 #[cfg(unix)]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(unix)]
 use std::thread;
 #[cfg(unix)]
 use std::time::Duration;
 
 #[cfg(unix)]
 use sysprims_timeout::{run_with_timeout, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
+
+/// Atomic counter to ensure unique markers even when tests run in parallel.
+/// Combined with PID and timestamp, this guarantees no marker collisions.
+#[cfg(unix)]
+static MARKER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Helper to count processes matching a pattern.
 ///
@@ -62,11 +69,17 @@ fn cleanup_processes(pattern: &str) {
 }
 
 /// Generate a unique marker for this test run.
+///
+/// Uses atomic counter + PID + timestamp to guarantee uniqueness even when
+/// multiple tests run in parallel (they share the same process, so PID alone
+/// isn't sufficient, and timestamp granularity may cause collisions).
 #[cfg(unix)]
 fn unique_marker() -> String {
+    let counter = MARKER_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!(
-        "sysprims_escape_{}_{}",
+        "sysprims_escape_{}_{}_{}",
         std::process::id(),
+        counter,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
