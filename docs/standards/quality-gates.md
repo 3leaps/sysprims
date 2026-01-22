@@ -35,6 +35,33 @@ Any schema change requires:
 - Golden test update
 - Meta-validation pass (JSON Schema 2020-12)
 
+## CI Workflow Strategy
+
+### Core CI (`ci.yml`)
+
+Runs on every push to `main` and on PRs. Validates Rust code quality:
+- Format, lint, test, license checks
+- Cross-platform matrix (Linux, macOS, Windows)
+
+### Binding Workflows (Manual Trigger Only)
+
+The `go-bindings.yml` and `typescript-bindings.yml` workflows are **manually triggered** (`workflow_dispatch` only). They do not run on push or PR.
+
+**Rationale:**
+- Binding validation requires building FFI shared libraries, which is expensive
+- Running on every push causes CI thrashing with no benefit during active development
+- Bindings are validated as a pre-release step, not on every commit
+- This keeps the feedback loop fast for core Rust development
+
+**When to run binding workflows:**
+1. Before tagging a release (validates bindings work with current FFI)
+2. After significant FFI changes (manual verification)
+3. When debugging binding-specific issues
+
+### Release Workflow (`release.yml`)
+
+Triggered manually or by tag push. Builds all artifacts and publishes releases.
+
 ## "Stop the Line" Conditions
 
 These conditions MUST block all merges until resolved:
