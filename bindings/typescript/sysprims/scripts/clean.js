@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require("node:fs");
+const path = require("node:path");
 
 function rmrf(p) {
   try {
@@ -10,9 +10,9 @@ function rmrf(p) {
 }
 
 function main() {
-  const packageRoot = path.resolve(__dirname, '..');
-  rmrf(path.join(packageRoot, 'dist'));
-  rmrf(path.join(packageRoot, 'dist-test'));
+  const packageRoot = path.resolve(__dirname, "..");
+  rmrf(path.join(packageRoot, "dist"));
+  rmrf(path.join(packageRoot, "dist-test"));
 }
 
 main();

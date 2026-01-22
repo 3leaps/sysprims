@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 function walk(dir, out) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -10,15 +10,15 @@ function walk(dir, out) {
       walk(p, out);
       continue;
     }
-    if (e.isFile() && e.name.endsWith('.test.js')) {
+    if (e.isFile() && e.name.endsWith(".test.js")) {
       out.push(p);
     }
   }
 }
 
 function main() {
-  const packageRoot = path.resolve(__dirname, '..');
-  const distTestRoot = path.join(packageRoot, 'dist-test');
+  const packageRoot = path.resolve(__dirname, "..");
+  const distTestRoot = path.join(packageRoot, "dist-test");
 
   if (!fs.existsSync(distTestRoot)) {
     console.error(`Missing dist-test directory: ${distTestRoot}`);
@@ -26,7 +26,7 @@ function main() {
   }
 
   const candidates = [];
-  const preferred = path.join(distTestRoot, 'test');
+  const preferred = path.join(distTestRoot, "test");
   if (fs.existsSync(preferred)) {
     walk(preferred, candidates);
   } else {
@@ -40,9 +40,9 @@ function main() {
     process.exit(1);
   }
 
-  const args = ['--test', ...candidates];
+  const args = ["--test", ...candidates];
   const res = spawnSync(process.execPath, args, {
-    stdio: 'inherit',
+    stdio: "inherit",
     cwd: packageRoot,
     env: process.env,
   });
