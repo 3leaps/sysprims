@@ -17,6 +17,8 @@ A PR is mergeable only if all gates pass.
 Note: The repo includes a minimal root `go.mod` plus `go.work` to support repo-root Go tooling (goneat/golangci-lint).
 Go sources live under `bindings/go/sysprims/`, plus a small placeholder package under `internal/gowork/`.
 
+Similarly, we include a minimal repo-root `package.json` as a tooling shim so repo-root npm invocations (from tooling like goneat) do not fail.
+
 ## Review Gates (Humans)
 
 ### FFI Surface Changes

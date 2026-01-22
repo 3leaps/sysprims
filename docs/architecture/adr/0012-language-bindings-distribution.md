@@ -161,7 +161,7 @@ Developers building from source use `lib/local/` directory.
 
 Go is an exception in that a non-module repo root breaks common tooling patterns (`./...` in CI, golangci-lint defaults, and multi-tool runners like goneat). We intentionally add a minimal root `go.mod` + `go.work` plus a tiny placeholder package (`internal/gowork/`) so repo-root Go tooling can run without turning sysprims into a Go-first repository.
 
-Python/TypeScript bindings do not require equivalent repo-root module scaffolding.
+Python/TypeScript bindings do not require equivalent repo-root module scaffolding for version resolution. However, as we expanded repo-root tooling (goneat `--package-mode`) to include TypeScript checks, we also add a minimal repo-root `package.json` so npm-based tool invocation does not fail with ENOENT when executed from the repository root.
 
 ```bash
 # Build FFI for current platform

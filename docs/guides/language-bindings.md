@@ -111,6 +111,10 @@ repo-root tooling (e.g. goneat / golangci-lint) can lint and typecheck the Go mo
 We also include a tiny placeholder Go package under `internal/gowork/` so repo-root
 `./...` patterns resolve to at least one package.
 
+For TypeScript bindings, we keep a minimal repo-root `package.json` as a tooling shim.
+This is not a published npm package; it exists so repo-root tools that invoke npm (e.g.
+goneat in `--package-mode`) do not error when run from the repository root.
+
 The CI workflow builds the FFI library and runs Go tests on all platforms:
 
 ```yaml
