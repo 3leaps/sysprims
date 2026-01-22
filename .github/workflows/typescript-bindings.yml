@@ -41,7 +41,7 @@ jobs:
             lib_src: target/release/libsysprims_ffi.so
             lib_dst: libsysprims_ffi.so
             build_cmd: cargo build --release -p sysprims-ffi
-          - os: macos-13
+          - os: macos-15
             platform_id: darwin-amd64
             lib_src: target/release/libsysprims_ffi.dylib
             lib_dst: libsysprims_ffi.dylib
@@ -123,7 +123,7 @@ jobs:
           - os: ubuntu-latest
             platform_id: linux-amd64
             shared_name: libsysprims_ffi.so
-          - os: macos-13
+          - os: macos-15
             platform_id: darwin-amd64
             shared_name: libsysprims_ffi.dylib
           - os: macos-14
