@@ -10,6 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-01-22
+
+TypeScript language bindings release. Node.js developers can now integrate sysprims directly.
+
+### Added
+
+- **TypeScript Bindings** (`bindings/typescript/sysprims/`)
+  - koffi-based FFI for Node.js 18+
+  - Cross-platform: linux-amd64, linux-arm64, darwin-arm64, windows-amd64
+  - ABI version verification on library load
+  - CI validates TypeScript bindings on all supported platforms
+
+- **Linux ARM64 CI Coverage**
+  - Added linux-arm64 runner to CI matrix for native ARM64 testing
+
+### Changed
+
+- **CI Platform Matrix**
+  - Replaced darwin-amd64 with linux-arm64 (Intel Mac runners deprecated)
+  - TypeScript CI: linux-amd64, linux-arm64, darwin-arm64, windows-amd64
+
+### Fixed
+
+- **Windows TypeScript Tests**
+  - Cross-platform build scripts replace Unix-only shell commands
+  - `npm run test:ci` now works on Windows runners
+
+- **Parallel Test Flakiness**
+  - Added atomic counter to `unique_marker()` in tree_escape tests
+  - Prevents collisions when tests run in parallel with same PID/timestamp
+
 ## [0.1.3] - 2026-01-19
 
 Go bindings infrastructure release. Prebuilt static libraries now included in release tags.
@@ -154,7 +185,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/3leaps/sysprims/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/3leaps/sysprims/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/3leaps/sysprims/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/3leaps/sysprims/compare/v0.1.0...v0.1.1

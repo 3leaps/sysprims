@@ -6,6 +6,59 @@
 
 ---
 
+## v0.1.4 - 2026-01-22
+
+**Status:** TypeScript Language Bindings Release
+
+Node.js developers can now integrate sysprims directly. This release delivers koffi-based TypeScript bindings with cross-platform support.
+
+### Highlights
+
+- **TypeScript Bindings**: First-class Node.js support via koffi FFI
+- **Cross-Platform**: linux-amd64, linux-arm64, darwin-arm64, windows-amd64
+- **ABI Verification**: Library loader validates ABI version at startup
+- **CI Coverage**: Native ARM64 Linux testing added to CI matrix
+
+### TypeScript Bindings
+
+Install and use in your Node.js projects:
+
+```typescript
+import { procGet, selfPGID, selfSID } from '@3leaps/sysprims';
+
+// Get process info by PID
+const proc = procGet(process.pid);
+console.log(`Process ${proc.pid}: ${proc.name}`);
+
+// Get current process group/session IDs (Unix)
+const pgid = selfPGID();
+const sid = selfSID();
+```
+
+**Platform Support:**
+
+| Platform | Status |
+|----------|--------|
+| Linux x64 (glibc) | Supported |
+| Linux arm64 (glibc) | Supported |
+| macOS arm64 | Supported |
+| Windows x64 | Supported |
+| Linux musl | Not supported |
+
+**Note:** Linux musl (Alpine) is not supported for TypeScript bindings due to glibc dependencies. Use a glibc-based image.
+
+### CI Changes
+
+- Replaced darwin-amd64 (Intel Mac) with linux-arm64 in CI matrix
+- Intel Mac runners deprecated by GitHub Actions
+
+### Bug Fixes
+
+- Windows TypeScript tests now pass (cross-platform build scripts)
+- Fixed parallel test flakiness in tree_escape tests
+
+---
+
 ## v0.1.3 - 2026-01-19
 
 **Status:** Go Bindings Infrastructure Release
@@ -38,11 +91,6 @@ The Go bindings prep is now a manual pre-release step:
 
 See `RELEASE_CHECKLIST.md` for full instructions.
 
-### What's Next
-
-- Python bindings (cffi + wheel packaging)
-- TypeScript bindings (C-ABI approach)
-
 ---
 
 ## v0.1.2 - 2026-01-19
@@ -62,42 +110,6 @@ Security patch addressing a high-severity vulnerability in CI/CD dependencies, p
 - Renamed `RELEASE_TAG` to `SYSPRIMS_RELEASE_TAG` to prevent cross-repo confusion
 - Added goneat/grype integration for SBOM-based vulnerability scanning
 - Updated `GONEAT_VERSION` to v0.5.1
-
----
-
-## v0.1.1 - 2026-01-17
-
-**Status:** First Language Bindings Release
-
-Completes the FFI surface and ships Go bindings with full cross-platform support.
-
-### Highlights
-
-- **Complete FFI Surface**: 14 C-ABI functions covering error handling, signals, process inspection, and timeout execution
-- **Go Bindings**: First-class Go bindings with prebuilt static libraries for 7 platforms
-- **Port-to-PID Lookup**: New `ListeningPorts()` API maps listening sockets to owning processes
-- **CLI Enhancements**: `kill -l` signal listing, `kill --group` for process groups
-
-### Go Bindings
-
-Install via Go modules (requires CGo):
-
-```go
-import "github.com/3leaps/sysprims/bindings/go/sysprims"
-```
-
-**Key APIs:**
-
-| Function | Description |
-|----------|-------------|
-| `Kill(pid, signal)` | Send signal to process |
-| `Terminate(pid)` | Send SIGTERM |
-| `ForceKill(pid)` | Send SIGKILL |
-| `ProcessList(filter)` | List processes with optional filter |
-| `ListeningPorts(filter)` | Map listening ports to PIDs (best-effort) |
-| `RunWithTimeout(cmd, args, timeout, config)` | Run command with timeout and tree-kill |
-
-**Note:** v0.1.1 Go bindings had empty lib directories. Use v0.1.3+ for working `go get`.
 
 ---
 
