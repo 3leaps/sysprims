@@ -15,11 +15,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "clean": "rm -rf dist dist-test",
+    "clean": "node scripts/clean.js",
     "build": "tsc -p tsconfig.build.json",
     "build:test": "tsc -p tsconfig.test.json",
-    "test": "npm run clean && npm run vendor:local && npm run build && npm run build:test && node --test dist-test/**/*.test.js",
-    "test:ci": "npm run clean && npm run build && npm run build:test && node --test dist-test/**/*.test.js",
+    "test": "npm run clean && npm run vendor:local && npm run build && npm run build:test && node scripts/run-tests.js",
+    "test:ci": "npm run clean && npm run build && npm run build:test && node scripts/run-tests.js",
     "vendor:local": "node scripts/vendor-local-libs.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
