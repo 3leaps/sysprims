@@ -27,9 +27,13 @@ jobs:
           TAG="${{ inputs.tag }}"
           VERSION="${TAG#v}"
 
-          echo "Testing: go get github.com/3leaps/sysprims/bindings/go/sysprims@v${VERSION}"
+          # Go bindings are tagged as bindings/go/sysprims/vX.Y.Z
+          GO_MODULE="github.com/3leaps/sysprims/bindings/go/sysprims"
+          GO_VERSION="v${VERSION}"
+
+          echo "Testing: go get ${GO_MODULE}@${GO_VERSION}"
           go mod init test-sysprims
-          go get "github.com/3leaps/sysprims/bindings/go/sysprims@v${VERSION}"
+          go get "${GO_MODULE}@${GO_VERSION}"
 
           echo "Go binding fetch: OK"
 
