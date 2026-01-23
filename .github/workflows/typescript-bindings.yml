@@ -95,7 +95,7 @@ jobs:
 
   test-from-release:
     name: Test From Release (${{ matrix.os }})
-    if: github.event_name == 'workflow_dispatch'
+    if: inputs.tag != ''
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
