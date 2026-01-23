@@ -62,6 +62,20 @@ The `go-bindings.yml` and `typescript-bindings.yml` workflows are **manually tri
 
 Triggered manually or by tag push. Builds all artifacts and publishes releases.
 
+### Release Validation (`validate-release.yml`)
+
+Optional post-publish smoke test to verify released artifacts are accessible and functional.
+
+**What it validates:**
+- Go bindings: Module is fetchable via `go get`
+- TypeScript bindings: FFI bundle downloads and tests pass
+
+**When to run:**
+- After publishing a release (manual spot-check)
+- When investigating user-reported download/installation issues
+
+This workflow is separate from binding workflows because it tests the *published release assets*, not the source code. Binding workflows validate "does the code work?" while this validates "can users download and use the release?"
+
 ## "Stop the Line" Conditions
 
 These conditions MUST block all merges until resolved:
