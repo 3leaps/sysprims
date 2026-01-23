@@ -120,6 +120,7 @@ jobs:
           fi
 
       - name: Package CLI
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -149,6 +150,7 @@ jobs:
           tar -czf sysprims-${VERSION}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
 
       - name: Package FFI
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -176,6 +178,7 @@ jobs:
 
       - name: Package FFI (shared)
         if: ${{ matrix.glibc != '' }}
+        shell: bash
         run: |
           set -euo pipefail
 
