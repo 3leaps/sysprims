@@ -376,6 +376,30 @@ SysprimsErrorCode sysprims_proc_list(const char *filter_json, char **result_json
 SysprimsErrorCode sysprims_proc_get(uint32_t pid, char **result_json_out);
 
 /**
+ * Get the current process group ID (PGID).
+ *
+ * On Unix, this calls `getpgid(0)`.
+ * On Windows, this returns `SYSPRIMS_ERR_NOT_SUPPORTED`.
+ *
+ * # Safety
+ *
+ * - `pgid_out` must be a valid pointer to a `u32`.
+ */
+SysprimsErrorCode sysprims_self_getpgid(unsigned int *pgid_out);
+
+/**
+ * Get the current session ID (SID).
+ *
+ * On Unix, this calls `getsid(0)`.
+ * On Windows, this returns `SYSPRIMS_ERR_NOT_SUPPORTED`.
+ *
+ * # Safety
+ *
+ * - `sid_out` must be a valid pointer to a `u32`.
+ */
+SysprimsErrorCode sysprims_self_getsid(unsigned int *sid_out);
+
+/**
  * Send a signal to a process.
  *
  * On Unix, this calls `kill(pid, signal)`.
