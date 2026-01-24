@@ -20,9 +20,20 @@ type SysprimsLib = {
   sysprims_clear_error: () => void;
   sysprims_free_string: (ptr: KoffiPtr) => void;
 
+  // Process inspection
   sysprims_proc_get: (pid: number, out: KoffiOutArray) => number;
+  sysprims_proc_list: (filterJson: KoffiPtr, out: KoffiOutArray) => number;
+  sysprims_proc_listening_ports: (filterJson: KoffiPtr, out: KoffiOutArray) => number;
+
+  // Self introspection
   sysprims_self_getpgid: (out: KoffiOutArray) => number;
   sysprims_self_getsid: (out: KoffiOutArray) => number;
+
+  // Signals
+  sysprims_signal_send: (pid: number, signal: number) => number;
+  sysprims_signal_send_group: (pgid: number, signal: number) => number;
+  sysprims_terminate: (pid: number) => number;
+  sysprims_force_kill: (pid: number) => number;
 };
 
 function packageRoot(): string {
@@ -84,9 +95,26 @@ export function loadSysprims(): SysprimsLib {
     sysprims_clear_error: lib.func("void sysprims_clear_error(void)"),
     sysprims_free_string,
 
+    // Process inspection
     sysprims_proc_get: lib.func("sysprims_proc_get", "int32", ["uint32", SysprimsOwnedStrOut]),
+    sysprims_proc_list: lib.func("sysprims_proc_list", "int32", ["str", SysprimsOwnedStrOut]),
+    sysprims_proc_listening_ports: lib.func("sysprims_proc_listening_ports", "int32", [
+      "str",
+      SysprimsOwnedStrOut,
+    ]),
+
+    // Self introspection
     sysprims_self_getpgid: lib.func("sysprims_self_getpgid", "int32", [u32Out]),
     sysprims_self_getsid: lib.func("sysprims_self_getsid", "int32", [u32Out]),
+
+    // Signals
+    sysprims_signal_send: lib.func("sysprims_signal_send", "int32", ["uint32", "int32"]),
+    sysprims_signal_send_group: lib.func("sysprims_signal_send_group", "int32", [
+      "uint32",
+      "int32",
+    ]),
+    sysprims_terminate: lib.func("sysprims_terminate", "int32", ["uint32"]),
+    sysprims_force_kill: lib.func("sysprims_force_kill", "int32", ["uint32"]),
   };
 
   const abi = api.sysprims_abi_version();
@@ -121,4 +149,12 @@ export function callU32Out(fn: (outPtr: KoffiOutArray) => number, lib: SysprimsL
   }
 
   return out[0] >>> 0;
+}
+
+export function callVoid(fn: () => number, lib: SysprimsLib): void {
+  lib.sysprims_clear_error();
+  const code = fn();
+  if (code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(lib, code);
+  }
 }

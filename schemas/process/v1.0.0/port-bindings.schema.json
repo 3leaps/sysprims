@@ -54,7 +54,7 @@
           "maximum": 4294967295
         },
         "process": {
-          "$ref": "process-info.schema.json"
+          "$ref": "process-info.schema.json#/definitions/process_info"
         }
       }
     }
