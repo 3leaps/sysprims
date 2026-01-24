@@ -19,20 +19,19 @@ import {
 // Test Helpers
 // -----------------------------------------------------------------------------
 
-/**
- * Spawn a short-lived child process and return its PID after it exits.
- * This provides a deterministic "dead PID" for NotFound assertions.
- */
-async function getDeadPid(): Promise<number> {
-  const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
-    stdio: "ignore",
-  });
-  const pid = child.pid;
-  if (pid === undefined) {
-    throw new Error("Failed to spawn child process");
-  }
-  await once(child, "exit");
-  return pid;
+async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<void> {
+  await Promise.race([
+    once(child, "exit"),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("child did not exit in time")), timeoutMs),
+    ),
+  ]);
+}
+
+function spawnLongRunningChild(): ReturnType<typeof spawn> {
+  // Long-running process we fully control.
+  // Using setInterval keeps the process alive until terminated.
+  return spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
 }
 
 // -----------------------------------------------------------------------------
@@ -117,22 +116,43 @@ test("selfPGID/selfSID are > 0 on Unix or NotSupported on Windows", () => {
 // Signal Tests (error-path only, using spawn-and-exit for safe PIDs)
 // -----------------------------------------------------------------------------
 
-test("terminate throws NotFound for exited process", async () => {
-  const deadPid = await getDeadPid();
-
+test("terminate rejects pid 0", () => {
   assert.throws(
-    () => terminate(deadPid),
-    (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.NotFound,
-    "terminate should throw NotFound for exited process",
+    () => terminate(0),
+    (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.InvalidArgument,
   );
 });
 
-test("forceKill throws NotFound for exited process", async () => {
-  const deadPid = await getDeadPid();
-
+test("forceKill rejects pid 0", () => {
   assert.throws(
-    () => forceKill(deadPid),
-    (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.NotFound,
-    "forceKill should throw NotFound for exited process",
+    () => forceKill(0),
+    (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.InvalidArgument,
   );
+});
+
+test("terminate kills a spawned child process", async () => {
+  const child = spawnLongRunningChild();
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error("Failed to spawn child process");
+  }
+
+  // Give it a moment to start.
+  await new Promise((r) => setTimeout(r, 50));
+
+  terminate(pid);
+  await waitForExit(child, 5000);
+});
+
+test("forceKill kills a spawned child process", async () => {
+  const child = spawnLongRunningChild();
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error("Failed to spawn child process");
+  }
+
+  await new Promise((r) => setTimeout(r, 50));
+
+  forceKill(pid);
+  await waitForExit(child, 5000);
 });
