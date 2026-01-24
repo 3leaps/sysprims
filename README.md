@@ -268,9 +268,9 @@ if (err == SYSPRIMS_OK) {
 
 | Language | Status | Package |
 |----------|--------|---------|
-| Go | ✅ Available | `github.com/3leaps/sysprims/bindings/go/sysprims` |
-| Python | 🚧 Planned (v0.1.x) | `pip install sysprims` |
-| TypeScript | 🚧 Planned (v0.1.x) | `npm install @3leaps/sysprims` |
+| Go | Available | `github.com/3leaps/sysprims/bindings/go/sysprims` |
+| TypeScript | Available | `npm install @3leaps/sysprims` |
+| Python | Planned (v0.2.x) | `pip install sysprims` |
 
 ### As a Go Library
 
@@ -295,6 +295,27 @@ snap, _ := sysprims.ListeningPorts(&sysprims.PortFilter{
     LocalPort: &port,
 })
 ```
+
+### As a TypeScript Library
+
+```typescript
+import { processList, listeningPorts, terminate, procGet } from '@3leaps/sysprims';
+
+// Get process info by PID
+const proc = procGet(process.pid);
+console.log(`Process ${proc.pid}: ${proc.name}`);
+
+// List processes matching a filter
+const nginx = processList({ name_contains: "nginx" });
+
+// Map listening port to owning process
+const http = listeningPorts({ local_port: 8080 });
+
+// Gracefully terminate a process
+terminate(pid);
+```
+
+**Note:** TypeScript bindings require glibc-based Linux (Alpine/musl not supported), macOS (x64 or arm64), or Windows x64.
 
 See [docs/guides/language-bindings.md](docs/guides/language-bindings.md) for build requirements and platform details.
 

@@ -6,6 +6,56 @@
 
 ---
 
+## v0.1.5 - 2026-01-24
+
+**Status:** TypeScript Bindings Parity Release (proc/ports/signals)
+
+Node.js developers now have access to process inspection, port mapping, and signal APIs. This release achieves parity with Go bindings for these core surfaces.
+
+### Highlights
+
+- **TypeScript Parity**: Process listing, port inspection, and signal operations
+- **Full Type Definitions**: All schemas have corresponding TypeScript types
+- **Windows Stability**: Signal tests no longer flaky on Windows CI
+
+### New TypeScript API
+
+| Function | Description |
+|----------|-------------|
+| `processList(filter?)` | List running processes with filtering |
+| `listeningPorts(filter?)` | Map listening ports to processes |
+| `signalSend(pid, signal)` | Send signal to process |
+| `signalSendGroup(pgid, signal)` | Send signal to process group (Unix) |
+| `terminate(pid)` | Graceful termination (SIGTERM on Unix, TerminateProcess on Windows) |
+| `forceKill(pid)` | Immediate kill (SIGKILL on Unix, TerminateProcess on Windows) |
+
+### Example Usage
+
+```typescript
+import { processList, listeningPorts, terminate } from '@3leaps/sysprims';
+
+// List all nginx processes
+const nginx = processList({ name_contains: "nginx" });
+for (const proc of nginx.processes) {
+  console.log(`${proc.pid}: ${proc.name} (${proc.cpu_percent}% CPU)`);
+}
+
+// Find what's listening on port 8080
+const http = listeningPorts({ local_port: 8080 });
+for (const binding of http.bindings) {
+  console.log(`Port ${binding.local_port}: PID ${binding.pid}`);
+}
+
+// Gracefully terminate a process
+terminate(1234);
+```
+
+### Bug Fixes
+
+- Windows signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
+
+---
+
 ## v0.1.4 - 2026-01-22
 
 **Status:** TypeScript Language Bindings Release
@@ -45,7 +95,7 @@ const sid = selfSID();
 | Windows x64 | Supported |
 | Linux musl | Not supported |
 
-**Note:** Linux musl (Alpine) is not supported for TypeScript bindings due to glibc dependencies. Use a glibc-based image.
+**Note:** Linux musl (Alpine) is not supported for TypeScript bindings due to glibc dependencies.
 
 ### CI Changes
 
@@ -90,26 +140,6 @@ The Go bindings prep is now a manual pre-release step:
 4. Push tags; release workflow verifies libs are present
 
 See `RELEASE_CHECKLIST.md` for full instructions.
-
----
-
-## v0.1.2 - 2026-01-19
-
-**Status:** Security & CI/CD Maintenance Release
-
-Security patch addressing a high-severity vulnerability in CI/CD dependencies, plus infrastructure improvements.
-
-### Security
-
-- **GHSA-cxww-7g56-2vh6** (High): Updated `actions/download-artifact` from `@v4` to `@v4.1.3`
-  - Path traversal vulnerability in GitHub Actions artifact downloads
-  - Impact: CI/CD pipeline only; no impact on library code or released binaries
-
-### CI/CD Improvements
-
-- Renamed `RELEASE_TAG` to `SYSPRIMS_RELEASE_TAG` to prevent cross-repo confusion
-- Added goneat/grype integration for SBOM-based vulnerability scanning
-- Updated `GONEAT_VERSION` to v0.5.1
 
 ---
 

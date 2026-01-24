@@ -4,10 +4,12 @@ This guide covers building and using sysprims language bindings (Go, Python, Typ
 
 ## Overview
 
-sysprims provides language bindings via prebuilt static FFI libraries. Each binding:
-- Ships with prebuilt libraries for all supported platforms
-- Links statically to avoid runtime dependencies
-- Provides idiomatic API for the target language
+sysprims provides language bindings via prebuilt FFI libraries:
+
+- **Go**: Static libraries (`libsysprims_ffi.a`) linked at compile time
+- **TypeScript**: Shared libraries (`.so`/`.dylib`/`.dll`) loaded at runtime via koffi
+
+Each binding ships with prebuilt libraries for all supported platforms and provides idiomatic API for the target language.
 
 ## Platform Matrix
 
@@ -21,11 +23,11 @@ sysprims provides language bindings via prebuilt static FFI libraries. Each bind
 | macOS arm64 | `aarch64-apple-darwin` | `libsysprims_ffi.a` | `-lm -lpthread` |
 | Windows x64 | `x86_64-pc-windows-gnu` | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
 
-## Windows: MinGW Requirement
+## Windows: MinGW Requirement (Go Bindings)
 
-**Important**: Windows builds use the GNU target (`x86_64-pc-windows-gnu`), not MSVC.
+**Important**: Go bindings on Windows use the GNU target (`x86_64-pc-windows-gnu`), not MSVC.
 
-### Why MinGW?
+### Why MinGW for Go?
 
 Go's CGo requires MinGW (GCC) on Windows. MSVC-produced `.lib` files are not compatible with MinGW's linker:
 
@@ -33,12 +35,16 @@ Go's CGo requires MinGW (GCC) on Windows. MSVC-produced `.lib` files are not com
 - MSVC `.lib` files use different ABI/format than GNU `.a` files
 - Mixing MSVC static libs with MinGW linker fails
 
-### What This Means for Users
+### What This Means for Go Users
 
 - The FFI library is `libsysprims_ffi.a` (not `.lib`) on Windows
 - Go binaries built with these bindings are **native Windows executables**
 - The Go binary does NOT require MinGW at runtime
 - The MinGW requirement only affects the build toolchain
+
+### TypeScript on Windows
+
+TypeScript bindings use MSVC-built shared libraries (`sysprims_ffi.dll`). No MinGW is required for TypeScript users.
 
 ### Licensing
 
@@ -162,6 +168,86 @@ go get github.com/3leaps/sysprims/bindings/go/sysprims@vX.Y.Z
 and get a proper semantic version instead of a pseudo-version.
 
 See `docs/architecture/adr/0012-language-bindings-distribution.md` for the policy.
+
+## TypeScript Bindings
+
+TypeScript bindings use [koffi](https://koffi.dev/) to call the sysprims C-ABI shared library.
+
+### Platform Support
+
+| Platform | Status |
+|----------|--------|
+| Linux x64 (glibc) | Supported |
+| Linux arm64 (glibc) | Supported |
+| macOS x64 | Supported |
+| macOS arm64 | Supported |
+| Windows x64 | Supported |
+| Linux musl (Alpine) | Not supported |
+
+**Note:** TypeScript bindings require glibc. Linux musl (Alpine) is not supported due to glibc dependencies in koffi.
+
+### Installation
+
+```bash
+npm install @3leaps/sysprims
+```
+
+### API Surface
+
+The TypeScript bindings provide parity with Go bindings:
+
+| Function | Description |
+|----------|-------------|
+| `procGet(pid)` | Get process info by PID |
+| `processList(filter?)` | List processes with optional filtering |
+| `listeningPorts(filter?)` | Map listening ports to processes |
+| `selfPGID()` | Get current process group ID (Unix) |
+| `selfSID()` | Get current session ID (Unix) |
+| `signalSend(pid, signal)` | Send signal to process |
+| `signalSendGroup(pgid, signal)` | Send signal to process group (Unix) |
+| `terminate(pid)` | Graceful termination |
+| `forceKill(pid)` | Immediate kill |
+
+### Filter Conventions
+
+Filter fields use **snake_case** to match FFI/schema conventions directly:
+
+```typescript
+// ProcessFilter
+const filter = {
+  name_contains: "nginx",    // substring match
+  cpu_above: 50,             // percentage
+  memory_above_kb: 100000    // kilobytes
+};
+
+// PortFilter
+const portFilter = {
+  protocol: "tcp",
+  local_port: 8080
+};
+```
+
+### How It Works
+
+At load time, the binding:
+
+1. Detects the current platform (`process.platform` + `process.arch`)
+2. Loads the appropriate shared library from `_lib/<platform>/`
+3. Verifies ABI version matches expected value
+4. Exposes typed functions to JavaScript
+
+### Local Development
+
+```bash
+# Build the shared FFI library for your platform first
+make build-local-ffi-shared
+
+# Then build and test the TypeScript bindings
+cd bindings/typescript/sysprims
+npm install
+npm run build
+npm test
+```
 
 ## Adding New Features
 
