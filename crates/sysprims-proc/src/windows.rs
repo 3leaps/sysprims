@@ -16,7 +16,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use sysprims_core::{SysprimsError, SysprimsResult};
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER,
-    INVALID_HANDLE_VALUE, NO_ERROR,
+    INVALID_HANDLE_VALUE, NO_ERROR, SYNCHRONIZE,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID,
@@ -34,7 +34,7 @@ use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_ME
 use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, GetProcessTimes, OpenProcess, QueryFullProcessImageNameW,
     WaitForSingleObject, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_VM_READ, SYNCHRONIZE,
+    PROCESS_VM_READ,
 };
 
 // ============================================================================
