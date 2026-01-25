@@ -7,6 +7,7 @@ use std::os::windows::io::AsRawHandle;
 use std::process::{Child, Command};
 use std::ptr;
 use std::time::{Duration, Instant};
+use std::{collections::HashMap, sync::Mutex};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::JobObjects::{
@@ -14,10 +15,59 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE,
+};
 
 use sysprims_core::{SysprimsError, SysprimsResult};
 
-use crate::{GroupingMode, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
+use crate::{
+    GroupingMode, SpawnInGroupConfig, SpawnInGroupResult, TimeoutConfig, TimeoutOutcome,
+    TreeKillReliability,
+};
+use sysprims_core::get_platform;
+use sysprims_core::schema::SPAWN_IN_GROUP_RESULT_V1;
+
+static JOB_REGISTRY: std::sync::OnceLock<Mutex<HashMap<u32, HANDLE>>> = std::sync::OnceLock::new();
+
+fn registry() -> &'static Mutex<HashMap<u32, HANDLE>> {
+    JOB_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_job(pid: u32, job: HANDLE) {
+    let mut map = registry().lock().unwrap();
+    map.insert(pid, job);
+}
+
+fn take_job(pid: u32) -> Option<HANDLE> {
+    let mut map = registry().lock().unwrap();
+    map.remove(&pid)
+}
+
+pub(crate) fn terminate_job_for_pid(pid: u32) -> Option<()> {
+    let job = take_job(pid)?;
+    unsafe {
+        // TerminateJobObject exit code is arbitrary
+        TerminateJobObject(job, 1);
+        CloseHandle(job);
+    }
+    Some(())
+}
+
+fn spawn_cleanup_thread(pid: u32) {
+    std::thread::spawn(move || unsafe {
+        // Best-effort: if we can open the process, wait for it.
+        let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle != 0 {
+            let _ = WaitForSingleObject(handle, u32::MAX);
+            CloseHandle(handle);
+        }
+        // Close the job handle if still registered.
+        if let Some(job) = take_job(pid) {
+            CloseHandle(job);
+        }
+    });
+}
 
 /// Polling interval for checking if child has exited.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -138,6 +188,85 @@ fn create_job_object() -> SysprimsResult<HANDLE> {
 
         Ok(job)
     }
+}
+
+pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult> {
+    let command = config.argv[0].as_str();
+    if command.is_empty() {
+        return Err(SysprimsError::invalid_argument(
+            "argv[0] (command) must not be empty",
+        ));
+    }
+
+    let mut cmd = Command::new(command);
+    for arg in config.argv.iter().skip(1) {
+        cmd.arg(arg);
+    }
+
+    if let Some(cwd) = config.cwd.as_deref() {
+        if !cwd.is_empty() {
+            cmd.current_dir(cwd);
+        }
+    }
+
+    if let Some(env) = config.env {
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+    }
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut reliability = TreeKillReliability::Guaranteed;
+
+    let mut job_handle = match create_job_object() {
+        Ok(h) => Some(h),
+        Err(_) => {
+            reliability = TreeKillReliability::BestEffort;
+            warnings.push("Job Object creation failed; spawning without grouping".to_string());
+            None
+        }
+    };
+
+    let mut child = cmd.spawn().map_err(|e| {
+        if let Some(job) = job_handle {
+            unsafe { CloseHandle(job) };
+        }
+        if e.kind() == std::io::ErrorKind::NotFound {
+            SysprimsError::not_found_command(command)
+        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+            SysprimsError::permission_denied_command(command)
+        } else {
+            SysprimsError::spawn_failed(command, e.to_string())
+        }
+    })?;
+
+    let pid = child.id();
+
+    if let Some(job) = job_handle {
+        let process_handle = child.as_raw_handle() as HANDLE;
+        let assigned = unsafe { AssignProcessToJobObject(job, process_handle) };
+        if assigned == 0 {
+            reliability = TreeKillReliability::BestEffort;
+            warnings.push("AssignProcessToJobObject failed; spawning without grouping".to_string());
+            unsafe { CloseHandle(job) };
+        } else {
+            register_job(pid, job);
+            spawn_cleanup_thread(pid);
+        }
+    }
+
+    Ok(SpawnInGroupResult {
+        schema_id: SPAWN_IN_GROUP_RESULT_V1,
+        timestamp: crate::current_timestamp(),
+        platform: get_platform(),
+        pid,
+        pgid: None,
+        tree_kill_reliability: match reliability {
+            TreeKillReliability::Guaranteed => "guaranteed".to_string(),
+            TreeKillReliability::BestEffort => "best_effort".to_string(),
+        },
+        warnings,
+    })
 }
 
 /// Kill the process tree.

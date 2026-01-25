@@ -517,6 +517,24 @@ SysprimsErrorCode sysprims_terminate(uint32_t pid);
 SysprimsErrorCode sysprims_force_kill(uint32_t pid);
 
 /**
+ * Spawn a process in a new process group (Unix) or Job Object (Windows).
+ *
+ * Returns a JSON object matching `spawn-in-group-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `config_json` - Spawn config JSON (must not be NULL)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `config_json` must point to a valid UTF-8 C string
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_spawn_in_group(const char *config_json, char **result_json_out);
+
+/**
  * Run a command with timeout.
  *
  * Spawns the command and waits for it to complete or timeout. If the command

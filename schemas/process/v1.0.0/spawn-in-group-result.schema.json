@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json",
+  "title": "sysprims spawn in group result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "pid",
+    "tree_kill_reliability",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json"
+    },
+    "timestamp": { "type": "string" },
+    "platform": { "type": "string" },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "pgid": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "tree_kill_reliability": {
+      "type": "string",
+      "enum": ["guaranteed", "best_effort"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

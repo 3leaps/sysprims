@@ -11,9 +11,70 @@ use libc::{killpg, SIGKILL};
 use sysprims_core::{SysprimsError, SysprimsResult};
 
 use crate::{GroupingMode, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
+use crate::{SpawnInGroupConfig, SpawnInGroupResult};
+use sysprims_core::get_platform;
+use sysprims_core::schema::SPAWN_IN_GROUP_RESULT_V1;
 
 /// Polling interval for checking if child has exited.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult> {
+    let command = config.argv[0].as_str();
+    if command.is_empty() {
+        return Err(SysprimsError::invalid_argument(
+            "argv[0] (command) must not be empty",
+        ));
+    }
+
+    let args: Vec<&str> = config.argv.iter().skip(1).map(|s| s.as_str()).collect();
+
+    let mut cmd = Command::new(command);
+    cmd.args(args);
+
+    if let Some(cwd) = config.cwd.as_deref() {
+        if !cwd.is_empty() {
+            cmd.current_dir(cwd);
+        }
+    }
+
+    if let Some(env) = config.env {
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+    }
+
+    // New process group: child becomes leader (pid == pgid).
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
+    let child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            SysprimsError::not_found_command(command)
+        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+            SysprimsError::permission_denied_command(command)
+        } else {
+            SysprimsError::spawn_failed(command, e.to_string())
+        }
+    })?;
+
+    let pid = child.id();
+
+    Ok(SpawnInGroupResult {
+        schema_id: SPAWN_IN_GROUP_RESULT_V1,
+        timestamp: crate::current_timestamp(),
+        platform: get_platform(),
+        pid,
+        pgid: Some(pid),
+        tree_kill_reliability: "guaranteed".to_string(),
+        warnings: vec![],
+    })
+}
 
 pub fn run_with_timeout_impl(
     command: &str,

@@ -32,6 +32,7 @@ mod error;
 mod proc;
 mod session;
 mod signal;
+mod spawn;
 mod timeout;
 
 // Re-export error types at crate root
@@ -46,6 +47,7 @@ pub use session::{sysprims_self_getpgid, sysprims_self_getsid};
 pub use signal::{
     sysprims_force_kill, sysprims_signal_send, sysprims_signal_send_group, sysprims_terminate,
 };
+pub use spawn::sysprims_spawn_in_group;
 pub use timeout::{
     sysprims_terminate_tree, sysprims_timeout_run, SysprimsGroupingMode, SysprimsTimeoutConfig,
 };

@@ -88,6 +88,25 @@ export interface TerminateTreeResult {
   warnings: string[];
 }
 
+// Spawn in group
+
+export interface SpawnInGroupConfig {
+  schema_id?: string;
+  argv: string[];
+  cwd?: string | null;
+  env?: Record<string, string> | null;
+}
+
+export interface SpawnInGroupResult {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  pid: number;
+  pgid?: number | null;
+  tree_kill_reliability: "guaranteed" | "best_effort";
+  warnings: string[];
+}
+
 // Port types
 
 export type Protocol = "tcp" | "udp";

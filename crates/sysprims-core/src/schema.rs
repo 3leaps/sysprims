@@ -113,6 +113,18 @@ pub const TERMINATE_TREE_CONFIG_V1: &str =
 pub const TERMINATE_TREE_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json";
 
+/// Schema ID for spawn-in-group config JSON input (v1.0.0).
+///
+/// Schema location: `schemas/process/v1.0.0/spawn-in-group-config.schema.json`
+pub const SPAWN_IN_GROUP_CONFIG_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json";
+
+/// Schema ID for spawn-in-group result JSON output (v1.0.0).
+///
+/// Schema location: `schemas/process/v1.0.0/spawn-in-group-result.schema.json`
+pub const SPAWN_IN_GROUP_RESULT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json";
+
 // ============================================================================
 // Schema Host Constants
 // ============================================================================
@@ -138,6 +150,8 @@ mod tests {
         assert!(WAIT_PID_RESULT_V1.starts_with("https://"));
         assert!(TERMINATE_TREE_CONFIG_V1.starts_with("https://"));
         assert!(TERMINATE_TREE_RESULT_V1.starts_with("https://"));
+        assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with("https://"));
+        assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with("https://"));
     }
 
     #[test]
@@ -177,6 +191,14 @@ mod tests {
             TERMINATE_TREE_RESULT_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
+        assert!(
+            SPAWN_IN_GROUP_CONFIG_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            SPAWN_IN_GROUP_RESULT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
     }
 
     #[test]
@@ -192,6 +214,8 @@ mod tests {
         assert!(WAIT_PID_RESULT_V1.ends_with(".schema.json"));
         assert!(TERMINATE_TREE_CONFIG_V1.ends_with(".schema.json"));
         assert!(TERMINATE_TREE_RESULT_V1.ends_with(".schema.json"));
+        assert!(SPAWN_IN_GROUP_CONFIG_V1.ends_with(".schema.json"));
+        assert!(SPAWN_IN_GROUP_RESULT_V1.ends_with(".schema.json"));
 
         // All v1.0.0 schemas should have version in path
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
@@ -202,6 +226,8 @@ mod tests {
         assert!(WAIT_PID_RESULT_V1.contains("/v1.0.0/"));
         assert!(TERMINATE_TREE_CONFIG_V1.contains("/v1.0.0/"));
         assert!(TERMINATE_TREE_RESULT_V1.contains("/v1.0.0/"));
+        assert!(SPAWN_IN_GROUP_CONFIG_V1.contains("/v1.0.0/"));
+        assert!(SPAWN_IN_GROUP_RESULT_V1.contains("/v1.0.0/"));
     }
 
     #[test]
@@ -239,6 +265,14 @@ mod tests {
             TERMINATE_TREE_RESULT_V1.contains("/process/"),
             "terminate-tree-result schema should have process topic"
         );
+        assert!(
+            SPAWN_IN_GROUP_CONFIG_V1.contains("/process/"),
+            "spawn-in-group-config schema should have process topic"
+        );
+        assert!(
+            SPAWN_IN_GROUP_RESULT_V1.contains("/process/"),
+            "spawn-in-group-result schema should have process topic"
+        );
     }
 
     #[test]
@@ -252,6 +286,8 @@ mod tests {
             WAIT_PID_RESULT_V1,
             TERMINATE_TREE_CONFIG_V1,
             TERMINATE_TREE_RESULT_V1,
+            SPAWN_IN_GROUP_CONFIG_V1,
+            SPAWN_IN_GROUP_RESULT_V1,
         ];
 
         // Check all pairs are different
@@ -279,5 +315,7 @@ mod tests {
         assert!(WAIT_PID_RESULT_V1.starts_with(&prefix));
         assert!(TERMINATE_TREE_CONFIG_V1.starts_with(&prefix));
         assert!(TERMINATE_TREE_RESULT_V1.starts_with(&prefix));
+        assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with(&prefix));
+        assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with(&prefix));
     }
 }

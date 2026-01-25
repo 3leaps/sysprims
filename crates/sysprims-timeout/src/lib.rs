@@ -203,7 +203,58 @@ pub struct TerminateTreeResult {
     pub warnings: Vec<String>,
 }
 
-fn current_timestamp() -> String {
+// =============================================================================
+// Spawn In Group / Job
+// =============================================================================
+
+/// Spawn a process in a new process group (Unix) or Job Object (Windows).
+///
+/// This is designed for supervisors that want kill-tree-safe jobs without
+/// using `run_with_timeout`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnInGroupConfig {
+    /// argv[0] is the command, argv[1..] are args.
+    pub argv: Vec<String>,
+
+    /// Optional working directory.
+    #[serde(default)]
+    pub cwd: Option<String>,
+
+    /// Environment variable overrides/additions.
+    ///
+    /// By default the child inherits the parent's environment.
+    #[serde(default)]
+    pub env: Option<std::collections::BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpawnInGroupResult {
+    pub schema_id: &'static str,
+    pub timestamp: String,
+    pub platform: &'static str,
+    pub pid: u32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pgid: Option<u32>,
+
+    pub tree_kill_reliability: String,
+    pub warnings: Vec<String>,
+}
+
+pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult> {
+    if config.argv.is_empty() {
+        return Err(SysprimsError::invalid_argument("argv must not be empty"));
+    }
+
+    #[cfg(unix)]
+    return unix::spawn_in_group_impl(config);
+
+    #[cfg(windows)]
+    return windows::spawn_in_group_impl(config);
+}
+
+pub(crate) fn current_timestamp() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
@@ -257,12 +308,47 @@ pub fn terminate_tree(
 
     #[cfg(windows)]
     {
+        // If this PID was spawned via spawn_in_group_impl(), we may have a Job Object.
+        // Prefer terminating the Job Object for better tree coverage.
+        if crate::windows::terminate_job_for_pid(pid).is_some() {
+            reliability = TreeKillReliability::Guaranteed;
+            warnings.push("Terminated via Job Object (spawn_in_group)".to_string());
+
+            let grace_wait = wait_pid(pid, Duration::from_millis(config.grace_timeout_ms))?;
+            return Ok(TerminateTreeResult {
+                schema_id: TERMINATE_TREE_RESULT_V1,
+                timestamp: current_timestamp(),
+                platform: get_platform(),
+                pid,
+                pgid: None,
+                signal_sent: config.signal,
+                kill_signal: None,
+                escalated: false,
+                exited: grace_wait.exited,
+                timed_out: grace_wait.timed_out,
+                tree_kill_reliability: "guaranteed".to_string(),
+                warnings,
+            });
+        }
+
         warnings.push("Windows PID termination is best-effort without Job Object".to_string());
     }
 
     // Step 1: send graceful signal
+    // If group kill fails (e.g. permission-limited), fall back to PID kill.
     if let Some(g) = pgid {
-        sysprims_signal::killpg(g, config.signal)?;
+        match sysprims_signal::killpg(g, config.signal) {
+            Ok(()) => {}
+            Err(SysprimsError::PermissionDenied { .. }) => {
+                warnings.push(
+                    "Permission denied signaling process group; falling back to pid".to_string(),
+                );
+                pgid = None;
+                reliability = TreeKillReliability::BestEffort;
+                sysprims_signal::kill(pid, config.signal)?;
+            }
+            Err(e) => return Err(e),
+        }
     } else {
         sysprims_signal::kill(pid, config.signal)?;
     }
@@ -292,7 +378,19 @@ pub fn terminate_tree(
 
     // Step 3: escalate
     if let Some(g) = pgid {
-        sysprims_signal::killpg(g, config.kill_signal)?;
+        match sysprims_signal::killpg(g, config.kill_signal) {
+            Ok(()) => {}
+            Err(SysprimsError::PermissionDenied { .. }) => {
+                warnings.push(
+                    "Permission denied signaling process group (kill); falling back to pid"
+                        .to_string(),
+                );
+                pgid = None;
+                reliability = TreeKillReliability::BestEffort;
+                sysprims_signal::kill(pid, config.kill_signal)?;
+            }
+            Err(e) => return Err(e),
+        }
     } else {
         sysprims_signal::kill(pid, config.kill_signal)?;
     }

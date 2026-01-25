@@ -15,6 +15,7 @@ import {
   terminate,
   waitPID,
   terminateTree,
+  spawnInGroup,
 } from "../src/index";
 
 // -----------------------------------------------------------------------------
@@ -182,4 +183,15 @@ test("terminateTree kills a spawned child process", async () => {
     once(child, "exit"),
     new Promise((_, reject) => setTimeout(() => reject(new Error("child did not exit")), 5000)),
   ]);
+});
+
+test("spawnInGroup returns a pid", () => {
+  // This is a smoke test; we terminate via terminateTree to avoid leaking processes.
+  const argv =
+    process.platform === "win32"
+      ? ["cmd", "/C", "ping -n 60 127.0.0.1 >NUL"]
+      : ["sleep", "60"];
+  const r = spawnInGroup({ argv });
+  assert.ok(r.pid > 0);
+  terminateTree(r.pid, { grace_timeout_ms: 100, kill_timeout_ms: 1000 });
 });

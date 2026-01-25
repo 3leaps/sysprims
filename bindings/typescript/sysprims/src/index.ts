@@ -9,6 +9,8 @@ import type {
   WaitPidResult,
   TerminateTreeConfig,
   TerminateTreeResult,
+  SpawnInGroupConfig,
+  SpawnInGroupResult,
 } from "./types";
 
 export { SysprimsError, SysprimsErrorCode };
@@ -24,6 +26,8 @@ export type {
   WaitPidResult,
   TerminateTreeConfig,
   TerminateTreeResult,
+  SpawnInGroupConfig,
+  SpawnInGroupResult,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -261,4 +265,19 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
     (out) => lib.sysprims_terminate_tree(pid >>> 0, JSON.stringify(cfg), out),
     lib,
   ) as TerminateTreeResult;
+}
+
+// -----------------------------------------------------------------------------
+// Spawn In Group
+// -----------------------------------------------------------------------------
+
+export function spawnInGroup(config: SpawnInGroupConfig): SpawnInGroupResult {
+  const lib = loadSysprims();
+  const cfg: SpawnInGroupConfig = {
+    schema_id:
+      config.schema_id ||
+      "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
+    ...config,
+  };
+  return callJsonReturn((out) => lib.sysprims_spawn_in_group(JSON.stringify(cfg), out), lib) as SpawnInGroupResult;
 }

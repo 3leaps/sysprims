@@ -38,6 +38,9 @@ type SysprimsLib = {
 
   // Terminate tree
   sysprims_terminate_tree: (pid: number, configJson: KoffiPtr, out: KoffiOutArray) => number;
+
+  // Spawn in group
+  sysprims_spawn_in_group: (configJson: KoffiPtr, out: KoffiOutArray) => number;
 };
 
 function packageRoot(): string {
@@ -127,6 +130,11 @@ export function loadSysprims(): SysprimsLib {
 
     sysprims_terminate_tree: lib.func("sysprims_terminate_tree", "int32", [
       "uint32",
+      "str",
+      SysprimsOwnedStrOut,
+    ]),
+
+    sysprims_spawn_in_group: lib.func("sysprims_spawn_in_group", "int32", [
       "str",
       SysprimsOwnedStrOut,
     ]),
