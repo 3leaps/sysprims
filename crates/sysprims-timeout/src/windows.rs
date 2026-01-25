@@ -227,7 +227,7 @@ pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnIn
     let mut warnings: Vec<String> = Vec::new();
     let mut reliability = TreeKillReliability::Guaranteed;
 
-    let mut job_handle = match create_job_object() {
+    let job_handle = match create_job_object() {
         Ok(h) => Some(h),
         Err(_) => {
             reliability = TreeKillReliability::BestEffort;
@@ -236,7 +236,7 @@ pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnIn
         }
     };
 
-    let mut child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         if let Some(job) = job_handle {
             unsafe { CloseHandle(job) };
         }

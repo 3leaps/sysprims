@@ -311,7 +311,6 @@ pub fn terminate_tree(
         // If this PID was spawned via spawn_in_group_impl(), we may have a Job Object.
         // Prefer terminating the Job Object for better tree coverage.
         if crate::windows::terminate_job_for_pid(pid).is_some() {
-            reliability = TreeKillReliability::Guaranteed;
             warnings.push("Terminated via Job Object (spawn_in_group)".to_string());
 
             let grace_wait = wait_pid(pid, Duration::from_millis(config.grace_timeout_ms))?;
