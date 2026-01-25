@@ -132,5 +132,5 @@ Not chosen as a requirement:
 - `scripts/generate-checksums.sh`
 - `RELEASE_CHECKLIST.md`
 - `Makefile` release targets (`release-download`, `release-checksums`, `release-sign`, `release-verify`)
-- ADR-0004: FFI Design (`docs/architecture/adr/0004-ffi-design.md`)
-- ADR-0012: Language Bindings Distribution (`docs/architecture/adr/0012-language-bindings-distribution.md`)
+- ADR-0004: FFI Design (`docs/decisions/ADR-0004-ffi-design.md`)
+- ADR-0012: Language Bindings Distribution (`docs/decisions/ADR-0012-language-bindings-distribution.md`)

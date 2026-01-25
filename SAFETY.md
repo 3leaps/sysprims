@@ -61,7 +61,7 @@ All of the following must pass in CI:
 3. Verify timeout kills all descendants under Group-by-Default policy
 4. Assert: no orphaned processes remain
 
-See [ADR-0003](docs/architecture/adr/0003-group-by-default.md) for the core differentiator.
+See [ADR-0003](docs/decisions/ADR-0003-group-by-default.md) for the core differentiator.
 
 **FFI memory ownership**:
 
@@ -69,7 +69,7 @@ See [ADR-0003](docs/architecture/adr/0003-group-by-default.md) for the core diff
 2. Free via `sysprims_free_string()` only
 3. Verify no leaks, no double-frees, no use-after-free
 
-See [ADR-0004](docs/architecture/adr/0004-ffi-design.md) for FFI contracts.
+See [ADR-0004](docs/decisions/ADR-0004-ffi-design.md) for FFI contracts.
 
 ## Release Safety
 
@@ -84,6 +84,6 @@ Release pipeline must:
 
 - [AGENTS.md](AGENTS.md) - Agent operational protocols
 - [MAINTAINERS.md](MAINTAINERS.md) - Review requirements
-- [ADR-0001](docs/architecture/adr/0001-license-policy.md) - License policy
-- [ADR-0003](docs/architecture/adr/0003-group-by-default.md) - Group-by-default (core differentiator)
-- [ADR-0004](docs/architecture/adr/0004-ffi-design.md) - FFI design
+- [ADR-0001](docs/decisions/ADR-0001-license-policy.md) - License policy
+- [ADR-0003](docs/decisions/ADR-0003-group-by-default.md) - Group-by-default (core differentiator)
+- [ADR-0004](docs/decisions/ADR-0004-ffi-design.md) - FFI design

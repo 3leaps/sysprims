@@ -10,7 +10,7 @@ status: "draft"
 
 This policy codifies the concrete implementation details for release and preview artifacts.
 
-Principles are defined in `docs/architecture/adr/0013-release-asset-publishing-and-verification.md`.
+Principles are defined in `docs/decisions/ADR-0013-release-asset-publishing-and-verification.md`.
 
 ## Directories
 
@@ -82,4 +82,4 @@ The `sysprims-ffi-<version>-libs.tar.gz` bundle is expected to contain:
 - Static libraries for binding consumers that link at build time (Go/cgo)
 - Shared libraries for binding consumers that load at runtime (TypeScript/Python)
 
-See `docs/architecture/adr/0014-ffi-artifact-groups-and-binding-consumers.md`.
+See `docs/decisions/ADR-0014-ffi-artifact-groups-and-binding-consumers.md`.

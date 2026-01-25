@@ -79,7 +79,7 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 Notes:
 - Go requires the path-prefixed tag because the module is `github.com/3leaps/sysprims/bindings/go/sysprims`.
 - Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
-- See `docs/architecture/adr/0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
+- See `docs/decisions/ADR-0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
 
 ### CI Verification
 
@@ -285,4 +285,4 @@ If rotating signing keys, update:
 - **Minor** (0.2.0): New features, backward-compatible
 - **Major** (1.0.0): Breaking changes, API changes
 
-See `docs/architecture/adr/` for versioning decisions.
+See `docs/decisions/` for versioning decisions.

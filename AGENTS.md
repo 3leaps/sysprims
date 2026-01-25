@@ -10,7 +10,7 @@
 
 > **WARNING**: This repository contains process control code. Tests that use incorrect
 > PIDs can terminate system processes including Finder, Terminal, and init. See
-> [ADR-0011](docs/architecture/adr/0011-pid-validation-safety.md) for a real incident
+> [ADR-0011](docs/decisions/ADR-0011-pid-validation-safety.md) for a real incident
 > where `u32::MAX` caused `kill(-1, SIGTERM)` and crashed a desktop session.
 
 ## Operating Model
@@ -113,7 +113,7 @@ This library terminates processes. Read [`REPOSITORY_SAFETY_PROTOCOLS.md`](REPOS
 
 Before writing or modifying any code that **sends signals** or **terminates processes** (`sysprims-signal`, `sysprims-timeout`):
 
-- [ ] I have read [ADR-0011: PID Validation Safety](docs/architecture/adr/0011-pid-validation-safety.md)
+- [ ] I have read [ADR-0011: PID Validation Safety](docs/decisions/ADR-0011-pid-validation-safety.md)
 - [ ] I understand `u32::MAX as i32 == -1` (integer overflow)
 - [ ] I understand `kill(-1, sig)` broadcasts to ALL processes
 - [ ] My tests use safe PIDs: `99999`, `std::process::id()`, or spawned children
@@ -156,7 +156,7 @@ Before writing or modifying any code that **sends signals** or **terminates proc
 - Change FFI contracts without ADR review
 - Use `unsafe` without clear justification and review
 - Assume platform behavior without testing
-- Commit `.plans/` directory (gitignored - planning docs stay local)
+- **EVER commit anything from `.plans/`** - this directory is gitignored and MUST stay local; planning docs are ephemeral working files, not repository artifacts
 - Commit `AGENTS.local.md` (gitignored - session-specific guidance)
 - **Use PID 0, 1, or u32::MAX in signal-sending tests** (see Safety Protocols above)
 - **Bypass PID validation in signal code without explicit maintainer approval**
@@ -183,7 +183,7 @@ cargo deny check licenses    # Must pass
 cargo deny check advisories  # Must pass
 ```
 
-See [ADR-0001](docs/architecture/adr/0001-license-policy.md) for allowed licenses.
+See [ADR-0001](docs/decisions/ADR-0001-license-policy.md) for allowed licenses.
 
 ### FFI Safety
 
@@ -192,7 +192,7 @@ FFI boundary changes require extra scrutiny:
 - Memory ownership must be explicit
 - All returned strings freed via `sysprims_free_string()`
 - No complex structs across FFI (JSON strings only)
-- See [ADR-0004](docs/architecture/adr/0004-ffi-design.md)
+- See [ADR-0004](docs/decisions/ADR-0004-ffi-design.md)
 
 ### Platform Parity
 
@@ -202,7 +202,7 @@ Changes must consider all supported platforms:
 - macOS (x64 + arm64)
 - Windows (x64)
 
-See [ADR-0007](docs/architecture/adr/0007-platform-abstraction.md).
+See [ADR-0007](docs/decisions/ADR-0007-platform-abstraction.md).
 
 ## Key Files
 
@@ -216,7 +216,7 @@ See [ADR-0007](docs/architecture/adr/0007-platform-abstraction.md).
 | `crates/sysprims-cli/`      | CLI binaries                               |
 | `ffi/sysprims-ffi/`         | C-ABI exports via cbindgen                 |
 | `bindings/`                 | Go, Python, TypeScript wrappers            |
-| `docs/architecture/adr/`    | Architecture Decision Records              |
+| `docs/decisions/`           | Decision Records (ADR, DDR, SDR)           |
 | `docs/safety/`              | Safety guides (signal dispatch, etc.)      |
 | `docs/standards/`           | Repository conventions and policies        |
 | `deny.toml`                 | License and security policy                |
@@ -334,21 +334,21 @@ Key architectural decisions:
 
 | ADR | Title | Relevance |
 | --- | ----- | --------- |
-| [0001](docs/architecture/adr/0001-license-policy.md) | License Policy | Dependency decisions |
-| [0002](docs/architecture/adr/0002-crate-structure.md) | Crate Structure | Module organization |
-| [0003](docs/architecture/adr/0003-group-by-default.md) | Group-by-Default | Core differentiator |
-| [0004](docs/architecture/adr/0004-ffi-design.md) | FFI Design | Binding architecture |
-| [0005](docs/architecture/adr/0005-schema-contracts.md) | Schema Contracts | JSON output stability |
-| [0006](docs/architecture/adr/0006-dependency-governance.md) | Dependency Governance | SBOM and compliance |
-| [0007](docs/architecture/adr/0007-platform-abstraction.md) | Platform Abstraction | Cross-platform strategy |
-| [0008](docs/architecture/adr/0008-error-handling.md) | Error Handling | Error taxonomy |
-| [0011](docs/architecture/adr/0011-pid-validation-safety.md) | **PID Validation Safety** | **CRITICAL** - Prevents kill(-1) disasters |
+| [0001](docs/decisions/ADR-0001-license-policy.md) | License Policy | Dependency decisions |
+| [0002](docs/decisions/ADR-0002-crate-structure.md) | Crate Structure | Module organization |
+| [0003](docs/decisions/ADR-0003-group-by-default.md) | Group-by-Default | Core differentiator |
+| [0004](docs/decisions/ADR-0004-ffi-design.md) | FFI Design | Binding architecture |
+| [0005](docs/decisions/ADR-0005-schema-contracts.md) | Schema Contracts | JSON output stability |
+| [0006](docs/decisions/ADR-0006-dependency-governance.md) | Dependency Governance | SBOM and compliance |
+| [0007](docs/decisions/ADR-0007-platform-abstraction.md) | Platform Abstraction | Cross-platform strategy |
+| [0008](docs/decisions/ADR-0008-error-handling.md) | Error Handling | Error taxonomy |
+| [0011](docs/decisions/ADR-0011-pid-validation-safety.md) | **PID Validation Safety** | **CRITICAL** - Prevents kill(-1) disasters |
 
 ## Standards Reference
 
 - **Online**: https://crucible.3leaps.dev/
 - **FulmenHQ patterns**: https://github.com/fulmenhq/crucible
-- **Local ADRs**: `docs/architecture/adr/`
+- **Local decisions**: `docs/decisions/` (ADR, DDR, SDR)
 
 ## Contact
 

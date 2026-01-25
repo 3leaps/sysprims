@@ -143,8 +143,8 @@ avoid a second binding strategy.
 
 ## References
 
-- ADR-0004: FFI Design (`docs/architecture/adr/0004-ffi-design.md`)
-- ADR-0007: Platform Abstraction Strategy (`docs/architecture/adr/0007-platform-abstraction.md`)
-- ADR-0012: Language Bindings Distribution (`docs/architecture/adr/0012-language-bindings-distribution.md`)
-- ADR-0013: Release Asset Publishing and Verification (`docs/architecture/adr/0013-release-asset-publishing-and-verification.md`)
+- ADR-0004: FFI Design (`docs/decisions/ADR-0004-ffi-design.md`)
+- ADR-0007: Platform Abstraction Strategy (`docs/decisions/ADR-0007-platform-abstraction.md`)
+- ADR-0012: Language Bindings Distribution (`docs/decisions/ADR-0012-language-bindings-distribution.md`)
+- ADR-0013: Release Asset Publishing and Verification (`docs/decisions/ADR-0013-release-asset-publishing-and-verification.md`)
 - seekable-zstd reference implementation (Windows split: Go GNU vs Node MSVC)

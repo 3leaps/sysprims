@@ -167,7 +167,7 @@ go get github.com/3leaps/sysprims/bindings/go/sysprims@vX.Y.Z
 
 and get a proper semantic version instead of a pseudo-version.
 
-See `docs/architecture/adr/0012-language-bindings-distribution.md` for the policy.
+See `docs/decisions/ADR-0012-language-bindings-distribution.md` for the policy.
 
 ## TypeScript Bindings
 

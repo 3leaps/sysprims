@@ -33,7 +33,7 @@ sysprims is a **process control library**. It provides utilities to:
 | `-1` (or `u32::MAX`) | Signals ALL processes | **CATASTROPHIC** |
 | `u32::MAX` | Overflows to -1 when cast to i32 | **CATASTROPHIC** |
 
-**Incident Reference**: On 2026-01-08, a test using `u32::MAX` caused `kill(-1, SIGTERM)` which terminated Finder and hundreds of other processes. See [ADR-0011](docs/architecture/adr/0011-pid-validation-safety.md).
+**Incident Reference**: On 2026-01-08, a test using `u32::MAX` caused `kill(-1, SIGTERM)` which terminated Finder and hundreds of other processes. See [ADR-0011](docs/decisions/ADR-0011-pid-validation-safety.md).
 
 ### Rule 2: Safe PIDs for Testing
 
@@ -82,9 +82,9 @@ Before working on signal, timeout, or process control code, read:
 
 | Document | Purpose |
 |----------|---------|
-| [ADR-0011: PID Validation Safety](docs/architecture/adr/0011-pid-validation-safety.md) | Why we validate PIDs, what values are dangerous |
+| [ADR-0011: PID Validation Safety](docs/decisions/ADR-0011-pid-validation-safety.md) | Why we validate PIDs, what values are dangerous |
 | [docs/safety/signal-dispatch.md](docs/safety/signal-dispatch.md) | POSIX signal semantics, safe usage patterns |
-| [ADR-0003: Group-by-Default](docs/architecture/adr/0003-group-by-default.md) | Why sysprims kills process trees |
+| [ADR-0003: Group-by-Default](docs/decisions/ADR-0003-group-by-default.md) | Why sysprims kills process trees |
 
 ---
 
