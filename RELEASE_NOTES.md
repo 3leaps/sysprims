@@ -6,6 +6,104 @@
 
 ---
 
+## v0.1.6 - 2026-01-25
+
+**Status:** Supervisor & Job Manager Primitives Release
+
+This release delivers process management primitives for long-running supervisors and job managers. Teams building systems like gonimbus or rampart lifecycle can now spawn kill-tree-safe jobs, detect PID reuse, and cleanly terminate process trees—without coupling to the timeout API.
+
+### Highlights
+
+- **PID Reuse Guard**: New `start_time_unix_ms` and `exe_path` fields in `ProcessInfo` enable detection of PID reuse
+- **Spawn In Group**: Create processes in a new process group (Unix) or Job Object (Windows)
+- **Wait With Timeout**: Poll for process exit with configurable timeout
+- **Terminate Tree**: Graceful-then-kill tree termination as a standalone primitive
+
+### New Primitives
+
+| Primitive | Rust | FFI | Go | TypeScript |
+|-----------|------|-----|-----|------------|
+| Process identity | `ProcessInfo` | `sysprims_proc_get` | `ProcessGet` | `procGet` |
+| Spawn in group | `spawn_in_group()` | `sysprims_spawn_in_group` | `SpawnInGroup` | `spawnInGroup` |
+| Wait PID with timeout | `wait_pid()` | `sysprims_proc_wait_pid` | `WaitPID` | `waitPID` |
+| Terminate tree | `terminate_tree()` | `sysprims_terminate_tree` | `TerminateTree` | `terminateTree` |
+
+### Process Identity (PID Reuse Guard)
+
+Long-running supervisors can now detect whether a stored PID still refers to the expected process:
+
+```rust
+use sysprims_proc::get_process;
+
+// Store identity at job creation
+let info = get_process(pid)?;
+let identity = (info.pid, info.start_time_unix_ms);
+
+// Later, verify before signaling
+let current = get_process(pid)?;
+if current.start_time_unix_ms != identity.1 {
+    // PID was reused—don't signal!
+}
+```
+
+### Spawn In Group
+
+Create processes in a new process group or Job Object for reliable tree termination:
+
+```rust
+use sysprims_timeout::{spawn_in_group, SpawnInGroupConfig};
+
+let outcome = spawn_in_group(SpawnInGroupConfig {
+    argv: vec!["./worker.sh".into(), "--id".into(), "42".into()],
+    cwd: None,
+    env: None, // inherits parent env by default
+})?;
+
+println!("Spawned PID {}", outcome.pid);
+#[cfg(unix)]
+println!("Process group: {}", outcome.pgid.unwrap());
+```
+
+### Wait PID With Timeout
+
+Wait for a process to exit without blocking forever:
+
+```rust
+use sysprims_proc::wait_pid;
+use std::time::Duration;
+
+let outcome = wait_pid(pid, Duration::from_secs(10))?;
+if outcome.timed_out {
+    println!("Process {} did not exit in 10s", pid);
+} else {
+    println!("Process {} exited with code {:?}", pid, outcome.exit_code);
+}
+```
+
+### Terminate Tree
+
+One-call process tree termination with graceful-then-kill escalation:
+
+```rust
+use sysprims_timeout::{terminate_tree, TerminateTreeConfig};
+
+let outcome = terminate_tree(pid, TerminateTreeConfig {
+    grace_timeout_ms: 5000,
+    kill_timeout_ms: 2000,
+    ..Default::default()
+})?;
+
+if outcome.escalated {
+    println!("Had to escalate to SIGKILL");
+}
+```
+
+### Documentation
+
+- Added Job Object registry documentation for Windows platform behavior
+
+---
+
 ## v0.1.5 - 2026-01-24
 
 **Status:** TypeScript Bindings Parity Release (proc/ports/signals)
@@ -28,27 +126,6 @@ Node.js developers now have access to process inspection, port mapping, and sign
 | `signalSendGroup(pgid, signal)` | Send signal to process group (Unix) |
 | `terminate(pid)` | Graceful termination (SIGTERM on Unix, TerminateProcess on Windows) |
 | `forceKill(pid)` | Immediate kill (SIGKILL on Unix, TerminateProcess on Windows) |
-
-### Example Usage
-
-```typescript
-import { processList, listeningPorts, terminate } from '@3leaps/sysprims';
-
-// List all nginx processes
-const nginx = processList({ name_contains: "nginx" });
-for (const proc of nginx.processes) {
-  console.log(`${proc.pid}: ${proc.name} (${proc.cpu_percent}% CPU)`);
-}
-
-// Find what's listening on port 8080
-const http = listeningPorts({ local_port: 8080 });
-for (const binding of http.bindings) {
-  console.log(`Port ${binding.local_port}: PID ${binding.pid}`);
-}
-
-// Gracefully terminate a process
-terminate(1234);
-```
 
 ### Bug Fixes
 
@@ -85,61 +162,10 @@ const pgid = selfPGID();
 const sid = selfSID();
 ```
 
-**Platform Support:**
-
-| Platform | Status |
-|----------|--------|
-| Linux x64 (glibc) | Supported |
-| Linux arm64 (glibc) | Supported |
-| macOS arm64 | Supported |
-| Windows x64 | Supported |
-| Linux musl | Not supported |
-
-**Note:** Linux musl (Alpine) is not supported for TypeScript bindings due to glibc dependencies.
-
-### CI Changes
-
-- Replaced darwin-amd64 (Intel Mac) with linux-arm64 in CI matrix
-- Intel Mac runners deprecated by GitHub Actions
-
 ### Bug Fixes
 
 - Windows TypeScript tests now pass (cross-platform build scripts)
 - Fixed parallel test flakiness in tree_escape tests
-
----
-
-## v0.1.3 - 2026-01-19
-
-**Status:** Go Bindings Infrastructure Release
-
-First fully working Go bindings release. Prebuilt static libraries now included in release tags.
-
-### Highlights
-
-- **Prebuilt Libs in Tags**: Go bindings now ship with static libraries in the tagged commit
-- **Manual Prep Workflow**: New `go-bindings.yml` workflow builds libs before tagging
-- **Release Gate**: CI verifies Go libs present before publishing
-- **Dual-Tag Policy**: Both `vX.Y.Z` and `bindings/go/sysprims/vX.Y.Z` tags required
-
-### Go Bindings (Now Working)
-
-v0.1.1/v0.1.2 had empty lib directories. v0.1.3 is the first release where Go bindings work via `go get`:
-
-```bash
-go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.1.3
-```
-
-### Release Process Changes
-
-The Go bindings prep is now a manual pre-release step:
-
-1. Run `go-bindings.yml` workflow (manual dispatch)
-2. Merge the resulting PR
-3. Tag with both `vX.Y.Z` and `bindings/go/sysprims/vX.Y.Z`
-4. Push tags; release workflow verifies libs are present
-
-See `RELEASE_CHECKLIST.md` for full instructions.
 
 ---
 

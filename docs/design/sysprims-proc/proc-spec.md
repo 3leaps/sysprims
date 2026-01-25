@@ -1,10 +1,10 @@
 ---
 title: "sysprims-proc Module Spec"
 module: "sysprims-proc"
-version: "1.0"
+version: "1.1"
 status: "Active"
-last_updated: "2026-01-09"
-adr_refs: ["ADR-0005", "ADR-0007", "ADR-0008"]
+last_updated: "2026-01-25"
+adr_refs: ["ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 ---
 
 # sysprims-proc Module Spec
@@ -115,6 +115,16 @@ pub struct ProcessInfo {
 
     /// Command line arguments (may be empty if unreadable).
     pub cmdline: Vec<String>,
+
+    /// Process start time as Unix epoch milliseconds (v0.1.6+).
+    /// Used for PID reuse detection. None if unavailable due to permissions/platform.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time_unix_ms: Option<u64>,
+
+    /// Executable path (v0.1.6+).
+    /// Best-effort; None if unavailable due to permissions/platform.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exe_path: Option<String>,
 }
 
 /// Process state (cross-platform mapping).
@@ -201,9 +211,54 @@ pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindin
 ///
 /// This is a convenience wrapper over `listening_ports`.
 pub fn process_by_port(port: u16, protocol: Protocol) -> SysprimsResult<ProcessInfo>;
+
+/// Wait for a process to exit with timeout (v0.1.6+).
+///
+/// Polls for process exit using best-effort mechanisms. Works for arbitrary PIDs,
+/// not just children of the current process.
+///
+/// Returns a schema-backed JSON result in FFI/bindings.
+pub fn wait_pid(pid: u32, timeout: Duration) -> SysprimsResult<WaitPidResult>;
 ```
 
-### 4.3 Error Handling
+### 4.3 WaitPidResult Type (v0.1.6+)
+
+```rust
+/// Result of waiting for a PID to exit (v0.1.6+).
+#[derive(Debug, Clone, Serialize)]
+pub struct WaitPidResult {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+
+    /// Timestamp (RFC3339).
+    pub timestamp: String,
+
+    /// Platform identifier (e.g. "linux", "macos", "windows").
+    pub platform: &'static str,
+
+    /// PID waited on.
+    pub pid: u32,
+
+    /// True if the process was observed to have exited.
+    pub exited: bool,
+
+    /// True if timeout elapsed before exit was observed.
+    pub timed_out: bool,
+
+    /// Exit code when available (Windows best-effort; Unix often unknown for non-children).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+
+    /// Warnings about degraded visibility (permission limits, platform gaps).
+    pub warnings: Vec<String>,
+}
+```
+
+**Platform notes:**
+- **Unix**: Polling via `kill(pid, 0)` (works for arbitrary PIDs; not parent-specific)
+- **Windows**: `OpenProcess` + `WaitForSingleObject` (best-effort)
+
+### 4.4 Error Handling
 
 Per ADR-0008, this module returns:
 
@@ -217,7 +272,7 @@ Per ADR-0008, this module returns:
 It returns `PermissionDenied` only when the platform denies even self-process socket inspection;
 otherwise it returns whatever it can and includes `warnings` describing omissions.
 
-### 4.4 Invariants
+### 4.5 Invariants
 
 1. **Required fields:** `pid` and `name` are always present.
 
@@ -304,6 +359,13 @@ SysprimsErrorCode sysprims_proc_listening_ports(
     const char* filter_json,  // NULL for no filter
     char** result_json_out    // Caller must free via sysprims_free_string
 );
+
+// Wait for process to exit with timeout (v0.1.6+)
+SysprimsErrorCode sysprims_proc_wait_pid(
+    uint32_t pid,
+    uint64_t timeout_ms,
+    char** result_json_out    // Caller must free via sysprims_free_string
+);
 ```
 
 **Memory ownership:** Caller owns returned strings; must free via `sysprims_free_string()`.
@@ -318,6 +380,9 @@ SysprimsErrorCode sysprims_proc_listening_ports(
 | Memory | `/proc/[pid]/statm` | `proc_pidinfo` | `GetProcessMemoryInfo` |
 | cmdline | `/proc/[pid]/cmdline` | Best-effort (name only) | `QueryFullProcessImageName` |
 | User | `/proc/[pid]/status` Uid | `proc_pidinfo` | Token queries |
+| start_time_unix_ms | `/proc/[pid]/stat` starttime + boot time | `proc_pidinfo` | Process creation time |
+| exe_path | `/proc/[pid]/exe` readlink | `proc_pidpath` | `QueryFullProcessImageName` |
+| wait_pid | `kill(pid, 0)` polling | `kill(pid, 0)` polling | `WaitForSingleObject` |
 
 Port bindings:
 
@@ -331,16 +396,20 @@ Port bindings:
 
 | Requirement | Reference | Rust API | CLI | Tests | Evidence |
 |-------------|-----------|----------|-----|-------|----------|
-| Required fields pid+name | spec §4.4 | `ProcessInfo` | `--json` | `test_get_self` | CI |
+| Required fields pid+name | spec §4.5 | `ProcessInfo` | `--json` | `test_get_self` | CI |
 | Strict filter schema | ADR-0005 | `ProcessFilter` | `--name` | `test_filter_unknown_field_rejected` | CI |
-| Unknown filter keys rejected | spec §4.4 | `deny_unknown_fields` | - | `test_filter_unknown_field_rejected` | CI |
-| cpu% normalized 0-100 | spec §4.4 | `cpu_percent` | `--json` | `test_cpu_normalized` | CI |
-| cpu_above range validation | spec §4.4 | `ProcessFilter::validate` | `--cpu-above` | `test_filter_validation_cpu_range` | CI |
+| Unknown filter keys rejected | spec §4.5 | `deny_unknown_fields` | - | `test_filter_unknown_field_rejected` | CI |
+| cpu% normalized 0-100 | spec §4.5 | `cpu_percent` | `--json` | `test_cpu_normalized` | CI |
+| cpu_above range validation | spec §4.5 | `ProcessFilter::validate` | `--cpu-above` | `test_filter_validation_cpu_range` | CI |
 | schema_id embedded | ADR-0005 | `PROCESS_INFO_V1` | `--json` | `test_snapshot_has_schema_id` | CI |
-| No fake data | spec §4.4 | optional fields | any | `test_get_self_has_valid_fields` | CI |
-| PID 0 rejected | spec §4.4 | `get_process` | `--pid 0` | `test_invalid_pid_zero` | CI |
+| No fake data | spec §4.5 | optional fields | any | `test_get_self_has_valid_fields` | CI |
+| PID 0 rejected | spec §4.5 | `get_process` | `--pid 0` | `test_invalid_pid_zero` | CI |
+| start_time_unix_ms (v0.1.6) | spec §4.1 | `ProcessInfo.start_time_unix_ms` | `--json` | `test_get_self_has_valid_fields` | CI |
+| exe_path (v0.1.6) | spec §4.1 | `ProcessInfo.exe_path` | `--json` | `test_get_self_has_valid_fields` | CI |
+| wait_pid timeout (v0.1.6) | spec §4.2 | `wait_pid` | - | `test_wait_pid_self_times_out` | CI |
+| wait_pid PID validation | ADR-0011 | `wait_pid` | - | `test_wait_pid_invalid_pid` | CI |
 
 ---
 
-*Spec version: 1.0*
-*Last updated: 2026-01-09*
+*Spec version: 1.1*
+*Last updated: 2026-01-25*

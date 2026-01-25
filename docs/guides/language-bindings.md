@@ -184,7 +184,7 @@ TypeScript bindings use [koffi](https://koffi.dev/) to call the sysprims C-ABI s
 | Windows x64 | Supported |
 | Linux musl (Alpine) | Not supported |
 
-**Note:** TypeScript bindings require glibc. Linux musl (Alpine) is not supported due to glibc dependencies in koffi.
+**Note:** TypeScript bindings require glibc. Linux musl (Alpine) is not supported because sysprims ships glibc-targeted shared libraries for Node; musl artifacts are not published.
 
 ### Installation
 
@@ -198,7 +198,7 @@ The TypeScript bindings provide parity with Go bindings:
 
 | Function | Description |
 |----------|-------------|
-| `procGet(pid)` | Get process info by PID |
+| `procGet(pid)` | Get process info by PID (includes `start_time_unix_ms`, `exe_path`) |
 | `processList(filter?)` | List processes with optional filtering |
 | `listeningPorts(filter?)` | Map listening ports to processes |
 | `selfPGID()` | Get current process group ID (Unix) |
@@ -207,6 +207,9 @@ The TypeScript bindings provide parity with Go bindings:
 | `signalSendGroup(pgid, signal)` | Send signal to process group (Unix) |
 | `terminate(pid)` | Graceful termination |
 | `forceKill(pid)` | Immediate kill |
+| `waitPID(pid, timeoutMs)` | Wait for process exit with timeout (v0.1.6+) |
+| `spawnInGroup(config)` | Spawn process in new group/Job Object (v0.1.6+) |
+| `terminateTree(pid, config?)` | Graceful-then-kill tree termination (v0.1.6+) |
 
 ### Filter Conventions
 
@@ -226,6 +229,64 @@ const portFilter = {
   local_port: 8080
 };
 ```
+
+### v0.1.6 Supervisor Primitives
+
+**waitPID** - Wait for a process to exit with timeout:
+
+```typescript
+import { waitPID } from '@3leaps/sysprims';
+
+const outcome = waitPID(pid, 10000); // 10 seconds
+if (outcome.timed_out) {
+  console.log('Process did not exit in time');
+} else {
+  console.log(`Exited with code ${outcome.exit_code}`);
+}
+```
+
+**spawnInGroup** - Spawn process in new process group/Job Object:
+
+```typescript
+import { spawnInGroup } from '@3leaps/sysprims';
+
+const result = spawnInGroup({
+  argv: ['./worker.sh', '--id', '42'],
+  cwd: '/app',
+  env: { LOG_LEVEL: 'debug' },
+});
+
+console.log(`Spawned PID ${result.pid}`);
+// result.pgid is null on Windows
+```
+
+**terminateTree** - Graceful-then-kill tree termination:
+
+```typescript
+import { terminateTree } from '@3leaps/sysprims';
+
+const outcome = terminateTree(pid, {
+  grace_timeout_ms: 5000,
+  kill_timeout_ms: 2000,
+});
+
+if (outcome.escalated) {
+  console.log('Had to escalate to kill');
+}
+```
+
+### Config Types (v0.1.6+)
+
+**SpawnInGroupConfig:**
+- `argv`: Command and arguments (required)
+- `cwd`: Working directory (optional)
+- `env`: Environment overrides (optional)
+
+**TerminateTreeConfig:**
+- `signal`: Initial signal (default: SIGTERM/15)
+- `grace_timeout_ms`: Wait before escalation (default: 10000)
+- `kill_signal`: Kill signal (default: SIGKILL/9)
+- `kill_timeout_ms`: Wait after kill (default: 2000)
 
 ### How It Works
 

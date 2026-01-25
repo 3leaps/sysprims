@@ -10,6 +10,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-01-25
+
+Supervisor and job manager primitives release. Teams building long-running supervisors can now spawn kill-tree-safe jobs, detect PID reuse, and cleanly terminate process trees.
+
+### Added
+
+- **Process Identity Fields** (`sysprims-proc`)
+  - `start_time_unix_ms` and `exe_path` fields in `ProcessInfo` for PID reuse detection
+  - Best-effort on all platforms: Linux (`/proc`), macOS (`libproc`), Windows (`Win32`)
+  - Enables supervisors to verify a PID still refers to the expected process
+
+- **Spawn In Group** (`sysprims-timeout`)
+  - `spawn_in_group(config: SpawnInGroupConfig) -> SpawnInGroupResult`
+  - Creates child in new process group (Unix) or Job Object (Windows)
+  - Returns `pid`, `pgid` (Unix only; null on Windows), and `tree_kill_reliability`
+  - FFI: `sysprims_spawn_in_group(config_json, *result_json_out)`
+  - Bindings: Go `SpawnInGroup`, TypeScript `spawnInGroup`
+
+- **Wait PID With Timeout** (`sysprims-proc`)
+  - `wait_pid(pid, timeout) -> WaitPidResult`
+  - Best-effort polling for arbitrary PIDs (not just children)
+  - Returns `exited`, `timed_out`, `exit_code`, `warnings`
+  - FFI: `sysprims_proc_wait_pid(pid, timeout_ms, *json_out)`
+  - Bindings: Go `WaitPID`, TypeScript `waitPID`
+
+- **Terminate Tree** (`sysprims-timeout`)
+  - `terminate_tree(pid, config) -> TerminateTreeResult`
+  - Graceful signal, wait, escalate to kill—as a standalone primitive
+  - Independent of `run_with_timeout` for use with externally-spawned processes
+  - FFI: `sysprims_terminate_tree(pid, json_config, *json_out)`
+  - Bindings: Go `TerminateTree`, TypeScript `terminateTree`
+
+- **Documentation**
+  - Job Object registry documentation for Windows platform behavior
+
+### Changed
+
+- `ProcessInfo` schema updated to include optional `start_time_unix_ms` and `exe_path` fields
+- Go and TypeScript bindings updated for new primitives
+
 ## [0.1.5] - 2026-01-24
 
 TypeScript bindings parity release for proc/ports/signals. Node.js developers now have access to process inspection, port mapping, and signal APIs.
@@ -215,7 +255,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/3leaps/sysprims/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/3leaps/sysprims/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/3leaps/sysprims/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/3leaps/sysprims/compare/v0.1.2...v0.1.3
