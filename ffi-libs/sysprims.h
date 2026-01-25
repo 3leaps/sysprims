@@ -376,6 +376,24 @@ SysprimsErrorCode sysprims_proc_list(const char *filter_json, char **result_json
 SysprimsErrorCode sysprims_proc_get(uint32_t pid, char **result_json_out);
 
 /**
+ * Wait for a PID to exit, up to a timeout.
+ *
+ * Returns a JSON object matching `wait-pid-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `pid` - PID to wait on (must be > 0)
+ * * `timeout_ms` - Timeout in milliseconds
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_wait_pid(uint32_t pid, uint64_t timeout_ms, char **result_json_out);
+
+/**
  * Get the current process group ID (PGID).
  *
  * On Unix, this calls `getpgid(0)`.
@@ -499,6 +517,24 @@ SysprimsErrorCode sysprims_terminate(uint32_t pid);
 SysprimsErrorCode sysprims_force_kill(uint32_t pid);
 
 /**
+ * Spawn a process in a new process group (Unix) or Job Object (Windows).
+ *
+ * Returns a JSON object matching `spawn-in-group-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `config_json` - Spawn config JSON (must not be NULL)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `config_json` must point to a valid UTF-8 C string
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_spawn_in_group(const char *config_json, char **result_json_out);
+
+/**
  * Run a command with timeout.
  *
  * Spawns the command and waits for it to complete or timeout. If the command
@@ -567,5 +603,25 @@ SysprimsErrorCode sysprims_force_kill(uint32_t pid);
  */
 SysprimsErrorCode sysprims_timeout_run(const struct SysprimsTimeoutConfig *config,
                                        char **result_json_out);
+
+/**
+ * Terminate a process (best-effort tree) with escalation.
+ *
+ * Returns a JSON object matching `terminate-tree-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `pid` - Process ID to terminate (must be > 0)
+ * * `config_json` - Optional JSON config (NULL/empty/"{}" for defaults)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_terminate_tree(uint32_t pid,
+                                          const char *config_json,
+                                          char **result_json_out);
 
 #endif  /* SYSPRIMS_H */
