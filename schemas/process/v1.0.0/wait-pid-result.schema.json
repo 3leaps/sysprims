@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/wait-pid-result.schema.json",
+  "title": "sysprims wait pid result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "pid",
+    "exited",
+    "timed_out",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/wait-pid-result.schema.json"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "exited": {
+      "type": "boolean"
+    },
+    "timed_out": {
+      "type": "boolean"
+    },
+    "exit_code": {
+      "type": ["integer", "null"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

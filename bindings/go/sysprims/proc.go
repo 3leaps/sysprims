@@ -7,6 +7,7 @@ package sysprims
 import "C"
 import (
 	"encoding/json"
+	"time"
 	"unsafe"
 )
 
@@ -44,6 +45,18 @@ type ProcessSnapshot struct {
 	Timestamp string `json:"timestamp"`
 	// Processes is the list of process information.
 	Processes []ProcessInfo `json:"processes"`
+}
+
+// WaitPidResult is the result of waiting for a PID to exit.
+type WaitPidResult struct {
+	SchemaID  string   `json:"schema_id"`
+	Timestamp string   `json:"timestamp"`
+	Platform  string   `json:"platform"`
+	PID       uint32   `json:"pid"`
+	Exited    bool     `json:"exited"`
+	TimedOut  bool     `json:"timed_out"`
+	ExitCode  *int32   `json:"exit_code,omitempty"`
+	Warnings  []string `json:"warnings"`
 }
 
 type Protocol string
@@ -167,6 +180,36 @@ func ProcessGet(pid uint32) (*ProcessInfo, error) {
 	}
 
 	return &info, nil
+}
+
+// WaitPID waits for a PID to exit up to the provided timeout.
+//
+// Best-effort behavior:
+// - On Unix, this uses polling (we are not necessarily the parent).
+// - On Windows, this uses process wait APIs when available.
+//
+// # Errors
+//
+//   - [ErrInvalidArgument]: pid is 0
+//   - [ErrNotFound]: pid does not exist at time of first check
+//   - [ErrPermissionDenied]: not permitted to query liveness
+func WaitPID(pid uint32, timeout time.Duration) (*WaitPidResult, error) {
+	var resultCStr *C.char
+	timeoutMs := uint64(timeout / time.Millisecond)
+
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_wait_pid(C.uint32_t(pid), C.uint64_t(timeoutMs), &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var result WaitPidResult
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &result, nil
 }
 
 // ListeningPorts returns a snapshot of listening ports, optionally filtered.

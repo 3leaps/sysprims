@@ -93,6 +93,14 @@ pub const PORT_BINDINGS_V1: &str =
 pub const PORT_FILTER_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-filter.schema.json";
 
+/// Schema ID for wait-pid result JSON output (v1.0.0).
+///
+/// This schema defines the structure of `wait_pid()` output.
+///
+/// Schema location: `schemas/process/v1.0.0/wait-pid-result.schema.json`
+pub const WAIT_PID_RESULT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/wait-pid-result.schema.json";
+
 // ============================================================================
 // Schema Host Constants
 // ============================================================================
@@ -115,6 +123,7 @@ mod tests {
         assert!(PROC_FILTER_V1.starts_with("https://"));
         assert!(PORT_BINDINGS_V1.starts_with("https://"));
         assert!(PORT_FILTER_V1.starts_with("https://"));
+        assert!(WAIT_PID_RESULT_V1.starts_with("https://"));
     }
 
     #[test]
@@ -142,6 +151,10 @@ mod tests {
             PORT_FILTER_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
+        assert!(
+            WAIT_PID_RESULT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
     }
 
     #[test]
@@ -154,6 +167,7 @@ mod tests {
         assert!(PROC_FILTER_V1.ends_with(".schema.json"));
         assert!(PORT_BINDINGS_V1.ends_with(".schema.json"));
         assert!(PORT_FILTER_V1.ends_with(".schema.json"));
+        assert!(WAIT_PID_RESULT_V1.ends_with(".schema.json"));
 
         // All v1.0.0 schemas should have version in path
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
@@ -161,6 +175,7 @@ mod tests {
         assert!(PROC_FILTER_V1.contains("/v1.0.0/"));
         assert!(PORT_BINDINGS_V1.contains("/v1.0.0/"));
         assert!(PORT_FILTER_V1.contains("/v1.0.0/"));
+        assert!(WAIT_PID_RESULT_V1.contains("/v1.0.0/"));
     }
 
     #[test]
@@ -186,6 +201,10 @@ mod tests {
             PORT_FILTER_V1.contains("/process/"),
             "port-filter schema should have process topic"
         );
+        assert!(
+            WAIT_PID_RESULT_V1.contains("/process/"),
+            "wait-pid-result schema should have process topic"
+        );
     }
 
     #[test]
@@ -196,6 +215,7 @@ mod tests {
             PROC_FILTER_V1,
             PORT_BINDINGS_V1,
             PORT_FILTER_V1,
+            WAIT_PID_RESULT_V1,
         ];
 
         // Check all pairs are different
@@ -220,5 +240,6 @@ mod tests {
         assert!(PROC_FILTER_V1.starts_with(&prefix));
         assert!(PORT_BINDINGS_V1.starts_with(&prefix));
         assert!(PORT_FILTER_V1.starts_with(&prefix));
+        assert!(WAIT_PID_RESULT_V1.starts_with(&prefix));
     }
 }

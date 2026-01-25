@@ -30,6 +30,15 @@ The `sysprims-cli` crate, as an application, WILL initialize a `tracing` subscri
 - **Structured Format:** The CLI will provide a command-line flag (e.g., `--log-format json`) to switch to a structured JSON output format. This is for automation, scripting, and integration with log collectors.
 - **Log Level Control:** The log level will be controllable via a flag (e.g., `--log-level debug`) or an environment variable.
 
+### 2.1 Stdout Purity Model
+
+The CLI must keep a strict separation between machine-readable command output and logs:
+
+- **Machine-readable outputs** (schema-versioned JSON produced by subcommands like `timeout --json`) go to `stdout`.
+- **Logs** go to `stderr` (both human-readable and `--log-format json`).
+
+Rationale: stdout is treated as a data channel for programmatic consumption, while stderr is reserved for diagnostics.
+
 ### 3. Structured Log Schema
 
 When structured JSON logging is enabled, every log line will conform to a formal schema. The full versioning and management strategy for schemas is detailed in [ADR-0010](./0010-schema-management-and-versioning.md).

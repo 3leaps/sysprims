@@ -46,6 +46,23 @@ export interface ProcessSnapshot {
   processes: ProcessInfo[];
 }
 
+// Wait PID
+
+/**
+ * Result of waiting for a PID to exit.
+ * Matches schema: wait-pid-result.schema.json
+ */
+export interface WaitPidResult {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  pid: number;
+  exited: boolean;
+  timed_out: boolean;
+  exit_code?: number | null;
+  warnings: string[];
+}
+
 // Port types
 
 export type Protocol = "tcp" | "udp";

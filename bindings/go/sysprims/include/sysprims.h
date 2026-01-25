@@ -376,6 +376,24 @@ SysprimsErrorCode sysprims_proc_list(const char *filter_json, char **result_json
 SysprimsErrorCode sysprims_proc_get(uint32_t pid, char **result_json_out);
 
 /**
+ * Wait for a PID to exit, up to a timeout.
+ *
+ * Returns a JSON object matching `wait-pid-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `pid` - PID to wait on (must be > 0)
+ * * `timeout_ms` - Timeout in milliseconds
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_wait_pid(uint32_t pid, uint64_t timeout_ms, char **result_json_out);
+
+/**
  * Get the current process group ID (PGID).
  *
  * On Unix, this calls `getpgid(0)`.

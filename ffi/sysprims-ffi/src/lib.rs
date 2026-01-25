@@ -39,7 +39,9 @@ pub use error::SysprimsErrorCode;
 
 // Re-export FFI functions from submodules
 pub use error::{sysprims_clear_error, sysprims_last_error, sysprims_last_error_code};
-pub use proc::{sysprims_proc_get, sysprims_proc_list, sysprims_proc_listening_ports};
+pub use proc::{
+    sysprims_proc_get, sysprims_proc_list, sysprims_proc_listening_ports, sysprims_proc_wait_pid,
+};
 pub use session::{sysprims_self_getpgid, sysprims_self_getsid};
 pub use signal::{
     sysprims_force_kill, sysprims_signal_send, sysprims_signal_send_group, sysprims_terminate,

@@ -13,6 +13,7 @@ import {
   selfPGID,
   selfSID,
   terminate,
+  waitPID,
 } from "../src/index";
 
 // -----------------------------------------------------------------------------
@@ -128,6 +129,13 @@ test("forceKill rejects pid 0", () => {
     () => forceKill(0),
     (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.InvalidArgument,
   );
+});
+
+test("waitPID(process.pid, 1ms) returns timed_out", () => {
+  const pid = process.pid;
+  const r = waitPID(pid, 1);
+  assert.equal(r.pid, pid);
+  assert.equal(r.timed_out, true);
 });
 
 test("terminate kills a spawned child process", async () => {

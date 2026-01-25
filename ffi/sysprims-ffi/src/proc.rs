@@ -5,6 +5,7 @@
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use std::time::Duration;
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
@@ -331,6 +332,64 @@ pub unsafe extern "C" fn sysprims_proc_get(
     SysprimsErrorCode::Ok
 }
 
+/// Wait for a PID to exit, up to a timeout.
+///
+/// Returns a JSON object matching `wait-pid-result.schema.json`.
+///
+/// # Arguments
+///
+/// * `pid` - PID to wait on (must be > 0)
+/// * `timeout_ms` - Timeout in milliseconds
+/// * `result_json_out` - Output pointer for result JSON string
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_wait_pid(
+    pid: u32,
+    timeout_ms: u64,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    let result = match sysprims_proc::wait_pid(pid, Duration::from_millis(timeout_ms)) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&result) {
+        Ok(j) => j,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("failed to serialize wait result: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -498,5 +557,26 @@ mod tests {
     fn test_proc_get_null_output() {
         let code = unsafe { sysprims_proc_get(1234, std::ptr::null_mut()) };
         assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn test_proc_wait_pid_invalid_pid() {
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_wait_pid(0, 1, &mut result) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn test_proc_wait_pid_self_times_out() {
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let pid = std::process::id();
+        let code = unsafe { sysprims_proc_wait_pid(pid, 1, &mut result) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("\"timed_out\":true"));
+
+        unsafe { sysprims_free_string(result) };
     }
 }

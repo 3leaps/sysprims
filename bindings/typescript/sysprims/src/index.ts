@@ -6,6 +6,7 @@ import type {
   ProcessFilter,
   ProcessInfo,
   ProcessSnapshot,
+  WaitPidResult,
 } from "./types";
 
 export { SysprimsError, SysprimsErrorCode };
@@ -18,6 +19,7 @@ export type {
   ProcessSnapshot,
   ProcessState,
   Protocol,
+  WaitPidResult,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -103,6 +105,23 @@ export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
   const filterJson = filter ? JSON.stringify(filter) : "";
   const result = callJsonReturn((out) => lib.sysprims_proc_listening_ports(filterJson, out), lib);
   return result as PortBindingsSnapshot;
+}
+
+// -----------------------------------------------------------------------------
+// Wait
+// -----------------------------------------------------------------------------
+
+/**
+ * Wait for a PID to exit up to the provided timeout (milliseconds).
+ *
+ * Best-effort behavior:
+ * - Unix: polling strategy (we are not necessarily the parent)
+ * - Windows: process wait APIs when available
+ */
+export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
+  const lib = loadSysprims();
+  const result = callJsonReturn((out) => lib.sysprims_proc_wait_pid(pid >>> 0, timeoutMs, out), lib);
+  return result as WaitPidResult;
 }
 
 // -----------------------------------------------------------------------------

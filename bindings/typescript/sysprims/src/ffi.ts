@@ -24,6 +24,7 @@ type SysprimsLib = {
   sysprims_proc_get: (pid: number, out: KoffiOutArray) => number;
   sysprims_proc_list: (filterJson: KoffiPtr, out: KoffiOutArray) => number;
   sysprims_proc_listening_ports: (filterJson: KoffiPtr, out: KoffiOutArray) => number;
+  sysprims_proc_wait_pid: (pid: number, timeoutMs: number, out: KoffiOutArray) => number;
 
   // Self introspection
   sysprims_self_getpgid: (out: KoffiOutArray) => number;
@@ -100,6 +101,11 @@ export function loadSysprims(): SysprimsLib {
     sysprims_proc_list: lib.func("sysprims_proc_list", "int32", ["str", SysprimsOwnedStrOut]),
     sysprims_proc_listening_ports: lib.func("sysprims_proc_listening_ports", "int32", [
       "str",
+      SysprimsOwnedStrOut,
+    ]),
+    sysprims_proc_wait_pid: lib.func("sysprims_proc_wait_pid", "int32", [
+      "uint32",
+      "uint64",
       SysprimsOwnedStrOut,
     ]),
 

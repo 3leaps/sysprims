@@ -25,14 +25,16 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
     TCP_TABLE_OWNER_PID_LISTENER, UDP_TABLE_OWNER_PID,
 };
 
+use std::time::Duration;
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_INFORMATION,
-    PROCESS_VM_READ,
+    GetExitCodeProcess, GetProcessTimes, OpenProcess, QueryFullProcessImageNameW,
+    WaitForSingleObject, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_VM_READ, SYNCHRONIZE,
 };
 
 // ============================================================================
@@ -79,6 +81,55 @@ pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
         .into_iter()
         .find(|p| p.pid == pid)
         .ok_or_else(|| SysprimsError::not_found(pid))
+}
+
+pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitPidResult> {
+    unsafe {
+        let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            let err = GetLastError();
+            if err == ERROR_ACCESS_DENIED {
+                return Err(SysprimsError::permission_denied(pid, "wait pid"));
+            }
+            return Err(SysprimsError::not_found(pid));
+        }
+
+        let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as u32;
+        let wait = WaitForSingleObject(handle, timeout_ms);
+
+        // WAIT_OBJECT_0 == 0, WAIT_TIMEOUT == 258
+        if wait == 0 {
+            let mut code: u32 = 0;
+            let ok = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            if !ok {
+                return Ok(crate::make_wait_pid_result(
+                    pid,
+                    true,
+                    false,
+                    None,
+                    vec!["GetExitCodeProcess failed".to_string()],
+                ));
+            }
+            return Ok(crate::make_wait_pid_result(
+                pid,
+                true,
+                false,
+                Some(code as i32),
+                vec![],
+            ));
+        }
+        if wait == 258 {
+            CloseHandle(handle);
+            return Ok(crate::make_wait_pid_result(pid, false, true, None, vec![]));
+        }
+
+        CloseHandle(handle);
+        Err(SysprimsError::system(
+            "WaitForSingleObject failed",
+            wait as i32,
+        ))
+    }
 }
 
 pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {

@@ -43,7 +43,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use sysprims_core::schema::{PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1};
+use std::time::Duration;
+use sysprims_core::schema::{
+    PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
+};
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
 // Platform-specific implementations
@@ -79,6 +82,39 @@ pub struct ProcessSnapshot {
 
     /// List of processes.
     pub processes: Vec<ProcessInfo>,
+}
+
+/// Result of waiting for a PID to exit.
+///
+/// Best-effort cross-platform semantics:
+/// - On Unix, this uses a polling strategy (we are not necessarily the parent).
+/// - On Windows, this uses process wait APIs when available.
+#[derive(Debug, Clone, Serialize)]
+pub struct WaitPidResult {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+
+    /// Timestamp of result creation (ISO 8601).
+    pub timestamp: String,
+
+    /// Current platform (e.g., "linux", "macos", "windows").
+    pub platform: &'static str,
+
+    /// PID waited on.
+    pub pid: u32,
+
+    /// True if the process was observed to have exited.
+    pub exited: bool,
+
+    /// True if the wait timed out before exit was observed.
+    pub timed_out: bool,
+
+    /// Exit code when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+
+    /// Warnings about degraded visibility.
+    pub warnings: Vec<String>,
 }
 
 /// Snapshot of listening ports at a point in time.
@@ -488,6 +524,20 @@ pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
     platform::get_process_impl(pid)
 }
 
+/// Wait for a PID to exit, up to the provided timeout.
+///
+/// Returns:
+/// - `Ok` with `timed_out=true` if the process did not exit in time.
+/// - `Ok` with `exited=true` if the process was observed to have exited.
+/// - `Err(NotFound)` if the PID does not exist at the time of the first check.
+/// - `Err(PermissionDenied)` if the platform forbids even querying liveness.
+pub fn wait_pid(pid: u32, timeout: Duration) -> SysprimsResult<WaitPidResult> {
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    platform::wait_pid_impl(pid, timeout)
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -523,6 +573,25 @@ fn make_snapshot(processes: Vec<ProcessInfo>) -> ProcessSnapshot {
         schema_id: PROCESS_INFO_V1,
         timestamp: current_timestamp(),
         processes,
+    }
+}
+
+fn make_wait_pid_result(
+    pid: u32,
+    exited: bool,
+    timed_out: bool,
+    exit_code: Option<i32>,
+    warnings: Vec<String>,
+) -> WaitPidResult {
+    WaitPidResult {
+        schema_id: WAIT_PID_RESULT_V1,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+        pid,
+        exited,
+        timed_out,
+        exit_code,
+        warnings,
     }
 }
 
@@ -617,6 +686,15 @@ mod tests {
                 || info.state == ProcessState::Unknown,
             "Test process should be running, sleeping, or unknown (Windows)"
         );
+    }
+
+    #[test]
+    fn test_wait_pid_self_times_out() {
+        let pid = std::process::id();
+        let r = wait_pid(pid, Duration::from_millis(1)).unwrap();
+        assert_eq!(r.pid, pid);
+        assert!(r.timed_out);
+        assert!(!r.exited);
     }
 
     #[test]

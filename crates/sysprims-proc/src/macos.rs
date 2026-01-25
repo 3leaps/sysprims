@@ -14,6 +14,8 @@ use libc::{c_int, c_void, pid_t, uid_t};
 use std::ffi::CStr;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::thread;
+use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysprims_core::{SysprimsError, SysprimsResult};
 
@@ -262,6 +264,37 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
 
 pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
     read_process_info(pid)
+}
+
+pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitPidResult> {
+    let start = Instant::now();
+    let mut first_check = true;
+
+    loop {
+        // SAFETY: kill(pid, 0) does not send a signal; it performs an existence/permission check.
+        let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if rc == 0 {
+            if start.elapsed() >= timeout {
+                return Ok(crate::make_wait_pid_result(pid, false, true, None, vec![]));
+            }
+            thread::sleep(Duration::from_millis(25));
+            first_check = false;
+            continue;
+        }
+
+        let errno = unsafe { *libc::__error() };
+        if errno == libc::ESRCH {
+            if first_check {
+                return Err(SysprimsError::not_found(pid));
+            }
+            return Ok(crate::make_wait_pid_result(pid, true, false, None, vec![]));
+        }
+        if errno == libc::EPERM {
+            return Err(SysprimsError::permission_denied(pid, "wait pid"));
+        }
+
+        return Err(SysprimsError::system("kill(pid, 0) failed", errno));
+    }
 }
 
 pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
