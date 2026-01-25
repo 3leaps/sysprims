@@ -16,7 +16,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use sysprims_core::{SysprimsError, SysprimsResult};
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER,
-    INVALID_HANDLE_VALUE, NO_ERROR, SYNCHRONIZE,
+    INVALID_HANDLE_VALUE, NO_ERROR,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID,
@@ -24,6 +24,7 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
     MIB_UDP6TABLE_OWNER_PID, MIB_UDPROW_OWNER_PID, MIB_UDPTABLE_OWNER_PID,
     TCP_TABLE_OWNER_PID_LISTENER, UDP_TABLE_OWNER_PID,
 };
+use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 
 use std::time::Duration;
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
