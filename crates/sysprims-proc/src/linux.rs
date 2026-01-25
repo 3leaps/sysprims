@@ -137,11 +137,17 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
     let boot_time = get_boot_time();
     let clock_ticks = get_clock_ticks();
     let start_time_secs = stat.starttime / clock_ticks + boot_time;
+    let start_time_unix_ms = start_time_secs.saturating_mul(1000);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     let elapsed_seconds = now.saturating_sub(start_time_secs);
+
+    // Best-effort executable path (/proc/<pid>/exe)
+    let exe_path = fs::read_link(proc_path.join("exe"))
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
 
     // Calculate CPU percentage (lifetime average)
     let total_cpu_ticks = stat.utime + stat.stime;
@@ -178,6 +184,8 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         cpu_percent,
         memory_kb,
         elapsed_seconds,
+        start_time_unix_ms: Some(start_time_unix_ms),
+        exe_path,
         state,
         cmdline,
     })

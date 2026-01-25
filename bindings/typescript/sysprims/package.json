@@ -1,6 +1,6 @@
 {
   "name": "@3leaps/sysprims",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "GPL-free cross-platform process utilities (TypeScript bindings via C-ABI shared libs)",
   "license": "MIT OR Apache-2.0",
   "main": "dist/index.js",

@@ -180,6 +180,18 @@ pub struct ProcessInfo {
     /// Seconds since process start.
     pub elapsed_seconds: u64,
 
+    /// Process start time (Unix epoch milliseconds), when available.
+    ///
+    /// Best-effort: omitted if the platform cannot provide it or access is denied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time_unix_ms: Option<u64>,
+
+    /// Executable path (absolute), when available.
+    ///
+    /// Best-effort: omitted if the platform cannot provide it or access is denied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exe_path: Option<String>,
+
     /// Process state.
     pub state: ProcessState,
 
@@ -588,6 +600,14 @@ mod tests {
         // Memory should be non-zero for running process
         // Note: Don't require this as some systems may report 0
         assert!(info.memory_kb < u64::MAX);
+
+        // Identity fields are best-effort; if present, they should be reasonable.
+        if let Some(ms) = info.start_time_unix_ms {
+            assert!(ms > 0);
+        }
+        if let Some(ref exe) = info.exe_path {
+            assert!(!exe.is_empty());
+        }
 
         // State should be running (we're executing)
         // Note: Windows reports Unknown as it doesn't expose process state simply

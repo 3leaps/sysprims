@@ -31,7 +31,8 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_INFORMATION,
+    PROCESS_VM_READ,
 };
 
 // ============================================================================
@@ -127,7 +128,10 @@ unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<Proce
     };
 
     // Try to get additional info by opening the process
-    let (cpu_percent, memory_kb, elapsed_seconds) = get_process_stats(pid).unwrap_or((0.0, 0, 0));
+    let (cpu_percent, memory_kb, elapsed_seconds, start_time_unix_ms) =
+        get_process_stats(pid).unwrap_or((0.0, 0, 0, None));
+
+    let exe_path = get_process_exe_path(pid);
 
     Ok(ProcessInfo {
         pid,
@@ -137,6 +141,8 @@ unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<Proce
         cpu_percent,
         memory_kb,
         elapsed_seconds,
+        start_time_unix_ms,
+        exe_path,
         state: ProcessState::Unknown, // Windows doesn't expose this simply
         cmdline: vec![name],
     })
@@ -413,7 +419,7 @@ fn udp6_row_to_binding(row: &MIB_UDP6ROW_OWNER_PID) -> Option<PortBinding> {
 }
 
 /// Get CPU and memory stats for a process.
-unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64)> {
+unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64, Option<u64>)> {
     let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
     if handle == 0 {
         return None;
@@ -452,7 +458,7 @@ unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64)> {
     };
 
     // Calculate elapsed time and CPU percent
-    let (cpu_percent, elapsed_seconds) = if times_ok {
+    let (cpu_percent, elapsed_seconds, start_time_unix_ms) = if times_ok {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
@@ -468,6 +474,9 @@ unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64)> {
 
         let elapsed = now.as_secs().saturating_sub(creation_secs);
 
+        // Best-effort process creation time in Unix ms
+        let creation_ms = creation_unix_100ns / 10_000;
+
         // CPU time in 100ns intervals
         let kernel_100ns =
             (kernel_time.dwHighDateTime as u64) << 32 | kernel_time.dwLowDateTime as u64;
@@ -480,12 +489,34 @@ unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64)> {
             0.0
         };
 
-        (cpu, elapsed)
+        (cpu, elapsed, Some(creation_ms))
     } else {
-        (0.0, 0)
+        (0.0, 0, None)
     };
 
-    Some((cpu_percent, memory_kb, elapsed_seconds))
+    Some((cpu_percent, memory_kb, elapsed_seconds, start_time_unix_ms))
+}
+
+unsafe fn get_process_exe_path(pid: u32) -> Option<String> {
+    let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
+    if handle == 0 {
+        return None;
+    }
+
+    // Start with a reasonable buffer; retry if it is too small.
+    let mut buf_len: u32 = 260;
+    let mut buf: Vec<u16> = vec![0u16; buf_len as usize];
+
+    let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut buf_len) != 0;
+    if !ok {
+        CloseHandle(handle);
+        return None;
+    }
+    CloseHandle(handle);
+
+    // buf_len is number of wide chars written (excluding null).
+    buf.truncate(buf_len as usize);
+    Some(String::from_utf16_lossy(&buf))
 }
 
 #[cfg(test)]

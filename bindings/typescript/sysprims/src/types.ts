@@ -16,6 +16,8 @@ export interface ProcessInfo {
   cpu_percent: number;
   memory_kb: number;
   elapsed_seconds: number;
+  start_time_unix_ms?: number | null;
+  exe_path?: string | null;
   state: ProcessState;
   cmdline: string[];
 }

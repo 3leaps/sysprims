@@ -235,6 +235,8 @@ extern "C" {
     ) -> c_int;
 
     fn proc_name(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
+
+    fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
 }
 
 // ============================================================================
@@ -484,10 +486,36 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         bsd_info.pbi_start_tvsec,
         bsd_info.pbi_start_tvusec as u32 * 1000,
     );
+    let start_time_unix_ms = bsd_info
+        .pbi_start_tvsec
+        .saturating_mul(1000)
+        .saturating_add((bsd_info.pbi_start_tvusec as u64) / 1000);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     let elapsed_seconds = now.as_secs().saturating_sub(start_time.as_secs());
+
+    // Best-effort executable path
+    let exe_path = {
+        let mut buffer = [0u8; MAXPATHLEN];
+        let result = unsafe {
+            proc_pidpath(
+                pid as c_int,
+                buffer.as_mut_ptr() as *mut c_void,
+                MAXPATHLEN as u32,
+            )
+        };
+
+        if result > 0 {
+            Some(
+                unsafe { CStr::from_ptr(buffer.as_ptr() as *const i8) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        } else {
+            None
+        }
+    };
 
     // Calculate CPU percentage
     let cpu_percent = task_info
@@ -525,6 +553,8 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         cpu_percent,
         memory_kb,
         elapsed_seconds,
+        start_time_unix_ms: Some(start_time_unix_ms),
+        exe_path,
         state,
         cmdline,
     })

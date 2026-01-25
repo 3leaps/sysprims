@@ -26,6 +26,10 @@ type ProcessInfo struct {
 	MemoryKB uint64 `json:"memory_kb"`
 	// ElapsedSeconds is the process runtime in seconds (may be nil if unavailable).
 	ElapsedSeconds *uint64 `json:"elapsed_seconds,omitempty"`
+	// StartTimeUnixMS is the process start time (Unix epoch ms), best-effort.
+	StartTimeUnixMS *uint64 `json:"start_time_unix_ms,omitempty"`
+	// ExePath is the absolute executable path, best-effort.
+	ExePath *string `json:"exe_path,omitempty"`
 	// State is the process state (may be nil if unavailable).
 	State *string `json:"state,omitempty"`
 	// Cmdline is the command line arguments (may be empty if unavailable).
@@ -87,6 +91,8 @@ type ProcessFilter struct {
 	UserEquals *string `json:"user_equals,omitempty"`
 	// PIDIn filters to only these PIDs.
 	PIDIn []uint32 `json:"pid_in,omitempty"`
+	// StateIn filters by process state.
+	StateIn []string `json:"state_in,omitempty"`
 	// CPUAbove filters to processes using more than this CPU percentage.
 	CPUAbove *float64 `json:"cpu_above,omitempty"`
 	// MemoryAboveKB filters to processes using more than this memory (KB).
