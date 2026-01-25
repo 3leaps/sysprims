@@ -586,4 +586,24 @@ SysprimsErrorCode sysprims_force_kill(uint32_t pid);
 SysprimsErrorCode sysprims_timeout_run(const struct SysprimsTimeoutConfig *config,
                                        char **result_json_out);
 
+/**
+ * Terminate a process (best-effort tree) with escalation.
+ *
+ * Returns a JSON object matching `terminate-tree-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `pid` - Process ID to terminate (must be > 0)
+ * * `config_json` - Optional JSON config (NULL/empty/"{}" for defaults)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_terminate_tree(uint32_t pid,
+                                          const char *config_json,
+                                          char **result_json_out);
+
 #endif  /* SYSPRIMS_H */

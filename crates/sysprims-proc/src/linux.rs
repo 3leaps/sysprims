@@ -80,6 +80,13 @@ pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitP
         let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
         if rc == 0 {
             // Still running.
+            // On Unix, an exited-but-unreaped child remains as a zombie and still
+            // responds to kill(pid, 0). Treat zombies as exited for supervisor use.
+            if let Ok(info) = read_process_info(pid) {
+                if info.state == crate::ProcessState::Zombie {
+                    return Ok(crate::make_wait_pid_result(pid, true, false, None, vec![]));
+                }
+            }
             if start.elapsed() >= timeout {
                 return Ok(crate::make_wait_pid_result(pid, false, true, None, vec![]));
             }

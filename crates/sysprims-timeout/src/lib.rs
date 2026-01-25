@@ -42,8 +42,12 @@
 use std::process::ExitStatus;
 use std::time::Duration;
 
-use serde::Serialize;
-use sysprims_core::SysprimsResult;
+use serde::{Deserialize, Serialize};
+use sysprims_core::schema::TERMINATE_TREE_RESULT_V1;
+use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
+use sysprims_proc::wait_pid;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 #[cfg(unix)]
 mod unix;
@@ -122,6 +126,220 @@ pub enum TreeKillReliability {
     /// Best-effort only. Process group or Job Object creation failed;
     /// only the direct child was killed. Grandchildren may have escaped.
     BestEffort,
+}
+
+// =============================================================================
+// Terminate Tree (PID-based)
+// =============================================================================
+
+/// Configuration for PID-based terminate-tree.
+///
+/// This is intentionally small and conservative; higher-level spawn-in-group
+/// APIs can provide stronger guarantees.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminateTreeConfig {
+    /// Timeout before escalation.
+    #[serde(default = "default_grace_timeout_ms")]
+    pub grace_timeout_ms: u64,
+
+    /// Timeout to wait after escalation signal.
+    #[serde(default = "default_kill_timeout_ms")]
+    pub kill_timeout_ms: u64,
+
+    /// Signal to send first (default SIGTERM).
+    #[serde(default = "default_grace_signal")]
+    pub signal: i32,
+
+    /// Signal to send on escalation (default SIGKILL).
+    #[serde(default = "default_kill_signal")]
+    pub kill_signal: i32,
+}
+
+fn default_grace_timeout_ms() -> u64 {
+    10_000
+}
+
+fn default_kill_timeout_ms() -> u64 {
+    2_000
+}
+
+fn default_grace_signal() -> i32 {
+    SIGTERM
+}
+
+fn default_kill_signal() -> i32 {
+    SIGKILL
+}
+
+impl Default for TerminateTreeConfig {
+    fn default() -> Self {
+        Self {
+            grace_timeout_ms: default_grace_timeout_ms(),
+            kill_timeout_ms: default_kill_timeout_ms(),
+            signal: default_grace_signal(),
+            kill_signal: default_kill_signal(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TerminateTreeResult {
+    pub schema_id: &'static str,
+    pub timestamp: String,
+    pub platform: &'static str,
+    pub pid: u32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pgid: Option<u32>,
+
+    pub signal_sent: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kill_signal: Option<i32>,
+    pub escalated: bool,
+    pub exited: bool,
+    pub timed_out: bool,
+    pub tree_kill_reliability: String,
+    pub warnings: Vec<String>,
+}
+
+fn current_timestamp() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+/// Terminate a process (and best-effort tree) with escalation.
+///
+/// PID-only API: if the target PID is a process group leader (Unix only), this will
+/// prefer group kill for better coverage. Otherwise it signals the PID directly.
+pub fn terminate_tree(
+    pid: u32,
+    config: TerminateTreeConfig,
+) -> SysprimsResult<TerminateTreeResult> {
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("pid must be > 0"));
+    }
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut pgid: Option<u32> = None;
+    let mut reliability = TreeKillReliability::BestEffort;
+
+    // Decide whether we can safely use group kill (Unix only).
+    #[cfg(unix)]
+    {
+        use sysprims_signal::MAX_SAFE_PID;
+        if pid <= MAX_SAFE_PID {
+            let pid_i32 = pid as i32;
+            let self_pgid = unsafe { libc::getpgid(0) };
+            let target_pgid = unsafe { libc::getpgid(pid_i32) };
+
+            if target_pgid == -1 {
+                warnings.push("Could not determine process group for pid".to_string());
+            } else if target_pgid == pid_i32 {
+                // Target is a group leader. Only use killpg if it isn't our own group.
+                if self_pgid != -1 && target_pgid == self_pgid {
+                    warnings.push(
+                        "Target pid is in caller's process group; refusing group kill".to_string(),
+                    );
+                } else {
+                    pgid = Some(target_pgid as u32);
+                    reliability = TreeKillReliability::Guaranteed;
+                }
+            } else {
+                warnings
+                    .push("Target pid is not a process group leader; using pid kill".to_string());
+            }
+        } else {
+            warnings.push("pid exceeds max safe pid for POSIX kill".to_string());
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        warnings.push("Windows PID termination is best-effort without Job Object".to_string());
+    }
+
+    // Step 1: send graceful signal
+    if let Some(g) = pgid {
+        sysprims_signal::killpg(g, config.signal)?;
+    } else {
+        sysprims_signal::kill(pid, config.signal)?;
+    }
+
+    // Step 2: wait for exit
+    let grace = Duration::from_millis(config.grace_timeout_ms);
+    let grace_wait = wait_pid(pid, grace)?;
+    if grace_wait.exited {
+        return Ok(TerminateTreeResult {
+            schema_id: TERMINATE_TREE_RESULT_V1,
+            timestamp: current_timestamp(),
+            platform: get_platform(),
+            pid,
+            pgid,
+            signal_sent: config.signal,
+            kill_signal: None,
+            escalated: false,
+            exited: true,
+            timed_out: false,
+            tree_kill_reliability: match reliability {
+                TreeKillReliability::Guaranteed => "guaranteed".to_string(),
+                TreeKillReliability::BestEffort => "best_effort".to_string(),
+            },
+            warnings,
+        });
+    }
+
+    // Step 3: escalate
+    if let Some(g) = pgid {
+        sysprims_signal::killpg(g, config.kill_signal)?;
+    } else {
+        sysprims_signal::kill(pid, config.kill_signal)?;
+    }
+
+    let kill_wait = wait_pid(pid, Duration::from_millis(config.kill_timeout_ms))?;
+    let mut exited = kill_wait.exited;
+    let mut timed_out = kill_wait.timed_out;
+
+    // If we timed out, attempt one final best-effort confirmation.
+    // On some platforms/permission contexts, a process may become unobservable
+    // (or a zombie) even after it has exited.
+    if timed_out {
+        match sysprims_proc::get_process(pid) {
+            Ok(_) => {
+                // Still observable -> treat as still running.
+            }
+            Err(SysprimsError::NotFound { .. }) => {
+                exited = true;
+                timed_out = false;
+                warnings.push("PID no longer found after timeout; treating as exited".to_string());
+            }
+            Err(SysprimsError::PermissionDenied { .. }) => {
+                warnings.push("Permission denied while confirming exit after timeout".to_string());
+            }
+            Err(e) => {
+                warnings.push(format!("Failed to confirm exit after timeout: {}", e));
+            }
+        }
+    }
+
+    Ok(TerminateTreeResult {
+        schema_id: TERMINATE_TREE_RESULT_V1,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+        pid,
+        pgid,
+        signal_sent: config.signal,
+        kill_signal: Some(config.kill_signal),
+        escalated: true,
+        exited,
+        timed_out,
+        tree_kill_reliability: match reliability {
+            TreeKillReliability::Guaranteed => "guaranteed".to_string(),
+            TreeKillReliability::BestEffort => "best_effort".to_string(),
+        },
+        warnings,
+    })
 }
 
 /// Outcome of timeout execution.
@@ -216,6 +434,7 @@ pub fn run_with_timeout_default(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Command, Stdio};
 
     #[test]
     fn default_config_uses_sigterm() {
@@ -239,5 +458,71 @@ mod tests {
     fn default_config_does_not_preserve_status() {
         let config = TimeoutConfig::default();
         assert!(!config.preserve_status);
+    }
+
+    #[test]
+    fn terminate_tree_rejects_pid_zero() {
+        let err = terminate_tree(0, TerminateTreeConfig::default()).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn terminate_tree_kills_spawned_child() {
+        // SAFETY: We spawn this process ourselves and control its PID.
+        let mut child = Command::new("sleep")
+            .arg("60")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn sleep process");
+
+        let pid = child.id();
+        let result = terminate_tree(
+            pid,
+            TerminateTreeConfig {
+                grace_timeout_ms: 100,
+                kill_timeout_ms: 5000,
+                ..TerminateTreeConfig::default()
+            },
+        )
+        .expect("terminate_tree should succeed");
+
+        assert_eq!(result.pid, pid);
+        assert!(
+            result.exited,
+            "expected child to be exited, got: {result:?}"
+        );
+        assert!(!result.timed_out, "unexpected timeout: {result:?}");
+
+        let _ = child.wait();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn terminate_tree_kills_spawned_child() {
+        // SAFETY: We spawn this process ourselves and control its PID.
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn ping sleep process");
+
+        let pid = child.id();
+        let result = terminate_tree(
+            pid,
+            TerminateTreeConfig {
+                grace_timeout_ms: 100,
+                kill_timeout_ms: 5000,
+                ..TerminateTreeConfig::default()
+            },
+        )
+        .expect("terminate_tree should succeed");
+
+        assert_eq!(result.pid, pid);
+        let _ = child.wait();
     }
 }

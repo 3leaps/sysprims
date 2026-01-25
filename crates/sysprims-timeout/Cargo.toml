@@ -17,9 +17,11 @@ cross-user-tests = []
 
 [dependencies]
 sysprims-core.workspace = true
+sysprims-proc.workspace = true
 sysprims-signal.workspace = true
 rsfulmen = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+time = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

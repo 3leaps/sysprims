@@ -101,6 +101,18 @@ pub const PORT_FILTER_V1: &str =
 pub const WAIT_PID_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/wait-pid-result.schema.json";
 
+/// Schema ID for terminate-tree config JSON input (v1.0.0).
+///
+/// Schema location: `schemas/process/v1.0.0/terminate-tree-config.schema.json`
+pub const TERMINATE_TREE_CONFIG_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json";
+
+/// Schema ID for terminate-tree result JSON output (v1.0.0).
+///
+/// Schema location: `schemas/process/v1.0.0/terminate-tree-result.schema.json`
+pub const TERMINATE_TREE_RESULT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json";
+
 // ============================================================================
 // Schema Host Constants
 // ============================================================================
@@ -124,6 +136,8 @@ mod tests {
         assert!(PORT_BINDINGS_V1.starts_with("https://"));
         assert!(PORT_FILTER_V1.starts_with("https://"));
         assert!(WAIT_PID_RESULT_V1.starts_with("https://"));
+        assert!(TERMINATE_TREE_CONFIG_V1.starts_with("https://"));
+        assert!(TERMINATE_TREE_RESULT_V1.starts_with("https://"));
     }
 
     #[test]
@@ -155,6 +169,14 @@ mod tests {
             WAIT_PID_RESULT_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
+        assert!(
+            TERMINATE_TREE_CONFIG_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            TERMINATE_TREE_RESULT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
     }
 
     #[test]
@@ -168,6 +190,8 @@ mod tests {
         assert!(PORT_BINDINGS_V1.ends_with(".schema.json"));
         assert!(PORT_FILTER_V1.ends_with(".schema.json"));
         assert!(WAIT_PID_RESULT_V1.ends_with(".schema.json"));
+        assert!(TERMINATE_TREE_CONFIG_V1.ends_with(".schema.json"));
+        assert!(TERMINATE_TREE_RESULT_V1.ends_with(".schema.json"));
 
         // All v1.0.0 schemas should have version in path
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
@@ -176,6 +200,8 @@ mod tests {
         assert!(PORT_BINDINGS_V1.contains("/v1.0.0/"));
         assert!(PORT_FILTER_V1.contains("/v1.0.0/"));
         assert!(WAIT_PID_RESULT_V1.contains("/v1.0.0/"));
+        assert!(TERMINATE_TREE_CONFIG_V1.contains("/v1.0.0/"));
+        assert!(TERMINATE_TREE_RESULT_V1.contains("/v1.0.0/"));
     }
 
     #[test]
@@ -205,6 +231,14 @@ mod tests {
             WAIT_PID_RESULT_V1.contains("/process/"),
             "wait-pid-result schema should have process topic"
         );
+        assert!(
+            TERMINATE_TREE_CONFIG_V1.contains("/process/"),
+            "terminate-tree-config schema should have process topic"
+        );
+        assert!(
+            TERMINATE_TREE_RESULT_V1.contains("/process/"),
+            "terminate-tree-result schema should have process topic"
+        );
     }
 
     #[test]
@@ -216,6 +250,8 @@ mod tests {
             PORT_BINDINGS_V1,
             PORT_FILTER_V1,
             WAIT_PID_RESULT_V1,
+            TERMINATE_TREE_CONFIG_V1,
+            TERMINATE_TREE_RESULT_V1,
         ];
 
         // Check all pairs are different
@@ -241,5 +277,7 @@ mod tests {
         assert!(PORT_BINDINGS_V1.starts_with(&prefix));
         assert!(PORT_FILTER_V1.starts_with(&prefix));
         assert!(WAIT_PID_RESULT_V1.starts_with(&prefix));
+        assert!(TERMINATE_TREE_CONFIG_V1.starts_with(&prefix));
+        assert!(TERMINATE_TREE_RESULT_V1.starts_with(&prefix));
     }
 }

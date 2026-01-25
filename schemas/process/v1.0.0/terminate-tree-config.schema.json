@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json",
+  "title": "sysprims terminate tree config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id"],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json"
+    },
+    "grace_timeout_ms": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "kill_timeout_ms": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "signal": {
+      "type": ["integer", "null"]
+    },
+    "kill_signal": {
+      "type": ["integer", "null"]
+    }
+  }
+}

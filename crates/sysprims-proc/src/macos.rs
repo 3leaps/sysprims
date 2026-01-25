@@ -274,6 +274,12 @@ pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitP
         // SAFETY: kill(pid, 0) does not send a signal; it performs an existence/permission check.
         let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
         if rc == 0 {
+            // Treat zombies as exited (kill(pid, 0) still succeeds for zombies).
+            if let Ok(info) = read_process_info(pid) {
+                if info.state == crate::ProcessState::Zombie {
+                    return Ok(crate::make_wait_pid_result(pid, true, false, None, vec![]));
+                }
+            }
             if start.elapsed() >= timeout {
                 return Ok(crate::make_wait_pid_result(pid, false, true, None, vec![]));
             }

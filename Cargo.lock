@@ -555,8 +555,10 @@ dependencies = [
  "rsfulmen",
  "serde",
  "sysprims-core",
+ "sysprims-proc",
  "sysprims-session",
  "sysprims-signal",
+ "time",
  "windows-sys 0.52.0",
 ]
 

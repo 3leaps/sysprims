@@ -14,6 +14,7 @@ import {
   selfSID,
   terminate,
   waitPID,
+  terminateTree,
 } from "../src/index";
 
 // -----------------------------------------------------------------------------
@@ -163,4 +164,22 @@ test("forceKill kills a spawned child process", async () => {
 
   forceKill(pid);
   await waitForExit(child, 5000);
+});
+
+test("terminateTree kills a spawned child process", async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error("Failed to spawn child process");
+  }
+
+  await new Promise((r) => setTimeout(r, 50));
+
+  const r = terminateTree(pid, { grace_timeout_ms: 100, kill_timeout_ms: 5000 });
+  assert.equal(r.pid, pid);
+
+  await Promise.race([
+    once(child, "exit"),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("child did not exit")), 5000)),
+  ]);
 });

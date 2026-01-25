@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json",
+  "title": "sysprims terminate tree result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "pid",
+    "signal_sent",
+    "escalated",
+    "exited",
+    "timed_out",
+    "tree_kill_reliability",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json"
+    },
+    "timestamp": { "type": "string" },
+    "platform": { "type": "string" },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "pgid": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "signal_sent": { "type": "integer" },
+    "kill_signal": { "type": ["integer", "null"] },
+    "escalated": { "type": "boolean" },
+    "exited": { "type": "boolean" },
+    "timed_out": { "type": "boolean" },
+    "tree_kill_reliability": {
+      "type": "string",
+      "enum": ["guaranteed", "best_effort"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

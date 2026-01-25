@@ -46,7 +46,9 @@ pub use session::{sysprims_self_getpgid, sysprims_self_getsid};
 pub use signal::{
     sysprims_force_kill, sysprims_signal_send, sysprims_signal_send_group, sysprims_terminate,
 };
-pub use timeout::{sysprims_timeout_run, SysprimsGroupingMode, SysprimsTimeoutConfig};
+pub use timeout::{
+    sysprims_terminate_tree, sysprims_timeout_run, SysprimsGroupingMode, SysprimsTimeoutConfig,
+};
 
 // ============================================================================
 // Version Constants

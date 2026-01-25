@@ -63,6 +63,31 @@ export interface WaitPidResult {
   warnings: string[];
 }
 
+// Terminate tree
+
+export interface TerminateTreeConfig {
+  schema_id?: string;
+  grace_timeout_ms?: number | null;
+  kill_timeout_ms?: number | null;
+  signal?: number | null;
+  kill_signal?: number | null;
+}
+
+export interface TerminateTreeResult {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  pid: number;
+  pgid?: number | null;
+  signal_sent: number;
+  kill_signal?: number | null;
+  escalated: boolean;
+  exited: boolean;
+  timed_out: boolean;
+  tree_kill_reliability: "guaranteed" | "best_effort";
+  warnings: string[];
+}
+
 // Port types
 
 export type Protocol = "tcp" | "udp";

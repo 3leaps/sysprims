@@ -71,6 +71,38 @@ type TimeoutResult struct {
 	TreeKillReliability *string `json:"tree_kill_reliability,omitempty"`
 }
 
+// -----------------------------------------------------------------------------
+// TerminateTree
+// -----------------------------------------------------------------------------
+
+// TerminateTreeConfig configures terminate-tree behavior.
+//
+// JSON keys use snake_case to match the schema/FFI conventions.
+type TerminateTreeConfig struct {
+	SchemaID string `json:"schema_id"`
+
+	GraceTimeoutMS *uint64 `json:"grace_timeout_ms,omitempty"`
+	KillTimeoutMS  *uint64 `json:"kill_timeout_ms,omitempty"`
+	Signal         *int32  `json:"signal,omitempty"`
+	KillSignal     *int32  `json:"kill_signal,omitempty"`
+}
+
+// TerminateTreeResult is the outcome of a terminate-tree operation.
+type TerminateTreeResult struct {
+	SchemaID            string   `json:"schema_id"`
+	Timestamp           string   `json:"timestamp"`
+	Platform            string   `json:"platform"`
+	PID                 uint32   `json:"pid"`
+	PGID                *uint32  `json:"pgid,omitempty"`
+	SignalSent          int32    `json:"signal_sent"`
+	KillSignal          *int32   `json:"kill_signal,omitempty"`
+	Escalated           bool     `json:"escalated"`
+	Exited              bool     `json:"exited"`
+	TimedOut            bool     `json:"timed_out"`
+	TreeKillReliability string   `json:"tree_kill_reliability"`
+	Warnings            []string `json:"warnings"`
+}
+
 // Completed returns true if the command completed without timing out.
 func (r *TimeoutResult) Completed() bool {
 	return r.Status == "completed"
@@ -170,6 +202,44 @@ func RunWithTimeout(command string, args []string, timeout time.Duration, config
 	defer C.sysprims_free_string(resultCStr)
 
 	var result TimeoutResult
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &result, nil
+}
+
+// TerminateTree sends a graceful signal, waits, then escalates to kill.
+//
+// This is intended for supervisor stop flows:
+// - send TERM
+// - wait
+// - send KILL
+//
+// On Unix, if the target PID is a process group leader, sysprims will prefer
+// group kill for better coverage.
+func TerminateTree(pid uint32, config TerminateTreeConfig) (*TerminateTreeResult, error) {
+	if config.SchemaID == "" {
+		config.SchemaID = "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json"
+	}
+
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to serialize config: " + err.Error()}
+	}
+
+	configCStr := C.CString(string(configJSON))
+	defer C.free(unsafe.Pointer(configCStr))
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_terminate_tree(C.uint32_t(pid), configCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var result TerminateTreeResult
 	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
 		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
 	}

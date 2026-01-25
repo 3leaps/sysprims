@@ -35,6 +35,9 @@ type SysprimsLib = {
   sysprims_signal_send_group: (pgid: number, signal: number) => number;
   sysprims_terminate: (pid: number) => number;
   sysprims_force_kill: (pid: number) => number;
+
+  // Terminate tree
+  sysprims_terminate_tree: (pid: number, configJson: KoffiPtr, out: KoffiOutArray) => number;
 };
 
 function packageRoot(): string {
@@ -121,6 +124,12 @@ export function loadSysprims(): SysprimsLib {
     ]),
     sysprims_terminate: lib.func("sysprims_terminate", "int32", ["uint32"]),
     sysprims_force_kill: lib.func("sysprims_force_kill", "int32", ["uint32"]),
+
+    sysprims_terminate_tree: lib.func("sysprims_terminate_tree", "int32", [
+      "uint32",
+      "str",
+      SysprimsOwnedStrOut,
+    ]),
   };
 
   const abi = api.sysprims_abi_version();

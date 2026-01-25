@@ -7,11 +7,53 @@ use std::os::raw::c_char;
 use std::time::Duration;
 
 use serde::Serialize;
-use sysprims_core::schema::TIMEOUT_RESULT_V1;
+use sysprims_core::schema::{TERMINATE_TREE_CONFIG_V1, TIMEOUT_RESULT_V1};
 use sysprims_core::SysprimsError;
-use sysprims_timeout::{GroupingMode, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
+use sysprims_timeout::{
+    terminate_tree, GroupingMode, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
+    TreeKillReliability,
+};
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SysprimsTerminateTreeConfig {
+    #[serde(default = "default_config_schema_id")]
+    schema_id: String,
+
+    #[serde(default)]
+    grace_timeout_ms: Option<u64>,
+    #[serde(default)]
+    kill_timeout_ms: Option<u64>,
+    #[serde(default)]
+    signal: Option<i32>,
+    #[serde(default)]
+    kill_signal: Option<i32>,
+}
+
+fn default_config_schema_id() -> String {
+    TERMINATE_TREE_CONFIG_V1.to_string()
+}
+
+impl From<SysprimsTerminateTreeConfig> for TerminateTreeConfig {
+    fn from(value: SysprimsTerminateTreeConfig) -> Self {
+        let mut cfg = TerminateTreeConfig::default();
+        if let Some(v) = value.grace_timeout_ms {
+            cfg.grace_timeout_ms = v;
+        }
+        if let Some(v) = value.kill_timeout_ms {
+            cfg.kill_timeout_ms = v;
+        }
+        if let Some(v) = value.signal {
+            cfg.signal = v;
+        }
+        if let Some(v) = value.kill_signal {
+            cfg.kill_signal = v;
+        }
+        cfg
+    }
+}
 
 /// Process grouping mode for timeout execution.
 ///
@@ -323,6 +365,103 @@ pub unsafe extern "C" fn sysprims_timeout_run(
     SysprimsErrorCode::Ok
 }
 
+/// Terminate a process (best-effort tree) with escalation.
+///
+/// Returns a JSON object matching `terminate-tree-result.schema.json`.
+///
+/// # Arguments
+///
+/// * `pid` - Process ID to terminate (must be > 0)
+/// * `config_json` - Optional JSON config (NULL/empty/"{}" for defaults)
+/// * `result_json_out` - Output pointer for result JSON string
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_terminate_tree(
+    pid: u32,
+    config_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    let cfg = if config_json.is_null() {
+        TerminateTreeConfig::default()
+    } else {
+        let cfg_str = match CStr::from_ptr(config_json).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                let err = SysprimsError::invalid_argument("config_json is not valid UTF-8");
+                set_error(&err);
+                return SysprimsErrorCode::InvalidArgument;
+            }
+        };
+
+        if cfg_str.is_empty() || cfg_str == "{}" {
+            TerminateTreeConfig::default()
+        } else {
+            let parsed = match serde_json::from_str::<SysprimsTerminateTreeConfig>(cfg_str) {
+                Ok(p) => p,
+                Err(e) => {
+                    let err =
+                        SysprimsError::invalid_argument(format!("invalid config JSON: {}", e));
+                    set_error(&err);
+                    return SysprimsErrorCode::InvalidArgument;
+                }
+            };
+
+            if parsed.schema_id != TERMINATE_TREE_CONFIG_V1 {
+                let err = SysprimsError::invalid_argument(format!(
+                    "invalid schema_id (expected {})",
+                    TERMINATE_TREE_CONFIG_V1
+                ));
+                set_error(&err);
+                return SysprimsErrorCode::InvalidArgument;
+            }
+
+            parsed.into()
+        }
+    };
+
+    let result = match terminate_tree(pid, cfg) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&result) {
+        Ok(j) => j,
+        Err(e) => {
+            let err =
+                SysprimsError::internal(format!("failed to serialize terminate result: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -468,6 +607,55 @@ mod tests {
         );
 
         unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_terminate_tree_rejects_pid_zero() {
+        let mut result: *mut c_char = ptr::null_mut();
+        let code = unsafe { sysprims_terminate_tree(0, ptr::null(), &mut result) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_terminate_tree_kills_spawned_child() {
+        #[cfg(unix)]
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("Failed to spawn sleep");
+
+        #[cfg(windows)]
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("Failed to spawn ping");
+
+        let pid = child.id();
+
+        let cfg = CString::new(format!(
+            r#"{{"schema_id":"{}","grace_timeout_ms":100,"kill_timeout_ms":5000}}"#,
+            TERMINATE_TREE_CONFIG_V1
+        ))
+        .unwrap();
+
+        let mut result: *mut c_char = ptr::null_mut();
+        let code = unsafe { sysprims_terminate_tree(pid, cfg.as_ptr(), &mut result) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("\"schema_id\""));
+        assert!(json.contains("\"tree_kill_reliability\""));
+
+        unsafe { sysprims_free_string(result) };
+        let _ = child.wait();
     }
 
     #[test]

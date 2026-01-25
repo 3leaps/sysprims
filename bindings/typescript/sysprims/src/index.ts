@@ -7,6 +7,8 @@ import type {
   ProcessInfo,
   ProcessSnapshot,
   WaitPidResult,
+  TerminateTreeConfig,
+  TerminateTreeResult,
 } from "./types";
 
 export { SysprimsError, SysprimsErrorCode };
@@ -20,6 +22,8 @@ export type {
   ProcessState,
   Protocol,
   WaitPidResult,
+  TerminateTreeConfig,
+  TerminateTreeResult,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -225,4 +229,36 @@ export function terminate(pid: number): void {
 export function forceKill(pid: number): void {
   const lib = loadSysprims();
   callVoid(() => lib.sysprims_force_kill(pid >>> 0), lib);
+}
+
+// -----------------------------------------------------------------------------
+// Terminate Tree
+// -----------------------------------------------------------------------------
+
+/**
+ * Terminate a process with escalation (TERM -> wait -> KILL).
+ *
+ * This is intended for supervisor stop flows.
+ *
+ * Note: this is a PID-only API. On Unix, if `pid` is a process group leader,
+ * sysprims may use group kill for better coverage.
+ */
+export function terminateTree(pid: number, config?: TerminateTreeConfig): TerminateTreeResult {
+  const lib = loadSysprims();
+
+  if (!config) {
+    return callJsonReturn((out) => lib.sysprims_terminate_tree(pid >>> 0, "", out), lib) as TerminateTreeResult;
+  }
+
+  const cfg: TerminateTreeConfig = {
+    schema_id:
+      config.schema_id ||
+      "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json",
+    ...config,
+  };
+
+  return callJsonReturn(
+    (out) => lib.sysprims_terminate_tree(pid >>> 0, JSON.stringify(cfg), out),
+    lib,
+  ) as TerminateTreeResult;
 }
