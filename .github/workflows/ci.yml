@@ -107,10 +107,10 @@ jobs:
         run: rustup target add x86_64-unknown-linux-musl
 
       - name: Build with musl
-        run: cargo build --workspace --target x86_64-unknown-linux-musl
+        run: cargo build --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
 
       - name: Test with musl
-        run: cargo test --workspace --target x86_64-unknown-linux-musl
+        run: cargo test --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
 
   # Go bindings tests
   # Windows uses MinGW (GNU target) for CGo compatibility

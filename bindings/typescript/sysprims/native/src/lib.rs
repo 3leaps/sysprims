@@ -73,6 +73,7 @@ fn err_json(err: SysprimsError) -> SysprimsCallJsonResult {
     }
 }
 
+#[cfg(unix)]
 fn ok_u32(value: u32) -> SysprimsCallU32Result {
     SysprimsCallU32Result {
         code: SysprimsErrorCode::Ok as i32,
