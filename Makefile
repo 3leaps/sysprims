@@ -12,6 +12,7 @@
 
 .PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version install
 .PHONY: precommit prepush deps-check audit deny miri msrv
+.PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
 .PHONY: release-clean release-download release-checksums release-sign
@@ -72,6 +73,9 @@ help: ## Show available targets
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
+	@echo "  check-windows   Fast Windows compile check (no SDK)"
+	@echo "  check-windows-msvc  cargo check for x86_64-pc-windows-msvc"
+	@echo "  check-windows-gnu   cargo check for x86_64-pc-windows-gnu"
 	@echo "  test            Run test suite"
 	@echo "  fmt             Format code (cargo fmt)"
 	@echo "  lint            Run linting (cargo clippy)"
@@ -236,8 +240,31 @@ tools: ## Verify external tools are available
 # Quality Gates
 # -----------------------------------------------------------------------------
 
-check: fmt-check lint test deny ## Run all quality checks
+check: fmt-check lint test check-windows deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
+
+check-windows: check-windows-msvc check-windows-gnu ## Fast Windows compile checks (no SDK)
+	@echo "[ok] Windows cross-target checks passed"
+
+check-windows-msvc: ## cargo check for x86_64-pc-windows-msvc (no SDK)
+	@echo "Checking Windows target compilation (msvc) ..."
+	@if ! command -v rustup >/dev/null 2>&1; then \
+		echo "[!!] rustup not found (required to add Windows targets)"; \
+		exit 1; \
+	fi
+	@rustup target add x86_64-pc-windows-msvc >/dev/null
+	@$(CARGO) check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-msvc
+	@echo "[ok] Windows MSVC target check passed"
+
+check-windows-gnu: ## cargo check for x86_64-pc-windows-gnu (no SDK)
+	@echo "Checking Windows target compilation (gnu) ..."
+	@if ! command -v rustup >/dev/null 2>&1; then \
+		echo "[!!] rustup not found (required to add Windows targets)"; \
+		exit 1; \
+	fi
+	@rustup target add x86_64-pc-windows-gnu >/dev/null
+	@$(CARGO) check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-gnu
+	@echo "[ok] Windows GNU target check passed"
 
 test: ## Run test suite
 	@echo "Running tests..."
