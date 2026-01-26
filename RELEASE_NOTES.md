@@ -6,6 +6,50 @@
 
 ---
 
+## v0.1.7 - 2026-01-26
+
+**Status:** TypeScript Bindings Infrastructure Release
+
+This release migrates TypeScript bindings from koffi FFI to a Node-API (N-API) native addon via napi-rs. The primary user-facing outcome: TypeScript bindings now work in Alpine/musl containers.
+
+### Highlights
+
+- **Node-API Migration**: TypeScript bindings now use napi-rs instead of koffi + vendored shared libraries
+- **Alpine/musl Support**: Linux musl containers (including Alpine) now supported for TypeScript
+- **No API Changes**: Existing imports and function calls remain unchanged
+- **npm Publishing Deferred**: Prebuilt npm packages planned for future release
+
+### What Changed (Implementation Detail)
+
+| Aspect | v0.1.6 (koffi) | v0.1.7 (N-API) |
+|--------|----------------|----------------|
+| Native loading | `koffi.load()` C-ABI shared lib | `require()` N-API `.node` addon |
+| Library location | `_lib/<platform>/libsysprims_ffi.*` | `native/<platform>/sysprims.*.node` |
+| Build requirement | None (prebuilt libs vendored) | Rust toolchain (when building from source) |
+| Alpine support | No | Yes |
+
+### Installation Modes
+
+**From git checkout / local path (current):**
+- Requires Rust toolchain and C/C++ build tools
+- Run `npm run build:native` after install
+
+**From npm (future):**
+- Prebuilt platform packages will install automatically
+- No build tools required
+
+### Breaking Changes
+
+None. The JavaScript API surface is unchanged.
+
+### Adoption Notes
+
+- Pin `@3leaps/sysprims` to exact version for initial rollouts
+- Add smoke test that calls `procGet(process.pid)` to validate addon loading
+- Keep fallback implementations for locked-down environments where native addons may fail
+
+---
+
 ## v0.1.6 - 2026-01-25
 
 **Status:** Supervisor & Job Manager Primitives Release
@@ -130,42 +174,6 @@ Node.js developers now have access to process inspection, port mapping, and sign
 ### Bug Fixes
 
 - Windows signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
-
----
-
-## v0.1.4 - 2026-01-22
-
-**Status:** TypeScript Language Bindings Release
-
-Node.js developers can now integrate sysprims directly. This release delivers koffi-based TypeScript bindings with cross-platform support.
-
-### Highlights
-
-- **TypeScript Bindings**: First-class Node.js support via koffi FFI
-- **Cross-Platform**: linux-amd64, linux-arm64, darwin-arm64, windows-amd64
-- **ABI Verification**: Library loader validates ABI version at startup
-- **CI Coverage**: Native ARM64 Linux testing added to CI matrix
-
-### TypeScript Bindings
-
-Install and use in your Node.js projects:
-
-```typescript
-import { procGet, selfPGID, selfSID } from '@3leaps/sysprims';
-
-// Get process info by PID
-const proc = procGet(process.pid);
-console.log(`Process ${proc.pid}: ${proc.name}`);
-
-// Get current process group/session IDs (Unix)
-const pgid = selfPGID();
-const sid = selfSID();
-```
-
-### Bug Fixes
-
-- Windows TypeScript tests now pass (cross-platform build scripts)
-- Fixed parallel test flakiness in tree_escape tests
 
 ---
 

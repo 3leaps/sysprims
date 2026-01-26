@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-01-26
+
+TypeScript bindings infrastructure release. Migrates from koffi FFI to Node-API (N-API) native addon, enabling Alpine/musl support.
+
+### Changed
+
+- **TypeScript Bindings Architecture** (`bindings/typescript/sysprims/`)
+  - Migrated from koffi + vendored C-ABI shared libraries to Node-API (N-API) native addon via napi-rs
+  - Prebuilt `.node` binaries loaded from `native/` directory instead of `_lib/<platform>/libsysprims_ffi.*`
+  - FFI returns `{ code, json?, message? }` internally; JS layer throws `SysprimsError` with same numeric error codes
+
+### Added
+
+- **Linux musl/Alpine Support** (TypeScript)
+  - TypeScript bindings now work in Alpine-based containers
+  - Removes the "glibc-only" limitation from v0.1.4-v0.1.6
+
+### Notes
+
+- **No API Changes**: Existing TypeScript imports and function calls remain unchanged
+- **Build from Source**: Installing from git checkout requires Rust toolchain and C/C++ build tools
+- **npm Prebuilds**: Deferred to future release pending consumer validation
+
 ## [0.1.6] - 2026-01-25
 
 Supervisor and job manager primitives release. Teams building long-running supervisors can now spawn kill-tree-safe jobs, detect PID reuse, and cleanly terminate process trees.
@@ -255,7 +278,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/3leaps/sysprims/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/3leaps/sysprims/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/3leaps/sysprims/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/3leaps/sysprims/compare/v0.1.3...v0.1.4

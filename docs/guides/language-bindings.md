@@ -184,13 +184,33 @@ TypeScript bindings use a Node-API (N-API) native addon (napi-rs).
 | Windows x64 | Supported |
 | Linux musl (Alpine) | Supported |
 
-**Note:** When installed from a git checkout or local path, the addon is built from source and requires a Rust toolchain.
-
 ### Installation
+
+**From git checkout / local path (current):**
+
+When installing from a git checkout or local path, the addon is built from source:
+
+```bash
+cd bindings/typescript/sysprims
+npm install
+npm run build:native  # Builds the N-API addon
+```
+
+**Requirements for building from source:**
+- Rust toolchain (1.81+)
+- C/C++ compiler
+- Node.js 18+
+
+**From npm (future):**
+
+When npm publishing is enabled, prebuilt platform packages will be installed automatically:
 
 ```bash
 npm install @3leaps/sysprims
+# Prebuilt .node binary selected based on platform
 ```
+
+No build tools required when using npm prebuilds.
 
 ### API Surface
 
