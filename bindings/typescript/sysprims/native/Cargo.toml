@@ -1,0 +1,27 @@
+[package]
+name = "sysprims-ts-napi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Node-API addon for @3leaps/sysprims (TypeScript bindings)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2.16.16", default-features = false, features = ["napi8"] }
+napi-derive = "2.16.13"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+sysprims-core.workspace = true
+sysprims-proc.workspace = true
+sysprims-signal.workspace = true
+sysprims-session.workspace = true
+sysprims-timeout.workspace = true
+
+[build-dependencies]
+napi-build = "2.1.4"

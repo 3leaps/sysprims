@@ -11,13 +11,14 @@ sysprims is a Rust library with multiple distribution endpoints:
 - **CLI** (`sysprims`) distributed as platform archives
 - **C-ABI FFI** (`sysprims-ffi`) distributed as a release bundle
 - **Go bindings** (`bindings/go/sysprims`) distributed as a Go submodule with committed prebuilt static libs
-- **TypeScript bindings** (planned) distributed as an npm package
+- **TypeScript bindings** distributed as an npm package (Node-API addon)
 - **Python bindings** (planned) distributed as wheels/sdist
 
 These consumers do not all consume the same binary format:
 
 - Go (cgo) consumes **static libraries** and has Windows toolchain constraints.
-- Node.js and Python (when using dynamic loading strategies such as koffi/cffi) consume **shared libraries**.
+- Python (and other dynamic-loading consumers) consume **shared libraries**.
+- Node.js (TypeScript bindings) consumes **Node-API binaries** (`.node`).
 
 On Windows, ecosystem expectations differ:
 
@@ -39,11 +40,16 @@ We standardize the sysprims FFI deliverables into explicit artifact groups.
      - Windows (GNU): `libsysprims_ffi.a`
 
 2. **FFI shared** (runtime loading)
-   - Intended consumers: TypeScript (koffi), Python (cffi), other runtime `dlopen`/`LoadLibrary` consumers
+   - Intended consumers: Python (cffi), other runtime `dlopen`/`LoadLibrary` consumers
    - Output:
-     - Linux: `libsysprims_ffi.so`
-     - macOS: `libsysprims_ffi.dylib`
-     - Windows (MSVC): `sysprims_ffi.dll`
+      - Linux: `libsysprims_ffi.so`
+      - macOS: `libsysprims_ffi.dylib`
+      - Windows (MSVC): `sysprims_ffi.dll`
+
+3. **Node-API addon** (Node.js runtime)
+   - Intended consumers: TypeScript bindings (`@3leaps/sysprims`)
+   - Output:
+     - Platform-specific `.node` binaries (MSVC on Windows)
 
 3. **FFI header** (binding surface)
    - Intended consumers: all language bindings
@@ -92,8 +98,7 @@ Platform identifiers match existing sysprims conventions:
   - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
 
 - TypeScript bindings will vendor **FFI shared** libs into:
-  - `bindings/typescript/sysprims/_lib/<platform>/<shared lib>`
-  - The loader MUST validate `sysprims_abi_version()` and fail fast on mismatch.
+- TypeScript bindings ship a **Node-API addon** (per-platform `.node` binaries).
 
 - Python bindings (future) will consume **FFI shared** libs as wheel platform assets.
 
@@ -137,6 +142,8 @@ Rejected: Node/Python need runtime-loadable libraries; static-only is not workab
 Rejected: adds runtime/tooling ambiguity for Node/Python consumers; MSVC is the dominant convention in those ecosystems.
 
 ### Alternative 3: Use napi-rs (native Node addon) instead of C-ABI shared libs
+
+Accepted for the TypeScript bindings.
 
 Deferred: we explicitly want a single C-ABI surface shared across Go/Python/TypeScript (ADR-0004) and want to
 avoid a second binding strategy.

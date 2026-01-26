@@ -1,0 +1,263 @@
+name: TypeScript N-API Prebuilds
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to npm (requires NPM_TOKEN secret)"
+        required: true
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build Linux prebuilds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.12.0
+
+      - name: Install Rust targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add \
+            x86_64-unknown-linux-musl \
+            aarch64-unknown-linux-gnu \
+            aarch64-unknown-linux-musl
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Build .node files (zig)
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sysprims.*.node
+          mkdir -p prebuilds
+
+          # glibc baseline (2.17) for broad compatibility
+          npx napi build --cargo-cwd native --release --platform --js false --strip \
+            --target x86_64-unknown-linux-gnu --zig --zig-abi-suffix 2.17
+          mv sysprims.linux-x64-gnu.node prebuilds/
+
+          npx napi build --cargo-cwd native --release --platform --js false --strip \
+            --target x86_64-unknown-linux-musl --zig
+          mv sysprims.linux-x64-musl.node prebuilds/
+
+          npx napi build --cargo-cwd native --release --platform --js false --strip \
+            --target aarch64-unknown-linux-gnu --zig --zig-abi-suffix 2.17
+          mv sysprims.linux-arm64-gnu.node prebuilds/
+
+          npx napi build --cargo-cwd native --release --platform --js false --strip \
+            --target aarch64-unknown-linux-musl --zig
+          mv sysprims.linux-arm64-musl.node prebuilds/
+
+      - name: Upload prebuilds
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-prebuilds-linux
+          path: bindings/typescript/sysprims/prebuilds/*.node
+
+  build-macos-x64:
+    name: Build macOS x64 prebuild
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Build .node file
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sysprims.*.node
+          mkdir -p prebuilds
+          npx napi build --cargo-cwd native --release --platform --js false --strip
+          mv sysprims.darwin-x64.node prebuilds/
+
+      - name: Upload prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-prebuilds-darwin-x64
+          path: bindings/typescript/sysprims/prebuilds/*.node
+
+  build-macos-arm64:
+    name: Build macOS arm64 prebuild
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Build .node file
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sysprims.*.node
+          mkdir -p prebuilds
+          npx napi build --cargo-cwd native --release --platform --js false --strip
+          mv sysprims.darwin-arm64.node prebuilds/
+
+      - name: Upload prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-prebuilds-darwin-arm64
+          path: bindings/typescript/sysprims/prebuilds/*.node
+
+  build-windows:
+    name: Build Windows x64 prebuild
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Build .node file
+        working-directory: bindings/typescript/sysprims
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Force sysprims.*.node -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
+          npx napi build --cargo-cwd native --release --platform --js false --strip
+          Move-Item sysprims.win32-x64-msvc.node prebuilds/
+
+      - name: Upload prebuild
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-prebuilds-win32-x64-msvc
+          path: bindings/typescript/sysprims/prebuilds/*.node
+
+  package:
+    name: Package (npm dir)
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos-x64, build-macos-arm64, build-windows]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm install
+
+      - name: Build JS dist (root package)
+        working-directory: bindings/typescript/sysprims
+        run: npm run clean && npm run build && npm run build:native
+
+      - name: Remove local .node from root dist
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f dist/native/sysprims.*.node || true
+
+      - name: Download prebuilds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ts-prebuilds-*
+          path: downloaded-prebuilds
+
+      - name: Create npm package templates
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf npm
+          npx napi create-npm-dir -t .
+
+      - name: Stage .node files into npm packages
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          for f in ../../../downloaded-prebuilds/**/*.node; do
+            base="$(basename "$f")"
+            plat="${base#sysprims.}"
+            plat="${plat%.node}"
+            dest="npm/${plat}/${base}"
+            mkdir -p "$(dirname "$dest")"
+            cp "$f" "$dest"
+          done
+
+      - name: Run napi prepublish (updates root package.json)
+        working-directory: bindings/typescript/sysprims
+        run: npx napi prepublish -t npm --skip-gh-release
+
+      - name: Upload npm dir
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-npm-dir
+          path: bindings/typescript/sysprims/npm
+
+      - name: Publish to npm
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && secrets.NPM_TOKEN != '' }}
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm config set //registry.npmjs.org/:_authToken="$NPM_TOKEN"
+
+          # Publish platform packages first
+          for dir in npm/*; do
+            (cd "$dir" && npm publish --access public)
+          done
+
+          # Then publish the root package
+          npm publish --access public

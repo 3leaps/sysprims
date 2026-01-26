@@ -33,6 +33,11 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
 - [ ] Create release notes: `docs/releases/vX.Y.Z.md`
 
+### Scope Control (Recommended)
+
+- [ ] Confirm release scope is intentional and minimal.
+  - For v0.1.7: keep scope to the TypeScript Node-API bindings rollout only (no extra refactors).
+
 ### Commit & Tag
 
 - [ ] Commit changes:
@@ -61,10 +66,28 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
     - `bindings/go/sysprims/include/sysprims.h`
   - Merge the PR so the prebuilt libs are present on `main` before tagging.
+  - After merge: ensure `main` is green again (this merge commit is what will be tagged).
+
+- [ ] TypeScript bindings validation (recommended):
+  - After the Go bindings PR is merged (and `main` is green), run the TypeScript workflow on `main`.
+    This is the normal order: push/merge to `main` first, then run the manual TS workflow on that exact commit.
+    ```bash
+    gh workflow run "TypeScript Bindings" --ref main
+    ```
+
+- [ ] TypeScript prebuild packaging rehearsal (recommended, deferred publish):
+  - Assemble per-platform npm package directories and stage `.node` binaries without publishing.
+    Run this only when you want to rehearse npm packaging.
+    ```bash
+    gh workflow run "TypeScript N-API Prebuilds" --ref main -f publish=false
+    ```
 
 - [ ] Create and push tags (must point to the SAME commit):
   ```bash
   VERSION=$(cat VERSION)
+
+   # IMPORTANT: tags must point to the commit that includes the merged Go bindings PR.
+   # Ensure you're tagging the current main HEAD.
 
   # Canonical repo tag (drives .github/workflows/release.yml)
   git tag -a "v${VERSION}" -m "v${VERSION}: <brief description>"
@@ -85,6 +108,11 @@ Notes:
 
 - [ ] Wait for GitHub Actions release workflow to complete
 - [ ] Verify CI status is green on the tag
+- [ ] (Recommended) Run the validation workflow against the tag:
+  ```bash
+  VERSION=$(cat VERSION)
+  gh workflow run "Validate Release" -f tag="v${VERSION}"
+  ```
 - [ ] Check draft release has all expected artifacts:
   - CLI binaries (darwin-amd64, darwin-arm64, linux-amd64, linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64)
   - FFI library tarball
@@ -102,15 +130,18 @@ Notes:
     If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
   - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
 
-  TypeScript bindings (recommended):
-  - Validate that the published FFI bundle contains the shared libraries the TypeScript package expects.
-    Run the workflow `.github/workflows/typescript-bindings.yml` in "from-release" mode against the draft release:
+  TypeScript bindings:
+  - Post-tag validation (recommended): run the validation workflow against the tag (includes TS on all runners, including Alpine/musl).
     ```bash
     VERSION=$(cat VERSION)
-    gh workflow run "TypeScript Bindings" -f tag="v${VERSION}"
+    gh workflow run "Validate Release" -f tag="v${VERSION}"
     ```
-    This downloads `sysprims-ffi-${VERSION}-libs.tar.gz` from the draft release, extracts the platform shared lib
-    into `bindings/typescript/sysprims/_lib/<platform>/`, and runs the TS test suite on each OS runner.
+
+  - npm publishing (DEFERRED until consumer assent):
+    We only publish `@3leaps/sysprims` to npm once:
+    - Brooklyn (and other TS consumers) explicitly assent to consuming npm-published artifacts, and
+    - we have completed at least one full release rehearsal.
+    When enabled, publishing remains a manual workflow-dispatch action gated by `NPM_TOKEN`.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 

@@ -3,5 +3,7 @@ dist-test/
 node_modules/
 package-lock.json
 
-_lib/*/*
-!_lib/.gitkeep
+# NAPI build/publish artifacts
+npm/
+prebuilds/
+*.node

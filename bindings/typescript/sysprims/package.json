@@ -1,32 +1,42 @@
 {
   "name": "@3leaps/sysprims",
-  "version": "0.1.6",
-  "description": "GPL-free cross-platform process utilities (TypeScript bindings via C-ABI shared libs)",
+  "version": "0.1.7",
+  "description": "GPL-free cross-platform process utilities (TypeScript bindings via Node-API native addon)",
   "license": "MIT OR Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
-    "_lib/",
+    "native/",
     "README.md",
     "LICENSE"
   ],
   "engines": {
     "node": ">=18"
   },
+  "napi": {
+    "name": "sysprims",
+    "triples": {
+      "additional": [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-apple-darwin"
+      ]
+    }
+  },
   "scripts": {
     "clean": "node scripts/clean.js",
+    "build:native": "napi build --cargo-cwd native --release --platform --strip dist/native",
     "build": "tsc -p tsconfig.build.json",
     "build:test": "tsc -p tsconfig.test.json",
-    "test": "npm run clean && npm run vendor:local && npm run build && npm run build:test && node scripts/run-tests.js",
-    "test:ci": "npm run clean && npm run build && npm run build:test && node scripts/run-tests.js",
-    "vendor:local": "node scripts/vendor-local-libs.js",
+    "test": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
+    "test:ci": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
-  "dependencies": {
-    "koffi": "^2.10.0"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
     "@types/node": "^22.10.0",
     "typescript": "^5.6.3"
   }

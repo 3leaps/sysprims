@@ -7,7 +7,7 @@ This guide covers building and using sysprims language bindings (Go, Python, Typ
 sysprims provides language bindings via prebuilt FFI libraries:
 
 - **Go**: Static libraries (`libsysprims_ffi.a`) linked at compile time
-- **TypeScript**: Shared libraries (`.so`/`.dylib`/`.dll`) loaded at runtime via koffi
+- **TypeScript**: Node-API (N-API) native addon (`.node`) loaded by Node.js
 
 Each binding ships with prebuilt libraries for all supported platforms and provides idiomatic API for the target language.
 
@@ -44,7 +44,7 @@ Go's CGo requires MinGW (GCC) on Windows. MSVC-produced `.lib` files are not com
 
 ### TypeScript on Windows
 
-TypeScript bindings use MSVC-built shared libraries (`sysprims_ffi.dll`). No MinGW is required for TypeScript users.
+TypeScript bindings use a Node-API native addon and do not require MinGW.
 
 ### Licensing
 
@@ -171,7 +171,7 @@ See `docs/decisions/ADR-0012-language-bindings-distribution.md` for the policy.
 
 ## TypeScript Bindings
 
-TypeScript bindings use [koffi](https://koffi.dev/) to call the sysprims C-ABI shared library.
+TypeScript bindings use a Node-API (N-API) native addon (napi-rs).
 
 ### Platform Support
 
@@ -182,9 +182,9 @@ TypeScript bindings use [koffi](https://koffi.dev/) to call the sysprims C-ABI s
 | macOS x64 | Supported |
 | macOS arm64 | Supported |
 | Windows x64 | Supported |
-| Linux musl (Alpine) | Not supported |
+| Linux musl (Alpine) | Supported |
 
-**Note:** TypeScript bindings require glibc. Linux musl (Alpine) is not supported because sysprims ships glibc-targeted shared libraries for Node; musl artifacts are not published.
+**Note:** When installed from a git checkout or local path, the addon is built from source and requires a Rust toolchain.
 
 ### Installation
 
@@ -293,20 +293,16 @@ if (outcome.escalated) {
 At load time, the binding:
 
 1. Detects the current platform (`process.platform` + `process.arch`)
-2. Loads the appropriate shared library from `_lib/<platform>/`
-3. Verifies ABI version matches expected value
-4. Exposes typed functions to JavaScript
+2. Loads the appropriate `.node` binary (either locally built or a prebuilt binary)
+3. Exposes typed functions to JavaScript
 
 ### Local Development
 
 ```bash
-# Build the shared FFI library for your platform first
-make build-local-ffi-shared
-
-# Then build and test the TypeScript bindings
 cd bindings/typescript/sysprims
 npm install
 npm run build
+npm run build:native
 npm test
 ```
 

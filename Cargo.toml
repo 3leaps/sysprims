@@ -8,6 +8,7 @@ members = [
     "crates/sysprims-proc",
     "crates/sysprims-cli",
     "ffi/sysprims-ffi",
+    "bindings/typescript/sysprims/native",
 ]
 
 [workspace.package]

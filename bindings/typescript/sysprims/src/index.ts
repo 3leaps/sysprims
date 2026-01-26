@@ -44,7 +44,7 @@ export type {
  */
 export function procGet(pid: number): ProcessInfo {
   const lib = loadSysprims();
-  const result = callJsonReturn((out) => lib.sysprims_proc_get(pid >>> 0, out), lib);
+  const result = callJsonReturn(() => lib.sysprimsProcGet(pid >>> 0));
   return result as ProcessInfo;
 }
 
@@ -78,7 +78,7 @@ export function procGet(pid: number): ProcessInfo {
 export function processList(filter?: ProcessFilter): ProcessSnapshot {
   const lib = loadSysprims();
   const filterJson = filter ? JSON.stringify(filter) : "";
-  const result = callJsonReturn((out) => lib.sysprims_proc_list(filterJson, out), lib);
+  const result = callJsonReturn(() => lib.sysprimsProcList(filterJson));
   return result as ProcessSnapshot;
 }
 
@@ -111,7 +111,7 @@ export function processList(filter?: ProcessFilter): ProcessSnapshot {
 export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
   const lib = loadSysprims();
   const filterJson = filter ? JSON.stringify(filter) : "";
-  const result = callJsonReturn((out) => lib.sysprims_proc_listening_ports(filterJson, out), lib);
+  const result = callJsonReturn(() => lib.sysprimsProcListeningPorts(filterJson));
   return result as PortBindingsSnapshot;
 }
 
@@ -128,7 +128,7 @@ export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
  */
 export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
   const lib = loadSysprims();
-  const result = callJsonReturn((out) => lib.sysprims_proc_wait_pid(pid >>> 0, timeoutMs, out), lib);
+  const result = callJsonReturn(() => lib.sysprimsProcWaitPid(pid >>> 0, timeoutMs));
   return result as WaitPidResult;
 }
 
@@ -144,7 +144,7 @@ export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
  */
 export function selfPGID(): number {
   const lib = loadSysprims();
-  return callU32Out((out) => lib.sysprims_self_getpgid(out), lib);
+  return callU32Out(() => lib.sysprimsSelfGetpgid());
 }
 
 /**
@@ -155,7 +155,7 @@ export function selfPGID(): number {
  */
 export function selfSID(): number {
   const lib = loadSysprims();
-  return callU32Out((out) => lib.sysprims_self_getsid(out), lib);
+  return callU32Out(() => lib.sysprimsSelfGetsid());
 }
 
 // -----------------------------------------------------------------------------
@@ -185,7 +185,7 @@ export function selfSID(): number {
  */
 export function signalSend(pid: number, signal: number): void {
   const lib = loadSysprims();
-  callVoid(() => lib.sysprims_signal_send(pid >>> 0, signal | 0), lib);
+  callVoid(() => lib.sysprimsSignalSend(pid >>> 0, signal | 0));
 }
 
 /**
@@ -202,7 +202,7 @@ export function signalSend(pid: number, signal: number): void {
  */
 export function signalSendGroup(pgid: number, signal: number): void {
   const lib = loadSysprims();
-  callVoid(() => lib.sysprims_signal_send_group(pgid >>> 0, signal | 0), lib);
+  callVoid(() => lib.sysprimsSignalSendGroup(pgid >>> 0, signal | 0));
 }
 
 /**
@@ -217,7 +217,7 @@ export function signalSendGroup(pgid: number, signal: number): void {
  */
 export function terminate(pid: number): void {
   const lib = loadSysprims();
-  callVoid(() => lib.sysprims_terminate(pid >>> 0), lib);
+  callVoid(() => lib.sysprimsTerminate(pid >>> 0));
 }
 
 /**
@@ -232,7 +232,7 @@ export function terminate(pid: number): void {
  */
 export function forceKill(pid: number): void {
   const lib = loadSysprims();
-  callVoid(() => lib.sysprims_force_kill(pid >>> 0), lib);
+  callVoid(() => lib.sysprimsForceKill(pid >>> 0));
 }
 
 // -----------------------------------------------------------------------------
@@ -251,7 +251,7 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
   const lib = loadSysprims();
 
   if (!config) {
-    return callJsonReturn((out) => lib.sysprims_terminate_tree(pid >>> 0, "", out), lib) as TerminateTreeResult;
+    return callJsonReturn(() => lib.sysprimsTerminateTree(pid >>> 0, "")) as TerminateTreeResult;
   }
 
   const cfg: TerminateTreeConfig = {
@@ -262,8 +262,7 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
   };
 
   return callJsonReturn(
-    (out) => lib.sysprims_terminate_tree(pid >>> 0, JSON.stringify(cfg), out),
-    lib,
+    () => lib.sysprimsTerminateTree(pid >>> 0, JSON.stringify(cfg)),
   ) as TerminateTreeResult;
 }
 
@@ -279,5 +278,5 @@ export function spawnInGroup(config: SpawnInGroupConfig): SpawnInGroupResult {
       "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
     ...config,
   };
-  return callJsonReturn((out) => lib.sysprims_spawn_in_group(JSON.stringify(cfg), out), lib) as SpawnInGroupResult;
+  return callJsonReturn(() => lib.sysprimsSpawnInGroup(JSON.stringify(cfg))) as SpawnInGroupResult;
 }

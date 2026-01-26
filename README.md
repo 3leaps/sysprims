@@ -315,7 +315,7 @@ const http = listeningPorts({ local_port: 8080 });
 terminate(pid);
 ```
 
-**Note:** TypeScript bindings require glibc-based Linux (Alpine/musl not supported), macOS (x64 or arm64), or Windows x64.
+**Note:** TypeScript bindings support Linux (glibc and musl/Alpine), macOS (x64 or arm64), and Windows x64.
 
 See [docs/guides/language-bindings.md](docs/guides/language-bindings.md) for build requirements and platform details.
 

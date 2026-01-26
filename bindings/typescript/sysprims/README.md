@@ -1,39 +1,24 @@
 # sysprims (TypeScript bindings)
 
-TypeScript/Node.js bindings for sysprims using the stable C-ABI shared library via `koffi`.
+TypeScript/Node.js bindings for sysprims using a Node-API (N-API) native addon (napi-rs).
 
 ## Platform support
 
-Supported (aligned with ADR-0012):
-- macOS: `darwin-arm64`, `darwin-amd64`
-- Linux (glibc only): `linux-arm64`, `linux-amd64`
-- Windows (x64): `windows-amd64` (MSVC `sysprims_ffi.dll`)
+Supported:
+- macOS: arm64, x64
+- Linux: glibc and musl (Alpine)
+- Windows: x64 (msvc)
 
-Not supported:
-- Linux musl (Alpine): this package refuses to load on musl. Use a glibc-based image.
+## Local development
 
-## Library loading
+The native addon is built from Rust:
 
-At runtime, the binding loads the shared library from:
-
-`_lib/<platform>/<filename>`
-
-- Linux: `_lib/<platform>/libsysprims_ffi.so`
-- macOS: `_lib/<platform>/libsysprims_ffi.dylib`
-- Windows: `_lib/<platform>/sysprims_ffi.dll`
-
-The loader verifies `sysprims_abi_version()` matches the expected ABI and fails fast if it does not.
-
-### Local development (populate `_lib/`)
-
-This repository does not commit shared libraries. For local dev:
-
-1. Build a local shared library:
-   - `make build-local-ffi-shared`
-2. Vendor it into the TS package:
-   - `npm run vendor:local` (from this directory)
-
-This copies from `dist/local/release/sysprims-ffi/lib/<platform>/shared/` into `_lib/<platform>/`.
+```bash
+npm install
+npm run build
+npm run build:native
+npm run test:ci
+```
 
 ## API (minimal)
 
