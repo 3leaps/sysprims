@@ -65,19 +65,20 @@ su testuser2 -c "sh -c 'nohup sleep 3600 >/dev/null 2>&1 & echo \$! >\"$OTHER_US
 chmod 644 "$OTHER_USER_PID_FILE" 2>/dev/null || true
 
 # Step 1: Build sysprims with all test features
+# Exclude sysprims-ts-napi: N-API cdylib cannot build on musl
 echo "[1/4] Building sysprims..."
-cargo build --workspace --target "$TARGET" \
+cargo build --workspace --exclude sysprims-ts-napi --target "$TARGET" \
 	--features privileged-tests,cross-user-tests
 
 # Step 2: Run standard tests first (should pass)
 echo ""
 echo "[2/4] Running standard tests..."
-cargo test --workspace --target "$TARGET"
+cargo test --workspace --exclude sysprims-ts-napi --target "$TARGET"
 
 # Step 3: Run privileged tests (only available in container)
 echo ""
 echo "[3/4] Running privileged tests as root..."
-cargo test --workspace --target "$TARGET" \
+cargo test --workspace --exclude sysprims-ts-napi --target "$TARGET" \
 	--features privileged-tests \
 	-- --test-threads=1 # Sequential to avoid race conditions
 
@@ -100,7 +101,7 @@ su testuser -c "
     export CARGO_HOME=/root/.cargo
     export RUSTUP_HOME=/root/.rustup
     export CARGO_TARGET_DIR=/workspace/target/container
-    cargo test --workspace --target $TARGET \
+    cargo test --workspace --exclude sysprims-ts-napi --target $TARGET \
         --features cross-user-tests \
         -- --test-threads=1
 "

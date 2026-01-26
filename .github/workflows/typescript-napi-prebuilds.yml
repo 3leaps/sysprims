@@ -245,13 +245,17 @@ jobs:
           path: bindings/typescript/sysprims/npm
 
       - name: Publish to npm
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && secrets.NPM_TOKEN != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         working-directory: bindings/typescript/sysprims
         shell: bash
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ -z "${NPM_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN secret is not set"
+            exit 1
+          fi
           npm config set //registry.npmjs.org/:_authToken="$NPM_TOKEN"
 
           # Publish platform packages first
