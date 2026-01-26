@@ -50,6 +50,18 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   git push origin main
   ```
 
+- [ ] **Verify local/remote sync** (required before running workflows):
+  Before running any release workflows, confirm local and remote are in sync:
+  ```bash
+  git fetch origin
+  # Must show no output (no divergence):
+  git log --oneline origin/main..HEAD
+  git log --oneline HEAD..origin/main
+  ```
+  If there's divergence, resolve it before proceeding. The Go bindings workflow
+  runs on the remote HEAD, so any unpushed local commits will cause the PR merge
+  to diverge from your local state. See [Troubleshooting: Local/Remote Divergence](#troubleshooting-localremote-divergence).
+
 - [ ] Go bindings prep (required):
   - Run the workflow `.github/workflows/go-bindings.yml` for this version (manual; do not run on every push).
     ```bash
@@ -302,6 +314,41 @@ mkdir -p docs/releases
 1. Ensure you used the correct signing key
 2. Re-run `make release-sign`
 3. Re-run `make release-verify` to confirm
+
+### Troubleshooting: Local/Remote Divergence
+
+If you ran the Go bindings workflow while local and remote were out of sync,
+the PR merge will create divergent branches:
+
+```
+Local:  A -- B -- C (unpushed local commit)
+Remote: A -- B -- D -- E (Go bindings PR merge)
+```
+
+**Symptoms:**
+- `git pull` fails with "divergent branches" error
+- `git log origin/main..HEAD` shows local commits not on remote
+- `git log HEAD..origin/main` shows remote commits not on local
+
+**Resolution:**
+1. If the local commit should be part of the release:
+   ```bash
+   git merge origin/main -m "Merge remote Go bindings PR"
+   git push origin main
+   # Wait for CI to pass, then re-run Go bindings workflow
+   ```
+
+2. If the local commit can be discarded:
+   ```bash
+   git reset --hard origin/main
+   ```
+
+**Prevention:** Always verify sync before running release workflows:
+```bash
+git fetch origin
+git log --oneline origin/main..HEAD  # should be empty
+git log --oneline HEAD..origin/main  # should be empty
+```
 
 ## Key Rotation
 
