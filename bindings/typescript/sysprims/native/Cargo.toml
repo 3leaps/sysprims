@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-rust-version.workspace = true
+# NOTE: napi-build requires rustc >= 1.88.
+rust-version = "1.88.0"
 description = "Node-API addon for @3leaps/sysprims (TypeScript bindings)"
 
 [lib]

@@ -27,6 +27,24 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  windows-cross-check:
+    name: Windows Cross-Target Check (no SDK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,x86_64-pc-windows-gnu
+
+      # cargo check does type checking only (no linking), so this works without the Windows SDK.
+      # This is a fast guardrail for Windows-only compile errors.
+      - name: cargo check (windows msvc)
+        run: cargo check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-msvc
+
+      - name: cargo check (windows gnu)
+        run: cargo check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-gnu
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

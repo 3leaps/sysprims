@@ -32,10 +32,10 @@ RUN apk add --no-cache \
 RUN adduser -D -u 1000 testuser && \
     adduser -D -u 1001 testuser2
 
-# Install Rust toolchain (1.85 - required by rsfulmen 0.1.2 and indexmap 2.12)
+# Install Rust toolchain (>= 1.88 required by napi-build)
 # Add both x86_64 and aarch64 musl targets for CI and local testing
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain 1.85 --profile minimal && \
+    sh -s -- -y --default-toolchain 1.88.0 --profile minimal && \
     /root/.cargo/bin/rustup target add x86_64-unknown-linux-musl && \
     /root/.cargo/bin/rustup target add aarch64-unknown-linux-musl
 
