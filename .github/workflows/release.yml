@@ -393,7 +393,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/cli | Out-Null
           Copy-Item target/aarch64-pc-windows-msvc/release/sysprims.exe dist/cli/
           Copy-Item LICENSE-MIT, LICENSE-APACHE dist/cli/
-          Compress-Archive -Path dist/cli/* -DestinationPath sysprims-${{ needs.validate-version.outputs.version }}-windows-arm64.zip
+          $version = "${{ needs.validate-version.outputs.version }}"
+          Compress-Archive -Path dist/cli/* -DestinationPath "sysprims-${version}-windows-arm64.zip"
 
       - name: Package FFI (static)
         shell: pwsh
