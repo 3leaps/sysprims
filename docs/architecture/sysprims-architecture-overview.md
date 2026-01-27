@@ -325,7 +325,7 @@ sysprims-pstat --json            ┌──────────────�
 │  sysprims-${VERSION}-linux-x64-musl.tar.gz     (Distroless-ready)   │
 │  sysprims-${VERSION}-linux-arm64-musl.tar.gz                        │
 │  sysprims-${VERSION}-linux-x64-gnu.tar.gz                           │
-│  sysprims-${VERSION}-darwin-x64.tar.gz                              │
+│  (no macOS x64 artifacts)                                           │
 │  sysprims-${VERSION}-darwin-arm64.tar.gz                            │
 │  sysprims-${VERSION}-windows-x64.zip                                │
 │  sbom-${VERSION}.spdx.json                                     │

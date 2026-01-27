@@ -33,11 +33,10 @@ or pure-Go implementations. See v0.1.8 brief for details.
 
 | Platform | Rust Target | Reason | Since |
 |----------|-------------|--------|-------|
-| macOS x64 (Intel) | `x86_64-apple-darwin` | Intel Macs are end-of-life; Apple Silicon is standard | v0.1.7 (TypeScript), future (Go/CLI) |
+| macOS x64 (Intel) | `x86_64-apple-darwin` | Intel Macs are end-of-life; Apple Silicon is standard | v0.1.7 |
 | Linux x86 (32-bit) | `i686-unknown-linux-gnu` | Legacy; no modern use case | v0.1.0 |
 
-**Note on macOS x64**: TypeScript bindings dropped macOS x64 support in v0.1.7. Go bindings and CLI still include
-darwin-amd64 for backward compatibility but this will be removed in a future release. New adopters should use
+**Note on macOS x64**: macOS x64 is not supported for sysprims artifacts as of v0.1.7. New adopters should use
 Apple Silicon (arm64) Macs.
 
 ## Artifact Coverage

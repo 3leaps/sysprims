@@ -1,6 +1,6 @@
 # ADR-0012: Language Bindings Distribution
 
-> **Status**: Proposed
+> **Status**: Accepted
 > **Date**: 2026-01-15
 > **Authors**: devlead, Architecture Council
 
@@ -16,7 +16,7 @@ sysprims provides a C-ABI FFI layer (ADR-0004) that enables bindings for multipl
 
 ### Current State
 
-- FFI library builds for 7 platform targets (release.yml)
+- FFI library builds for multiple platform targets (see `docs/standards/platform-support.md`)
 - C header generated via cbindgen at release time
 - No language bindings exist yet
 - seekable-zstd provides a working reference implementation
@@ -27,7 +27,7 @@ sysprims provides a C-ABI FFI layer (ADR-0004) that enables bindings for multipl
 |----------|---------------|----------|
 | Go | CGo | v0.1.x (phased) |
 | Python | cffi/PyO3 | v0.1.x (phased) |
-| TypeScript | napi-rs/node-ffi-napi | v0.1.x (phased) |
+| TypeScript | napi-rs (Node-API addon) | v0.1.x (phased) |
 
 **Release intent**: v0.1.x is considered feature-complete only once Go, Python, and
 TypeScript bindings are all available. Patch releases may be used to phase
@@ -59,8 +59,6 @@ Prebuilt static libraries are committed to the repository at each release tag.
 
 ```
 bindings/go/sysprims/lib/
-├── darwin-amd64/
-│   └── libsysprims_ffi.a
 ├── darwin-arm64/
 │   └── libsysprims_ffi.a
 ├── linux-amd64/
@@ -87,16 +85,20 @@ bindings/go/sysprims/lib/
 | Platform | Architecture | C Library | Go | Python | TypeScript |
 |----------|--------------|-----------|:--:|:------:|:----------:|
 | Linux | x86_64 | glibc 2.17+ | ✅ | ✅ | ✅ |
-| Linux | x86_64 | musl | ✅ | ❌ | ❌ |
+| Linux | x86_64 | musl | ✅ | ❌ | ✅ |
 | Linux | aarch64 | glibc 2.17+ | ✅ | ✅ | ✅ |
-| Linux | aarch64 | musl | ✅ | ❌ | ❌ |
-| macOS | x86_64 | - | ✅ | ✅ | ✅ |
+| Linux | aarch64 | musl | ✅ | ❌ | ✅ |
+| macOS | x86_64 | - | ❌ | ❌ | ❌ |
 | macOS | aarch64 | - | ✅ | ✅ | ✅ |
 | Windows | x86_64 | GNU (Go) / MSVC (shared) | ✅ | ✅ | ✅ |
 
+| Windows | arm64 | MSVC | ❌ | ❌ | ✅ |
+
 **Notes**:
-- Linux musl targets are Go-only (Alpine containers, static binaries)
-- Python/TypeScript musl support deferred due to wheel complexity
+- Linux musl is supported by Go and TypeScript (via Node-API addon); Python musl is deferred.
+- macOS x64 (Intel) is not supported as of v0.1.7.
+- Windows arm64 Go bindings are not supported (CGo requires MinGW; arm64 requires llvm-mingw).
+- Windows arm64 Python bindings are not yet supported.
 
 ### 4. Library Naming Convention
 
@@ -106,9 +108,10 @@ sysprims supports multiple binding consumers with different toolchain needs.
 |----------|----------|------------------|-------|
 | Go (cgo) | Linux/macOS | `libsysprims_ffi.a` | Static linking |
 | Go (cgo) | Windows | `libsysprims_ffi.a` | Built for `x86_64-pc-windows-gnu` (MinGW) |
-| TypeScript/Python (runtime load) | Linux | `libsysprims_ffi.so` | Shared library |
-| TypeScript/Python (runtime load) | macOS | `libsysprims_ffi.dylib` | Shared library |
-| TypeScript/Python (runtime load) | Windows | `sysprims_ffi.dll` | Built for `x86_64-pc-windows-msvc` |
+| Python (runtime load) | Linux | `libsysprims_ffi.so` | Shared library |
+| Python (runtime load) | macOS | `libsysprims_ffi.dylib` | Shared library |
+| Python (runtime load) | Windows | `sysprims_ffi.dll` | Built for `x86_64-pc-windows-msvc` |
+| TypeScript (Node-API addon) | All | `sysprims.<platform>.node` | Published as npm platform packages |
 
 ### 5. CGo Link Flags by Platform
 

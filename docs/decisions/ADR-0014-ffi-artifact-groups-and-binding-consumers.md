@@ -1,6 +1,6 @@
 # ADR-0014: FFI Artifact Groups and Binding Consumers
 
-> **Status**: Proposed
+> **Status**: Accepted
 > **Date**: 2026-01-21
 > **Authors**: entarch, ffiarch
 
@@ -51,7 +51,7 @@ We standardize the sysprims FFI deliverables into explicit artifact groups.
    - Output:
      - Platform-specific `.node` binaries (MSVC on Windows)
 
-3. **FFI header** (binding surface)
+4. **FFI header** (binding surface)
    - Intended consumers: all language bindings
    - Output: `sysprims.h` generated via cbindgen
 
@@ -90,15 +90,18 @@ lib/
 ```
 
 Platform identifiers match existing sysprims conventions:
-- `linux-amd64`, `linux-arm64`, `darwin-amd64`, `darwin-arm64`, `windows-amd64`
+- `linux-amd64`, `linux-arm64`, `darwin-arm64`, `windows-amd64`, `windows-arm64`
 
 ### 4) Binding Packaging Responsibilities
 
 - Go bindings continue to vendor **FFI static** libs into:
   - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
 
-- TypeScript bindings will vendor **FFI shared** libs into:
-- TypeScript bindings ship a **Node-API addon** (per-platform `.node` binaries).
+- TypeScript bindings ship a **Node-API addon** via npm:
+  - Root package: `@3leaps/sysprims` (JS/TS wrapper)
+  - Platform packages: `@3leaps/sysprims-<platform>` that each contain exactly one `.node` binary
+  - Loader contract: runtime selection MUST be constrained to the repo platform matrix (see `docs/standards/platform-support.md`)
+    and MUST NOT implicitly add unsupported platforms via tool defaults.
 
 - Python bindings (future) will consume **FFI shared** libs as wheel platform assets.
 
@@ -145,8 +148,19 @@ Rejected: adds runtime/tooling ambiguity for Node/Python consumers; MSVC is the 
 
 Accepted for the TypeScript bindings.
 
-Deferred: we explicitly want a single C-ABI surface shared across Go/Python/TypeScript (ADR-0004) and want to
-avoid a second binding strategy.
+We still keep the C-ABI surface for Go and (future) Python consumers. The Node-API addon is a packaging strategy
+for Node.js and does not change the C-ABI design principles.
+
+## Implementation Notes (TypeScript)
+
+The `napi-rs` CLI can generate a default loader that includes platform branches we do not support (e.g. macOS x64).
+To avoid accidental publication or accidental runtime attempts to load unsupported packages, the TypeScript bindings
+use an explicit loader that:
+
+- prefers a locally built addon at `dist/native/sysprims.<platform>.node` for git/local installs
+- otherwise requires the platform package `@3leaps/sysprims-<platform>`
+- rejects unsupported platform/arch combinations with a clear error
+
 
 ## References
 
