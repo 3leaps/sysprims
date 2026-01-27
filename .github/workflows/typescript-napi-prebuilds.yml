@@ -233,8 +233,13 @@ jobs:
           done
 
       - name: Run napi prepublish (updates root package.json)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         working-directory: bindings/typescript/sysprims
-        run: npx napi prepublish -t npm --skip-gh-release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm config set //registry.npmjs.org/:_authToken="${NPM_TOKEN}"
+          npx napi prepublish -t npm --skip-gh-release
 
       - name: Upload npm dir
         uses: actions/upload-artifact@v4
