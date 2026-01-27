@@ -1,5 +1,9 @@
 name: Go Bindings (Prep)
 
+# NOTE: Windows arm64 is NOT supported for Go bindings.
+# MinGW does not support the arm64 target, and Go's CGo requires MinGW on Windows.
+# See docs/standards/platform-support.md for details.
+
 on:
   workflow_dispatch:
     inputs:

@@ -35,15 +35,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc,x86_64-pc-windows-gnu
+          targets: x86_64-pc-windows-msvc,x86_64-pc-windows-gnu,aarch64-pc-windows-msvc
 
       # cargo check does type checking only (no linking), so this works without the Windows SDK.
       # This is a fast guardrail for Windows-only compile errors.
-      - name: cargo check (windows msvc)
+      - name: cargo check (windows msvc x64)
         run: cargo check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-msvc
 
-      - name: cargo check (windows gnu)
+      - name: cargo check (windows gnu x64)
         run: cargo check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-gnu
+
+      - name: cargo check (windows msvc arm64)
+        run: cargo check --workspace --exclude sysprims-ts-napi --target aarch64-pc-windows-msvc
 
   test:
     name: Test (${{ matrix.os }})
@@ -58,6 +61,8 @@ jobs:
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+          - os: windows-latest-arm64-s
+            target: aarch64-pc-windows-msvc
 
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +136,9 @@ jobs:
         run: cargo test --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
 
   # Go bindings tests
-  # Windows uses MinGW (GNU target) for CGo compatibility
+  # Windows x64 uses MinGW (GNU target) for CGo compatibility.
+  # Windows arm64 is NOT supported: MinGW does not support arm64 target.
+  # See docs/standards/platform-support.md for details.
   test-go:
     name: Test Go Bindings (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

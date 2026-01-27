@@ -23,13 +23,17 @@ All CI/CD workflows, language bindings, and release assets MUST conform to this 
 | Linux arm64 (musl) | `aarch64-unknown-linux-musl` | `linux/arm64` (musl) | `linux-arm64-musl` | **Supported** |
 | macOS arm64 | `aarch64-apple-darwin` | `darwin/arm64` | `darwin-arm64` | **Supported** |
 | Windows x64 | `x86_64-pc-windows-msvc` (CLI) / `x86_64-pc-windows-gnu` (FFI) | `windows/amd64` | `win32-x64-msvc` | **Supported** |
+| Windows arm64 | `aarch64-pc-windows-msvc` | N/A | `win32-arm64-msvc` | **Supported** (CLI, TypeScript only) |
+
+**Note on Windows arm64 Go bindings**: Go bindings do not support Windows arm64 because Go's CGo on Windows
+requires MinGW, and MinGW does not support the arm64 target. A future release may address this via llvm-mingw
+or pure-Go implementations. See v0.1.8 brief for details.
 
 ## Explicitly Unsupported Platforms
 
 | Platform | Rust Target | Reason | Since |
 |----------|-------------|--------|-------|
 | macOS x64 (Intel) | `x86_64-apple-darwin` | Intel Macs are end-of-life; Apple Silicon is standard | v0.1.7 (TypeScript), future (Go/CLI) |
-| Windows arm64 | `aarch64-pc-windows-msvc` | Insufficient library ecosystem support | v0.1.0 |
 | Linux x86 (32-bit) | `i686-unknown-linux-gnu` | Legacy; no modern use case | v0.1.0 |
 
 **Note on macOS x64**: TypeScript bindings dropped macOS x64 support in v0.1.7. Go bindings and CLI still include
@@ -48,6 +52,7 @@ Release assets include CLI binaries for all supported platforms:
 - `sysprims-<version>-linux-arm64-musl.tar.gz`
 - `sysprims-<version>-darwin-arm64.tar.gz`
 - `sysprims-<version>-windows-amd64.zip`
+- `sysprims-<version>-windows-arm64.zip`
 
 ### FFI Libraries (Go Bindings)
 
@@ -60,6 +65,9 @@ Static libraries committed to `bindings/go/sysprims/lib/`:
 - `linux-arm64-musl/libsysprims_ffi.a`
 - `windows-amd64/libsysprims_ffi.a` (GNU target for cgo compatibility)
 
+**Note**: Windows arm64 is NOT supported for Go bindings. MinGW (required by Go's CGo on Windows) does not
+support arm64. See the Windows arm64 note in the Supported Platforms table.
+
 ### TypeScript N-API Prebuilds
 
 Platform packages published to npm (when enabled):
@@ -70,6 +78,7 @@ Platform packages published to npm (when enabled):
 - `@3leaps/sysprims-linux-arm64-musl`
 - `@3leaps/sysprims-darwin-arm64`
 - `@3leaps/sysprims-win32-x64-msvc`
+- `@3leaps/sysprims-win32-arm64-msvc`
 
 ## CI Runner Matrix
 
@@ -81,6 +90,7 @@ Platform packages published to npm (when enabled):
 | Linux arm64 | `ubuntu-latest-arm64-s` | Native arm64 builds |
 | macOS arm64 | `macos-14` | Apple Silicon |
 | Windows x64 | `windows-latest` | MSVC for CLI, MinGW for FFI |
+| Windows arm64 | `windows-latest-arm64-s` | MSVC only (no Go bindings) |
 | Alpine/musl | `ubuntu-latest` + container | `node:20-alpine` or custom |
 
 ### Cross-Compilation
@@ -97,7 +107,7 @@ Native arm64-gnu builds are done on `ubuntu-latest-arm64-s` for reliability.
 
 Before any release, verify:
 
-- [ ] All 6 supported platforms have artifacts
+- [ ] All 7 supported platforms have artifacts (Go bindings: 6 platforms, no Windows arm64)
 - [ ] No unsupported platform artifacts are included
 - [ ] CI workflows reference correct runners
 - [ ] Package configurations (napi, cgo) match this matrix
