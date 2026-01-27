@@ -85,7 +85,7 @@ jobs:
       - name: Install build dependencies
         shell: sh
         run: |
-          set -euo pipefail
+          set -eu
           apk add --no-cache bash curl build-base python3 git
 
       - name: Install Rust (rustup)

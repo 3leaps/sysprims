@@ -36,9 +36,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # arm64-gnu built natively on ubuntu-latest-arm64-s (build-linux-arm64 job)
           rustup target add \
             x86_64-unknown-linux-musl \
-            aarch64-unknown-linux-gnu \
             aarch64-unknown-linux-musl
 
       - name: Install Node dependencies
@@ -62,9 +62,7 @@ jobs:
             --target x86_64-unknown-linux-musl --zig
           mv sysprims.linux-x64-musl.node prebuilds/
 
-          npx napi build --cargo-cwd native --release --platform --js false --strip \
-            --target aarch64-unknown-linux-gnu --zig --zig-abi-suffix 2.17
-          mv sysprims.linux-arm64-gnu.node prebuilds/
+          # arm64-gnu built natively on ubuntu-latest-arm64-s (build-linux-arm64 job)
 
           npx napi build --cargo-cwd native --release --platform --js false --strip \
             --target aarch64-unknown-linux-musl --zig
@@ -76,9 +74,9 @@ jobs:
           name: ts-prebuilds-linux
           path: bindings/typescript/sysprims/prebuilds/*.node
 
-  build-macos-x64:
-    name: Build macOS x64 prebuild
-    runs-on: macos-13
+  build-linux-arm64:
+    name: Build Linux arm64 prebuild (native)
+    runs-on: ubuntu-latest-arm64-s
     steps:
       - uses: actions/checkout@v4
 
@@ -102,12 +100,12 @@ jobs:
           rm -f sysprims.*.node
           mkdir -p prebuilds
           npx napi build --cargo-cwd native --release --platform --js false --strip
-          mv sysprims.darwin-x64.node prebuilds/
+          mv sysprims.linux-arm64-gnu.node prebuilds/
 
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
-          name: ts-prebuilds-darwin-x64
+          name: ts-prebuilds-linux-arm64-gnu-native
           path: bindings/typescript/sysprims/prebuilds/*.node
 
   build-macos-arm64:
@@ -181,7 +179,7 @@ jobs:
   package:
     name: Package (npm dir)
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos-x64, build-macos-arm64, build-windows]
+    needs: [build-linux, build-linux-arm64, build-macos-arm64, build-windows]
     steps:
       - uses: actions/checkout@v4
 
