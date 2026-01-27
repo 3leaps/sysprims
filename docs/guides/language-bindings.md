@@ -13,15 +13,18 @@ Each binding ships with prebuilt libraries for all supported platforms and provi
 
 ## Platform Matrix
 
+See [Platform Support Matrix](../standards/platform-support.md) for the canonical reference.
+
 | Platform | Rust Target | Library Name | Linker Flags |
 |----------|-------------|--------------|--------------|
 | Linux x64 (glibc) | `x86_64-unknown-linux-gnu` | `libsysprims_ffi.a` | `-lm -lpthread -ldl` |
 | Linux x64 (musl) | `x86_64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread` |
 | Linux arm64 (glibc) | `aarch64-unknown-linux-gnu` | `libsysprims_ffi.a` | `-lm -lpthread -ldl` |
 | Linux arm64 (musl) | `aarch64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread` |
-| macOS x64 | `x86_64-apple-darwin` | `libsysprims_ffi.a` | `-lm -lpthread` |
 | macOS arm64 | `aarch64-apple-darwin` | `libsysprims_ffi.a` | `-lm -lpthread` |
 | Windows x64 | `x86_64-pc-windows-gnu` | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
+
+**Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
 
 ## Windows: MinGW Requirement (Go Bindings)
 
@@ -78,7 +81,6 @@ Prebuilt libraries are committed to the repository at release tags:
 
 ```
 bindings/go/sysprims/lib/
-├── darwin-amd64/libsysprims_ffi.a
 ├── darwin-arm64/libsysprims_ffi.a
 ├── linux-amd64/libsysprims_ffi.a
 ├── linux-amd64-musl/libsysprims_ffi.a
@@ -86,6 +88,8 @@ bindings/go/sysprims/lib/
 ├── linux-arm64-musl/libsysprims_ffi.a
 └── windows-amd64/libsysprims_ffi.a
 ```
+
+**Note**: macOS x64 (darwin-amd64) is not supported as of v0.1.7.
 
 ### CGo Configuration
 
@@ -175,14 +179,18 @@ TypeScript bindings use a Node-API (N-API) native addon (napi-rs).
 
 ### Platform Support
 
+See [Platform Support Matrix](../standards/platform-support.md) for the canonical reference.
+
 | Platform | Status |
 |----------|--------|
 | Linux x64 (glibc) | Supported |
+| Linux x64 (musl) | Supported |
 | Linux arm64 (glibc) | Supported |
-| macOS x64 | Supported |
+| Linux arm64 (musl) | Supported |
 | macOS arm64 | Supported |
 | Windows x64 | Supported |
-| Linux musl (Alpine) | Supported |
+
+**Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
 
 ### Installation
 

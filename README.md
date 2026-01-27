@@ -231,13 +231,18 @@ sysprims pstat --sort cpu                      # Sort by CPU usage
 
 ## Platform Support
 
+See [Platform Support Matrix](docs/standards/platform-support.md) for the canonical reference.
+
 | Platform | Target | Status |
 |----------|--------|--------|
-| Linux x64 (musl) | `x86_64-unknown-linux-musl` | Primary |
 | Linux x64 (glibc) | `x86_64-unknown-linux-gnu` | Supported |
-| macOS x64 | `x86_64-apple-darwin` | Supported |
+| Linux x64 (musl) | `x86_64-unknown-linux-musl` | Supported |
+| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu` | Supported |
+| Linux arm64 (musl) | `aarch64-unknown-linux-musl` | Supported |
 | macOS arm64 | `aarch64-apple-darwin` | Supported |
 | Windows x64 | `x86_64-pc-windows-msvc` | Supported |
+
+**Not supported**: macOS x64 (Intel Macs) - end-of-life hardware.
 
 ### Feature Parity
 

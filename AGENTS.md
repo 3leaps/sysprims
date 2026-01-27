@@ -196,19 +196,22 @@ FFI boundary changes require extra scrutiny:
 
 ### Platform Parity
 
-Changes must consider all supported platforms:
+Changes must consider all supported platforms. See [Platform Support Matrix](docs/standards/platform-support.md) for the canonical reference:
 
-- Linux (musl + glibc)
-- macOS (x64 + arm64)
-- Windows (x64)
+- Linux x64/arm64 (glibc + musl)
+- macOS arm64 (Intel Macs are **not supported** as of v0.1.7)
+- Windows x64
 
-See [ADR-0007](docs/decisions/ADR-0007-platform-abstraction.md).
+See also [ADR-0007](docs/decisions/ADR-0007-platform-abstraction.md) for the abstraction strategy.
 
 ## Key Files
 
 | Path                        | Purpose                                    |
 | --------------------------- | ------------------------------------------ |
 | `REPOSITORY_SAFETY_PROTOCOLS.md` | **MANDATORY** - Process control safety rules |
+| `RELEASE_CHECKLIST.md`      | Release workflow with validation steps     |
+| `config/agentic/roles/`     | In-repo role definitions                   |
+| `docs/standards/platform-support.md` | **Canonical platform matrix** - 6 supported platforms |
 | `crates/sysprims-core/`     | Shared types, errors, telemetry            |
 | `crates/sysprims-timeout/`  | Process timeout with group-by-default      |
 | `crates/sysprims-signal/`   | Signal dispatch and process groups         |
@@ -223,50 +226,110 @@ See [ADR-0007](docs/decisions/ADR-0007-platform-abstraction.md).
 
 ## Roles
 
-| Role      | Source                                                                 | Customization     |
-| --------- | ---------------------------------------------------------------------- | ----------------- |
-| `devlead` | [crucible baseline](https://crucible.3leaps.dev/catalog/roles/devlead) | See below         |
-| `secrev`  | [crucible baseline](https://crucible.3leaps.dev/catalog/roles/secrev)  | See below         |
-| `qa`      | [crucible baseline](https://crucible.3leaps.dev/catalog/roles/qa)      | See below         |
-| `releng`  | [crucible baseline](https://crucible.3leaps.dev/catalog/roles/releng)  | -                 |
-| `cicd`    | [crucible baseline](https://crucible.3leaps.dev/catalog/roles/cicd)    | -                 |
-| `infoarch`| [crucible baseline](https://crucible.3leaps.dev/catalog/roles/infoarch)| -                 |
-| `ffiarch` | Project-specific                                                       | See below         |
-| `entarch` | Project-specific                                                       | See below         |
+Role definitions live in [`config/agentic/roles/`](config/agentic/roles/) - all roles are in-repo with sysprims-specific customizations extending crucible baselines.
+
+| Role      | Source                                              | Focus                           |
+| --------- | --------------------------------------------------- | ------------------------------- |
+| `devlead` | [in-repo](config/agentic/roles/devlead.yaml)        | Implementation, FFI, safety     |
+| `secrev`  | [in-repo](config/agentic/roles/secrev.yaml)         | Security, PID validation, FFI   |
+| `qa`      | [in-repo](config/agentic/roles/qa.yaml)             | Testing, cross-platform         |
+| `releng`  | [in-repo](config/agentic/roles/releng.yaml)         | CI/CD + platform validation     |
+| `cicd`    | [in-repo](config/agentic/roles/cicd.yaml)           | Pipelines, runners, matrix      |
+| `infoarch`| [in-repo](config/agentic/roles/infoarch.yaml)       | Docs, schemas, standards        |
+| `ffiarch` | Project-specific (see below)                        | Bindings, cross-language        |
+| `entarch` | Project-specific (see below)                        | Ecosystem integration           |
+
+### Role: releng
+
+**Source**: [`config/agentic/roles/releng.yaml`](config/agentic/roles/releng.yaml)
+
+Extends crucible releng baseline with CI/CD platform validation focus. This is the key role for adoption velocity.
+
+#### Additional Scope
+
+- CI/CD workflow validation before push (actionlint, shellcheck)
+- Platform matrix enforcement ([Platform Support Matrix](docs/standards/platform-support.md))
+- Runner availability verification (no deprecated runners)
+- Cross-repository release coordination (Go, TypeScript, Python bindings)
+
+#### Pre-Push Checklist
+
+- [ ] Run actionlint on all modified workflows
+- [ ] Run shellcheck on shell scripts in workflows
+- [ ] Verify runners are not deprecated
+- [ ] Confirm platform matrix matches `docs/standards/platform-support.md`
+- [ ] Ensure local/remote git sync before release workflows
+
+#### Does Not
+
+- Push without running pre-push validation
+- Dismiss CI failures as "transient" without investigation
+- Use deprecated runners without checking availability
+- Release with incomplete platform coverage
 
 ### Role: devlead
 
-Extends [crucible devlead baseline](https://crucible.3leaps.dev/catalog/roles/devlead).
+**Source**: [`config/agentic/roles/devlead.yaml`](config/agentic/roles/devlead.yaml)
 
-#### Additional Scope
+Default role for implementation. Extended with sysprims safety protocols and cross-platform focus.
+
+#### Key Extensions
 
 - Rust implementation across all crates
-- Cross-platform abstraction layer
-- Process control semantics (group-by-default)
-- Integration with Fulmen ecosystem
+- Cross-platform abstraction layer (6 platforms)
+- FFI boundary implementation
+- PID safety validation (never use 0, 1, u32::MAX)
 
 ### Role: secrev
 
-Extends [crucible secrev baseline](https://crucible.3leaps.dev/catalog/roles/secrev).
+**Source**: [`config/agentic/roles/secrev.yaml`](config/agentic/roles/secrev.yaml)
 
-#### Additional Scope
+Security review with emphasis on FFI safety and PID validation.
+
+#### Key Extensions
 
 - FFI boundary security review
-- Signal handling security implications
-- Process control privilege boundaries
-- Dependency license and vulnerability audits
+- PID validation review (ADR-0011)
 - Memory safety review for `unsafe` code
+- Signal handling security implications
 
 ### Role: qa
 
-Extends [crucible qa baseline](https://crucible.3leaps.dev/catalog/roles/qa).
+**Source**: [`config/agentic/roles/qa.yaml`](config/agentic/roles/qa.yaml)
 
-#### Additional Scope
+Testing and quality assurance with cross-platform focus.
 
-- Cross-platform test coverage
-- Tree escape integration tests (critical differentiator)
-- FFI conformance tests (C, Go, Python, TypeScript)
-- Schema validation golden tests
+#### Key Extensions
+
+- Cross-platform test coverage (6 platforms)
+- Tree escape integration tests
+- FFI conformance tests
+- Safe PID usage verification in tests
+
+### Role: cicd
+
+**Source**: [`config/agentic/roles/cicd.yaml`](config/agentic/roles/cicd.yaml)
+
+Pipeline automation with platform matrix focus.
+
+#### Key Extensions
+
+- Multi-platform build matrix (6 platforms)
+- Runner selection and availability verification
+- Pre-push validation (actionlint, shellcheck)
+- Cross-compilation with Zig
+
+### Role: infoarch
+
+**Source**: [`config/agentic/roles/infoarch.yaml`](config/agentic/roles/infoarch.yaml)
+
+Documentation and standards with platform focus.
+
+#### Key Extensions
+
+- Platform support documentation
+- Language bindings documentation
+- Safety documentation maintenance
 
 ### Role: ffiarch
 
@@ -349,6 +412,8 @@ Key architectural decisions:
 - **Online**: https://crucible.3leaps.dev/
 - **FulmenHQ patterns**: https://github.com/fulmenhq/crucible
 - **Local decisions**: `docs/decisions/` (ADR, DDR, SDR)
+- **Platform support**: [`docs/standards/platform-support.md`](docs/standards/platform-support.md)
+- **Release workflow**: [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)
 
 ## Contact
 
@@ -357,4 +422,4 @@ Key architectural decisions:
 
 ---
 
-**Last Updated**: December 31, 2025
+**Last Updated**: January 27, 2026

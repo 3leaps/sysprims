@@ -217,6 +217,16 @@ jobs:
           rm -rf npm
           npx napi create-npm-dir -t .
 
+      - name: Remove unsupported platform packages
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          # darwin-x64 (Intel Mac) is not supported as of v0.1.7
+          # See docs/standards/platform-support.md
+          rm -rf npm/darwin-x64
+          echo "Removed unsupported platform: darwin-x64"
+
       - name: Stage .node files into npm packages
         working-directory: bindings/typescript/sysprims
         shell: bash
