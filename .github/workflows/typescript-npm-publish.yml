@@ -1,0 +1,183 @@
+name: TypeScript npm Publish
+
+# Publishes TypeScript bindings to npm using OIDC trusted publishing.
+# See docs/ops/npm-publishing.md for setup instructions.
+#
+# Prerequisites:
+# - Package must already exist on npm (first publish is manual)
+# - Trusted publisher configured on npmjs.com for this workflow
+# - Prebuilds workflow must have completed successfully
+
+on:
+  workflow_dispatch:
+    inputs:
+      prebuilds_run_id:
+        description: "Prebuilds workflow run ID (leave empty for latest successful)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (validate but don't publish)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write   # Required for OIDC trusted publishing
+  contents: read
+  actions: read     # Required to download artifacts from other runs
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Validate release tag exists
+        run: |
+          set -euo pipefail
+          VERSION=$(cat VERSION)
+          TAG="v${VERSION}"
+
+          # Check tag exists
+          if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Release tag ${TAG} does not exist"
+            echo "Push the release tag before publishing to npm"
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_ENV"
+          echo "Validated release tag: ${TAG}"
+
+      - name: Find prebuilds run
+        id: find-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${{ inputs.prebuilds_run_id }}" ]; then
+            RUN_ID="${{ inputs.prebuilds_run_id }}"
+            echo "Using specified run ID: ${RUN_ID}"
+          else
+            echo "Finding latest successful prebuilds run..."
+            RUN_ID=$(gh run list \
+              --workflow=typescript-napi-prebuilds.yml \
+              --status=success \
+              --limit=1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "::error::No successful prebuilds run found"
+              exit 1
+            fi
+            echo "Found run ID: ${RUN_ID}"
+          fi
+
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Download npm directory artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ steps.find-run.outputs.run_id }}"
+
+          echo "Downloading ts-npm-dir artifact from run ${RUN_ID}..."
+          gh run download "${RUN_ID}" --name ts-npm-dir --dir npm-packages
+
+          echo "Downloaded packages:"
+          ls -la npm-packages/
+
+      - name: Verify packages
+        run: |
+          set -euo pipefail
+
+          # Expected platform packages
+          PLATFORMS=(
+            "linux-x64-gnu"
+            "linux-x64-musl"
+            "linux-arm64-gnu"
+            "linux-arm64-musl"
+            "darwin-arm64"
+            "win32-x64-msvc"
+            "win32-arm64-msvc"
+          )
+
+          echo "Verifying platform packages..."
+          for plat in "${PLATFORMS[@]}"; do
+            if [ ! -d "npm-packages/${plat}" ]; then
+              echo "::error::Missing platform package: ${plat}"
+              exit 1
+            fi
+            if [ ! -f "npm-packages/${plat}/sysprims.${plat}.node" ]; then
+              echo "::error::Missing .node file in ${plat}"
+              exit 1
+            fi
+            echo "  ${plat}: OK"
+          done
+
+          echo "All platform packages verified"
+
+      - name: Build root package
+        working-directory: bindings/typescript/sysprims
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Publish (dry run)
+        if: ${{ inputs.dry_run }}
+        working-directory: bindings/typescript/sysprims
+        run: |
+          set -euo pipefail
+          echo "=== DRY RUN - No packages will be published ==="
+
+          echo "Platform packages:"
+          for dir in ../../../npm-packages/*/; do
+            (cd "$dir" && npm publish --access public --dry-run)
+          done
+
+          echo "Root package:"
+          npm publish --access public --dry-run
+
+      - name: Publish platform packages
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          echo "Publishing platform packages..."
+          for dir in npm-packages/*/; do
+            pkg=$(basename "$dir")
+            echo "Publishing @3leaps/sysprims-${pkg}..."
+            (cd "$dir" && npm publish --access public)
+          done
+
+      - name: Publish root package
+        if: ${{ !inputs.dry_run }}
+        working-directory: bindings/typescript/sysprims
+        run: |
+          set -euo pipefail
+          echo "Publishing @3leaps/sysprims..."
+          npm publish --access public
+
+      - name: Verify publication
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.version }}"
+
+          echo "Waiting for npm to index packages..."
+          sleep 10
+
+          echo "Verifying @3leaps/sysprims@${VERSION}..."
+          npm view "@3leaps/sysprims@${VERSION}" version || {
+            echo "::warning::Package not yet visible on npm (may take a few minutes)"
+          }

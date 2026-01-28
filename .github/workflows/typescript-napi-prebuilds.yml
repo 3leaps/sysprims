@@ -2,12 +2,6 @@ name: TypeScript N-API Prebuilds
 
 on:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Publish to npm (requires NPM_TOKEN secret)"
-        required: true
-        type: boolean
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -276,39 +270,8 @@ jobs:
             cp "$f" "$dest"
           done
 
-      - name: Run napi prepublish (updates root package.json)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-        working-directory: bindings/typescript/sysprims
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          npm config set //registry.npmjs.org/:_authToken="${NPM_TOKEN}"
-          npx napi prepublish -t npm --skip-gh-release
-
       - name: Upload npm dir
         uses: actions/upload-artifact@v4
         with:
           name: ts-npm-dir
           path: bindings/typescript/sysprims/npm
-
-      - name: Publish to npm
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-        working-directory: bindings/typescript/sysprims
-        shell: bash
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${NPM_TOKEN:-}" ]]; then
-            echo "::error::NPM_TOKEN secret is not set"
-            exit 1
-          fi
-          npm config set //registry.npmjs.org/:_authToken="$NPM_TOKEN"
-
-          # Publish platform packages first
-          for dir in npm/*; do
-            (cd "$dir" && npm publish --access public)
-          done
-
-          # Then publish the root package
-          npm publish --access public
