@@ -88,6 +88,15 @@ does_not:
 
 platform_reference: docs/standards/platform-support.md
 
+required_reading:
+  description: >
+    These files MUST be read in their entirety before starting any releng work.
+    They define the release process, build targets, and operational procedures.
+    Do NOT deviate from the documented process without explicit approval.
+  files:
+    - Makefile                  # Build targets, release automation
+    - RELEASE_CHECKLIST.md      # Step-by-step release process (canonical reference)
+
 related_docs:
   - RELEASE_CHECKLIST.md
   - docs/standards/platform-support.md

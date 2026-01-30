@@ -79,6 +79,14 @@ does_not:
 
 platform_reference: docs/standards/platform-support.md
 
+required_reading:
+  description: >
+    These files MUST be read in their entirety before starting any cicd work.
+    They define the release process, build targets, and operational procedures.
+  files:
+    - Makefile                  # Build targets, release automation
+    - RELEASE_CHECKLIST.md      # Step-by-step release process
+
 runners:
   linux_x64: ubuntu-latest
   linux_arm64: ubuntu-latest-arm64-s
