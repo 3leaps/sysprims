@@ -689,7 +689,7 @@ version-set: ## Set explicit version (V=X.Y.Z)
 	@echo "$(V)" > $(VERSION_FILE)
 	@echo "Version set to $(V)"
 
-version-sync: ## Sync VERSION file to Cargo.toml (requires cargo-edit)
+version-sync: ## Sync VERSION file to Cargo.toml and TypeScript package.json
 	@ver=$$(cat $(VERSION_FILE)); \
 	if command -v cargo-set-version >/dev/null 2>&1; then \
 		cargo set-version --workspace "$$ver"; \
@@ -697,4 +697,12 @@ version-sync: ## Sync VERSION file to Cargo.toml (requires cargo-edit)
 	else \
 		echo "[!!] cargo-edit not installed (cargo install cargo-edit)"; \
 		echo "Manual update required: set version = \"$$ver\" in Cargo.toml"; \
+	fi
+	@ver=$$(cat $(VERSION_FILE)); \
+	ts_pkg="bindings/typescript/sysprims/package.json"; \
+	if [ -f "$$ts_pkg" ]; then \
+		sed -i.bak -e "s/\"version\": \"[0-9]*\.[0-9]*\.[0-9]*\"/\"version\": \"$$ver\"/" "$$ts_pkg"; \
+		sed -i.bak -e "s/@3leaps\/sysprims-\([^\"]*\)\": \"[0-9]*\.[0-9]*\.[0-9]*\"/@3leaps\/sysprims-\1\": \"$$ver\"/g" "$$ts_pkg"; \
+		rm -f "$$ts_pkg.bak"; \
+		echo "[ok] Synced TypeScript package.json to $$ver"; \
 	fi
