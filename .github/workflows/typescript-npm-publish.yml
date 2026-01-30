@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -53,7 +55,17 @@ jobs:
           fi
 
           echo "version=${VERSION}" >> "$GITHUB_ENV"
+          echo "tag=${TAG}" >> "$GITHUB_ENV"
           echo "Validated release tag: ${TAG}"
+
+      - name: Checkout release tag
+        run: |
+          set -euo pipefail
+          # IMPORTANT: Checkout the exact tagged commit for provenance integrity.
+          # The npm package must be built from the same commit as the GitHub release.
+          echo "Checking out ${{ env.tag }}..."
+          git checkout "${{ env.tag }}"
+          echo "Now at commit: $(git rev-parse HEAD)"
 
       - name: Find prebuilds run
         id: find-run
