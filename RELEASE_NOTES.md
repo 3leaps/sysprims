@@ -6,6 +6,109 @@
 
 ---
 
+## v0.1.8 - 2026-01-29
+
+**Status:** CLI Tree Termination Release
+
+This release adds the `terminate-tree` CLI subcommand for safe, structured termination of existing process trees. Combined with enhanced `pstat` sampling, sysprims now provides a complete workflow for diagnosing and cleaning up runaway processes.
+
+### Highlights
+
+- **`sysprims terminate-tree`**: Terminate process trees with graceful-then-kill escalation
+- **PID Reuse Protection**: `--require-start-time-ms` and `--require-exe-path` guards
+- **CLI Safety**: Refuses to terminate PID 1, self, or parent without `--force`
+- **`pstat` Sampling**: `--sample` and `--top` flags for "what's burning CPU" investigation
+
+### New CLI Commands
+
+#### `sysprims terminate-tree`
+
+Terminate an existing process tree by PID:
+
+```bash
+# Basic usage
+sysprims terminate-tree 26021
+
+# With PID reuse protection (recommended for automation)
+sysprims terminate-tree 26021 \
+  --require-exe-path "/Applications/VSCodium.app/Contents/MacOS/Electron" \
+  --require-start-time-ms 1769432792261
+
+# JSON output for scripting
+sysprims terminate-tree 26021 --json
+```
+
+Output (JSON):
+
+```json
+{
+  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json",
+  "pid": 26021,
+  "pgid": 26021,
+  "signal_sent": 15,
+  "escalated": false,
+  "exited": true,
+  "tree_kill_reliability": "guaranteed"
+}
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--grace <DURATION>` | Grace period before escalation (default: 5s) |
+| `--kill-after <DURATION>` | Send kill signal if still running (default: 10s) |
+| `--signal <SIGNAL>` | Grace period signal (default: TERM) |
+| `--kill-signal <SIGNAL>` | Forced termination signal (default: KILL) |
+| `--require-start-time-ms <MS>` | Refuse if PID start time doesn't match |
+| `--require-exe-path <PATH>` | Refuse if PID exe path doesn't match |
+| `--force` | Override safety checks (PID 1, self, parent) |
+| `--json` | Output as JSON |
+
+#### `pstat` Sampling Enhancements
+
+Find processes consuming CPU right now:
+
+```bash
+# Sample CPU over 250ms, show top 5
+sysprims pstat --sample 250ms --top 5 --sort cpu --table
+
+# Find VSCodium helpers burning CPU
+sysprims pstat --name "VSCodium Helper" --sample 500ms --cpu-above 50 --json
+```
+
+### Surgical vs Tree Termination
+
+The new [runaway process diagnosis guide](docs/guides/runaway-process-diagnosis.md) documents two approaches:
+
+**Option A: Surgical Strike** (try first)
+```bash
+sysprims kill 8436 -s TERM   # or -s KILL if ignored
+```
+- Kills individual helpers while preserving parent windows
+- SIGTERM may be ignored by runaway processes; escalate to SIGKILL
+
+**Option B: Tree Termination** (if surgical fails)
+```bash
+sysprims terminate-tree 26021 --require-exe-path "..."
+```
+- Terminates parent and all descendants
+- Closes all windows managed by that process
+
+### Documentation
+
+- **New Guide**: `docs/guides/runaway-process-diagnosis.md`
+  - Real-world walkthrough with VSCodium/Electron plugin helper scenario
+  - Investigation workflow using `pstat` and `lsof`
+  - Decision framework for surgical vs tree termination
+
+### Coming in v0.1.9
+
+- **`sysprims fds`**: Open file descriptor inspection (Linux/macOS)
+- **Multi-PID kill**: `sysprims kill <PID> <PID> ...` batch operations
+
+---
+
 ## v0.1.7 - 2026-01-26
 
 **Status:** TypeScript Bindings Infrastructure Release
@@ -145,35 +248,6 @@ if outcome.escalated {
 ### Documentation
 
 - Added Job Object registry documentation for Windows platform behavior
-
----
-
-## v0.1.5 - 2026-01-24
-
-**Status:** TypeScript Bindings Parity Release (proc/ports/signals)
-
-Node.js developers now have access to process inspection, port mapping, and signal APIs. This release achieves parity with Go bindings for these core surfaces.
-
-### Highlights
-
-- **TypeScript Parity**: Process listing, port inspection, and signal operations
-- **Full Type Definitions**: All schemas have corresponding TypeScript types
-- **Windows Stability**: Signal tests no longer flaky on Windows CI
-
-### New TypeScript API
-
-| Function | Description |
-|----------|-------------|
-| `processList(filter?)` | List running processes with filtering |
-| `listeningPorts(filter?)` | Map listening ports to processes |
-| `signalSend(pid, signal)` | Send signal to process |
-| `signalSendGroup(pgid, signal)` | Send signal to process group (Unix) |
-| `terminate(pid)` | Graceful termination (SIGTERM on Unix, TerminateProcess on Windows) |
-| `forceKill(pid)` | Immediate kill (SIGKILL on Unix, TerminateProcess on Windows) |
-
-### Bug Fixes
-
-- Windows signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
 
 ---
 

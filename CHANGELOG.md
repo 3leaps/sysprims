@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-01-29
+
+CLI tree termination release. Adds `terminate-tree` subcommand for safe, structured termination of existing process trees, plus `pstat` sampling enhancements for runaway process diagnosis.
+
+### Added
+
+- **CLI: `sysprims terminate-tree`** (`sysprims-cli`)
+  - Terminate an existing process tree by PID with graceful-then-kill escalation
+  - Identity guards: `--require-start-time-ms`, `--require-exe-path` for PID reuse protection
+  - Timing control: `--grace`, `--kill-after`, `--signal`, `--kill-signal`
+  - Safety: refuses PID 1, self, or parent without `--force`
+  - JSON output with `tree_kill_reliability` and `warnings`
+
+- **CLI: `pstat` Sampling Mode** (`sysprims-cli`)
+  - `--sample <DURATION>`: compute CPU rate over sampling interval (e.g., `--sample 250ms`)
+  - `--top <N>`: limit output to top N processes by CPU after filtering
+  - Enables "what's burning CPU right now?" investigation workflow
+
+- **Documentation**
+  - New guide: `docs/guides/runaway-process-diagnosis.md`
+  - Real-world walkthrough: diagnosing and terminating runaway Electron/VSCodium plugin helpers
+  - Documents surgical (single PID) vs tree termination approaches
+  - Notes that SIGTERM may be ignored by runaway processes; escalate to SIGKILL
+
+### Notes
+
+- `terminate-tree` CLI wraps the `sysprims_timeout::terminate_tree` library function (added in v0.1.6)
+- Library-level footgun protections (PID 0, MAX_SAFE_PID bounds) apply; CLI adds interactive safety guards
+- Future releases will add process visibility enhancements (`fds` command) for deeper investigation
+
 ## [0.1.7] - 2026-01-26
 
 TypeScript bindings infrastructure release. Migrates from koffi FFI to Node-API (N-API) native addon, enabling Alpine/musl support.
@@ -278,7 +308,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/3leaps/sysprims/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/3leaps/sysprims/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/3leaps/sysprims/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/3leaps/sysprims/compare/v0.1.4...v0.1.5
