@@ -21,6 +21,9 @@ on:
         type: boolean
         default: false
 
+# NOTE: This workflow publishes the version in the VERSION file on main.
+# To publish an older release, manually check out that tag and publish locally.
+
 permissions:
   id-token: write   # Required for OIDC trusted publishing
   contents: read
@@ -30,6 +33,7 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    environment: publish-npm  # Required for npm OIDC trusted publishing
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,7 +51,6 @@ jobs:
           VERSION=$(cat VERSION)
           TAG="v${VERSION}"
 
-          # Check tag exists
           if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "::error::Release tag ${TAG} does not exist"
             echo "Push the release tag before publishing to npm"
