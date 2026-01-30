@@ -555,7 +555,7 @@ pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
         if handle == 0 {
             // Map missing handle to not found vs permission denied is ambiguous.
             // Align with other best-effort functions by returning PermissionDenied.
-            return Err(SysprimsError::permission_denied(pid));
+            return Err(SysprimsError::permission_denied(pid, "cpu_total_time_ns"));
         }
 
         let mut creation_time = mem::zeroed();
