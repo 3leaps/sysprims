@@ -414,6 +414,18 @@ pub fn snapshot() -> SysprimsResult<ProcessSnapshot> {
     platform::snapshot_impl()
 }
 
+/// Get total CPU time consumed by a process (kernel + user) in nanoseconds.
+///
+/// This is a best-effort value used for sampling-based CPU calculations.
+///
+/// Notes:
+/// - The existing `ProcessInfo.cpu_percent` is a lifetime-average estimate.
+/// - For near-instant CPU usage, callers should sample this value twice and
+///   compute a rate over an interval.
+pub fn cpu_total_time_ns(pid: u32) -> SysprimsResult<u64> {
+    platform::cpu_total_time_ns_impl(pid)
+}
+
 /// Get a snapshot of listening ports.
 pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindingsSnapshot> {
     let filter = filter.cloned().unwrap_or_default();

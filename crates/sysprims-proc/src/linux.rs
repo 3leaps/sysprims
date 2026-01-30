@@ -233,6 +233,27 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
     })
 }
 
+pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
+    let proc_path = Path::new("/proc").join(pid.to_string());
+    if !proc_path.exists() {
+        return Err(SysprimsError::not_found(pid));
+    }
+
+    let stat_content = read_file(&proc_path.join("stat")).map_err(|e| map_io_error(e, pid))?;
+    let stat = parse_stat(&stat_content)?;
+    let clock_ticks = get_clock_ticks();
+    let total_cpu_ticks = stat.utime + stat.stime;
+
+    // Convert ticks -> nanoseconds.
+    // Use u128 to avoid overflow.
+    let ns = (total_cpu_ticks as u128)
+        .saturating_mul(1_000_000_000u128)
+        .checked_div(clock_ticks as u128)
+        .unwrap_or(0);
+
+    Ok(ns as u64)
+}
+
 fn collect_socket_bindings() -> SysprimsResult<Vec<PortBinding>> {
     let mut bindings = Vec::new();
 

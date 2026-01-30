@@ -759,6 +759,13 @@ fn calculate_cpu_percent(task_info: &ProcTaskInfo, elapsed_secs: u64) -> f64 {
     percent.clamp(0.0, 100.0)
 }
 
+pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
+    let task_info = get_task_info(pid)?;
+    Ok(task_info
+        .pti_total_user
+        .saturating_add(task_info.pti_total_system))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,7 +3,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use sysprims_core::get_platform;
 use sysprims_core::SysprimsError;
-use sysprims_proc::{get_process, snapshot, snapshot_filtered, ProcessFilter};
+use sysprims_proc::{cpu_total_time_ns, get_process, snapshot, snapshot_filtered, ProcessFilter};
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
 use tracing::info;
@@ -42,6 +42,12 @@ enum Command {
     /// Lists processes with optional filtering. Output is JSON by default
     /// for automation, or table format for human consumption.
     Pstat(PstatArgs),
+
+    /// Terminate a process tree by PID.
+    ///
+    /// This is best-effort cross-platform termination of a PID and its descendants.
+    /// On Unix this uses process groups when possible; on Windows it uses Job Objects.
+    TerminateTree(TerminateTreeArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -148,6 +154,17 @@ struct PstatArgs {
     #[arg(long, value_name = "PERCENT")]
     cpu_above: Option<f64>,
 
+    /// Sample CPU usage over an interval (e.g., "250ms").
+    ///
+    /// When provided, `cpu_percent` is computed as a rate over this interval
+    /// instead of a lifetime-average estimate.
+    #[arg(long, value_name = "DURATION")]
+    sample: Option<String>,
+
+    /// Limit output to the top N processes (after filtering).
+    #[arg(long, value_name = "N")]
+    top: Option<usize>,
+
     /// Filter by minimum memory usage in KB.
     #[arg(long, value_name = "KB")]
     memory_above: Option<u64>,
@@ -155,6 +172,45 @@ struct PstatArgs {
     /// Sort by field (pid, name, cpu, memory).
     #[arg(long, value_name = "FIELD", default_value = "pid")]
     sort: String,
+}
+
+#[derive(Parser, Debug)]
+struct TerminateTreeArgs {
+    /// Target process ID.
+    #[arg(value_name = "PID")]
+    pid: u32,
+
+    /// Grace period before escalation (default: 5s).
+    #[arg(long, value_name = "DURATION", default_value = "5s")]
+    grace: String,
+
+    /// Send kill_signal if still running after this duration (default: 10s).
+    #[arg(long, value_name = "DURATION", default_value = "10s")]
+    kill_after: String,
+
+    /// Signal used for the grace period (default: TERM).
+    #[arg(long, value_name = "SIGNAL", default_value = "TERM")]
+    signal: String,
+
+    /// Signal used for forced termination (default: KILL).
+    #[arg(long, value_name = "SIGNAL", default_value = "KILL")]
+    kill_signal: String,
+
+    /// Refuse to terminate if the PID's start time does not match.
+    #[arg(long, value_name = "UNIX_MS")]
+    require_start_time_ms: Option<u64>,
+
+    /// Refuse to terminate if the PID's executable path does not match.
+    #[arg(long, value_name = "PATH")]
+    require_exe_path: Option<String>,
+
+    /// Proceed even if identity checks fail.
+    #[arg(long)]
+    force: bool,
+
+    /// Output as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
@@ -212,6 +268,10 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
         }
         Command::Timeout(args) => run_timeout(args),
         Command::Pstat(args) => run_pstat(args),
+        Command::TerminateTree(args) => {
+            run_terminate_tree(args)?;
+            Ok(0)
+        }
     }
 }
 
@@ -413,6 +473,108 @@ fn run_timeout(args: TimeoutArgs) -> Result<i32, SysprimsError> {
     }
 }
 
+// ============================================================================
+// TerminateTree command
+// ============================================================================
+
+fn run_terminate_tree(args: TerminateTreeArgs) -> Result<(), SysprimsError> {
+    // Hard safety checks for interactive CLI usage.
+    // The library allows terminating any pid > 0 (subject to OS permission), but the CLI
+    // defaults to refusing the most footgun targets unless the user explicitly opts in.
+    let self_pid = std::process::id();
+    if args.pid == self_pid && !args.force {
+        return Err(SysprimsError::invalid_argument(
+            "refusing to terminate the sysprims process itself (use --force to override)",
+        ));
+    }
+
+    if args.pid == 1 && !args.force {
+        return Err(SysprimsError::invalid_argument(
+            "refusing to terminate PID 1 (use --force to override)",
+        ));
+    }
+
+    // Refuse killing our parent by default; this often means killing the caller's shell/terminal.
+    if let Ok(self_info) = get_process(self_pid) {
+        if args.pid == self_info.ppid && !args.force {
+            return Err(SysprimsError::invalid_argument(
+                "refusing to terminate the parent process (use --force to override)",
+            ));
+        }
+    }
+
+    // Optional PID identity checks to prevent PID reuse mistakes.
+    if args.require_start_time_ms.is_some() || args.require_exe_path.is_some() {
+        let info = get_process(args.pid)?;
+
+        if let Some(expected) = args.require_start_time_ms {
+            let actual = info.start_time_unix_ms.ok_or_else(|| {
+                SysprimsError::invalid_argument(
+                    "start_time_unix_ms unavailable; cannot enforce --require-start-time-ms",
+                )
+            })?;
+            if actual != expected && !args.force {
+                return Err(SysprimsError::invalid_argument(format!(
+                    "PID identity mismatch: start_time_unix_ms expected {expected}, got {actual} (use --force to override)"
+                )));
+            }
+        }
+
+        if let Some(ref expected) = args.require_exe_path {
+            let actual = info.exe_path.clone().ok_or_else(|| {
+                SysprimsError::invalid_argument(
+                    "exe_path unavailable; cannot enforce --require-exe-path",
+                )
+            })?;
+            if &actual != expected && !args.force {
+                return Err(SysprimsError::invalid_argument(format!(
+                    "PID identity mismatch: exe_path expected '{expected}', got '{actual}' (use --force to override)"
+                )));
+            }
+        }
+    }
+
+    let grace = parse_duration(&args.grace)?;
+    let kill_after = parse_duration(&args.kill_after)?;
+    let signal = resolve_signal(&args.signal)?;
+    let kill_signal = resolve_signal(&args.kill_signal)?;
+
+    // Mirror ADR-0011 bounds (avoid dangerous casts).
+    if args.pid > sysprims_signal::MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "pid {} exceeds maximum safe value {}",
+            args.pid,
+            sysprims_signal::MAX_SAFE_PID
+        )));
+    }
+
+    let cfg = sysprims_timeout::TerminateTreeConfig {
+        grace_timeout_ms: grace.as_millis() as u64,
+        kill_timeout_ms: kill_after.as_millis() as u64,
+        signal,
+        kill_signal,
+    };
+
+    let result = sysprims_timeout::terminate_tree(args.pid, cfg)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    } else {
+        // Human summary
+        println!(
+            "terminate-tree: pid={} tree_kill_reliability={} warnings={}",
+            result.pid,
+            result.tree_kill_reliability,
+            result.warnings.len()
+        );
+        for w in result.warnings {
+            println!("warning: {w}");
+        }
+    }
+
+    Ok(())
+}
+
 /// Parse a duration string like "5s", "100ms", "2m", "1h", or just "5" (seconds).
 fn parse_duration(s: &str) -> Result<Duration, SysprimsError> {
     let s = s.trim();
@@ -481,7 +643,19 @@ fn resolve_signal(s: &str) -> Result<i32, SysprimsError> {
 fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
     // If specific PID requested, just get that one
     if let Some(pid) = args.pid {
-        let proc_info = get_process(pid)?;
+        let mut proc_info = get_process(pid)?;
+        if let Some(sample_s) = args.sample {
+            let sample = parse_duration(&sample_s)?;
+            let cpu0 = cpu_total_time_ns(pid)?;
+            std::thread::sleep(sample);
+            let cpu1 = cpu_total_time_ns(pid)?;
+            let dt_ns = sample.as_nanos() as f64;
+            let delta = cpu1.saturating_sub(cpu0) as f64;
+            if dt_ns > 0.0 {
+                proc_info.cpu_percent = (delta / dt_ns) * 100.0;
+            }
+        }
+
         if args.table {
             print_process_table(&[proc_info]);
         } else {
@@ -491,28 +665,97 @@ fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
         return Ok(0);
     }
 
-    // Build filter from args
-    let filter = ProcessFilter {
-        name_contains: args.name,
-        user_equals: args.user,
-        cpu_above: args.cpu_above,
+    // Build filter from args.
+    // When sampling CPU, apply cpu_above after sampling so we don't filter out
+    // processes due to lifetime-average CPU values.
+    let sampling = args.sample.is_some();
+    let base_filter = ProcessFilter {
+        name_contains: args.name.clone(),
+        user_equals: args.user.clone(),
+        cpu_above: if sampling { None } else { args.cpu_above },
         memory_above_kb: args.memory_above,
         ..Default::default()
     };
 
-    // Get processes
-    let mut snap = if filter.name_contains.is_some()
-        || filter.user_equals.is_some()
-        || filter.cpu_above.is_some()
-        || filter.memory_above_kb.is_some()
+    let mut snap = if base_filter.name_contains.is_some()
+        || base_filter.user_equals.is_some()
+        || base_filter.cpu_above.is_some()
+        || base_filter.memory_above_kb.is_some()
     {
-        snapshot_filtered(&filter)?
+        snapshot_filtered(&base_filter)?
     } else {
         snapshot()?
     };
 
+    if let Some(sample_s) = args.sample {
+        let sample = parse_duration(&sample_s)?;
+        if sample.is_zero() {
+            return Err(SysprimsError::invalid_argument(
+                "sample duration must be > 0",
+            ));
+        }
+
+        // Capture CPU totals at t0.
+        let mut t0 = std::collections::HashMap::<u32, (Option<u64>, u64)>::new();
+        for p in &snap.processes {
+            if let Ok(cpu_ns) = cpu_total_time_ns(p.pid) {
+                t0.insert(p.pid, (p.start_time_unix_ms, cpu_ns));
+            }
+        }
+
+        std::thread::sleep(sample);
+
+        // Refresh snapshot (same base filter) for current fields.
+        let mut snap1 = if base_filter.name_contains.is_some()
+            || base_filter.user_equals.is_some()
+            || base_filter.cpu_above.is_some()
+            || base_filter.memory_above_kb.is_some()
+        {
+            snapshot_filtered(&base_filter)?
+        } else {
+            snapshot()?
+        };
+
+        let dt_ns = sample.as_nanos() as f64;
+        if dt_ns > 0.0 {
+            for p in &mut snap1.processes {
+                if let Ok(cpu1) = cpu_total_time_ns(p.pid) {
+                    if let Some((start0, cpu0)) = t0.get(&p.pid) {
+                        // PID reuse guard: only compute if start time matches.
+                        if start0.is_some()
+                            && p.start_time_unix_ms.is_some()
+                            && start0 != &p.start_time_unix_ms
+                        {
+                            continue;
+                        }
+                        let delta = cpu1.saturating_sub(*cpu0) as f64;
+                        p.cpu_percent = (delta / dt_ns) * 100.0;
+                    }
+                }
+            }
+        }
+
+        // Apply cpu_above after sampling.
+        if let Some(threshold) = args.cpu_above {
+            snap1.processes.retain(|p| p.cpu_percent >= threshold);
+        }
+
+        snap = snap1;
+    }
+
     // Sort processes
-    sort_processes(&mut snap.processes, &args.sort);
+    if sampling && args.sort == "pid" {
+        sort_processes(&mut snap.processes, "cpu");
+    } else {
+        sort_processes(&mut snap.processes, &args.sort);
+    }
+
+    // Top N
+    if let Some(n) = args.top {
+        if snap.processes.len() > n {
+            snap.processes.truncate(n);
+        }
+    }
 
     // Output
     if args.table {
@@ -548,6 +791,11 @@ fn print_process_table(processes: &[sysprims_proc::ProcessInfo]) {
         "PID", "PPID", "CPU%", "MEM(KB)", "STATE", "USER"
     );
     println!("{:-<80}", "");
+
+    if processes.is_empty() {
+        println!("(no matching processes)");
+        return;
+    }
 
     for p in processes {
         let user = p.user.as_deref().unwrap_or("-");

@@ -272,6 +272,16 @@ pub fn terminate_tree(
         return Err(SysprimsError::invalid_argument("pid must be > 0"));
     }
 
+    // Defense in depth: avoid unsafe casts on Unix.
+    // See ADR-0011 (PID Validation Safety).
+    if pid > sysprims_signal::MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "pid {} exceeds maximum safe value {}",
+            pid,
+            sysprims_signal::MAX_SAFE_PID
+        )));
+    }
+
     let mut warnings: Vec<String> = Vec::new();
     let mut pgid: Option<u32> = None;
     let mut reliability = TreeKillReliability::BestEffort;

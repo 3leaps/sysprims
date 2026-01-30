@@ -549,6 +549,44 @@ unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64, Option<u64>)> {
     Some((cpu_percent, memory_kb, elapsed_seconds, start_time_unix_ms))
 }
 
+pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
+        if handle == 0 {
+            // Map missing handle to not found vs permission denied is ambiguous.
+            // Align with other best-effort functions by returning PermissionDenied.
+            return Err(SysprimsError::permission_denied(pid));
+        }
+
+        let mut creation_time = mem::zeroed();
+        let mut exit_time = mem::zeroed();
+        let mut kernel_time = mem::zeroed();
+        let mut user_time = mem::zeroed();
+
+        let ok = GetProcessTimes(
+            handle,
+            &mut creation_time,
+            &mut exit_time,
+            &mut kernel_time,
+            &mut user_time,
+        ) != 0;
+
+        CloseHandle(handle);
+
+        if !ok {
+            return Err(SysprimsError::internal("GetProcessTimes failed"));
+        }
+
+        // FILETIME values are 100-nanosecond intervals.
+        let kernel_100ns =
+            (kernel_time.dwHighDateTime as u64) << 32 | kernel_time.dwLowDateTime as u64;
+        let user_100ns = (user_time.dwHighDateTime as u64) << 32 | user_time.dwLowDateTime as u64;
+        let total_100ns = kernel_100ns.saturating_add(user_100ns);
+
+        Ok(total_100ns.saturating_mul(100))
+    }
+}
+
 unsafe fn get_process_exe_path(pid: u32) -> Option<String> {
     let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
     if handle == 0 {
