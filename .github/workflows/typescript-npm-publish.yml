@@ -142,7 +142,11 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: |
           set -euo pipefail
-          npm ci
+          # Use npm install instead of npm ci because:
+          # 1. Optional dependencies (platform packages) are being published in this workflow
+          # 2. They don't exist yet when we build the root package
+          # 3. We only need devDependencies for TypeScript compilation
+          npm install --omit=optional
           npm run build
 
       - name: Publish (dry run)
