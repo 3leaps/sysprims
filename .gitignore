@@ -89,10 +89,11 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-bindings/typescript/**/package-lock.json
 
-# Root-level npm lockfile (repo tooling only)
+# Root-level npm lockfile (repo tooling only, not for published packages)
 package-lock.json
+# Exception: TypeScript bindings package-lock.json is tracked for npm ci reproducibility
+!bindings/typescript/sysprims/package-lock.json
 
 # NAPI-RS build artifacts
 bindings/typescript/target/
