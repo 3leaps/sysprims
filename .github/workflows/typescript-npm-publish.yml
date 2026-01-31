@@ -46,6 +46,14 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Ensure npm CLI supports OIDC
+        run: |
+          set -euo pipefail
+          echo "npm (before): $(npm --version)"
+          # Trusted publishing requires npm >= 11.5.1
+          npm install -g npm@11.5.1
+          echo "npm (after): $(npm --version)"
+
       - name: Validate running from a tag ref
         run: |
           set -euo pipefail
@@ -219,6 +227,11 @@ jobs:
           set -euo pipefail
           echo "=== DRY RUN - No packages will be published ==="
 
+          # Force OIDC mode: do not allow token auth to interfere.
+          unset NODE_AUTH_TOKEN NPM_TOKEN
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
+          printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
+
           echo "Platform packages:"
           for dir in ../../../npm-packages/*/; do
             (cd "$dir" && npm publish --access public --dry-run)
@@ -232,6 +245,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Force OIDC mode: do not allow token auth to interfere.
+          unset NODE_AUTH_TOKEN NPM_TOKEN
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
+          printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
+
           echo "Publishing platform packages..."
           for dir in npm-packages/*/; do
             pkg=$(basename "$dir")
@@ -244,6 +262,9 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: |
           set -euo pipefail
+          unset NODE_AUTH_TOKEN NPM_TOKEN
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
+          printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
           echo "Publishing @3leaps/sysprims..."
           npm publish --access public
 
