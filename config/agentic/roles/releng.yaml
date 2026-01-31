@@ -76,6 +76,12 @@ escalates_to:
     when: Platform support changes (add/remove platforms)
   - target: secrev
     when: Secrets or credentials handling in workflows
+  - target: cicd
+    when: Pipeline execution details or workflow debugging
+
+cross_role_note: >
+  Releng agents may be asked to perform CI/CD tasks (e.g., workflow execution, pipeline debugging).
+  For such tasks, reference the cicd role and follow RELEASE_CHECKLIST.md as a sequential procedure.
 
 does_not:
   - Push without running pre-push validation

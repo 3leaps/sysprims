@@ -87,6 +87,15 @@ required_reading:
     - Makefile                  # Build targets, release automation
     - RELEASE_CHECKLIST.md      # Step-by-step release process
 
+release_procedure:
+  description: >
+    RELEASE_CHECKLIST.md is a SEQUENTIAL checklist. Execute steps in order.
+    Do not skip ahead. Verify each step completes before proceeding to the next.
+    Common mistakes to avoid:
+    - Pushing tags before Go bindings PR is merged
+    - Running npm publish before TypeScript prebuilds complete
+    - Running TypeScript workflows from main instead of from the tag ref
+
 runners:
   linux_x64: ubuntu-latest
   linux_arm64: ubuntu-latest-arm64-s

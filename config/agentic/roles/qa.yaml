@@ -61,6 +61,12 @@ escalates_to:
     when: Quality gate failures blocking release
   - target: secrev
     when: Security-related test requirements
+  - target: cicd
+    when: Release workflow execution or CI/CD pipeline tasks
+
+cross_role_note: >
+  QA agents may be asked to perform CI/CD tasks (e.g., release verification, workflow execution).
+  For such tasks, reference the cicd role and follow RELEASE_CHECKLIST.md as a sequential procedure.
 
 does_not:
   - Approve code with failing tests
