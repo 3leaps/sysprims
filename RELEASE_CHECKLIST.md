@@ -87,13 +87,6 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     gh workflow run "TypeScript Bindings" --ref main
     ```
 
-- [ ] TypeScript prebuild packaging rehearsal (recommended, deferred publish):
-  - Assemble per-platform npm package directories and stage `.node` binaries without publishing.
-    Run this only when you want to rehearse npm packaging.
-    ```bash
-    gh workflow run "TypeScript N-API Prebuilds" --ref main -f publish=false
-    ```
-
 - [ ] Create and push tags (must point to the SAME commit):
   ```bash
   VERSION=$(cat VERSION)
@@ -142,18 +135,26 @@ Notes:
     If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
   - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
 
-  TypeScript bindings:
-  - Post-tag validation (recommended): run the validation workflow against the tag (includes TS on all runners, including Alpine/musl).
-    ```bash
-    VERSION=$(cat VERSION)
-    gh workflow run "Validate Release" -f tag="v${VERSION}"
-    ```
+  TypeScript bindings (run AFTER signing, from the tag ref):
+  1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
+     ```bash
+     VERSION=$(cat VERSION)
+     gh workflow run "TypeScript N-API Prebuilds" --ref "v${VERSION}"
+     ```
+     Wait for completion. This builds `.node` binaries and stages npm package directories.
 
-  - npm publishing (DEFERRED until consumer assent):
-    We only publish `@3leaps/sysprims` to npm once:
-    - Brooklyn (and other TS consumers) explicitly assent to consuming npm-published artifacts, and
-    - we have completed at least one full release rehearsal.
-    When enabled, publishing remains a manual workflow-dispatch action gated by `NPM_TOKEN`.
+  2. Run npm publish workflow on the tag (requires OIDC trusted publishing):
+     ```bash
+     VERSION=$(cat VERSION)
+     gh workflow run "TypeScript npm Publish" --ref "v${VERSION}"
+     ```
+     The workflow validates:
+     - Running from a `v*` tag ref (required for OIDC and environment protection)
+     - VERSION file and package.json match the tag
+     - Prebuilds were built from the same commit as the tag
+
+  Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow must run
+  from a tag ref to satisfy the `publish-npm` environment protection rules.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 

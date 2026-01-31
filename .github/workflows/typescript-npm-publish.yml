@@ -11,6 +11,10 @@ name: TypeScript npm Publish
 on:
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Release tag to publish (must match the workflow ref, e.g. v0.1.8)"
+        required: false
+        type: string
       prebuilds_run_id:
         description: "Prebuilds workflow run ID (leave empty for latest successful)"
         required: false
@@ -20,9 +24,6 @@ on:
         required: false
         type: boolean
         default: false
-
-# NOTE: This workflow publishes the version in the VERSION file on main.
-# To publish an older release, manually check out that tag and publish locally.
 
 permissions:
   id-token: write   # Required for OIDC trusted publishing
@@ -45,30 +46,49 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Validate release tag exists
+      - name: Validate running from a tag ref
         run: |
           set -euo pipefail
-          VERSION=$(cat VERSION)
-          TAG="v${VERSION}"
-
-          if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "::error::Release tag ${TAG} does not exist"
-            echo "Push the release tag before publishing to npm"
+          if [ "${GITHUB_REF_TYPE:-}" != "tag" ]; then
+            echo "::error::This workflow must run from a tag ref (refs/tags/vX.Y.Z)."
+            echo "Re-run it selecting the release tag in the GitHub UI, or trigger it by pushing a v* tag."
             exit 1
           fi
 
-          echo "version=${VERSION}" >> "$GITHUB_ENV"
-          echo "tag=${TAG}" >> "$GITHUB_ENV"
-          echo "Validated release tag: ${TAG}"
-
-      - name: Checkout release tag
+      - name: Validate release tag and versions
         run: |
           set -euo pipefail
-          # IMPORTANT: Checkout the exact tagged commit for provenance integrity.
-          # The npm package must be built from the same commit as the GitHub release.
-          echo "Checking out ${{ env.tag }}..."
-          git checkout "${{ env.tag }}"
-          echo "Now at commit: $(git rev-parse HEAD)"
+          TAG="${GITHUB_REF_NAME}"
+          if [ -n "${{ inputs.tag }}" ] && [ "${{ inputs.tag }}" != "$TAG" ]; then
+            echo "::error::Input tag does not match workflow ref"
+            echo "input.tag=${{ inputs.tag }}"
+            echo "ref.tag=${TAG}"
+            exit 1
+          fi
+
+          VERSION_FROM_TAG="${TAG#v}"
+          VERSION_FILE=$(cat VERSION)
+          if [ "$VERSION_FILE" != "$VERSION_FROM_TAG" ]; then
+            echo "::error::VERSION file does not match tag"
+            echo "VERSION=$VERSION_FILE"
+            echo "tag=$TAG"
+            exit 1
+          fi
+
+          PKG_VERSION=$(node -p "require('./bindings/typescript/sysprims/package.json').version")
+          if [ "$PKG_VERSION" != "$VERSION_FROM_TAG" ]; then
+            echo "::error::bindings/typescript/sysprims/package.json version does not match tag"
+            echo "package.json=$PKG_VERSION"
+            echo "tag=$TAG"
+            exit 1
+          fi
+
+          {
+            echo "version=${VERSION_FROM_TAG}"
+            echo "tag=${TAG}"
+            echo "head_sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_ENV"
+          echo "Validated tag/version: ${TAG}"
 
       - name: Find prebuilds run
         id: find-run
@@ -80,17 +100,30 @@ jobs:
           if [ -n "${{ inputs.prebuilds_run_id }}" ]; then
             RUN_ID="${{ inputs.prebuilds_run_id }}"
             echo "Using specified run ID: ${RUN_ID}"
+
+            RUN_SHA=$(gh run view "${RUN_ID}" --json headSha --jq '.headSha')
+            if [ -z "$RUN_SHA" ] || [ "$RUN_SHA" = "null" ]; then
+              echo "::error::Could not determine headSha for run ${RUN_ID}"
+              exit 1
+            fi
+            if [ "$RUN_SHA" != "${{ env.head_sha }}" ]; then
+              echo "::error::Prebuild run ${RUN_ID} was built from ${RUN_SHA}, expected ${{ env.head_sha }}"
+              echo "Use a prebuilds run from the tagged commit, or omit prebuilds_run_id to auto-select."
+              exit 1
+            fi
           else
             echo "Finding latest successful prebuilds run..."
             RUN_ID=$(gh run list \
               --workflow=typescript-napi-prebuilds.yml \
               --status=success \
-              --limit=1 \
-              --json databaseId \
-              --jq '.[0].databaseId')
+              --limit=50 \
+              --json databaseId,headSha \
+              --jq '.[] | select(.headSha == "${{ env.head_sha }}") | .databaseId' \
+              | head -n 1)
 
             if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-              echo "::error::No successful prebuilds run found"
+              echo "::error::No successful prebuilds run found for commit ${{ env.head_sha }}"
+              echo "Run the TypeScript N-API Prebuilds workflow on the tagged commit, or pass prebuilds_run_id."
               exit 1
             fi
             echo "Found run ID: ${RUN_ID}"
@@ -115,6 +148,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          VERSION="${{ env.version }}"
+
           # Expected platform packages
           PLATFORMS=(
             "linux-x64-gnu"
@@ -134,6 +169,17 @@ jobs:
             fi
             if [ ! -f "npm-packages/${plat}/sysprims.${plat}.node" ]; then
               echo "::error::Missing .node file in ${plat}"
+              exit 1
+            fi
+
+            PKG_JSON="npm-packages/${plat}/package.json"
+            if [ ! -f "$PKG_JSON" ]; then
+              echo "::error::Missing package.json in ${plat}"
+              exit 1
+            fi
+            PKG_VERSION=$(node -p "require('./' + process.argv[1]).version" "$PKG_JSON")
+            if [ "$PKG_VERSION" != "$VERSION" ]; then
+              echo "::error::Version mismatch in ${plat} package.json (${PKG_VERSION} != ${VERSION})"
               exit 1
             fi
             echo "  ${plat}: OK"
