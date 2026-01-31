@@ -139,7 +139,21 @@ jobs:
           RUN_ID="${{ steps.find-run.outputs.run_id }}"
 
           echo "Downloading ts-npm-dir artifact from run ${RUN_ID}..."
-          gh run download "${RUN_ID}" --name ts-npm-dir --dir npm-packages
+          # GitHub-hosted runners occasionally hit transient network errors to api.github.com.
+          # Retry here to avoid burning a full workflow rerun on a short blip.
+          for attempt in 1 2 3 4 5; do
+            if gh run download "${RUN_ID}" --name ts-npm-dir --dir npm-packages; then
+              break
+            fi
+            rc=$?
+            echo "::warning::Artifact download failed (attempt ${attempt}/5, rc=${rc}). Retrying..."
+            sleep $((attempt * attempt))
+          done
+
+          if [ ! -d "npm-packages" ] || [ -z "$(ls -A npm-packages 2>/dev/null)" ]; then
+            echo "::error::Failed to download ts-npm-dir artifact from run ${RUN_ID} after retries"
+            exit 1
+          fi
 
           echo "Downloaded packages:"
           ls -la npm-packages/
