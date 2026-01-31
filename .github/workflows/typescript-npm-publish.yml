@@ -36,9 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-npm  # Required for npm OIDC trusted publishing
     steps:
+      # Note: Do NOT use fetch-tags here. When running from a tag ref,
+      # it causes a git fetch conflict. The tag is already checked out.
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
