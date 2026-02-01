@@ -367,6 +367,8 @@ jobs:
 
             - linux-amd64 (glibc): libsysprims_ffi.so
             - linux-arm64 (glibc): libsysprims_ffi.so
+            - linux-amd64-musl: libsysprims_ffi.so
+            - linux-arm64-musl: libsysprims_ffi.so
             - darwin-amd64: libsysprims_ffi.dylib (install_name: @rpath/...)
             - darwin-arm64: libsysprims_ffi.dylib (install_name: @rpath/...)
             - windows-amd64: sysprims_ffi.dll + libsysprims_ffi.dll.a
@@ -382,6 +384,12 @@ jobs:
             ```bash
             cd bindings/go/sysprims
             go test -v -tags=sysprims_shared ./...
+            ```
+
+            Shared mode (musl/Alpine):
+            ```bash
+            cd bindings/go/sysprims
+            go test -v -tags="musl,sysprims_shared" ./...
             ```
 
             ---
