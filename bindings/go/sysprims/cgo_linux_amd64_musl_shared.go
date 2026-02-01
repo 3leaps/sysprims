@@ -3,6 +3,10 @@
 package sysprims
 
 /*
-#error "sysprims_shared is not available on musl yet (see Feature 04: musl shared artifacts)"
+#cgo CFLAGS: -I${SRCDIR}/include
+#cgo LDFLAGS: -L${SRCDIR}/lib-shared/local/linux-amd64-musl -L${SRCDIR}/lib-shared/linux-amd64-musl
+#cgo LDFLAGS: -Wl,-rpath,${SRCDIR}/lib-shared/local/linux-amd64-musl -Wl,-rpath,${SRCDIR}/lib-shared/linux-amd64-musl
+#cgo LDFLAGS: -lsysprims_ffi -lm -lpthread
+#include "sysprims.h"
 */
 import "C"

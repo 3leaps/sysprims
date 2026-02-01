@@ -77,9 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
-          if [ -n "${{ matrix.glibc }}" ]; then
-            mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
-          fi
+          mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
           resolve_target() {
             file="$1"
             candidates=("${{ matrix.target }}")
@@ -100,10 +98,8 @@ jobs:
           TARGET_DIR="$(resolve_target libsysprims_ffi.a)"
           cp "target/${TARGET_DIR}/release/libsysprims_ffi.a" "dist/ffi/${{ matrix.artifact_suffix }}/"
 
-          if [ -n "${{ matrix.glibc }}" ]; then
-            TARGET_DIR_SHARED="$(resolve_target libsysprims_ffi.so)"
-            cp "target/${TARGET_DIR_SHARED}/release/libsysprims_ffi.so" "dist/ffi-shared/${{ matrix.artifact_suffix }}/"
-          fi
+          TARGET_DIR_SHARED="$(resolve_target libsysprims_ffi.so)"
+          cp "target/${TARGET_DIR_SHARED}/release/libsysprims_ffi.so" "dist/ffi-shared/${{ matrix.artifact_suffix }}/"
 
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4
@@ -112,7 +108,6 @@ jobs:
           path: dist/ffi/${{ matrix.artifact_suffix }}
 
       - name: Upload FFI shared artifact
-        if: ${{ matrix.glibc != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: ffi-shared-${{ matrix.artifact_suffix }}
@@ -224,6 +219,45 @@ jobs:
         with:
           name: ffi-shared-windows-amd64
           path: dist/ffi-shared/windows-amd64
+
+  test-musl-shared-go:
+    name: Test Go Shared Mode (linux-musl, alpine)
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.22-alpine
+    needs: [validate, build-linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        shell: sh
+        run: |
+          set -eu
+          apk add --no-cache bash build-base
+
+      - name: Download musl shared artifact (linux-amd64-musl)
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: ffi-shared-linux-amd64-musl
+          path: ffi-shared-linux-amd64-musl
+
+      - name: Place shared lib into Go bindings lib-shared tree
+        shell: sh
+        run: |
+          set -eu
+          mkdir -p bindings/go/sysprims/lib-shared/linux-amd64-musl
+          mkdir -p bindings/go/sysprims/lib-shared/local/linux-amd64-musl
+          cp ffi-shared-linux-amd64-musl/libsysprims_ffi.so bindings/go/sysprims/lib-shared/linux-amd64-musl/
+
+      - name: Run Go tests (musl + shared)
+        working-directory: bindings/go/sysprims
+        shell: sh
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -eu
+          go version
+          go test -v -tags="musl,sysprims_shared" ./...
 
   cbindgen:
     name: Generate C Header
