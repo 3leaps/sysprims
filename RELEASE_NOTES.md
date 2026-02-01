@@ -17,6 +17,7 @@ This release adds process visibility (`sysprims fds`) and batch signal operation
 - **`sysprims fds`**: Inspect open file descriptors (the `lsof` use-case, GPL-free)
 - **Multi-PID Kill**: Batch signal delivery with per-PID result tracking
 - **Complete Workflow**: From diagnosis (`pstat` → `fds`) to remediation (`kill` → `terminate-tree`)
+- **Go Shared Library Mode**: Alpine/musl support via `-tags=sysprims_shared` for consumers linking multiple Rust staticlibs
 
 ### New CLI Commands
 
@@ -168,11 +169,39 @@ const snapshot = listFds(pid, { kind: 'file' });
 const result = killMany([pid1, pid2, pid3], SIGTERM);
 ```
 
-### Coming in v0.1.10
+### Go Shared Library Mode
 
-- **Go Shared Library Mode**: Support for `dlopen`/`dlsym` loading patterns
+For Go applications that link multiple Rust static libraries (which can cause symbol collisions), sysprims now supports shared library mode on all platforms except Windows ARM64:
+
+**Default (static linking):**
+```bash
+go test ./...
+```
+
+**Shared mode (where supported):**
+```bash
+# Standard platforms (darwin, linux-glibc, windows-amd64)
+go test -tags=sysprims_shared ./...
+
+# Alpine/musl (added in this release)
+go test -tags="musl,sysprims_shared" ./...
+```
+
+**Platform Support:**
+
+| Platform | Static | Shared | Build Tags |
+|----------|--------|--------|------------|
+| macOS (arm64) | ✓ | ✓ | `sysprims_shared` |
+| Linux glibc | ✓ | ✓ | `sysprims_shared` |
+| Linux musl | ✓ | ✓ | `musl,sysprims_shared` |
+| Windows | ✓ | ✓ | `sysprims_shared` |
+| Windows ARM64 | ✓ | ✗ | N/A |
+
+Shared libraries use rpath for runtime resolution and are validated in CI via Alpine containers for musl support.
 
 ---
+
+## v0.1.8 - 2026-01-29
 
 ## v0.1.8 - 2026-01-29
 

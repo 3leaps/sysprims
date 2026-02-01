@@ -40,6 +40,13 @@ Process visibility and batch operations release. Adds `sysprims fds` for inspect
   - Exit codes: 0 (all success), 1 (partial), 2 (all failed)
   - Individual failures don't abort the batch
 
+- **Go Bindings: Shared Library Mode** (`bindings/go/sysprims/`)
+  - New build tag: `sysprims_shared` for dlopen/dlsym loading patterns
+  - Supported platforms: macOS, Linux (glibc), Linux musl, Windows (not Windows ARM64)
+  - Musl support: `-tags="musl,sysprims_shared"` for Alpine containers
+  - Rpath-based runtime resolution avoids symbol collisions when linking multiple Rust staticlibs
+  - CI validates musl shared mode via Alpine container job
+
 - **Documentation**
   - New app note: `docs/appnotes/fds-validation/` - Synthetic test cases for FD inspection
   - Updated guide: `docs/guides/runaway-process-diagnosis.md` - Now includes `fds` workflow
@@ -50,6 +57,7 @@ Process visibility and batch operations release. Adds `sysprims fds` for inspect
 - `sysprims fds` fills the diagnostic gap noted in v0.1.8's runaway process guide (previously required external `lsof`)
 - Multi-PID kill enables surgical strikes on multiple runaway processes without loops or scripts
 - Together with `pstat` and `terminate-tree`, completes the "diagnose → remediate" workflow
+- Go shared library mode enables Alpine/musl consumers to avoid symbol collisions when linking sysprims alongside other Rust staticlibs
 
 ## [0.1.8] - 2026-01-29
 
