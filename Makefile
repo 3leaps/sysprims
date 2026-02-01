@@ -425,6 +425,7 @@ ifeq ($(UNAME_S),linux)
 endif
 
 GO_LOCAL_LIB := $(GO_LIB_ROOT)/local/$(GO_OS)-$(GO_ARCH)
+GO_LOCAL_SHARED_LIB := $(GO_BINDINGS_DIR)/lib-shared/local/$(GO_OS)-$(GO_ARCH)
 
 build-local-go: ## Build FFI for local Go development
 	@echo "Building FFI for local Go development ($(GO_OS)-$(GO_ARCH))..."
@@ -440,6 +441,11 @@ build-local-go: ## Build FFI for local Go development
 	@cp $(GO_BINDINGS_DIR)/include/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims-go.h
 	@shared_root="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
 	if [ -f "$$shared_root" ]; then \
+		mkdir -p "$(GO_LOCAL_SHARED_LIB)"; \
+		if [ "$(GO_OS)" = "darwin" ]; then \
+			install_name_tool -id "@rpath/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)" "$$shared_root" || true; \
+		fi; \
+		cp "$$shared_root" "$(GO_LOCAL_SHARED_LIB)/"; \
 		cp "$$shared_root" "$(DIST_LOCAL)/release/sysprims-ffi/"; \
 	fi
 

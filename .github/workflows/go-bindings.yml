@@ -77,6 +77,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
+          if [ -n "${{ matrix.glibc }}" ]; then
+            mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
+          fi
           resolve_target() {
             file="$1"
             candidates=("${{ matrix.target }}")
@@ -97,11 +100,23 @@ jobs:
           TARGET_DIR="$(resolve_target libsysprims_ffi.a)"
           cp "target/${TARGET_DIR}/release/libsysprims_ffi.a" "dist/ffi/${{ matrix.artifact_suffix }}/"
 
+          if [ -n "${{ matrix.glibc }}" ]; then
+            TARGET_DIR_SHARED="$(resolve_target libsysprims_ffi.so)"
+            cp "target/${TARGET_DIR_SHARED}/release/libsysprims_ffi.so" "dist/ffi-shared/${{ matrix.artifact_suffix }}/"
+          fi
+
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffi-${{ matrix.artifact_suffix }}
           path: dist/ffi/${{ matrix.artifact_suffix }}
+
+      - name: Upload FFI shared artifact
+        if: ${{ matrix.glibc != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-shared-${{ matrix.artifact_suffix }}
+          path: dist/ffi-shared/${{ matrix.artifact_suffix }}
 
   build-macos:
     name: Build FFI (macOS)
@@ -122,12 +137,21 @@ jobs:
           cargo build --release --target x86_64-apple-darwin -p sysprims-ffi
           cargo build --release --target aarch64-apple-darwin -p sysprims-ffi
 
+      - name: Fix dylib install_name (@rpath)
+        run: |
+          set -euo pipefail
+          install_name_tool -id "@rpath/libsysprims_ffi.dylib" target/x86_64-apple-darwin/release/libsysprims_ffi.dylib
+          install_name_tool -id "@rpath/libsysprims_ffi.dylib" target/aarch64-apple-darwin/release/libsysprims_ffi.dylib
+
       - name: Package FFI
         run: |
           set -euo pipefail
           mkdir -p dist/ffi/darwin-amd64 dist/ffi/darwin-arm64
+          mkdir -p dist/ffi-shared/darwin-amd64 dist/ffi-shared/darwin-arm64
           cp target/x86_64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-amd64/
           cp target/aarch64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-arm64/
+          cp target/x86_64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-amd64/
+          cp target/aarch64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-arm64/
 
       - name: Upload FFI artifact (darwin-amd64)
         uses: actions/upload-artifact@v4
@@ -135,11 +159,23 @@ jobs:
           name: ffi-darwin-amd64
           path: dist/ffi/darwin-amd64
 
+      - name: Upload FFI shared artifact (darwin-amd64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-shared-darwin-amd64
+          path: dist/ffi-shared/darwin-amd64
+
       - name: Upload FFI artifact (darwin-arm64)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-darwin-arm64
           path: dist/ffi/darwin-arm64
+
+      - name: Upload FFI shared artifact (darwin-arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-shared-darwin-arm64
+          path: dist/ffi-shared/darwin-arm64
 
   build-windows:
     name: Build FFI (Windows GNU)
@@ -173,11 +209,21 @@ jobs:
           mkdir -p dist/ffi/windows-amd64
           cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
 
+          mkdir -p dist/ffi-shared/windows-amd64
+          cp target/x86_64-pc-windows-gnu/release/sysprims_ffi.dll dist/ffi-shared/windows-amd64/
+          cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.dll.a dist/ffi-shared/windows-amd64/
+
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffi-windows-amd64
           path: dist/ffi/windows-amd64
+
+      - name: Upload FFI shared artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-shared-windows-amd64
+          path: dist/ffi-shared/windows-amd64
 
   cbindgen:
     name: Generate C Header
@@ -239,7 +285,11 @@ jobs:
 
           for dir in ffi-libs/ffi-*/; do
             artifact=$(basename "$dir")
+
             if [[ "$artifact" == ffi-shared-* ]]; then
+              platform=${artifact#ffi-shared-}
+              mkdir -p "bindings/go/sysprims/lib-shared/$platform"
+              cp "$dir"/* "bindings/go/sysprims/lib-shared/$platform/"
               continue
             fi
 
@@ -250,6 +300,9 @@ jobs:
 
           echo "Go bindings updated for $VERSION"
           ls -la bindings/go/sysprims/lib/*/
+          if [ -d bindings/go/sysprims/lib-shared ]; then
+            ls -la bindings/go/sysprims/lib-shared/*/ || true
+          fi
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
@@ -275,11 +328,26 @@ jobs:
             - darwin-arm64
             - windows-amd64
 
+            ### Shared Libraries (opt-in)
+            This PR also includes prebuilt shared libraries for the `sysprims_shared` build tag:
+
+            - linux-amd64 (glibc): libsysprims_ffi.so
+            - linux-arm64 (glibc): libsysprims_ffi.so
+            - darwin-amd64: libsysprims_ffi.dylib (install_name: @rpath/...)
+            - darwin-arm64: libsysprims_ffi.dylib (install_name: @rpath/...)
+            - windows-amd64: sysprims_ffi.dll + libsysprims_ffi.dll.a
+
             ### Testing
             After merging:
             ```bash
             cd bindings/go/sysprims
             go test -v ./...
+            ```
+
+            Shared mode (where supported):
+            ```bash
+            cd bindings/go/sysprims
+            go test -v -tags=sysprims_shared ./...
             ```
 
             ---
