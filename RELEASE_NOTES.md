@@ -6,7 +6,7 @@
 
 ---
 
-## v0.1.9 - 2026-02-XX
+## v0.1.9 - 2026-02-01
 
 **Status:** Process Visibility & Batch Operations Release
 
@@ -203,8 +203,6 @@ Shared libraries use rpath for runtime resolution and are validated in CI via Al
 
 ## v0.1.8 - 2026-01-29
 
-## v0.1.8 - 2026-01-29
-
 **Status:** CLI Tree Termination Release
 
 This release adds the `terminate-tree` CLI subcommand for safe, structured termination of existing process trees. Combined with enhanced `pstat` sampling, sysprims now provides a complete workflow for diagnosing and cleaning up runaway processes.
@@ -345,102 +343,3 @@ None. The JavaScript API surface is unchanged.
 
 ---
 
-## v0.1.6 - 2026-01-25
-
-**Status:** Supervisor & Job Manager Primitives Release
-
-This release delivers process management primitives for long-running supervisors and job managers. Teams building systems like gonimbus or rampart lifecycle can now spawn kill-tree-safe jobs, detect PID reuse, and cleanly terminate process trees—without coupling to the timeout API.
-
-### Highlights
-
-- **PID Reuse Guard**: New `start_time_unix_ms` and `exe_path` fields in `ProcessInfo` enable detection of PID reuse
-- **Spawn In Group**: Create processes in a new process group (Unix) or Job Object (Windows)
-- **Wait With Timeout**: Poll for process exit with configurable timeout
-- **Terminate Tree**: Graceful-then-kill tree termination as a standalone primitive
-
-### New Primitives
-
-| Primitive | Rust | FFI | Go | TypeScript |
-|-----------|------|-----|-----|------------|
-| Process identity | `ProcessInfo` | `sysprims_proc_get` | `ProcessGet` | `procGet` |
-| Spawn in group | `spawn_in_group()` | `sysprims_spawn_in_group` | `SpawnInGroup` | `spawnInGroup` |
-| Wait PID with timeout | `wait_pid()` | `sysprims_proc_wait_pid` | `WaitPID` | `waitPID` |
-| Terminate tree | `terminate_tree()` | `sysprims_terminate_tree` | `TerminateTree` | `terminateTree` |
-
-### Process Identity (PID Reuse Guard)
-
-Long-running supervisors can now detect whether a stored PID still refers to the expected process:
-
-```rust
-use sysprims_proc::get_process;
-
-// Store identity at job creation
-let info = get_process(pid)?;
-let identity = (info.pid, info.start_time_unix_ms);
-
-// Later, verify before signaling
-let current = get_process(pid)?;
-if current.start_time_unix_ms != identity.1 {
-    // PID was reused—don't signal!
-}
-```
-
-### Spawn In Group
-
-Create processes in a new process group or Job Object for reliable tree termination:
-
-```rust
-use sysprims_timeout::{spawn_in_group, SpawnInGroupConfig};
-
-let outcome = spawn_in_group(SpawnInGroupConfig {
-    argv: vec!["./worker.sh".into(), "--id".into(), "42".into()],
-    cwd: None,
-    env: None, // inherits parent env by default
-})?;
-
-println!("Spawned PID {}", outcome.pid);
-#[cfg(unix)]
-println!("Process group: {}", outcome.pgid.unwrap());
-```
-
-### Wait PID With Timeout
-
-Wait for a process to exit without blocking forever:
-
-```rust
-use sysprims_proc::wait_pid;
-use std::time::Duration;
-
-let outcome = wait_pid(pid, Duration::from_secs(10))?;
-if outcome.timed_out {
-    println!("Process {} did not exit in 10s", pid);
-} else {
-    println!("Process {} exited with code {:?}", pid, outcome.exit_code);
-}
-```
-
-### Terminate Tree
-
-One-call process tree termination with graceful-then-kill escalation:
-
-```rust
-use sysprims_timeout::{terminate_tree, TerminateTreeConfig};
-
-let outcome = terminate_tree(pid, TerminateTreeConfig {
-    grace_timeout_ms: 5000,
-    kill_timeout_ms: 2000,
-    ..Default::default()
-})?;
-
-if outcome.escalated {
-    println!("Had to escalate to SIGKILL");
-}
-```
-
-### Documentation
-
-- Added Job Object registry documentation for Windows platform behavior
-
----
-
-*For older releases, see [CHANGELOG.md](CHANGELOG.md) or individual release notes in `docs/releases/`.*
