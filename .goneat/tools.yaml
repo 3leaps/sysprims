@@ -29,6 +29,7 @@ scopes:
       # Rust
       - cargo-deny
       - cargo-audit
+      - cargo-edit
       - cargo-nextest
       - cbindgen
       # Languages (bindings)
@@ -60,6 +61,7 @@ scopes:
     tools:
       - cargo-deny
       - cargo-audit
+      - cargo-edit
       - cargo-nextest
       - cbindgen
 
@@ -252,6 +254,21 @@ tools:
         - cargo-install
     install_commands:
       cargo-install: cargo install cargo-audit --locked
+
+  cargo-edit:
+    name: cargo-edit
+    description: Cargo plugin for version management (cargo set-version)
+    kind: cargo
+    detect_command: cargo set-version -V
+    version_args:
+      - -V
+    check_args:
+      - --help
+    installer_priority:
+      all:
+        - cargo-install
+    install_commands:
+      cargo-install: cargo install cargo-edit --locked
 
   cargo-nextest:
     name: cargo-nextest

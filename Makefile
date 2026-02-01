@@ -166,7 +166,7 @@ bootstrap: ## Install required tools (sfetch -> goneat)
 		echo "[!!] goneat installation failed"; exit 1; \
 	fi
 	@echo ""
-	@# Step 3: Install Rust tools via cargo (cargo-deny, cargo-audit)
+	@# Step 3: Install Rust tools via cargo (cargo-deny, cargo-audit, cargo-edit)
 	@echo "[..] Checking Rust dev tools..."
 	@if ! command -v cargo-deny >/dev/null 2>&1; then \
 		echo "[..] Installing cargo-deny..."; \
@@ -179,6 +179,12 @@ bootstrap: ## Install required tools (sfetch -> goneat)
 		cargo install cargo-audit --locked; \
 	else \
 		echo "[ok] cargo-audit installed"; \
+	fi
+	@if ! cargo set-version -V >/dev/null 2>&1; then \
+		echo "[..] Installing cargo-edit..."; \
+		cargo install cargo-edit --locked; \
+	else \
+		echo "[ok] cargo-edit installed"; \
 	fi
 	@echo ""
 	@echo "[ok] Bootstrap complete"
@@ -219,6 +225,12 @@ tools: ## Verify external tools are available
 		echo "[ok] cargo-audit: $$(cargo-audit --version)"; \
 	else \
 		echo "[!!] cargo-audit not found (cargo install cargo-audit)"; \
+	fi
+	@# Check cargo-edit
+	@if cargo set-version -V >/dev/null 2>&1; then \
+		echo "[ok] cargo-edit: $$(cargo set-version -V)"; \
+	else \
+		echo "[!!] cargo-edit not found (cargo install cargo-edit)"; \
 	fi
 	@# Check sfetch
 	@if [ -x "$(BIN_DIR)/sfetch" ]; then \
