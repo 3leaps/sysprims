@@ -33,7 +33,7 @@ The CLI is a thin wrapper. Most functionality is tested in the underlying librar
 | Test Case | Command | Expected |
 |-----------|---------|----------|
 | Default signal | `sysprims kill 1234` | Uses TERM |
-| Custom signal | `sysprims kill -s INT 1234` | Uses INT |
+| Custom signal | `sysprims kill 1234 -s INT` | Uses INT |
 | Duration seconds | `sysprims timeout 5s true` | 5 second timeout |
 | Duration minutes | `sysprims timeout 2m true` | 2 minute timeout |
 | Duration milliseconds | `sysprims timeout 500ms true` | 500ms timeout |
@@ -47,7 +47,7 @@ The CLI is a thin wrapper. Most functionality is tested in the underlying librar
 | Timeout occurs | `sysprims timeout 1s sleep 60` | 124 |
 | Command not found | `sysprims timeout 5s /nonexistent` | 127 |
 | Signal success | `sysprims kill -s 0 $$` | 0 |
-| Signal not found | `sysprims kill 99999999` | 1 |
+| Signal not found | `sysprims kill 2147483647` | 1 |
 | pstat success | `sysprims pstat --pid $$` | 0 |
 
 ### Category C: Output Formats

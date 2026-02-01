@@ -50,7 +50,7 @@ Installed as single binary with subcommand dispatch.
 ### 4.1 sysprims kill
 
 ```
-sysprims kill [-s SIGNAL] <PID>
+sysprims kill [-s SIGNAL] [--json] <PID> [PID...]
 ```
 
 **Options:**
@@ -58,8 +58,15 @@ sysprims kill [-s SIGNAL] <PID>
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-s, --signal <SIG>` | Signal name or number | TERM |
+| `-g, --group` | Treat PID as a PGID and signal the process group (Unix-only; requires exactly one PID) | false |
+| `--json` | Print per-PID batch result as JSON | false |
 
-**Exit codes:** Per sysprims-signal spec (0 success, 1 error).
+**Exit codes:**
+
+| Code | Condition |
+|------|-----------|
+| 0 | All targets signaled successfully |
+| 1 | Any target failed (or argument/parse error) |
 
 ### 4.2 sysprims timeout
 
@@ -94,8 +101,16 @@ sysprims pstat [OPTIONS]
 | `--name <NAME>` | Filter by name | - |
 | `--user <USER>` | Filter by user | - |
 | `--cpu-above <PERCENT>` | Filter by CPU | - |
+| `--cpu-mode <MODE>` | CPU measurement mode (lifetime, monitor) | lifetime |
+| `--sample <DURATION>` | Sample CPU over interval (enables monitor-style CPU) | - |
+| `--top <N>` | Limit output to top N processes | - |
 | `--memory-above <KB>` | Filter by memory | - |
 | `--sort <FIELD>` | Sort by field | pid |
+
+**CPU modes:**
+
+- `lifetime`: lifetime-average estimate (may under-report recent spikes)
+- `monitor`: sampled CPU over a short interval (Activity Monitor / top style). Defaults to 1s if `--sample` is not provided.
 
 *Default output is JSON for automation.
 

@@ -164,7 +164,7 @@ Per ADR-0008:
 ### Synopsis
 
 ```
-sysprims kill [-s SIGNAL] <PID>
+sysprims kill [-s SIGNAL] [--json] <PID> [PID...]
 ```
 
 ### Options
@@ -172,13 +172,15 @@ sysprims kill [-s SIGNAL] <PID>
 | Option | Description |
 |--------|-------------|
 | `-s, --signal <SIG>` | Signal to send (name or number, default: TERM) |
+| `-g, --group` | Treat PID as a PGID and signal the process group (Unix-only; requires exactly one PID) |
+| `--json` | Print per-PID batch result as JSON |
 
 ### Exit Codes
 
 | Code | Condition |
 |------|-----------|
-| 0 | Signal sent successfully |
-| 1 | Error (see stderr) |
+| 0 | All targets signaled successfully |
+| 1 | Any target failed (or argument/parse error) |
 
 ## 6) Platform Signal Mapping
 

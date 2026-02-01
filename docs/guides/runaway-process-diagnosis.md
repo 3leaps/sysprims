@@ -22,17 +22,21 @@ These processes are Electron/Chromium utility processes that host VS Code extens
 
 ## Step 1: Find High-CPU Candidates
 
-Use `sysprims pstat` to identify processes by name and CPU usage:
+Use `sysprims pstat` with `--cpu-mode monitor` to identify processes by instantaneous CPU usage (Activity Monitor / top style):
 
 ```bash
-sysprims pstat --name "VSCodium Helper" --cpu-above 50 --sort cpu --table
+sysprims pstat --cpu-mode monitor --name "VSCodium Helper" --cpu-above 50 --sort cpu --table
 ```
+
+**Note**: In monitor mode, `--cpu-above` filters by sampled CPU which can exceed 100% when processes use multiple cores. The default sample duration is 1 second; use `--sample 250ms` for faster (but noisier) results.
 
 For machine-readable output:
 
 ```bash
-sysprims pstat --name "VSCodium Helper" --json
+sysprims pstat --cpu-mode monitor --name "VSCodium Helper" --json
 ```
+
+The `--cpu-mode monitor` uses the sampled schema (`process-info-sampled.schema.json`) to indicate that CPU values may exceed 100%.
 
 ## Step 2: Identify Process Relationships
 
@@ -97,6 +101,12 @@ This terminates only the specific runaway helper. The parent VSCodium window sta
 
 ```bash
 sysprims kill 88680 -s KILL
+```
+
+If you have multiple runaway helpers, you can terminate them in one call:
+
+```bash
+sysprims kill 88680 88681 88682 -s TERM
 ```
 
 In testing, surgical kills successfully terminated runaway helpers while preserving the parent VSCodium windows - no respawns occurred and no work was lost. This makes Option A the preferred starting point.
@@ -243,13 +253,15 @@ for (const [ppid, children] of byParent) {
 
 | Task | Command |
 |------|---------|
-| Find high-CPU processes | `sysprims pstat --cpu-above 50 --sort cpu` |
+| Find high-CPU processes (instantaneous) | `sysprims pstat --cpu-mode monitor --cpu-above 50 --sort cpu` |
+| Find high-CPU processes (lifetime avg) | `sysprims pstat --cpu-above 50 --sort cpu` |
 | Inspect specific PID | `sysprims pstat --pid <PID> --json` |
 | Kill single process (try first) | `sysprims kill <PID> -s TERM` |
 | Kill single process (if TERM ignored) | `sysprims kill <PID> -s KILL` |
+| Kill multiple processes | `sysprims kill <PID> <PID> ... -s TERM --json` |
 | Terminate process tree (last resort) | `sysprims terminate-tree <PID> --require-exe-path <PATH>` |
 
 ---
 
-**Version**: sysprims v0.1.8+
+**Version**: sysprims v0.1.9+
 **Platforms**: Linux, macOS, Windows
