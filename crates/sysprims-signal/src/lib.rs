@@ -52,6 +52,32 @@ fn validate_pid(pid: u32, param_name: &str) -> SysprimsResult<()> {
     Ok(())
 }
 
+#[derive(Debug)]
+pub struct BatchKillFailure {
+    pub pid: u32,
+    pub error: SysprimsError,
+}
+
+#[derive(Debug, Default)]
+pub struct BatchKillResult {
+    pub succeeded: Vec<u32>,
+    pub failed: Vec<BatchKillFailure>,
+}
+
+fn validate_pid_list(pids: &[u32], param_name: &str) -> SysprimsResult<()> {
+    if pids.is_empty() {
+        return Err(SysprimsError::invalid_argument(format!(
+            "{param_name} must not be empty"
+        )));
+    }
+
+    for &pid in pids {
+        validate_pid(pid, param_name)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -142,6 +168,40 @@ pub fn kill(pid: u32, signal: i32) -> SysprimsResult<()> {
 
     #[cfg(windows)]
     return windows::kill_impl(pid, signal);
+}
+
+/// Send a signal to multiple processes.
+///
+/// PID validation happens for the entire slice before any signals are sent.
+/// Individual send failures are collected and returned in the aggregate result.
+///
+/// # Errors
+///
+/// Returns [`SysprimsError::InvalidArgument`] if:
+/// - `pids` is empty
+/// - any PID in `pids` is invalid (e.g. 0 or > [`MAX_SAFE_PID`])
+pub fn kill_many(pids: &[u32], signal: i32) -> SysprimsResult<BatchKillResult> {
+    validate_pid_list(pids, "pids")?;
+
+    let mut result = BatchKillResult::default();
+    for &pid in pids {
+        match kill(pid, signal) {
+            Ok(()) => result.succeeded.push(pid),
+            Err(error) => result.failed.push(BatchKillFailure { pid, error }),
+        }
+    }
+
+    Ok(result)
+}
+
+/// Convenience wrapper: send `SIGTERM` to multiple processes.
+pub fn terminate_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
+    kill_many(pids, SIGTERM)
+}
+
+/// Convenience wrapper: send `SIGKILL` to multiple processes.
+pub fn force_kill_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
+    kill_many(pids, SIGKILL)
 }
 
 /// Send a signal to a process, resolving the signal number by name.
@@ -290,6 +350,13 @@ mod tests {
     fn max_safe_pid_is_i32_max() {
         assert_eq!(MAX_SAFE_PID, i32::MAX as u32);
         assert_eq!(MAX_SAFE_PID, 2147483647);
+    }
+
+    #[test]
+    fn kill_many_rejects_empty_pid_list() {
+        let err = kill_many(&[], SIGTERM).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
+        assert!(err.to_string().contains("must not be empty"));
     }
 
     // ========================================================================

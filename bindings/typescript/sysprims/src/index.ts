@@ -1,6 +1,8 @@
 import { SysprimsError, SysprimsErrorCode } from "./errors";
 import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
 import type {
+  BatchKillFailure,
+  BatchKillResult,
   PortBindingsSnapshot,
   PortFilter,
   ProcessFilter,
@@ -15,6 +17,8 @@ import type {
 
 export { SysprimsError, SysprimsErrorCode };
 export type {
+  BatchKillFailure,
+  BatchKillResult,
   PortBinding,
   PortBindingsSnapshot,
   PortFilter,
@@ -233,6 +237,101 @@ export function terminate(pid: number): void {
 export function forceKill(pid: number): void {
   const lib = loadSysprims();
   callVoid(() => lib.sysprimsForceKill(pid >>> 0));
+}
+
+const MAX_SAFE_PID = 2147483647;
+
+function validatePidList(pids: number[]): void {
+  if (!Array.isArray(pids) || pids.length === 0) {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pids must not be empty");
+  }
+  for (const pid of pids) {
+    if (!Number.isInteger(pid)) {
+      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pid must be an integer");
+    }
+    if (pid <= 0) {
+      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pid must be > 0");
+    }
+    if (pid > MAX_SAFE_PID) {
+      throw new SysprimsError(
+        SysprimsErrorCode.InvalidArgument,
+        `pid ${pid} exceeds maximum safe value ${MAX_SAFE_PID}`,
+      );
+    }
+  }
+}
+
+function validateSignal(signal: number): void {
+  if (!Number.isInteger(signal)) {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signal must be an integer");
+  }
+}
+
+/**
+ * Send a signal to multiple processes.
+ *
+ * PID validation happens for the entire slice before any signals are sent.
+ * Individual failures are collected and returned.
+ */
+export function killMany(pids: number[], signal: number): BatchKillResult {
+  validatePidList(pids);
+  validateSignal(signal);
+
+  const result: BatchKillResult = { succeeded: [], failed: [] };
+  for (const pid of pids) {
+    try {
+      signalSend(pid, signal);
+      result.succeeded.push(pid >>> 0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      result.failed.push({ pid: pid >>> 0, error: msg } satisfies BatchKillFailure);
+    }
+  }
+  return result;
+}
+
+/**
+ * Terminate multiple processes gracefully.
+ *
+ * On Unix: sends SIGTERM.
+ * On Windows: calls TerminateProcess.
+ */
+export function terminateMany(pids: number[]): BatchKillResult {
+  validatePidList(pids);
+
+  const result: BatchKillResult = { succeeded: [], failed: [] };
+  for (const pid of pids) {
+    try {
+      terminate(pid);
+      result.succeeded.push(pid >>> 0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      result.failed.push({ pid: pid >>> 0, error: msg } satisfies BatchKillFailure);
+    }
+  }
+  return result;
+}
+
+/**
+ * Force kill multiple processes immediately.
+ *
+ * On Unix: sends SIGKILL.
+ * On Windows: calls TerminateProcess.
+ */
+export function forceKillMany(pids: number[]): BatchKillResult {
+  validatePidList(pids);
+
+  const result: BatchKillResult = { succeeded: [], failed: [] };
+  for (const pid of pids) {
+    try {
+      forceKill(pid);
+      result.succeeded.push(pid >>> 0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      result.failed.push({ pid: pid >>> 0, error: msg } satisfies BatchKillFailure);
+    }
+  }
+  return result;
 }
 
 // -----------------------------------------------------------------------------

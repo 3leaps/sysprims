@@ -13,7 +13,7 @@ fn kill_rejects_pid_zero() {
 
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("pid must be > 0"));
+        .stderr(predicate::str::contains("must be > 0"));
 }
 
 #[test]

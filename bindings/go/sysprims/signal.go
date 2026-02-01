@@ -5,6 +5,8 @@ package sysprims
 */
 import "C"
 
+import "math"
+
 const (
 	SIGINT  = 2  // Interrupt
 	SIGKILL = 9  // Kill (cannot be caught)
@@ -32,6 +34,71 @@ func Kill(pid uint32, signal int) error {
 	return callAndCheck(func() C.SysprimsErrorCode {
 		return C.sysprims_signal_send(C.uint32_t(pid), C.int32_t(signal))
 	})
+}
+
+type BatchKillFailure struct {
+	PID   uint32
+	Error *Error
+}
+
+type BatchKillResult struct {
+	Succeeded []uint32
+	Failed    []BatchKillFailure
+}
+
+func validatePidList(pids []uint32) error {
+	if len(pids) == 0 {
+		return &Error{Code: ErrInvalidArgument, Message: "pids must not be empty"}
+	}
+	for _, pid := range pids {
+		if pid == 0 {
+			return &Error{Code: ErrInvalidArgument, Message: "pid must be > 0"}
+		}
+		if pid > uint32(math.MaxInt32) {
+			return &Error{Code: ErrInvalidArgument, Message: "pid exceeds maximum safe value"}
+		}
+	}
+	return nil
+}
+
+// KillMany sends a signal to multiple processes.
+//
+// PID validation happens for the entire slice before any signals are sent.
+// Individual send failures are collected and returned in the aggregate result.
+//
+// This is implemented in Go (not a single FFI call) to avoid introducing new
+// FFI surface area.
+func KillMany(pids []uint32, signal int) (*BatchKillResult, error) {
+	if err := validatePidList(pids); err != nil {
+		return nil, err
+	}
+
+	r := &BatchKillResult{}
+	for _, pid := range pids {
+		err := Kill(pid, signal)
+		if err == nil {
+			r.Succeeded = append(r.Succeeded, pid)
+			continue
+		}
+
+		sErr, ok := err.(*Error)
+		if !ok {
+			return nil, err
+		}
+		r.Failed = append(r.Failed, BatchKillFailure{PID: pid, Error: sErr})
+	}
+
+	return r, nil
+}
+
+// TerminateMany sends SIGTERM to multiple processes.
+func TerminateMany(pids []uint32) (*BatchKillResult, error) {
+	return KillMany(pids, SIGTERM)
+}
+
+// ForceKillMany sends SIGKILL to multiple processes.
+func ForceKillMany(pids []uint32) (*BatchKillResult, error) {
+	return KillMany(pids, SIGKILL)
 }
 
 // Terminate sends SIGTERM to a process.

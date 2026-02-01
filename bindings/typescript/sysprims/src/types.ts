@@ -144,3 +144,15 @@ export interface PortBindingsSnapshot {
   bindings: PortBinding[];
   warnings: string[];
 }
+
+// Signal operations
+
+export interface BatchKillFailure {
+  pid: number;
+  error: string;
+}
+
+export interface BatchKillResult {
+  succeeded: number[];
+  failed: BatchKillFailure[];
+}

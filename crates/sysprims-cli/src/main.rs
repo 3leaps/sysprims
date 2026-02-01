@@ -1,8 +1,11 @@
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use sysprims_core::get_platform;
 use sysprims_core::SysprimsError;
+use sysprims_core::{
+    get_platform,
+    schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
+};
 use sysprims_proc::{cpu_total_time_ns, get_process, snapshot, snapshot_filtered, ProcessFilter};
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
@@ -52,11 +55,11 @@ enum Command {
 
 #[derive(Parser, Debug)]
 struct KillArgs {
-    /// Target process ID (or process group ID with --group).
+    /// Target process ID(s) (or process group ID with --group).
     ///
     /// Not required when using --list.
-    #[arg(required_unless_present = "list")]
-    pid: Option<u32>,
+    #[arg(value_name = "PID", required_unless_present = "list", num_args = 1..)]
+    pids: Vec<u32>,
 
     /// Signal name, pattern, or number (default: TERM).
     #[arg(
@@ -78,8 +81,12 @@ struct KillArgs {
     ///
     /// On Unix, uses killpg() to signal all processes in the group.
     /// On Windows, returns an error (process groups not supported).
-    #[arg(short = 'g', long = "group")]
+    #[arg(short = 'g', long = "group", conflicts_with = "list")]
     group: bool,
+
+    /// Output JSON batch result.
+    #[arg(long, conflicts_with = "list")]
+    json: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -150,9 +157,20 @@ struct PstatArgs {
     #[arg(long, value_name = "USER")]
     user: Option<String>,
 
-    /// Filter by minimum CPU usage (0-100).
+    /// Filter by minimum CPU usage.
+    ///
+    /// Notes:
+    /// - In `lifetime` mode, values are best-effort and generally fall in 0-100.
+    /// - In `monitor`/sampling modes, values may exceed 100 when a process uses multiple cores.
     #[arg(long, value_name = "PERCENT")]
     cpu_above: Option<f64>,
+
+    /// CPU measurement mode.
+    ///
+    /// - lifetime: lifetime-average estimate (may under-report recent spikes)
+    /// - monitor: sampled CPU over a short interval (Activity Monitor / top style)
+    #[arg(long, value_enum, value_name = "MODE", default_value = "lifetime")]
+    cpu_mode: CpuMode,
 
     /// Sample CPU usage over an interval (e.g., "250ms").
     ///
@@ -172,6 +190,14 @@ struct PstatArgs {
     /// Sort by field (pid, name, cpu, memory).
     #[arg(long, value_name = "FIELD", default_value = "pid")]
     sort: String,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+enum CpuMode {
+    /// Lifetime-average CPU usage (best-effort), normalized 0-100.
+    Lifetime,
+    /// Sampled CPU usage over an interval (Activity Monitor / top style).
+    Monitor,
 }
 
 #[derive(Parser, Debug)]
@@ -262,10 +288,7 @@ fn main() {
 
 fn run_command(command: Command) -> Result<i32, SysprimsError> {
     match command {
-        Command::Kill(args) => {
-            run_kill(args)?;
-            Ok(0)
-        }
+        Command::Kill(args) => run_kill(args),
         Command::Timeout(args) => run_timeout(args),
         Command::Pstat(args) => run_pstat(args),
         Command::TerminateTree(args) => {
@@ -307,16 +330,31 @@ fn parse_signal_arg(signal_arg: &str) -> Result<SignalTarget, SysprimsError> {
     Ok(SignalTarget::Name(trimmed.to_string()))
 }
 
-fn run_kill(args: KillArgs) -> Result<(), SysprimsError> {
+#[derive(serde::Serialize)]
+struct BatchKillFailureJson {
+    pid: u32,
+    error: String,
+}
+
+#[derive(serde::Serialize)]
+struct BatchKillResultJson {
+    schema_id: &'static str,
+    signal_sent: i32,
+    succeeded: Vec<u32>,
+    failed: Vec<BatchKillFailureJson>,
+}
+
+fn run_kill(args: KillArgs) -> Result<i32, SysprimsError> {
     // Handle --list flag
     if let Some(list_arg) = args.list {
         return run_kill_list(list_arg);
     }
 
-    // PID is required when not listing
-    let pid = args
-        .pid
-        .ok_or_else(|| SysprimsError::invalid_argument("PID is required when not using --list"))?;
+    if args.group && args.pids.len() != 1 {
+        return Err(SysprimsError::invalid_argument(
+            "--group requires exactly one PID",
+        ));
+    }
 
     // Parse signal
     let signal = parse_signal_arg(&args.signal)?;
@@ -330,16 +368,83 @@ fn run_kill(args: KillArgs) -> Result<(), SysprimsError> {
             .ok_or_else(|| SysprimsError::invalid_argument(format!("unknown signal '{}'", name)))?,
     };
 
+    let schema_id = BATCH_KILL_RESULT_V1;
+
     // Send signal to process or process group
     if args.group {
-        sysprims_signal::killpg(pid, signal_num)
-    } else {
-        sysprims_signal::kill(pid, signal_num)
+        let pgid = args.pids[0];
+        let mut succeeded = Vec::new();
+        let mut failed = Vec::new();
+
+        match sysprims_signal::killpg(pgid, signal_num) {
+            Ok(()) => succeeded.push(pgid),
+            Err(e) => failed.push(BatchKillFailureJson {
+                pid: pgid,
+                error: e.to_string(),
+            }),
+        }
+
+        if args.json {
+            let out = BatchKillResultJson {
+                schema_id,
+                signal_sent: signal_num,
+                succeeded,
+                failed,
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&out).expect("serialize json")
+            );
+            return Ok(if out.failed.is_empty() { 0 } else { 1 });
+        }
+
+        if !failed.is_empty() {
+            for f in failed {
+                eprintln!("PID {}: {}", f.pid, f.error);
+            }
+            return Ok(1);
+        }
+
+        return Ok(0);
     }
+
+    // Non-group: multi-PID supported.
+    let batch = sysprims_signal::kill_many(&args.pids, signal_num)?;
+    let failed: Vec<BatchKillFailureJson> = batch
+        .failed
+        .into_iter()
+        .map(|f| BatchKillFailureJson {
+            pid: f.pid,
+            error: f.error.to_string(),
+        })
+        .collect();
+
+    if args.json {
+        let out = BatchKillResultJson {
+            schema_id,
+            signal_sent: signal_num,
+            succeeded: batch.succeeded,
+            failed,
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).expect("serialize json")
+        );
+        return Ok(if out.failed.is_empty() { 0 } else { 1 });
+    }
+
+    if !failed.is_empty() {
+        for f in failed {
+            eprintln!("PID {}: {}", f.pid, f.error);
+        }
+        return Ok(1);
+    }
+
+    Ok(0)
 }
 
 /// Handle `kill --list` command.
-fn run_kill_list(signal_name: Option<String>) -> Result<(), SysprimsError> {
+fn run_kill_list(signal_name: Option<String>) -> Result<i32, SysprimsError> {
     if let Some(name) = signal_name {
         // Print signal number for a specific signal name
         let num = sysprims_signal::get_signal_number(&name)
@@ -353,7 +458,7 @@ fn run_kill_list(signal_name: Option<String>) -> Result<(), SysprimsError> {
         // Print all signals in table format
         print_signal_table();
     }
-    Ok(())
+    Ok(0)
 }
 
 /// Print all signals in table format (similar to `kill -l`).
@@ -641,11 +746,24 @@ fn resolve_signal(s: &str) -> Result<i32, SysprimsError> {
 // ============================================================================
 
 fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
+    let monitor_mode = args.cpu_mode == CpuMode::Monitor;
+    let sampling = args.sample.is_some() || monitor_mode;
+    let sample_duration = if sampling {
+        if let Some(sample_s) = &args.sample {
+            parse_duration(sample_s)?
+        } else {
+            std::time::Duration::from_secs(1)
+        }
+    } else {
+        std::time::Duration::from_secs(0)
+    };
+
     // If specific PID requested, just get that one
     if let Some(pid) = args.pid {
         let mut proc_info = get_process(pid)?;
-        if let Some(sample_s) = args.sample {
-            let sample = parse_duration(&sample_s)?;
+
+        if sampling {
+            let sample = sample_duration;
             let cpu0 = cpu_total_time_ns(pid)?;
             std::thread::sleep(sample);
             let cpu1 = cpu_total_time_ns(pid)?;
@@ -668,7 +786,6 @@ fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
     // Build filter from args.
     // When sampling CPU, apply cpu_above after sampling so we don't filter out
     // processes due to lifetime-average CPU values.
-    let sampling = args.sample.is_some();
     let base_filter = ProcessFilter {
         name_contains: args.name.clone(),
         user_equals: args.user.clone(),
@@ -687,8 +804,8 @@ fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
         snapshot()?
     };
 
-    if let Some(sample_s) = args.sample {
-        let sample = parse_duration(&sample_s)?;
+    if sampling {
+        let sample = sample_duration;
         if sample.is_zero() {
             return Err(SysprimsError::invalid_argument(
                 "sample duration must be > 0",
@@ -739,6 +856,9 @@ fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
         if let Some(threshold) = args.cpu_above {
             snap1.processes.retain(|p| p.cpu_percent >= threshold);
         }
+
+        // Sampling changes CPU semantics (can exceed 100 for multi-core).
+        snap1.schema_id = PROCESS_INFO_SAMPLED_V1;
 
         snap = snap1;
     }
@@ -844,7 +964,7 @@ mod tests {
         let Command::Kill(args) = cli.command.unwrap() else {
             panic!("expected kill command");
         };
-        assert_eq!(args.pid, None);
+        assert!(args.pids.is_empty());
         assert!(matches!(args.list, Some(None)));
     }
 
@@ -854,7 +974,7 @@ mod tests {
         let Command::Kill(args) = cli.command.unwrap() else {
             panic!("expected kill command");
         };
-        assert_eq!(args.pid, None);
+        assert!(args.pids.is_empty());
         assert!(matches!(args.list, Some(Some(ref s)) if s == "TERM"));
     }
 
@@ -864,7 +984,7 @@ mod tests {
         let Command::Kill(args) = cli.command.unwrap() else {
             panic!("expected kill command");
         };
-        assert_eq!(args.pid, Some(1234));
+        assert_eq!(args.pids, vec![1234]);
         assert!(args.group);
         assert_eq!(args.list, None);
     }

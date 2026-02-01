@@ -16,7 +16,7 @@
 
 // Used by both Unix and Windows tests
 use std::process::{Command, Stdio};
-use sysprims_signal::{kill, SIGTERM};
+use sysprims_signal::{kill, kill_many, MAX_SAFE_PID, SIGTERM};
 
 // Unix-only imports
 #[cfg(unix)]
@@ -55,6 +55,154 @@ fn is_running(child: &mut Child) -> bool {
 // ============================================================================
 // kill() Integration Tests
 // ============================================================================
+
+#[test]
+#[cfg(unix)]
+fn kill_many_terminates_multiple_children_with_sigterm() {
+    // SAFETY: We spawn these processes ourselves and control their PIDs.
+    let mut a = spawn_sleep(60);
+    let mut b = spawn_sleep(60);
+
+    let pids = [a.id(), b.id()];
+    let r = kill_many(&pids, SIGTERM).expect("kill_many() should succeed");
+
+    assert_eq!(r.succeeded, pids);
+    assert!(r.failed.is_empty());
+
+    let status_a = a.wait().expect("Failed to wait for child a");
+    let status_b = b.wait().expect("Failed to wait for child b");
+
+    assert_eq!(status_a.signal(), Some(SIGTERM));
+    assert_eq!(status_b.signal(), Some(SIGTERM));
+}
+
+#[test]
+#[cfg(windows)]
+fn kill_many_terminates_multiple_children_on_windows() {
+    // SAFETY: We spawn these processes ourselves and control their PIDs.
+    let mut a = Command::new("cmd")
+        .args(["/C", "ping", "-n", "60", "127.0.0.1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("Failed to spawn ping process a");
+
+    let mut b = Command::new("cmd")
+        .args(["/C", "ping", "-n", "60", "127.0.0.1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("Failed to spawn ping process b");
+
+    let pids = [a.id(), b.id()];
+    let r = kill_many(&pids, SIGTERM).expect("kill_many() should succeed on Windows");
+    assert_eq!(r.succeeded, pids);
+    assert!(r.failed.is_empty());
+
+    let status_a = a.wait().expect("Failed to wait for child a");
+    let status_b = b.wait().expect("Failed to wait for child b");
+    assert!(!status_a.success());
+    assert!(!status_b.success());
+}
+
+#[test]
+#[cfg(unix)]
+fn kill_many_validates_all_pids_before_sending_any_signal() {
+    // SAFETY: We spawn this process ourselves and control its PID.
+    let mut child = spawn_sleep(60);
+    let pid = child.id();
+
+    // Include an invalid PID to force fast-fail.
+    let err = kill_many(&[pid, 0], SIGTERM).unwrap_err();
+    assert!(matches!(
+        err,
+        sysprims_core::SysprimsError::InvalidArgument { .. }
+    ));
+
+    // Child should still be running since no signals should have been sent.
+    assert!(is_running(&mut child));
+
+    // Cleanup.
+    kill(pid, SIGTERM).expect("cleanup kill should succeed");
+    let _ = child.wait();
+}
+
+#[test]
+#[cfg(windows)]
+fn kill_many_validates_all_pids_before_sending_any_signal() {
+    // SAFETY: We spawn this process ourselves and control its PID.
+    let mut child = Command::new("cmd")
+        .args(["/C", "ping", "-n", "60", "127.0.0.1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("Failed to spawn ping process");
+
+    let pid = child.id();
+
+    // Include an invalid PID to force fast-fail.
+    let err = kill_many(&[pid, 0], SIGTERM).unwrap_err();
+    assert!(matches!(
+        err,
+        sysprims_core::SysprimsError::InvalidArgument { .. }
+    ));
+
+    // Child should still be running since no signals should have been sent.
+    assert!(matches!(child.try_wait(), Ok(None)));
+
+    // Cleanup.
+    kill(pid, SIGTERM).expect("cleanup kill should succeed");
+    let _ = child.wait();
+}
+
+#[test]
+fn kill_many_collects_per_pid_failures() {
+    // SAFETY: We only attempt to signal a process we spawned, plus MAX_SAFE_PID
+    // which should not exist on any normal system.
+
+    #[cfg(unix)]
+    {
+        let mut child = spawn_sleep(60);
+        let pid = child.id();
+
+        let r = kill_many(&[pid, MAX_SAFE_PID], SIGTERM).expect("kill_many should return Ok");
+        assert_eq!(r.succeeded, vec![pid]);
+        assert_eq!(r.failed.len(), 1);
+        assert_eq!(r.failed[0].pid, MAX_SAFE_PID);
+        assert!(!matches!(
+            r.failed[0].error,
+            sysprims_core::SysprimsError::InvalidArgument { .. }
+        ));
+
+        let _ = child.wait();
+    }
+
+    #[cfg(windows)]
+    {
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping", "-n", "60", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn ping process");
+
+        let pid = child.id();
+        let r = kill_many(&[pid, MAX_SAFE_PID], SIGTERM).expect("kill_many should return Ok");
+        assert_eq!(r.succeeded, vec![pid]);
+        assert_eq!(r.failed.len(), 1);
+        assert_eq!(r.failed[0].pid, MAX_SAFE_PID);
+        assert!(!matches!(
+            r.failed[0].error,
+            sysprims_core::SysprimsError::InvalidArgument { .. }
+        ));
+
+        let _ = child.wait();
+    }
+}
 
 #[test]
 #[cfg(unix)]

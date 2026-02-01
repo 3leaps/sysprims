@@ -67,6 +67,15 @@ pub const TIMEOUT_RESULT_V1: &str =
 pub const PROCESS_INFO_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info.schema.json";
 
+/// Schema ID for process snapshot output with sampled (monitor-style) CPU (v1.0.0).
+///
+/// This schema matches the shape of `process-info.schema.json` but relaxes
+/// `cpu_percent` to allow values > 100 when a process uses multiple cores.
+///
+/// Schema location: `schemas/process/v1.0.0/process-info-sampled.schema.json`
+pub const PROCESS_INFO_SAMPLED_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info-sampled.schema.json";
+
 /// Schema ID for process filter input (v1.0.0).
 ///
 /// This schema defines the structure of filter JSON accepted by
@@ -100,6 +109,14 @@ pub const PORT_FILTER_V1: &str =
 /// Schema location: `schemas/process/v1.0.0/wait-pid-result.schema.json`
 pub const WAIT_PID_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/wait-pid-result.schema.json";
+
+/// Schema ID for batch kill result JSON output (v1.0.0).
+///
+/// This schema defines the structure of `sysprims kill --json` output.
+///
+/// Schema location: `schemas/signal/v1.0.0/batch-kill-result.schema.json`
+pub const BATCH_KILL_RESULT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/signal/v1.0.0/batch-kill-result.schema.json";
 
 /// Schema ID for terminate-tree config JSON input (v1.0.0).
 ///
@@ -144,10 +161,12 @@ mod tests {
         // All schema IDs should be valid HTTPS URLs
         assert!(TIMEOUT_RESULT_V1.starts_with("https://"));
         assert!(PROCESS_INFO_V1.starts_with("https://"));
+        assert!(PROCESS_INFO_SAMPLED_V1.starts_with("https://"));
         assert!(PROC_FILTER_V1.starts_with("https://"));
         assert!(PORT_BINDINGS_V1.starts_with("https://"));
         assert!(PORT_FILTER_V1.starts_with("https://"));
         assert!(WAIT_PID_RESULT_V1.starts_with("https://"));
+        assert!(BATCH_KILL_RESULT_V1.starts_with("https://"));
         assert!(TERMINATE_TREE_CONFIG_V1.starts_with("https://"));
         assert!(TERMINATE_TREE_RESULT_V1.starts_with("https://"));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with("https://"));
@@ -168,6 +187,10 @@ mod tests {
             "Expected 3leaps.dev host"
         );
         assert!(
+            PROCESS_INFO_SAMPLED_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
             PROC_FILTER_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
@@ -181,6 +204,10 @@ mod tests {
         );
         assert!(
             WAIT_PID_RESULT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            BATCH_KILL_RESULT_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
         assert!(

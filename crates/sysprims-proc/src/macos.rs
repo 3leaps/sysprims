@@ -5,6 +5,7 @@
 //! - `proc_pidinfo()` with `PROC_PIDTBSDINFO` - process info (name, ppid, state, user)
 //! - `proc_pidinfo()` with `PROC_PIDTASKINFO` - resource info (CPU, memory)
 //! - `proc_name()` - get process name
+//! - `mach_timebase_info()` - convert Mach time units to nanoseconds
 
 use crate::{
     aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
@@ -14,6 +15,7 @@ use libc::{c_int, c_void, pid_t, uid_t};
 use std::ffi::CStr;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -239,6 +241,42 @@ extern "C" {
     fn proc_name(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
 
     fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
+
+    fn mach_timebase_info(info: *mut MachTimebaseInfo) -> c_int;
+}
+
+/// Mach timebase info for converting Mach time units to nanoseconds.
+/// On Apple Silicon, numer/denom is typically 125/3 (~41.67x).
+/// On Intel Macs, it's often 1/1.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct MachTimebaseInfo {
+    numer: u32,
+    denom: u32,
+}
+
+/// Cached Mach timebase conversion factor (numer/denom).
+/// Computed once on first use.
+static MACH_TIMEBASE_FACTOR: OnceLock<f64> = OnceLock::new();
+
+/// Get the Mach timebase conversion factor for converting Mach time to nanoseconds.
+fn mach_to_ns_factor() -> f64 {
+    *MACH_TIMEBASE_FACTOR.get_or_init(|| {
+        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+        let ret = unsafe { mach_timebase_info(&mut info) };
+        if ret != 0 || info.denom == 0 {
+            // Fallback to 1:1 if we can't get timebase info
+            1.0
+        } else {
+            info.numer as f64 / info.denom as f64
+        }
+    })
+}
+
+/// Convert Mach time units to nanoseconds.
+#[inline]
+fn mach_time_to_ns(mach_time: u64) -> u64 {
+    (mach_time as f64 * mach_to_ns_factor()) as u64
 }
 
 // ============================================================================
@@ -745,8 +783,9 @@ fn calculate_cpu_percent(task_info: &ProcTaskInfo, elapsed_secs: u64) -> f64 {
         return 0.0;
     }
 
-    // Total CPU time in nanoseconds
-    let total_cpu_ns = task_info.pti_total_user + task_info.pti_total_system;
+    // Total CPU time in Mach time units - convert to nanoseconds
+    let total_mach_time = task_info.pti_total_user + task_info.pti_total_system;
+    let total_cpu_ns = mach_time_to_ns(total_mach_time);
 
     // Convert to seconds
     let cpu_secs = total_cpu_ns as f64 / 1_000_000_000.0;
@@ -761,9 +800,11 @@ fn calculate_cpu_percent(task_info: &ProcTaskInfo, elapsed_secs: u64) -> f64 {
 
 pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
     let task_info = get_task_info(pid)?;
-    Ok(task_info
+    // Convert Mach time units to nanoseconds
+    let total_mach_time = task_info
         .pti_total_user
-        .saturating_add(task_info.pti_total_system))
+        .saturating_add(task_info.pti_total_system);
+    Ok(mach_time_to_ns(total_mach_time))
 }
 
 #[cfg(test)]
