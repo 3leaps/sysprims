@@ -9,7 +9,8 @@
 
 use crate::{
     aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
-    PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+    FdInfo, FdKind, PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState,
+    Protocol,
 };
 use libc::{c_int, c_void, pid_t, uid_t};
 use std::ffi::CStr;
@@ -33,8 +34,11 @@ const MAXCOMLEN: usize = 16;
 const MAXPATHLEN: usize = 1024;
 
 const PROC_PIDLISTFDS: c_int = 1;
+const PROC_PIDFDVNODEPATHINFO: c_int = 2;
 const PROC_PIDFDSOCKETINFO: c_int = 3;
+const PROX_FDTYPE_VNODE: u32 = 1;
 const PROX_FDTYPE_SOCKET: u32 = 2;
+const PROX_FDTYPE_PIPE: u32 = 6;
 
 const SOCKINFO_IN: i32 = 1;
 const SOCKINFO_TCP: i32 = 2;
@@ -455,6 +459,134 @@ fn list_socket_fds(pid: pid_t) -> SysprimsResult<Vec<i32>> {
 
         buffer_size = (buffer_size * 2).min(max_buffer_size);
     }
+}
+
+fn list_all_fds(pid: pid_t) -> SysprimsResult<Vec<ProcFdInfo>> {
+    // libproc does not provide a reliable "size query" mode for PROC_PIDLISTFDS.
+    // Instead, allocate a buffer and retry with growth if the result indicates truncation.
+    let mut buffer_size: usize = 4096;
+    let max_buffer_size: usize = 1024 * 1024;
+
+    loop {
+        let count = buffer_size / mem::size_of::<ProcFdInfo>();
+        let mut fdinfo = vec![ProcFdInfo::default(); count];
+
+        let actual = unsafe {
+            proc_pidinfo(
+                pid,
+                PROC_PIDLISTFDS,
+                0,
+                fdinfo.as_mut_ptr() as *mut c_void,
+                buffer_size as c_int,
+            )
+        };
+
+        if actual <= 0 {
+            let errno = unsafe { *libc::__error() };
+            if errno == libc::EPERM || errno == libc::EACCES {
+                return Err(SysprimsError::permission_denied(pid as u32, "list fds"));
+            }
+            if errno == libc::ESRCH {
+                return Err(SysprimsError::not_found(pid as u32));
+            }
+            return Err(SysprimsError::internal("proc_pidinfo list fds failed"));
+        }
+
+        // proc_pidinfo returns the number of bytes written.
+        let actual_bytes = actual as usize;
+        if actual_bytes < buffer_size || buffer_size >= max_buffer_size {
+            let actual_count = actual_bytes / mem::size_of::<ProcFdInfo>();
+            fdinfo.truncate(actual_count);
+            return Ok(fdinfo);
+        }
+
+        buffer_size = (buffer_size * 2).min(max_buffer_size);
+    }
+}
+
+fn read_vnode_fd_path(pid: pid_t, fd: i32) -> Option<String> {
+    // Use PROC_PIDFDVNODEPATHINFO and extract the trailing MAXPATHLEN bytes.
+    // proc_pidfdinfo returns the number of bytes written; the path is at the
+    // end of the vnode_fdinfowithpath structure.
+    let mut buffer_size: usize = 2048;
+    let max_buffer_size: usize = 64 * 1024;
+
+    loop {
+        let mut buf = vec![0u8; buffer_size];
+        let result = unsafe {
+            proc_pidfdinfo(
+                pid,
+                fd,
+                PROC_PIDFDVNODEPATHINFO,
+                buf.as_mut_ptr() as *mut c_void,
+                buffer_size as c_int,
+            )
+        };
+
+        if result <= 0 {
+            return None;
+        }
+
+        let written = result as usize;
+        if written < buffer_size || buffer_size >= max_buffer_size {
+            if written < MAXPATHLEN {
+                return None;
+            }
+
+            let tail = &buf[written.saturating_sub(MAXPATHLEN)..written];
+            let end = tail.iter().position(|&b| b == 0).unwrap_or(tail.len());
+            return Some(String::from_utf8_lossy(&tail[..end]).into_owned());
+        }
+
+        buffer_size = (buffer_size * 2).min(max_buffer_size);
+    }
+}
+
+pub fn list_fds_impl(pid: u32) -> SysprimsResult<(Vec<FdInfo>, Vec<String>)> {
+    let pid = pid as pid_t;
+    let infos = list_all_fds(pid)?;
+
+    let mut fds = Vec::new();
+    let mut path_missing = 0usize;
+
+    for info in infos {
+        if info.proc_fd < 0 {
+            continue;
+        }
+
+        let fd_num = info.proc_fd;
+        let fd = fd_num as u32;
+        let kind = match info.proc_fdtype {
+            PROX_FDTYPE_VNODE => FdKind::File,
+            PROX_FDTYPE_SOCKET => FdKind::Socket,
+            PROX_FDTYPE_PIPE => FdKind::Pipe,
+            _ => FdKind::Unknown,
+        };
+
+        let path = if kind == FdKind::File {
+            let p = read_vnode_fd_path(pid, fd_num);
+            if p.is_none() {
+                path_missing += 1;
+            }
+            p
+        } else {
+            None
+        };
+
+        fds.push(FdInfo { fd, kind, path });
+    }
+
+    fds.sort_by_key(|f| f.fd);
+
+    let mut warnings = Vec::new();
+    if path_missing > 0 {
+        warnings.push(format!(
+            "Failed to resolve paths for {} file fds",
+            path_missing
+        ));
+    }
+
+    Ok((fds, warnings))
 }
 
 fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {

@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::time::Duration;
 use sysprims_core::schema::{
-    PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
+    FD_SNAPSHOT_V1, PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
 };
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
@@ -185,6 +185,67 @@ pub struct PortFilter {
     pub local_port: Option<u16>,
 }
 
+/// File descriptor kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FdKind {
+    File,
+    Socket,
+    Pipe,
+    Unknown,
+}
+
+/// Filter for fd queries.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FdFilter {
+    /// Filter by fd kind.
+    pub kind: Option<FdKind>,
+}
+
+impl FdFilter {
+    pub fn validate(&self) -> SysprimsResult<()> {
+        // No numeric ranges for now.
+        Ok(())
+    }
+}
+
+/// Information about a single file descriptor.
+#[derive(Debug, Clone, Serialize)]
+pub struct FdInfo {
+    /// File descriptor number.
+    pub fd: u32,
+
+    /// Best-effort fd classification.
+    pub kind: FdKind,
+
+    /// Best-effort resolved path/target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Snapshot of open file descriptors for a process.
+#[derive(Debug, Clone, Serialize)]
+pub struct FdSnapshot {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+
+    /// Timestamp of snapshot (ISO 8601).
+    pub timestamp: String,
+
+    /// Current platform (e.g., "linux", "macos", "windows").
+    pub platform: &'static str,
+
+    /// Target PID.
+    pub pid: u32,
+
+    /// List of open file descriptors.
+    pub fds: Vec<FdInfo>,
+
+    /// Warnings about partial visibility.
+    pub warnings: Vec<String>,
+}
+
 /// Information about a single process.
 ///
 /// All fields are populated on a best-effort basis. Fields that cannot be read
@@ -318,6 +379,18 @@ impl PortFilter {
     }
 }
 
+impl FdInfo {
+    fn matches(&self, filter: &FdFilter) -> bool {
+        if let Some(kind) = filter.kind {
+            if self.kind != kind {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
 impl PortBinding {
     fn matches(&self, filter: &PortFilter) -> bool {
         if let Some(protocol) = filter.protocol {
@@ -444,6 +517,41 @@ pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindin
     Ok(snapshot)
 }
 
+/// List open file descriptors for a PID.
+///
+/// Best-effort cross-platform behavior:
+/// - Linux: enumerates `/proc/<pid>/fd` symlinks.
+/// - macOS: enumerates via libproc (`proc_pidinfo(PROC_PIDLISTFDS)`) and attempts path recovery.
+/// - Windows: returns NotSupported.
+pub fn list_fds(pid: u32, filter: Option<&FdFilter>) -> SysprimsResult<FdSnapshot> {
+    // Safety: avoid negative pid_t casting semantics on Unix.
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
+
+    let filter = filter.cloned().unwrap_or_default();
+    filter.validate()?;
+
+    let (mut fds, mut warnings) = platform::list_fds_impl(pid)?;
+    if filter.kind.is_some() {
+        fds.retain(|fd| fd.matches(&filter));
+    }
+
+    // Best-effort: provide a helpful warning if nothing visible.
+    if fds.is_empty() {
+        warnings.push("No file descriptors visible".to_string());
+    }
+
+    Ok(make_fd_snapshot(pid, fds, warnings))
+}
+
 /// Resolve a process by port and protocol.
 pub fn process_by_port(port: u16, protocol: Protocol) -> SysprimsResult<ProcessInfo> {
     if port == 0 {
@@ -565,6 +673,17 @@ fn make_port_snapshot(bindings: Vec<PortBinding>, warnings: Vec<String>) -> Port
         timestamp: current_timestamp(),
         platform: get_platform(),
         bindings,
+        warnings,
+    }
+}
+
+fn make_fd_snapshot(pid: u32, fds: Vec<FdInfo>, warnings: Vec<String>) -> FdSnapshot {
+    FdSnapshot {
+        schema_id: FD_SNAPSHOT_V1,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+        pid,
+        fds,
         warnings,
     }
 }

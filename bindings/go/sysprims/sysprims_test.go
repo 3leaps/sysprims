@@ -145,6 +145,37 @@ func TestProcessGetSelf(t *testing.T) {
 	t.Logf("Process: %s (PID %d, PPID %d)", info.Name, info.PID, info.PPID)
 }
 
+func TestListFdsSelf(t *testing.T) {
+	pid := uint32(os.Getpid())
+	snap, err := sysprims.ListFds(pid, nil)
+
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Fatalf("expected ListFds to fail on windows")
+		}
+		if sErr, ok := err.(*sysprims.Error); ok {
+			if sErr.Code != sysprims.ErrNotSupported {
+				t.Fatalf("expected ErrNotSupported, got %d (%s)", sErr.Code, sErr.Code)
+			}
+		}
+		return
+	}
+
+	if err != nil {
+		t.Fatalf("ListFds(%d) failed: %v", pid, err)
+	}
+
+	if snap.SchemaID == "" {
+		t.Fatalf("ListFds returned empty schema_id")
+	}
+	if snap.Pid != pid {
+		t.Fatalf("ListFds returned wrong pid: got %d expected %d", snap.Pid, pid)
+	}
+	if len(snap.Fds) == 0 {
+		t.Fatalf("ListFds returned empty fd list; warnings=%v", snap.Warnings)
+	}
+}
+
 // TestProcessGetInvalidPID verifies that ProcessGet rejects PID 0.
 func TestProcessGetInvalidPID(t *testing.T) {
 	_, err := sysprims.ProcessGet(0)

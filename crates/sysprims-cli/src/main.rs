@@ -6,7 +6,10 @@ use sysprims_core::{
     get_platform,
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
-use sysprims_proc::{cpu_total_time_ns, get_process, snapshot, snapshot_filtered, ProcessFilter};
+use sysprims_proc::{
+    cpu_total_time_ns, get_process, list_fds, snapshot, snapshot_filtered, FdFilter, FdKind,
+    ProcessFilter,
+};
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
 use tracing::info;
@@ -51,6 +54,9 @@ enum Command {
     /// This is best-effort cross-platform termination of a PID and its descendants.
     /// On Unix this uses process groups when possible; on Windows it uses Job Objects.
     TerminateTree(TerminateTreeArgs),
+
+    /// List open file descriptors for a process.
+    Fds(FdsArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -239,6 +245,44 @@ struct TerminateTreeArgs {
     json: bool,
 }
 
+#[derive(Parser, Debug)]
+struct FdsArgs {
+    /// Target process ID.
+    #[arg(long, value_name = "PID")]
+    pid: u32,
+
+    /// Output as JSON.
+    #[arg(long)]
+    json: bool,
+
+    /// Output as human-readable table.
+    #[arg(long, conflicts_with = "json")]
+    table: bool,
+
+    /// Filter by fd kind.
+    #[arg(long, value_enum, value_name = "KIND")]
+    kind: Option<FdKindArg>,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+enum FdKindArg {
+    File,
+    Socket,
+    Pipe,
+    Unknown,
+}
+
+impl From<FdKindArg> for FdKind {
+    fn from(value: FdKindArg) -> Self {
+        match value {
+            FdKindArg::File => FdKind::File,
+            FdKindArg::Socket => FdKind::Socket,
+            FdKindArg::Pipe => FdKind::Pipe,
+            FdKindArg::Unknown => FdKind::Unknown,
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
 enum LogFormat {
     /// Human-readable text format.
@@ -295,6 +339,7 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
             run_terminate_tree(args)?;
             Ok(0)
         }
+        Command::Fds(args) => run_fds(args),
     }
 }
 
@@ -888,6 +933,62 @@ fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
     Ok(0)
 }
 
+// ============================================================================
+// Fds command
+// ============================================================================
+
+fn fd_kind_str(kind: FdKind) -> &'static str {
+    match kind {
+        FdKind::File => "file",
+        FdKind::Socket => "socket",
+        FdKind::Pipe => "pipe",
+        FdKind::Unknown => "unknown",
+    }
+}
+
+fn run_fds(args: FdsArgs) -> Result<i32, SysprimsError> {
+    let filter = args.kind.map(|k| FdFilter {
+        kind: Some(k.into()),
+    });
+
+    let snapshot = match filter.as_ref() {
+        Some(f) => list_fds(args.pid, Some(f))?,
+        None => list_fds(args.pid, None)?,
+    };
+
+    if args.table {
+        print_fd_table(&snapshot.fds);
+        for w in snapshot.warnings {
+            eprintln!("Warning: {w}");
+        }
+        return Ok(0);
+    }
+
+    // Default to JSON
+    println!("{}", serde_json::to_string_pretty(&snapshot).unwrap());
+    Ok(0)
+}
+
+fn print_fd_table(fds: &[sysprims_proc::FdInfo]) {
+    println!("{:>5} {:<8} TARGET", "FD", "KIND");
+    println!("{:-<80}", "");
+
+    if fds.is_empty() {
+        println!("(no visible file descriptors)");
+        return;
+    }
+
+    for fd in fds {
+        let target = fd.path.as_deref().unwrap_or("-");
+        println!(
+            "{:>5} {:<8} {}",
+            fd.fd,
+            fd_kind_str(fd.kind),
+            truncate(target, 72)
+        );
+    }
+}
+
 /// Sort processes by the specified field.
 fn sort_processes(processes: &mut [sysprims_proc::ProcessInfo], field: &str) {
     match field.to_lowercase().as_str() {
@@ -987,5 +1088,21 @@ mod tests {
         assert_eq!(args.pids, vec![1234]);
         assert!(args.group);
         assert_eq!(args.list, None);
+    }
+
+    #[test]
+    fn fds_requires_pid() {
+        assert!(Cli::try_parse_from(["sysprims", "fds"]).is_err());
+    }
+
+    #[test]
+    fn fds_parses_pid_and_kind() {
+        let cli =
+            Cli::try_parse_from(["sysprims", "fds", "--pid", "1234", "--kind", "socket"]).unwrap();
+        let Command::Fds(args) = cli.command.unwrap() else {
+            panic!("expected fds command");
+        };
+        assert_eq!(args.pid, 1234);
+        assert!(matches!(args.kind, Some(FdKindArg::Socket)));
     }
 }

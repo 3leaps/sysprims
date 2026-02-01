@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json",
+  "title": "sysprims fd snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "timestamp", "platform", "pid", "fds", "warnings"],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json"
+    },
+    "timestamp": { "type": "string" },
+    "platform": { "type": "string" },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "fds": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/fd_info" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "fd_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fd", "kind"],
+      "properties": {
+        "fd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["file", "socket", "pipe", "unknown"]
+        },
+        "path": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

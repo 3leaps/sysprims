@@ -112,6 +112,61 @@ type ProcessFilter struct {
 	MemoryAboveKB *uint64 `json:"memory_above_kb,omitempty"`
 }
 
+// FdInfo describes an open file descriptor.
+type FdInfo struct {
+	Fd   uint32  `json:"fd"`
+	Kind string  `json:"kind"`
+	Path *string `json:"path,omitempty"`
+}
+
+// FdSnapshot represents a point-in-time listing of open file descriptors.
+type FdSnapshot struct {
+	SchemaID  string   `json:"schema_id"`
+	Timestamp string   `json:"timestamp"`
+	Platform  string   `json:"platform"`
+	Pid       uint32   `json:"pid"`
+	Fds       []FdInfo `json:"fds"`
+	Warnings  []string `json:"warnings"`
+}
+
+// FdFilter specifies criteria for filtering file descriptors.
+type FdFilter struct {
+	Kind *string `json:"kind,omitempty"`
+}
+
+// ListFds returns a snapshot of open file descriptors for the given PID.
+//
+// Best-effort behavior:
+// - Fields may be omitted
+// - Warnings may be present
+// - Windows returns ErrNotSupported
+func ListFds(pid uint32, filter *FdFilter) (*FdSnapshot, error) {
+	var filterCStr *C.char
+	if filter != nil {
+		filterJSON, err := json.Marshal(filter)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+		}
+		filterCStr = C.CString(string(filterJSON))
+		defer C.free(unsafe.Pointer(filterCStr))
+	}
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_list_fds(C.uint32_t(pid), filterCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var snapshot FdSnapshot
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &snapshot); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &snapshot, nil
+}
+
 // ProcessList returns a snapshot of running processes, optionally filtered.
 //
 // Pass nil for filter to return all processes.

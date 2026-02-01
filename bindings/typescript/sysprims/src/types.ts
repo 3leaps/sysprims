@@ -145,6 +145,29 @@ export interface PortBindingsSnapshot {
   warnings: string[];
 }
 
+// File descriptors
+
+export type FdKind = "file" | "socket" | "pipe" | "unknown";
+
+export interface FdInfo {
+  fd: number;
+  kind: FdKind;
+  path?: string | null;
+}
+
+export interface FdFilter {
+  kind?: FdKind;
+}
+
+export interface FdSnapshot {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  pid: number;
+  fds: FdInfo[];
+  warnings: string[];
+}
+
 // Signal operations
 
 export interface BatchKillFailure {

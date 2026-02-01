@@ -8,7 +8,8 @@
 
 use crate::{
     aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
-    PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+    FdInfo, FdKind, PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState,
+    Protocol,
 };
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -65,6 +66,79 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
     }
 
     Ok(make_snapshot(processes))
+}
+
+pub fn list_fds_impl(pid: u32) -> SysprimsResult<(Vec<FdInfo>, Vec<String>)> {
+    let proc_fd_dir = Path::new("/proc").join(pid.to_string()).join("fd");
+    let entries = match fs::read_dir(&proc_fd_dir) {
+        Ok(d) => d,
+        Err(e) => {
+            return Err(match e.kind() {
+                io::ErrorKind::NotFound => SysprimsError::not_found(pid),
+                io::ErrorKind::PermissionDenied => {
+                    SysprimsError::permission_denied(pid, "list fds")
+                }
+                _ => SysprimsError::internal(format!(
+                    "Failed to read {}: {}",
+                    proc_fd_dir.display(),
+                    e
+                )),
+            })
+        }
+    };
+
+    let mut fds = Vec::new();
+    let mut read_errors = 0usize;
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => {
+                read_errors += 1;
+                continue;
+            }
+        };
+
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        let fd: u32 = match name_str.parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        let target = match fs::read_link(entry.path()) {
+            Ok(t) => t.to_string_lossy().into_owned(),
+            Err(_) => {
+                read_errors += 1;
+                continue;
+            }
+        };
+
+        let kind = if target.starts_with("socket:[") {
+            FdKind::Socket
+        } else if target.starts_with("pipe:[") {
+            FdKind::Pipe
+        } else if target.starts_with("anon_inode:") {
+            FdKind::Unknown
+        } else {
+            FdKind::File
+        };
+
+        fds.push(FdInfo {
+            fd,
+            kind,
+            path: Some(target),
+        });
+    }
+
+    fds.sort_by_key(|f| f.fd);
+
+    let mut warnings = Vec::new();
+    if let Some(w) = aggregate_error_warning(read_errors, "fd entries") {
+        warnings.push(w);
+    }
+
+    Ok((fds, warnings))
 }
 
 pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {

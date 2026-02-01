@@ -8,8 +8,8 @@
 //! - `QueryFullProcessImageName` - process path
 
 use crate::{
-    aggregate_error_warning, make_port_snapshot, make_snapshot, PortBinding, PortBindingsSnapshot,
-    ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+    aggregate_error_warning, make_port_snapshot, make_snapshot, FdInfo, PortBinding,
+    PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
 };
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -73,6 +73,13 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
     }
 
     Ok(make_snapshot(processes))
+}
+
+pub fn list_fds_impl(_pid: u32) -> SysprimsResult<(Vec<FdInfo>, Vec<String>)> {
+    Err(SysprimsError::not_supported(
+        "open file descriptor enumeration",
+        sysprims_core::get_platform(),
+    ))
 }
 
 pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {

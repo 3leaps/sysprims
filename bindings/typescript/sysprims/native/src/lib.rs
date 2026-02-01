@@ -3,7 +3,7 @@ use std::time::Duration;
 use napi_derive::napi;
 use sysprims_core::schema::{SPAWN_IN_GROUP_CONFIG_V1, TERMINATE_TREE_CONFIG_V1};
 use sysprims_core::SysprimsError;
-use sysprims_proc::{PortFilter, ProcessFilter};
+use sysprims_proc::{FdFilter, PortFilter, ProcessFilter};
 use sysprims_timeout::{spawn_in_group, terminate_tree, SpawnInGroupConfig, TerminateTreeConfig};
 
 #[repr(i32)]
@@ -184,6 +184,38 @@ pub fn sysprims_proc_listening_ports(filter_json: String) -> SysprimsCallJsonRes
             Ok(json) => ok_json(json),
             Err(e) => err_json(SysprimsError::internal(format!(
                 "failed to serialize port bindings: {}",
+                e
+            ))),
+        },
+        Err(e) => err_json(e),
+    }
+}
+
+#[napi]
+pub fn sysprims_proc_list_fds(pid: u32, filter_json: String) -> SysprimsCallJsonResult {
+    let filter = if filter_json.is_empty() || filter_json == "{}" {
+        FdFilter::default()
+    } else {
+        match serde_json::from_str::<FdFilter>(&filter_json) {
+            Ok(f) => f,
+            Err(e) => {
+                return err_json(SysprimsError::invalid_argument(format!(
+                    "invalid filter JSON: {}",
+                    e
+                )))
+            }
+        }
+    };
+
+    if let Err(e) = filter.validate() {
+        return err_json(e);
+    }
+
+    match sysprims_proc::list_fds(pid, Some(&filter)) {
+        Ok(snapshot) => match serde_json::to_string(&snapshot) {
+            Ok(json) => ok_json(json),
+            Err(e) => err_json(SysprimsError::internal(format!(
+                "failed to serialize fd snapshot: {}",
                 e
             ))),
         },

@@ -9,7 +9,105 @@ use std::time::Duration;
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
-use sysprims_proc::{PortFilter, ProcessFilter};
+use sysprims_proc::{FdFilter, PortFilter, ProcessFilter};
+
+/// List open file descriptors for a PID, optionally filtered.
+///
+/// Returns a JSON object matching `fd-snapshot.schema.json`.
+///
+/// # Arguments
+///
+/// * `pid` - Target PID
+/// * `filter_json` - JSON filter object (may be NULL for no filtering)
+/// * `result_json_out` - Output pointer for result JSON string
+///
+/// # Filter JSON Format
+///
+/// ```json
+/// {
+///   "kind": "socket" // Optional: "file", "socket", "pipe", "unknown"
+/// }
+/// ```
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_list_fds(
+    pid: u32,
+    filter_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    let filter = if filter_json.is_null() {
+        FdFilter::default()
+    } else {
+        let filter_str = match CStr::from_ptr(filter_json).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                let err = SysprimsError::invalid_argument("filter_json is not valid UTF-8");
+                set_error(&err);
+                return SysprimsErrorCode::InvalidArgument;
+            }
+        };
+
+        if filter_str.is_empty() || filter_str == "{}" {
+            FdFilter::default()
+        } else {
+            match serde_json::from_str::<FdFilter>(filter_str) {
+                Ok(f) => f,
+                Err(e) => {
+                    let err =
+                        SysprimsError::invalid_argument(format!("invalid filter JSON: {}", e));
+                    set_error(&err);
+                    return SysprimsErrorCode::InvalidArgument;
+                }
+            }
+        }
+    };
+
+    if let Err(e) = filter.validate() {
+        set_error(&e);
+        return SysprimsErrorCode::from(&e);
+    }
+
+    let snapshot = match sysprims_proc::list_fds(pid, Some(&filter)) {
+        Ok(s) => s,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&snapshot) {
+        Ok(j) => j,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("failed to serialize fd snapshot: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
 
 /// List listening ports, optionally filtered.
 ///
@@ -438,6 +536,30 @@ mod tests {
 
         assert_eq!(code, SysprimsErrorCode::InvalidArgument);
         assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_list_fds_self() {
+        let pid = std::process::id() as u32;
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe { sysprims_proc_list_fds(pid, std::ptr::null(), &mut result) };
+
+        if cfg!(windows) {
+            assert_eq!(code, SysprimsErrorCode::NotSupported);
+            assert!(result.is_null());
+            return;
+        }
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        // SAFETY: We just allocated this
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("\"schema_id\""));
+        assert!(json.contains("\"fds\""));
+
+        unsafe { sysprims_free_string(result) };
     }
 
     #[test]

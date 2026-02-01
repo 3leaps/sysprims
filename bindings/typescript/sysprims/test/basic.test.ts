@@ -8,6 +8,7 @@ import {
   listeningPorts,
   processList,
   procGet,
+  listFds,
   SysprimsError,
   SysprimsErrorCode,
   selfPGID,
@@ -74,6 +75,24 @@ test("processList({ name_contains }) filters correctly", () => {
   assert.ok(snapshot.processes.length >= 1, "should find at least current process");
   const found = snapshot.processes.find((p) => p.pid === process.pid);
   assert.ok(found, "current process should match its own name filter");
+});
+
+test("listFds(process.pid) returns a snapshot", () => {
+  if (process.platform === "win32") {
+    assert.throws(
+      () => listFds(process.pid),
+      (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.NotSupported,
+    );
+    return;
+  }
+
+  const snap = listFds(process.pid);
+  assert.ok(snap.schema_id);
+  assert.ok(snap.timestamp);
+  assert.ok(snap.platform);
+  assert.equal(snap.pid, process.pid);
+  assert.ok(Array.isArray(snap.fds));
+  assert.ok(Array.isArray(snap.warnings));
 });
 
 test("listeningPorts() returns a snapshot with required fields", () => {

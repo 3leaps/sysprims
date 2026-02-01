@@ -41,6 +41,7 @@ export type SysprimsLib = {
   sysprimsProcList: (filterJson: string) => SysprimsCallJsonResult;
   sysprimsProcListeningPorts: (filterJson: string) => SysprimsCallJsonResult;
   sysprimsProcWaitPid: (pid: number, timeoutMs: number) => SysprimsCallJsonResult;
+  sysprimsProcListFds: (pid: number, filterJson: string) => SysprimsCallJsonResult;
 
   // Self introspection
   sysprimsSelfGetpgid: () => SysprimsCallU32Result;

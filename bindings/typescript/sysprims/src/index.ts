@@ -3,6 +3,8 @@ import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
 import type {
   BatchKillFailure,
   BatchKillResult,
+  FdFilter,
+  FdSnapshot,
   PortBindingsSnapshot,
   PortFilter,
   ProcessFilter,
@@ -19,6 +21,8 @@ export { SysprimsError, SysprimsErrorCode };
 export type {
   BatchKillFailure,
   BatchKillResult,
+  FdFilter,
+  FdSnapshot,
   PortBinding,
   PortBindingsSnapshot,
   PortFilter,
@@ -134,6 +138,22 @@ export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
   const lib = loadSysprims();
   const result = callJsonReturn(() => lib.sysprimsProcWaitPid(pid >>> 0, timeoutMs));
   return result as WaitPidResult;
+}
+
+// -----------------------------------------------------------------------------
+// File Descriptors
+// -----------------------------------------------------------------------------
+
+/**
+ * List open file descriptors for a PID.
+ *
+ * Best-effort behavior: fields may be missing and warnings may be present.
+ */
+export function listFds(pid: number, filter?: FdFilter): FdSnapshot {
+  const lib = loadSysprims();
+  const filterJson = filter ? JSON.stringify(filter) : "";
+  const result = callJsonReturn(() => lib.sysprimsProcListFds(pid >>> 0, filterJson));
+  return result as FdSnapshot;
 }
 
 // -----------------------------------------------------------------------------

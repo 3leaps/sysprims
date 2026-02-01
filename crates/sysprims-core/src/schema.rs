@@ -102,6 +102,18 @@ pub const PORT_BINDINGS_V1: &str =
 pub const PORT_FILTER_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-filter.schema.json";
 
+/// Schema ID for file descriptor snapshot output (v1.0.0).
+///
+/// Schema location: `schemas/process/v1.0.0/fd-snapshot.schema.json`
+pub const FD_SNAPSHOT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json";
+
+/// Schema ID for file descriptor filter input (v1.0.0).
+///
+/// Schema location: `schemas/process/v1.0.0/fd-filter.schema.json`
+pub const FD_FILTER_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-filter.schema.json";
+
 /// Schema ID for wait-pid result JSON output (v1.0.0).
 ///
 /// This schema defines the structure of `wait_pid()` output.
@@ -165,6 +177,8 @@ mod tests {
         assert!(PROC_FILTER_V1.starts_with("https://"));
         assert!(PORT_BINDINGS_V1.starts_with("https://"));
         assert!(PORT_FILTER_V1.starts_with("https://"));
+        assert!(FD_SNAPSHOT_V1.starts_with("https://"));
+        assert!(FD_FILTER_V1.starts_with("https://"));
         assert!(WAIT_PID_RESULT_V1.starts_with("https://"));
         assert!(BATCH_KILL_RESULT_V1.starts_with("https://"));
         assert!(TERMINATE_TREE_CONFIG_V1.starts_with("https://"));
@@ -203,6 +217,14 @@ mod tests {
             "Expected 3leaps.dev host"
         );
         assert!(
+            FD_SNAPSHOT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            FD_FILTER_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
             WAIT_PID_RESULT_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
@@ -235,10 +257,14 @@ mod tests {
         // All should end with .schema.json
         assert!(TIMEOUT_RESULT_V1.ends_with(".schema.json"));
         assert!(PROCESS_INFO_V1.ends_with(".schema.json"));
+        assert!(PROCESS_INFO_SAMPLED_V1.ends_with(".schema.json"));
         assert!(PROC_FILTER_V1.ends_with(".schema.json"));
         assert!(PORT_BINDINGS_V1.ends_with(".schema.json"));
         assert!(PORT_FILTER_V1.ends_with(".schema.json"));
+        assert!(FD_SNAPSHOT_V1.ends_with(".schema.json"));
+        assert!(FD_FILTER_V1.ends_with(".schema.json"));
         assert!(WAIT_PID_RESULT_V1.ends_with(".schema.json"));
+        assert!(BATCH_KILL_RESULT_V1.ends_with(".schema.json"));
         assert!(TERMINATE_TREE_CONFIG_V1.ends_with(".schema.json"));
         assert!(TERMINATE_TREE_RESULT_V1.ends_with(".schema.json"));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.ends_with(".schema.json"));
@@ -247,10 +273,14 @@ mod tests {
         // All v1.0.0 schemas should have version in path
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
         assert!(PROCESS_INFO_V1.contains("/v1.0.0/"));
+        assert!(PROCESS_INFO_SAMPLED_V1.contains("/v1.0.0/"));
         assert!(PROC_FILTER_V1.contains("/v1.0.0/"));
         assert!(PORT_BINDINGS_V1.contains("/v1.0.0/"));
         assert!(PORT_FILTER_V1.contains("/v1.0.0/"));
+        assert!(FD_SNAPSHOT_V1.contains("/v1.0.0/"));
+        assert!(FD_FILTER_V1.contains("/v1.0.0/"));
         assert!(WAIT_PID_RESULT_V1.contains("/v1.0.0/"));
+        assert!(BATCH_KILL_RESULT_V1.contains("/v1.0.0/"));
         assert!(TERMINATE_TREE_CONFIG_V1.contains("/v1.0.0/"));
         assert!(TERMINATE_TREE_RESULT_V1.contains("/v1.0.0/"));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.contains("/v1.0.0/"));
@@ -269,6 +299,10 @@ mod tests {
             "process-info schema should have process topic"
         );
         assert!(
+            PROCESS_INFO_SAMPLED_V1.contains("/process/"),
+            "process-info-sampled schema should have process topic"
+        );
+        assert!(
             PROC_FILTER_V1.contains("/process/"),
             "process-filter schema should have process topic"
         );
@@ -281,8 +315,20 @@ mod tests {
             "port-filter schema should have process topic"
         );
         assert!(
+            FD_SNAPSHOT_V1.contains("/process/"),
+            "fd-snapshot schema should have process topic"
+        );
+        assert!(
+            FD_FILTER_V1.contains("/process/"),
+            "fd-filter schema should have process topic"
+        );
+        assert!(
             WAIT_PID_RESULT_V1.contains("/process/"),
             "wait-pid-result schema should have process topic"
+        );
+        assert!(
+            BATCH_KILL_RESULT_V1.contains("/signal/"),
+            "batch-kill-result schema should have signal topic"
         );
         assert!(
             TERMINATE_TREE_CONFIG_V1.contains("/process/"),
@@ -307,10 +353,14 @@ mod tests {
         let ids = [
             TIMEOUT_RESULT_V1,
             PROCESS_INFO_V1,
+            PROCESS_INFO_SAMPLED_V1,
             PROC_FILTER_V1,
             PORT_BINDINGS_V1,
             PORT_FILTER_V1,
+            FD_SNAPSHOT_V1,
+            FD_FILTER_V1,
             WAIT_PID_RESULT_V1,
+            BATCH_KILL_RESULT_V1,
             TERMINATE_TREE_CONFIG_V1,
             TERMINATE_TREE_RESULT_V1,
             SPAWN_IN_GROUP_CONFIG_V1,
@@ -336,10 +386,14 @@ mod tests {
         let prefix = format!("{}/{}/", SCHEMA_HOST, SCHEMA_MODULE);
         assert!(TIMEOUT_RESULT_V1.starts_with(&prefix));
         assert!(PROCESS_INFO_V1.starts_with(&prefix));
+        assert!(PROCESS_INFO_SAMPLED_V1.starts_with(&prefix));
         assert!(PROC_FILTER_V1.starts_with(&prefix));
         assert!(PORT_BINDINGS_V1.starts_with(&prefix));
         assert!(PORT_FILTER_V1.starts_with(&prefix));
+        assert!(FD_SNAPSHOT_V1.starts_with(&prefix));
+        assert!(FD_FILTER_V1.starts_with(&prefix));
         assert!(WAIT_PID_RESULT_V1.starts_with(&prefix));
+        assert!(BATCH_KILL_RESULT_V1.starts_with(&prefix));
         assert!(TERMINATE_TREE_CONFIG_V1.starts_with(&prefix));
         assert!(TERMINATE_TREE_RESULT_V1.starts_with(&prefix));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with(&prefix));
