@@ -115,6 +115,12 @@ sysprims pstat --json
 
 # List processes with filters and table output
 sysprims pstat --name nginx --cpu-above 5 --table
+
+# Inspect open file descriptors for a process
+sysprims fds --pid 1234 --table
+
+# Filter file descriptors by type
+sysprims fds --pid 1234 --kind socket --json
 ```
 
 ### Exit Codes
@@ -189,10 +195,10 @@ attachment and process group membership.
 
 ### sysprims-proc
 
-Process inspection and enumeration.
+Process inspection, enumeration, and open file descriptor visibility.
 
 ```rust
-use sysprims_proc::{snapshot, get_process, ProcessFilter};
+use sysprims_proc::{snapshot, get_process, ProcessFilter, list_fds, FdFilter, FdKind};
 
 // Get all processes
 let snap = snapshot()?;
@@ -206,16 +212,31 @@ let filter = ProcessFilter::builder()
     .cpu_above(10.0)
     .build();
 let filtered = snapshot_filtered(&filter)?;
+
+// Inspect open file descriptors (Linux/macOS)
+let fd_filter = FdFilter { kind: Some(FdKind::File) };
+let fds = list_fds(pid, Some(&fd_filter))?;
+for fd in &fds.fds {
+    if let Some(path) = &fd.path {
+        println!("FD {}: {}", fd.fd, path);
+    }
+}
 ```
 
 **CLI:**
 ```bash
+# Process listing
 sysprims pstat [OPTIONS]
 sysprims pstat --json                          # JSON output (default)
 sysprims pstat --table                         # Human-readable table
 sysprims pstat --pid 1234                      # Single process by PID
 sysprims pstat --name nginx --cpu-above 10    # Filter by name and CPU
 sysprims pstat --sort cpu                      # Sort by CPU usage
+
+# Open file descriptor inspection
+sysprims fds --pid 1234                        # List all FDs
+sysprims fds --pid 1234 --table                # Human-readable table
+sysprims fds --pid 1234 --kind file --json     # Filter by type
 ```
 
 **Filter options:**

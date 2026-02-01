@@ -10,6 +10,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-02-XX
+
+Process visibility and batch operations release. Adds `sysprims fds` for inspecting open file descriptors and multi-PID kill for batch signal operations, completing the diagnostic and remediation toolkit.
+
+### Added
+
+- **CLI: `sysprims fds`** (`sysprims-cli`, `sysprims-proc`)
+  - Inspect open file descriptors for any process (the `lsof` use-case, GPL-free)
+  - Platform support: Linux (full paths), macOS (best-effort), Windows (not supported)
+  - Filter by resource type: `--kind file|socket|pipe|unknown`
+  - JSON schema-backed output (`process/v1.0.0/fd-snapshot`)
+  - Library: `list_fds(pid, filter) -> FdSnapshot`
+  - FFI: `sysprims_proc_list_fds(pid, filter_json, result_json_out)`
+  - Bindings: Go `ListFds`, TypeScript `listFds`
+
+- **Library: Batch Signal Operations** (`sysprims-signal`)
+  - `kill_many(pids, signal) -> BatchKillResult` - Send signal to multiple processes
+  - `terminate_many(pids)` - Convenience wrapper for SIGTERM batch
+  - `force_kill_many(pids)` - Convenience wrapper for SIGKILL batch
+  - Per-PID result tracking (succeeded/failed split)
+  - All PIDs validated before any signals sent
+  - FFI: `sysprims_signal_send_many(pids_json, signal, result_json_out)`
+  - Bindings: Go `KillMany`, TypeScript `killMany`
+
+- **CLI: Multi-PID Kill** (`sysprims-cli`)
+  - `sysprims kill <PID> <PID> ... -s <SIGNAL>` - Batch signal delivery
+  - JSON output with per-PID results (`signal/v1.0.0/batch-kill-result` schema)
+  - Exit codes: 0 (all success), 1 (partial), 2 (all failed)
+  - Individual failures don't abort the batch
+
+- **Documentation**
+  - New app note: `docs/appnotes/fds-validation/` - Synthetic test cases for FD inspection
+  - Updated guide: `docs/guides/runaway-process-diagnosis.md` - Now includes `fds` workflow
+  - New schemas: `fd-snapshot.schema.json`, `fd-filter.schema.json`, `batch-kill-result.schema.json`
+
+### Notes
+
+- `sysprims fds` fills the diagnostic gap noted in v0.1.8's runaway process guide (previously required external `lsof`)
+- Multi-PID kill enables surgical strikes on multiple runaway processes without loops or scripts
+- Together with `pstat` and `terminate-tree`, completes the "diagnose → remediate" workflow
+
 ## [0.1.8] - 2026-01-29
 
 CLI tree termination release. Adds `terminate-tree` subcommand for safe, structured termination of existing process trees, plus `pstat` sampling enhancements for runaway process diagnosis.
@@ -308,7 +349,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/3leaps/sysprims/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/3leaps/sysprims/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/3leaps/sysprims/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/3leaps/sysprims/compare/v0.1.5...v0.1.6

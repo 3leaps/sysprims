@@ -6,6 +6,174 @@
 
 ---
 
+## v0.1.9 - 2026-02-XX
+
+**Status:** Process Visibility & Batch Operations Release
+
+This release adds process visibility (`sysprims fds`) and batch signal operations (`sysprims kill` with multiple PIDs), completing the diagnostic and remediation toolkit for runaway process management.
+
+### Highlights
+
+- **`sysprims fds`**: Inspect open file descriptors (the `lsof` use-case, GPL-free)
+- **Multi-PID Kill**: Batch signal delivery with per-PID result tracking
+- **Complete Workflow**: From diagnosis (`pstat` → `fds`) to remediation (`kill` → `terminate-tree`)
+
+### New CLI Commands
+
+#### `sysprims fds`
+
+Inspect open file descriptors for any process:
+
+```bash
+# Table output for human inspection
+sysprims fds --pid 88680 --table
+
+# JSON output for scripting
+sysprims fds --pid 88680 --json
+
+# Filter by resource type
+sysprims fds --pid 88680 --kind file --table
+sysprims fds --pid 88680 --kind socket --json
+```
+
+Output (JSON):
+
+```json
+{
+  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json",
+  "timestamp": "2026-02-01T17:40:10.702011Z",
+  "platform": "macos",
+  "pid": 88680,
+  "fds": [
+    {
+      "fd": 5,
+      "kind": "file",
+      "path": "/Users/.../extension/state.json"
+    },
+    {
+      "fd": 6,
+      "kind": "socket"
+    }
+  ],
+  "warnings": []
+}
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--pid <PID>` | Process to inspect (required) |
+| `--kind <TYPE>` | Filter by: `file`, `socket`, `pipe`, `unknown` |
+| `--json` | Output as JSON (default) |
+| `--table` | Human-readable table format |
+
+**Platform Support:**
+- **Linux**: Full file path resolution via `/proc/<pid>/fd/`
+- **macOS**: Best-effort path recovery via `proc_pidinfo()`
+- **Windows**: Returns error (not supported; requires elevated privileges)
+
+#### Multi-PID Kill
+
+Send signals to multiple processes in one call:
+
+```bash
+# Kill multiple specific PIDs
+sysprims kill 88680 88681 88682 -s TERM
+
+# With JSON output showing per-PID results
+sysprims kill 88680 88681 88682 -s TERM --json
+```
+
+Output (JSON):
+
+```json
+{
+  "schema_id": "https://schemas.3leaps.dev/sysprims/signal/v1.0.0/batch-kill-result.schema.json",
+  "signal_sent": 15,
+  "succeeded": [88680, 88681],
+  "failed": [
+    { "pid": 88682, "error": "Process not found" }
+  ]
+}
+```
+
+Exit codes:
+- `0`: All PIDs signaled successfully
+- `1`: Some PIDs failed (partial success)
+- `2`: All PIDs failed or validation error
+
+**Key behavior:** All PIDs are validated before any signals are sent. Individual failures don't abort the batch.
+
+### Complete Runaway Process Workflow
+
+```bash
+# 1. Find high-CPU processes
+sysprims pstat --cpu-mode monitor --cpu-above 50 --sort cpu --table
+
+# 2. Inspect what files they have open
+sysprims fds --pid <PID> --kind file --json
+
+# 3. Kill runaway processes (surgical)
+sysprims kill <PID> <PID> ... -s TERM
+
+# 4. If that doesn't work, terminate the tree
+sysprims terminate-tree <PARENT_PID> --require-exe-path <PATH>
+```
+
+See the updated [runaway process diagnosis guide](docs/guides/runaway-process-diagnosis.md) for the full walkthrough.
+
+### Documentation
+
+- **New App Note**: `docs/appnotes/fds-validation/`
+  - Synthetic test cases for validating `sysprims fds` output
+  - Demonstrates platform differences (Linux full paths vs macOS best-effort)
+- **Updated Guide**: `docs/guides/runaway-process-diagnosis.md`
+  - Now includes `sysprims fds` for root cause identification
+  - Documents the complete diagnostic workflow
+
+### Library API (Rust)
+
+```rust
+use sysprims_proc::{list_fds, FdFilter, FdKind};
+use sysprims_signal::kill_many;
+
+// Inspect file descriptors
+let filter = FdFilter { kind: Some(FdKind::File) };
+let snapshot = list_fds(pid, Some(&filter))?;
+
+// Batch signal delivery
+let result = kill_many(&[pid1, pid2, pid3], SIGTERM)?;
+```
+
+### Language Bindings
+
+Both features are available in Go and TypeScript:
+
+**Go:**
+```go
+// List file descriptors
+snapshot, err := sysprims.ListFds(pid, &sysprims.FdFilter{Kind: sysprims.FdKindFile})
+
+// Batch kill
+result, err := sysprims.KillMany([]uint32{pid1, pid2, pid3}, sysprims.SIGTERM)
+```
+
+**TypeScript:**
+```typescript
+// List file descriptors
+const snapshot = listFds(pid, { kind: 'file' });
+
+// Batch kill
+const result = killMany([pid1, pid2, pid3], SIGTERM);
+```
+
+### Coming in v0.1.10
+
+- **Go Shared Library Mode**: Support for `dlopen`/`dlsym` loading patterns
+
+---
+
 ## v0.1.8 - 2026-01-29
 
 **Status:** CLI Tree Termination Release
@@ -79,7 +247,7 @@ sysprims pstat --name "VSCodium Helper" --sample 500ms --cpu-above 50 --json
 
 ### Surgical vs Tree Termination
 
-The new [runaway process diagnosis guide](docs/guides/runaway-process-diagnosis.md) documents two approaches:
+The [runaway process diagnosis guide](docs/guides/runaway-process-diagnosis.md) documents two approaches:
 
 **Option A: Surgical Strike** (try first)
 ```bash
@@ -97,15 +265,10 @@ sysprims terminate-tree 26021 --require-exe-path "..."
 
 ### Documentation
 
-- **New Guide**: `docs/guides/runaway-process-diagnosis.md`
+- **Guide**: `docs/guides/runaway-process-diagnosis.md`
   - Real-world walkthrough with VSCodium/Electron plugin helper scenario
-  - Investigation workflow using `pstat` and `lsof`
+  - Investigation workflow using `pstat` and `fds`
   - Decision framework for surgical vs tree termination
-
-### Coming in v0.1.9
-
-- **`sysprims fds`**: Open file descriptor inspection (Linux/macOS)
-- **Multi-PID kill**: `sysprims kill <PID> <PID> ...` batch operations
 
 ---
 

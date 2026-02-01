@@ -203,15 +203,39 @@ These protections are CLI-specific. The underlying library allows these operatio
 
 ## Identifying the Root Cause
 
-In this scenario, investigation using macOS `lsof` revealed the runaway helpers were all accessing the Cline (claude-dev) extension's state files:
+In this scenario, investigation revealed the runaway helpers were all accessing the Cline (claude-dev) extension's state files. Use `sysprims fds` to inspect open file descriptors without requiring external tools:
 
+```bash
+# Inspect what files a runaway process has open
+sysprims fds --pid 88680 --table
+
+# Filter to only file descriptors
+sysprims fds --pid 88680 --kind file --json
 ```
-/Users/.../saoudrizwan.claude-dev/state/taskHistory.json
+
+Example output showing the extension state files:
+
+```json
+{
+  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json",
+  "pid": 88680,
+  "fds": [
+    {
+      "fd": 5,
+      "kind": "file",
+      "path": "/Users/.../saoudrizwan.claude-dev/state/taskHistory.json"
+    }
+  ],
+  "warnings": []
+}
 ```
 
-This identified the specific extension causing the spin. Note that sysprims currently focuses on process control primitives; identifying which workspace or extension triggered the issue requires OS-specific tools like `lsof` on Unix or Process Explorer on Windows.
+**Platform Notes:**
+- **Linux**: Full file paths available via `/proc/<pid>/fd/` symlinks
+- **macOS**: Best-effort path recovery; some paths may be unavailable
+- **Windows**: Not supported (requires elevated privileges; see `docs/appnotes/fds-validation/`)
 
-Future sysprims releases will include further enhancements relating to process visibility to make this kind of investigation more self-contained.
+This identifies which extension or workspace triggered the issue directly within sysprims, without requiring external tools like `lsof`.
 
 ## Using sysprims as a Library
 
@@ -256,6 +280,7 @@ for (const [ppid, children] of byParent) {
 | Find high-CPU processes (instantaneous) | `sysprims pstat --cpu-mode monitor --cpu-above 50 --sort cpu` |
 | Find high-CPU processes (lifetime avg) | `sysprims pstat --cpu-above 50 --sort cpu` |
 | Inspect specific PID | `sysprims pstat --pid <PID> --json` |
+| Inspect open files/sockets | `sysprims fds --pid <PID> --table` |
 | Kill single process (try first) | `sysprims kill <PID> -s TERM` |
 | Kill single process (if TERM ignored) | `sysprims kill <PID> -s KILL` |
 | Kill multiple processes | `sysprims kill <PID> <PID> ... -s TERM --json` |
