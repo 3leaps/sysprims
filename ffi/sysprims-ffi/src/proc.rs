@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_proc_list_fds_self() {
-        let pid = std::process::id() as u32;
+        let pid = std::process::id();
         let mut result: *mut c_char = std::ptr::null_mut();
 
         let code = unsafe { sysprims_proc_list_fds(pid, std::ptr::null(), &mut result) };
