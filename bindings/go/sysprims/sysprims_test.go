@@ -271,8 +271,13 @@ func TestListeningPortsSelfListener(t *testing.T) {
 	snap, err := sysprims.ListeningPorts(filter)
 	if err != nil {
 		// Best-effort: on macOS SIP/TCC or constrained runners, this may fail.
-		if sErr, ok := err.(*sysprims.Error); ok && sErr.Code == sysprims.ErrPermissionDenied {
-			t.Skipf("ListeningPorts PermissionDenied in this environment: %v", err)
+		if sErr, ok := err.(*sysprims.Error); ok {
+			if sErr.Code == sysprims.ErrPermissionDenied {
+				t.Skipf("ListeningPorts PermissionDenied in this environment: %v", err)
+			}
+			if sErr.Code == sysprims.ErrNotSupported {
+				t.Skipf("ListeningPorts NotSupported in this environment: %v", err)
+			}
 		}
 		t.Fatalf("ListeningPorts failed: %v", err)
 	}
