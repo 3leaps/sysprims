@@ -66,11 +66,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${{ matrix.glibc }}" ]; then
-            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p sysprims-ffi
-          else
-            cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-ffi
+          glibc="${{ matrix.glibc }}"
+          target="${{ matrix.target }}"
+
+          if [ -n "$glibc" ]; then
+            cargo zigbuild --release --target "${target}.${glibc}" -p sysprims-ffi
+            exit 0
           fi
+
+          # musl targets may not produce a usable cdylib by default due to crt-static.
+          # Build once with defaults (static), then again with crt-static disabled to
+          # ensure libsysprims_ffi.so is emitted for sysprims_shared on Alpine.
+          if [[ "$target" == *-unknown-linux-musl ]]; then
+            cargo zigbuild --release --target "$target" -p sysprims-ffi
+            RUSTFLAGS="-C target-feature=-crt-static" cargo zigbuild --release --target "$target" -p sysprims-ffi
+            exit 0
+          fi
+
+          cargo zigbuild --release --target "$target" -p sysprims-ffi
 
       - name: Package FFI
         shell: bash
@@ -80,9 +93,11 @@ jobs:
           mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
           resolve_target() {
             file="$1"
-            candidates=("${{ matrix.target }}")
-            if [ -n "${{ matrix.glibc }}" ]; then
-              candidates+=("${{ matrix.target }}.${{ matrix.glibc }}")
+            glibc="${{ matrix.glibc }}"
+            target="${{ matrix.target }}"
+            candidates=("${target}")
+            if [ -n "$glibc" ]; then
+              candidates+=("${target}.${glibc}")
             fi
             for c in "${candidates[@]}"; do
               if [ -f "target/${c}/release/${file}" ]; then
