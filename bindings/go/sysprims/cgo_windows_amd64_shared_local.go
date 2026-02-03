@@ -1,4 +1,4 @@
-//go:build windows && amd64 && sysprims_shared && !sysprims_shared_local
+//go:build windows && amd64 && sysprims_shared && sysprims_shared_local
 
 package sysprims
 
@@ -8,7 +8,7 @@ package sysprims
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/include
-#cgo LDFLAGS: -L${SRCDIR}/lib-shared/windows-amd64 -lsysprims_ffi -lws2_32 -luserenv -lbcrypt -lkernel32 -lntdll -ladvapi32 -liphlpapi -lpsapi
+#cgo LDFLAGS: -L${SRCDIR}/lib-shared/local/windows-amd64 -L${SRCDIR}/lib-shared/windows-amd64 -lsysprims_ffi -lws2_32 -luserenv -lbcrypt -lkernel32 -lntdll -ladvapi32 -liphlpapi -lpsapi
 #include "sysprims.h"
 */
 import "C"

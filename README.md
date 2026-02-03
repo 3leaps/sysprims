@@ -300,6 +300,10 @@ if (err == SYSPRIMS_OK) {
 
 ### As a Go Library
 
+If your Go binary also links another Rust `staticlib` via cgo, you may see link-time
+duplicate symbol errors such as `_rust_eh_personality`. Use the shared-library mode
+to avoid Rust runtime symbol collisions.
+
 ```go
 import "github.com/3leaps/sysprims/bindings/go/sysprims"
 
@@ -320,6 +324,22 @@ snap, _ := sysprims.ListeningPorts(&sysprims.PortFilter{
     Protocol: &proto,
     LocalPort: &port,
 })
+```
+
+**Shared mode (recommended for multi-Rust cgo builds):**
+
+```bash
+# glibc + macOS + Windows
+go test -v -tags=sysprims_shared ./...
+
+# musl / Alpine
+go test -v -tags="musl,sysprims_shared" ./...
+```
+
+**Local development (use locally built shared libs under lib-shared/local):**
+
+```bash
+go test -v -tags="sysprims_shared,sysprims_shared_local" ./...
 ```
 
 ### As a TypeScript Library
