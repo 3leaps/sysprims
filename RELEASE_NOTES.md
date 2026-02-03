@@ -6,6 +6,73 @@
 
 ---
 
+## v0.1.10 - 2026-02-03
+
+**Status:** Go Shared Library Mode Polish Release
+
+Fast-follow polish release improving Go shared-library mode developer experience and clarifying multi-Rust FFI collision guidance.
+
+### Highlights
+
+- **`sysprims_shared_local` Tag**: New opt-in build tag for local development workflows
+- **Cleaner Default Shared Mode**: `sysprims_shared` no longer references non-existent local paths
+- **Clearer Multi-Rust Guidance**: README explicitly documents duplicate symbol `_rust_eh_personality` failure mode
+
+### New Build Tag: `sysprims_shared_local`
+
+For developers who need to link against locally-built shared libraries:
+
+```bash
+# Local development with custom shared libs
+# (libs must be in bindings/go/sysprims/lib-shared/local/<platform>/)
+go test -v -tags="sysprims_shared,sysprims_shared_local" ./...
+```
+
+This tag re-enables the local override paths that were previously searched by default, which caused confusing linker warnings when the directory didn't exist.
+
+### Cleaner Default: `sysprims_shared`
+
+The default shared mode now only searches shipped prebuilt libraries:
+
+```bash
+# Standard shared mode (no local paths searched)
+# glibc/macOS/Windows
+go test -v -tags=sysprims_shared ./...
+
+# Alpine/musl
+go test -v -tags="musl,sysprims_shared" ./...
+```
+
+This eliminates the linker warnings that previously appeared when `lib-shared/local/` didn't exist.
+
+### Multi-Rust FFI Collision Guidance
+
+The README now explicitly documents the "multiple Rust FFI libs in one Go binary" failure mode:
+
+**Symptom:** Link errors mentioning duplicate symbols like `_rust_eh_personality`
+
+**Cause:** Linking multiple Rust static libraries (via cgo `//#cgo LDFLAGS: -l...`) in a single Go binary causes duplicate Rust runtime symbols.
+
+**Solution:** Use sysprims as a shared library:
+
+| Platform | Build Tags |
+|----------|-----------|
+| glibc/macOS/Windows | `-tags=sysprims_shared` |
+| Alpine/musl | `-tags="musl,sysprims_shared"` |
+| Local dev override | `-tags="sysprims_shared,sysprims_shared_local"` |
+
+### Upgrade Notes
+
+- **No breaking changes** for existing `sysprims_shared` workflows using prebuilt libraries
+- If you were relying on `lib-shared/local/...` implicitly, add the `sysprims_shared_local` tag explicitly
+- No changes needed for standard consumers using shipped prebuilt libs
+
+### References
+
+- Commit: `3b004b7` - adds `sysprims_shared_local`, removes local-path warnings, updates docs
+
+---
+
 ## v0.1.9 - 2026-02-01
 
 **Status:** Process Visibility & Batch Operations Release
@@ -298,48 +365,5 @@ sysprims terminate-tree 26021 --require-exe-path "..."
   - Decision framework for surgical vs tree termination
 
 ---
-
-## v0.1.7 - 2026-01-26
-
-**Status:** TypeScript Bindings Infrastructure Release
-
-This release migrates TypeScript bindings from koffi FFI to a Node-API (N-API) native addon via napi-rs. The primary user-facing outcome: TypeScript bindings now work in Alpine/musl containers.
-
-### Highlights
-
-- **Node-API Migration**: TypeScript bindings now use napi-rs instead of koffi + vendored shared libraries
-- **Alpine/musl Support**: Linux musl containers (including Alpine) now supported for TypeScript
-- **No API Changes**: Existing imports and function calls remain unchanged
-- **npm Publishing Deferred**: Prebuilt npm packages planned for future release
-
-### What Changed (Implementation Detail)
-
-| Aspect | v0.1.6 (koffi) | v0.1.7 (N-API) |
-|--------|----------------|----------------|
-| Native loading | `koffi.load()` C-ABI shared lib | `require()` N-API `.node` addon |
-| Library location | `_lib/<platform>/libsysprims_ffi.*` | `native/<platform>/sysprims.*.node` |
-| Build requirement | None (prebuilt libs vendored) | Rust toolchain (when building from source) |
-| Alpine support | No | Yes |
-
-### Installation Modes
-
-**From git checkout / local path (current):**
-- Requires Rust toolchain and C/C++ build tools
-- Run `npm run build:native` after install
-
-**From npm (future):**
-- Prebuilt platform packages will install automatically
-- No build tools required
-
-### Breaking Changes
-
-None. The JavaScript API surface is unchanged.
-
-### Adoption Notes
-
-- Pin `@3leaps/sysprims` to exact version for initial rollouts
-- Add smoke test that calls `procGet(process.pid)` to validate addon loading
-- Keep fallback implementations for locked-down environments where native addons may fail
-
 ---
 

@@ -10,6 +10,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-02-03
+
+Fast-follow polish release improving Go shared-library mode developer experience and clarifying multi-Rust FFI collision guidance.
+
+### Added
+
+- **Go Bindings: Developer-Local Shared Library Override** (`bindings/go/sysprims/`)
+  - New build tag: `sysprims_shared_local` for local development workflows
+  - Allows linking against locally-built shared libraries in `lib-shared/local/<platform>/`
+  - Separates shipped prebuilt libs from developer-local overrides to eliminate linker confusion
+  - Usage: `-tags="sysprims_shared,sysprims_shared_local" ./...`
+
+### Changed
+
+- **Go Bindings: Cleaner Default Shared Mode** (`bindings/go/sysprims/`)
+  - `sysprims_shared` tag no longer searches `lib-shared/local/...` paths by default
+  - Eliminates confusing linker warnings when local override directory doesn't exist
+  - Prebuilt libraries remain available via `sysprims_shared` tag only
+
+### Documentation
+
+- **README.md**: Added explicit guidance for multi-Rust FFI collision scenarios
+  - Documents duplicate symbol `_rust_eh_personality` failure mode
+  - Clear tag selection guide:
+    - `-tags=sysprims_shared` (glibc/macOS/Windows)
+    - `-tags="musl,sysprims_shared"` (Alpine/musl)
+    - `-tags="sysprims_shared,sysprims_shared_local"` (local dev override)
+
+### Upgrade Notes
+
+- If relying on `bindings/go/sysprims/lib-shared/local/...` implicitly with `sysprims_shared`, add the `sysprims_shared_local` tag explicitly.
+- No breaking changes to existing `sysprims_shared` workflows using prebuilt libraries.
+
 ## [0.1.9] - 2026-02-01
 
 Process visibility and batch operations release. Adds `sysprims fds` for inspecting open file descriptors and multi-PID kill for batch signal operations, completing the diagnostic and remediation toolkit.
@@ -357,7 +390,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/3leaps/sysprims/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/3leaps/sysprims/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/3leaps/sysprims/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/3leaps/sysprims/compare/v0.1.6...v0.1.7
