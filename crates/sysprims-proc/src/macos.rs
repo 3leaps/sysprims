@@ -91,16 +91,6 @@ struct ProcFdInfo {
 }
 
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy)]
-struct ProcFileInfo {
-    fi_openflags: u32,
-    fi_status: u32,
-    fi_offset: i64,
-    fi_type: i32,
-    fi_guardflags: u32,
-}
-
-#[repr(C)]
 #[derive(Clone, Copy)]
 struct In4In6Addr {
     i46a_pad32: [u32; 3],
@@ -170,37 +160,79 @@ struct SockbufInfo {
     sbi_timeo: i16,
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-struct SocketInfoPrefix {
-    // Size of struct vinfo_stat (as used in struct socket_info) varies across SDKs.
-    // On modern macOS SDKs this is 136 bytes.
-    soi_stat: [u8; 136],
-    soi_so: u64,
-    soi_pcb: u64,
-    soi_type: i32,
-    soi_protocol: i32,
-    soi_family: i32,
-    soi_options: i16,
-    soi_linger: i16,
-    soi_state: i16,
-    soi_qlen: i16,
-    soi_incqlen: i16,
-    soi_qlimit: i16,
-    soi_timeo: i16,
-    soi_error: u16,
-    soi_oobmark: u32,
-    soi_rcv: SockbufInfo,
-    soi_snd: SockbufInfo,
-    soi_kind: i32,
-    rfu_1: u32,
+// NOTE: We intentionally do not model socket_fdinfo/socket_info as Rust structs
+// for parsing. See read_socket_binding() for offset-based parsing.
+
+const PROC_FILEINFO_SIZE: usize = 24;
+
+fn compute_socket_info_offsets(vinfo_stat_size: usize) -> (usize, usize, usize) {
+    // Layout based on sys/proc_info.h:
+    // struct socket_fdinfo { struct proc_fileinfo pfi; struct socket_info psi; };
+    // struct socket_info { struct vinfo_stat soi_stat; ... int soi_kind; uint32_t rfu_1; union soi_proto; }
+
+    let base = PROC_FILEINFO_SIZE;
+    let mut off = base + vinfo_stat_size;
+
+    off += 8; // soi_so
+    off += 8; // soi_pcb
+
+    off += 4; // soi_type
+    let soi_protocol_off = off;
+    off += 4; // soi_protocol
+
+    off += 4; // soi_family
+
+    off += 2; // soi_options
+    off += 2; // soi_linger
+    off += 2; // soi_state
+    off += 2; // soi_qlen
+    off += 2; // soi_incqlen
+    off += 2; // soi_qlimit
+    off += 2; // soi_timeo
+    off += 2; // soi_error
+
+    off += 4; // soi_oobmark
+    off += mem::size_of::<SockbufInfo>(); // soi_rcv
+    off += mem::size_of::<SockbufInfo>(); // soi_snd
+
+    let soi_kind_off = off;
+    off += 4; // soi_kind
+    off += 4; // rfu_1
+    let soi_proto_off = off;
+
+    (soi_protocol_off, soi_kind_off, soi_proto_off)
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-struct SocketFdInfoPrefix {
-    pfi: ProcFileInfo,
-    psi: SocketInfoPrefix,
+fn read_i32_at(buf: &[u8], offset: usize) -> Option<i32> {
+    if buf.len() < offset + 4 {
+        return None;
+    }
+    let mut bytes = [0u8; 4];
+    bytes.copy_from_slice(&buf[offset..offset + 4]);
+    Some(i32::from_ne_bytes(bytes))
+}
+
+fn select_socket_info_layout(buf: &[u8]) -> Option<(usize, usize, usize)> {
+    // vinfo_stat size varies across SDKs. Try common candidates.
+    // Validate by checking that derived soi_kind and soi_protocol look plausible.
+    let candidates = [136usize, 144usize];
+
+    for stat_size in candidates {
+        let (proto_off, kind_off, proto_union_off) = compute_socket_info_offsets(stat_size);
+        let kind = read_i32_at(buf, kind_off)?;
+        if !(0..=7).contains(&kind) {
+            continue;
+        }
+
+        let proto = read_i32_at(buf, proto_off).unwrap_or(0);
+        let proto_ok = proto == libc::IPPROTO_TCP || proto == libc::IPPROTO_UDP || proto == 0;
+        let kind_ok = kind == SOCKINFO_TCP || kind == SOCKINFO_IN || kind == 0;
+        if proto_ok && kind_ok {
+            return Some((proto_off, kind_off, proto_union_off));
+        }
+    }
+
+    None
 }
 
 /// Task info structure returned by proc_pidinfo with PROC_PIDTASKINFO
@@ -416,12 +448,11 @@ pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
 
     let mut warnings = Vec::new();
 
-    warnings.push(format!(
-        "macos port bindings are best-effort; scanning current user processes only (uid={})",
-        current_uid
-    ));
-
     if skipped_other_user > 0 {
+        warnings.push(format!(
+            "macos port bindings are best-effort; scanning current user processes only (uid={})",
+            current_uid
+        ));
         warnings.push(format!(
             "Skipped {} pid entries owned by other users",
             skipped_other_user
@@ -694,18 +725,18 @@ fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {
         return Err(SysprimsError::internal("proc_pidfdinfo socket failed"));
     }
 
-    if (result as usize) < mem::size_of::<SocketFdInfoPrefix>() {
-        return Err(SysprimsError::internal("socket fdinfo truncated"));
-    }
+    let written = result as usize;
+    let (soi_protocol_off, soi_kind_off, soi_proto_off) =
+        select_socket_info_layout(&buf[..written])
+            .ok_or_else(|| SysprimsError::internal("unsupported socket_info layout"))?;
 
-    let prefix: SocketFdInfoPrefix =
-        unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const SocketFdInfoPrefix) };
-
-    let kind = prefix.psi.soi_kind;
+    let kind = read_i32_at(&buf[..written], soi_kind_off)
+        .ok_or_else(|| SysprimsError::internal("socket kind missing"))?;
 
     // Determine protocol using socket_info.soi_protocol where possible.
     // This is more robust than relying solely on soi_kind.
-    let protocol = match prefix.psi.soi_protocol {
+    let soi_protocol = read_i32_at(&buf[..written], soi_protocol_off).unwrap_or(0);
+    let protocol = match soi_protocol {
         x if x == libc::IPPROTO_TCP => Protocol::Tcp,
         x if x == libc::IPPROTO_UDP => Protocol::Udp,
         _ => match kind {
@@ -719,16 +750,15 @@ fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {
         },
     };
 
-    let proto_off = mem::size_of::<SocketFdInfoPrefix>();
-    if (result as usize) < proto_off + mem::size_of::<InSockInfo>() {
+    if written < soi_proto_off + mem::size_of::<InSockInfo>() {
         return Err(SysprimsError::internal("socket proto truncated"));
     }
-    let proto_ptr = unsafe { buf.as_ptr().add(proto_off) };
+    let proto_ptr = unsafe { buf.as_ptr().add(soi_proto_off) };
 
     let (local_addr, local_port) = unsafe {
         match kind {
             SOCKINFO_TCP => {
-                if (result as usize) < proto_off + mem::size_of::<TcpSockInfo>() {
+                if written < soi_proto_off + mem::size_of::<TcpSockInfo>() {
                     return Err(SysprimsError::internal("tcp sockinfo truncated"));
                 }
                 let tcp: TcpSockInfo = std::ptr::read_unaligned(proto_ptr as *const TcpSockInfo);
