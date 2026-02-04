@@ -6,6 +6,86 @@
 
 ---
 
+## v0.1.11 - 2026-02-04
+
+**Status:** macOS Port Discovery & Bun Runtime Support Release
+
+Fixes `listeningPorts()` returning empty results on macOS, adds a new `ports` CLI command, and enables Bun runtime support for TypeScript bindings.
+
+### Highlights
+
+- **macOS Port Discovery Fixed**: `listeningPorts()` now works on macOS (was returning empty)
+- **New CLI Command**: `sysprims ports` for listing listening port bindings
+- **Bun Runtime Support**: TypeScript bindings now work under Bun
+
+### New CLI Command: `sysprims ports`
+
+List listening port bindings with optional filtering:
+
+```bash
+# Table output for human inspection
+sysprims ports --table
+
+# Filter by protocol
+sysprims ports --protocol tcp --table
+
+# Filter by specific port (JSON output)
+sysprims ports --protocol tcp --local-port 8080 --json
+```
+
+Output includes full process details (name, PID, exe_path, cmdline, user).
+
+### macOS Port Discovery Fix
+
+The `listeningPorts()` function was returning empty results on macOS due to SDK struct layout mismatches in socket fdinfo parsing. This release fixes the issue:
+
+**Before (v0.1.10):**
+```
+Found 0 bindings
+```
+
+**After (v0.1.11):**
+```
+Found 68 bindings
+  tcp *:9999 -> pid=54659 (bun)
+  tcp 127.0.0.1:8080 -> pid=40672 (namelens)
+  ...
+```
+
+**Technical changes:**
+- UID filtering: scans current-user processes only (reduces SIP/TCC permission errors)
+- Heuristic vinfo_stat size detection (136/144 bytes) for SDK compatibility
+- Offset-based parsing instead of fixed struct layout
+- Strict TCP listener filtering (`TSI_S_LISTEN` state only)
+
+### Bun Runtime Support
+
+TypeScript bindings now work under Bun. The explicit Bun block has been removed:
+
+```typescript
+// REMOVED in v0.1.11:
+if (process.versions?.bun) {
+  throw new Error("sysprims TypeScript bindings are not yet validated on Bun...");
+}
+```
+
+Validated functionality under Bun:
+
+| Feature | Status |
+|---------|--------|
+| Module loading | Works |
+| `procGet()` | Works |
+| `terminate()` | Works |
+| `listeningPorts()` | Works (with macOS fix) |
+
+### Upgrade Notes
+
+- No breaking changes
+- macOS users will now see port bindings that were previously invisible
+- Bun users can use sysprims directly without workarounds
+
+---
+
 ## v0.1.10 - 2026-02-03
 
 **Status:** Go Shared Library Mode Polish Release
@@ -266,104 +346,5 @@ go test -tags="musl,sysprims_shared" ./...
 
 Shared libraries use rpath for runtime resolution and are validated in CI via Alpine containers for musl support.
 
----
-
-## v0.1.8 - 2026-01-29
-
-**Status:** CLI Tree Termination Release
-
-This release adds the `terminate-tree` CLI subcommand for safe, structured termination of existing process trees. Combined with enhanced `pstat` sampling, sysprims now provides a complete workflow for diagnosing and cleaning up runaway processes.
-
-### Highlights
-
-- **`sysprims terminate-tree`**: Terminate process trees with graceful-then-kill escalation
-- **PID Reuse Protection**: `--require-start-time-ms` and `--require-exe-path` guards
-- **CLI Safety**: Refuses to terminate PID 1, self, or parent without `--force`
-- **`pstat` Sampling**: `--sample` and `--top` flags for "what's burning CPU" investigation
-
-### New CLI Commands
-
-#### `sysprims terminate-tree`
-
-Terminate an existing process tree by PID:
-
-```bash
-# Basic usage
-sysprims terminate-tree 26021
-
-# With PID reuse protection (recommended for automation)
-sysprims terminate-tree 26021 \
-  --require-exe-path "/Applications/VSCodium.app/Contents/MacOS/Electron" \
-  --require-start-time-ms 1769432792261
-
-# JSON output for scripting
-sysprims terminate-tree 26021 --json
-```
-
-Output (JSON):
-
-```json
-{
-  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json",
-  "pid": 26021,
-  "pgid": 26021,
-  "signal_sent": 15,
-  "escalated": false,
-  "exited": true,
-  "tree_kill_reliability": "guaranteed"
-}
-```
-
-Options:
-
-| Option | Description |
-|--------|-------------|
-| `--grace <DURATION>` | Grace period before escalation (default: 5s) |
-| `--kill-after <DURATION>` | Send kill signal if still running (default: 10s) |
-| `--signal <SIGNAL>` | Grace period signal (default: TERM) |
-| `--kill-signal <SIGNAL>` | Forced termination signal (default: KILL) |
-| `--require-start-time-ms <MS>` | Refuse if PID start time doesn't match |
-| `--require-exe-path <PATH>` | Refuse if PID exe path doesn't match |
-| `--force` | Override safety checks (PID 1, self, parent) |
-| `--json` | Output as JSON |
-
-#### `pstat` Sampling Enhancements
-
-Find processes consuming CPU right now:
-
-```bash
-# Sample CPU over 250ms, show top 5
-sysprims pstat --sample 250ms --top 5 --sort cpu --table
-
-# Find VSCodium helpers burning CPU
-sysprims pstat --name "VSCodium Helper" --sample 500ms --cpu-above 50 --json
-```
-
-### Surgical vs Tree Termination
-
-The [runaway process diagnosis guide](docs/guides/runaway-process-diagnosis.md) documents two approaches:
-
-**Option A: Surgical Strike** (try first)
-```bash
-sysprims kill 8436 -s TERM   # or -s KILL if ignored
-```
-- Kills individual helpers while preserving parent windows
-- SIGTERM may be ignored by runaway processes; escalate to SIGKILL
-
-**Option B: Tree Termination** (if surgical fails)
-```bash
-sysprims terminate-tree 26021 --require-exe-path "..."
-```
-- Terminates parent and all descendants
-- Closes all windows managed by that process
-
-### Documentation
-
-- **Guide**: `docs/guides/runaway-process-diagnosis.md`
-  - Real-world walkthrough with VSCodium/Electron plugin helper scenario
-  - Investigation workflow using `pstat` and `fds`
-  - Decision framework for surgical vs tree termination
-
----
 ---
 

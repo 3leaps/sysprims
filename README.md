@@ -121,6 +121,12 @@ sysprims fds --pid 1234 --table
 
 # Filter file descriptors by type
 sysprims fds --pid 1234 --kind socket --json
+
+# List listening ports
+sysprims ports --table
+
+# Filter by protocol and port
+sysprims ports --protocol tcp --local-port 8080 --json
 ```
 
 ### Exit Codes
@@ -274,6 +280,7 @@ See [Platform Support Matrix](docs/standards/platform-support.md) for the canoni
 | Signal INT | Native | Native | Best-effort |
 | Signal HUP/USR1/2 | Native | Native | Not supported |
 | Process enumeration | /proc | libproc | Toolhelp32 |
+| Port enumeration | /proc/net/* | libproc (current user) | Not yet |
 
 ## FFI and Language Bindings
 

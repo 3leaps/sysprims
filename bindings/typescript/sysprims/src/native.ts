@@ -21,13 +21,6 @@ function bindingIdForRuntime(): string {
   const platform = process.platform;
   const arch = process.arch;
 
-  if ((process as unknown as { versions?: { bun?: string } }).versions?.bun) {
-    throw new Error(
-      "sysprims TypeScript bindings are not yet validated on Bun. " +
-        "Run under Node.js or add a fallback path for Bun.",
-    );
-  }
-
   if (platform === "darwin") {
     if (arch !== "arm64") {
       throw new Error(

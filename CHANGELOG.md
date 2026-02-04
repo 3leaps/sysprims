@@ -10,6 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-02-04
+
+macOS port discovery and Bun runtime support release. Fixes `listeningPorts()` returning empty results on macOS and adds a new `ports` CLI command.
+
+### Added
+
+- **CLI: `sysprims ports`** (`sysprims-cli`)
+  - List listening port bindings with optional filtering
+  - Filter by protocol: `--protocol tcp|udp`
+  - Filter by port: `--local-port 8080`
+  - Output formats: `--json` (default) or `--table`
+  - Includes full process info (name, PID, exe_path, cmdline)
+
+### Fixed
+
+- **macOS: `listeningPorts()` Reliability** (`sysprims-proc`)
+  - Fixed socket fdinfo parsing that was failing due to SDK struct layout mismatch
+  - Now correctly discovers TCP listeners on macOS (was returning empty results)
+  - Added UID filtering to scan current-user processes only (reduces SIP/TCC noise)
+  - Heuristic vinfo_stat size detection (136/144 bytes) for SDK compatibility
+  - Offset-based parsing instead of fixed struct layout (future-proof)
+  - Strict TCP listener filtering (`TSI_S_LISTEN` state only)
+
+### Changed
+
+- **TypeScript Bindings: Bun Runtime Support** (`bindings/typescript/sysprims/`)
+  - Removed explicit Bun runtime block that threw an error on load
+  - Bun's N-API compatibility is now leveraged directly
+  - Core functionality validated: `procGet()`, `terminate()`, `listeningPorts()`
+
+### Notes
+
+- macOS port discovery now works for current-user processes; other users' processes are filtered with warnings
+- Bun support validated by kitfly team before release
+
 ## [0.1.10] - 2026-02-03
 
 Fast-follow polish release improving Go shared-library mode developer experience and clarifying multi-Rust FFI collision guidance.
@@ -390,7 +425,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/3leaps/sysprims/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/3leaps/sysprims/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/3leaps/sysprims/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/3leaps/sysprims/compare/v0.1.7...v0.1.8
