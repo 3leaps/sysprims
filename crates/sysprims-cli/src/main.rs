@@ -7,8 +7,8 @@ use sysprims_core::{
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
 use sysprims_proc::{
-    cpu_total_time_ns, get_process, list_fds, snapshot, snapshot_filtered, FdFilter, FdKind,
-    ProcessFilter,
+    cpu_total_time_ns, get_process, list_fds, listening_ports, snapshot, snapshot_filtered,
+    FdFilter, FdKind, PortFilter, ProcessFilter, Protocol,
 };
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
@@ -57,6 +57,9 @@ enum Command {
 
     /// List open file descriptors for a process.
     Fds(FdsArgs),
+
+    /// List listening port bindings.
+    Ports(PortsArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -264,6 +267,40 @@ struct FdsArgs {
     kind: Option<FdKindArg>,
 }
 
+#[derive(Parser, Debug)]
+struct PortsArgs {
+    /// Output as JSON.
+    #[arg(long)]
+    json: bool,
+
+    /// Output as human-readable table.
+    #[arg(long, conflicts_with = "json")]
+    table: bool,
+
+    /// Filter by protocol.
+    #[arg(long, value_enum, value_name = "PROTO")]
+    protocol: Option<ProtocolArg>,
+
+    /// Filter by local port.
+    #[arg(long, value_name = "PORT")]
+    local_port: Option<u16>,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+enum ProtocolArg {
+    Tcp,
+    Udp,
+}
+
+impl From<ProtocolArg> for Protocol {
+    fn from(value: ProtocolArg) -> Self {
+        match value {
+            ProtocolArg::Tcp => Protocol::Tcp,
+            ProtocolArg::Udp => Protocol::Udp,
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
 enum FdKindArg {
     File,
@@ -340,6 +377,7 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
             Ok(0)
         }
         Command::Fds(args) => run_fds(args),
+        Command::Ports(args) => run_ports(args),
     }
 }
 
@@ -989,6 +1027,82 @@ fn print_fd_table(fds: &[sysprims_proc::FdInfo]) {
     }
 }
 
+// ============================================================================
+// Ports command
+// ============================================================================
+
+fn protocol_str(p: Protocol) -> &'static str {
+    match p {
+        Protocol::Tcp => "tcp",
+        Protocol::Udp => "udp",
+    }
+}
+
+fn format_local_addr_port(addr: Option<std::net::IpAddr>, port: u16) -> String {
+    match addr {
+        Some(std::net::IpAddr::V4(a)) => format!("{}:{}", a, port),
+        Some(std::net::IpAddr::V6(a)) => format!("[{}]:{}", a, port),
+        None => format!("*:{}", port),
+    }
+}
+
+fn run_ports(args: PortsArgs) -> Result<i32, SysprimsError> {
+    let filter = PortFilter {
+        protocol: args.protocol.map(Into::into),
+        local_port: args.local_port,
+    };
+
+    let snapshot = if filter.protocol.is_some() || filter.local_port.is_some() {
+        listening_ports(Some(&filter))?
+    } else {
+        listening_ports(None)?
+    };
+
+    if args.table {
+        print_ports_table(&snapshot.bindings);
+        for w in snapshot.warnings {
+            eprintln!("Warning: {w}");
+        }
+        return Ok(0);
+    }
+
+    // Default to JSON
+    println!("{}", serde_json::to_string_pretty(&snapshot).unwrap());
+    Ok(0)
+}
+
+fn print_ports_table(bindings: &[sysprims_proc::PortBinding]) {
+    println!(
+        "{:>5} {:<22} {:<8} {:>7} NAME",
+        "PROTO", "LOCAL", "STATE", "PID"
+    );
+    println!("{:-<80}", "");
+
+    if bindings.is_empty() {
+        println!("(no visible listening ports)");
+        return;
+    }
+
+    for b in bindings {
+        let local = format_local_addr_port(b.local_addr, b.local_port);
+        let state = b.state.as_deref().unwrap_or("-");
+        let pid = b
+            .pid
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let name = b.process.as_ref().map(|p| p.name.as_str()).unwrap_or("-");
+
+        println!(
+            "{:>5} {:<22} {:<8} {:>7} {}",
+            protocol_str(b.protocol),
+            truncate(&local, 22),
+            truncate(state, 8),
+            pid,
+            truncate(name, 32)
+        );
+    }
+}
+
 /// Sort processes by the specified field.
 fn sort_processes(processes: &mut [sysprims_proc::ProcessInfo], field: &str) {
     match field.to_lowercase().as_str() {
@@ -1104,5 +1218,27 @@ mod tests {
         };
         assert_eq!(args.pid, 1234);
         assert!(matches!(args.kind, Some(FdKindArg::Socket)));
+    }
+
+    #[test]
+    fn ports_parses_protocol_and_port() {
+        let cli = Cli::try_parse_from([
+            "sysprims",
+            "ports",
+            "--protocol",
+            "tcp",
+            "--local-port",
+            "8080",
+            "--table",
+        ])
+        .unwrap();
+        let Command::Ports(args) = cli.command.unwrap() else {
+            panic!("expected ports command");
+        };
+
+        assert!(args.table);
+        assert!(!args.json);
+        assert!(matches!(args.protocol, Some(ProtocolArg::Tcp)));
+        assert_eq!(args.local_port, Some(8080));
     }
 }
