@@ -159,8 +159,23 @@ struct TcpSockInfo {
 }
 
 #[repr(C)]
-struct SocketInfo {
-    soi_stat: [u8; 144],
+#[derive(Debug, Clone, Copy)]
+struct SockbufInfo {
+    sbi_cc: u32,
+    sbi_hiwat: u32,
+    sbi_mbcnt: u32,
+    sbi_mbmax: u32,
+    sbi_lowat: u32,
+    sbi_flags: i16,
+    sbi_timeo: i16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct SocketInfoPrefix {
+    // Size of struct vinfo_stat (as used in struct socket_info) varies across SDKs.
+    // On modern macOS SDKs this is 136 bytes.
+    soi_stat: [u8; 136],
     soi_so: u64,
     soi_pcb: u64,
     soi_type: i32,
@@ -175,28 +190,17 @@ struct SocketInfo {
     soi_timeo: i16,
     soi_error: u16,
     soi_oobmark: u32,
-    soi_rcv: [u8; 24],
-    soi_snd: [u8; 24],
+    soi_rcv: SockbufInfo,
+    soi_snd: SockbufInfo,
     soi_kind: i32,
     rfu_1: u32,
-    soi_proto: SocketProto,
 }
 
 #[repr(C)]
-union SocketProto {
-    pri_in: InSockInfo,
-    pri_tcp: TcpSockInfo,
-    pri_un: [u8; 106],
-    pri_ndrv: [u8; 16],
-    pri_kern_event: [u8; 12],
-    pri_kern_ctl: [u8; 68],
-    pri_vsock: [u8; 40],
-}
-
-#[repr(C)]
-struct SocketFdInfo {
+#[derive(Debug, Clone, Copy)]
+struct SocketFdInfoPrefix {
     pfi: ProcFileInfo,
-    psi: SocketInfo,
+    psi: SocketInfoPrefix,
 }
 
 /// Task info structure returned by proc_pidinfo with PROC_PIDTASKINFO
@@ -350,17 +354,56 @@ pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
     let mut bindings = Vec::new();
     let mut permission_denied = 0usize;
     let mut read_errors = 0usize;
+    let mut skipped_other_user = 0usize;
+    let mut socket_permission_denied = 0usize;
+    let mut socket_read_errors = 0usize;
+    let mut socket_unsupported = 0usize;
+    let mut socket_missing_port = 0usize;
+
+    let current_uid = unsafe { libc::geteuid() };
 
     for pid in pids {
         if pid <= 0 {
             continue;
         }
 
+        // Filter to current UID to reduce SIP/TCC noise and improve performance.
+        // This still includes "self" and is the most useful view for typical tooling.
+        match get_bsd_info(pid as u32) {
+            Ok(bsd) => {
+                if bsd.pbi_uid != current_uid {
+                    skipped_other_user += 1;
+                    continue;
+                }
+            }
+            Err(SysprimsError::PermissionDenied { .. }) => {
+                permission_denied += 1;
+                continue;
+            }
+            Err(_) => {
+                read_errors += 1;
+                continue;
+            }
+        }
+
         match list_socket_fds(pid) {
             Ok(fds) => {
                 for fd in fds {
-                    if let Ok(binding) = read_socket_binding(pid, fd) {
-                        bindings.push(binding);
+                    match read_socket_binding(pid, fd) {
+                        Ok(binding) => bindings.push(binding),
+                        Err(SysprimsError::PermissionDenied { .. }) => {
+                            socket_permission_denied += 1
+                        }
+                        Err(SysprimsError::Internal { message }) => {
+                            if message.contains("unsupported socket") {
+                                socket_unsupported += 1;
+                            } else if message.contains("no local port") {
+                                socket_missing_port += 1;
+                            } else {
+                                socket_read_errors += 1;
+                            }
+                        }
+                        Err(_) => socket_read_errors += 1,
                     }
                 }
             }
@@ -372,11 +415,44 @@ pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
     }
 
     let mut warnings = Vec::new();
+
+    warnings.push(format!(
+        "macos port bindings are best-effort; scanning current user processes only (uid={})",
+        current_uid
+    ));
+
+    if skipped_other_user > 0 {
+        warnings.push(format!(
+            "Skipped {} pid entries owned by other users",
+            skipped_other_user
+        ));
+    }
+
     if let Some(warning) = aggregate_permission_warning(permission_denied, "pid entries") {
         warnings.push(warning);
     }
     if let Some(warning) = aggregate_error_warning(read_errors, "pid entries") {
         warnings.push(warning);
+    }
+
+    if let Some(warning) = aggregate_permission_warning(socket_permission_denied, "socket entries")
+    {
+        warnings.push(warning);
+    }
+    if let Some(warning) = aggregate_error_warning(socket_read_errors, "socket entries") {
+        warnings.push(warning);
+    }
+    if socket_unsupported > 0 {
+        warnings.push(format!(
+            "Skipped {} socket entries due to unsupported socket kinds",
+            socket_unsupported
+        ));
+    }
+    if socket_missing_port > 0 {
+        warnings.push(format!(
+            "Skipped {} socket entries with no local port",
+            socket_missing_port
+        ));
     }
 
     Ok(make_port_snapshot(bindings, warnings))
@@ -590,14 +666,19 @@ pub fn list_fds_impl(pid: u32) -> SysprimsResult<(Vec<FdInfo>, Vec<String>)> {
 }
 
 fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {
-    let mut info: SocketFdInfo = unsafe { mem::zeroed() };
-    let size = mem::size_of::<SocketFdInfo>() as c_int;
+    // Don't model the full socket_fdinfo union layout directly; it contains large
+    // members (e.g. unix domain socket addresses) and an undersized model can
+    // cause proc_pidfdinfo() to fail with EINVAL.
+    //
+    // Instead, request a generously sized buffer and parse the fixed prefix.
+    let mut buf = [0u8; 2048];
+    let size = buf.len() as c_int;
     let result = unsafe {
         proc_pidfdinfo(
             pid,
             fd,
             PROC_PIDFDSOCKETINFO,
-            &mut info as *mut _ as *mut c_void,
+            buf.as_mut_ptr() as *mut c_void,
             size,
         )
     };
@@ -613,31 +694,75 @@ fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {
         return Err(SysprimsError::internal("proc_pidfdinfo socket failed"));
     }
 
-    let protocol = match info.psi.soi_kind {
-        SOCKINFO_TCP => Protocol::Tcp,
-        SOCKINFO_IN => Protocol::Udp,
-        _ => {
-            return Err(SysprimsError::internal(
-                "unsupported socket kind for port bindings",
-            ))
-        }
+    if (result as usize) < mem::size_of::<SocketFdInfoPrefix>() {
+        return Err(SysprimsError::internal("socket fdinfo truncated"));
+    }
+
+    let prefix: SocketFdInfoPrefix =
+        unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const SocketFdInfoPrefix) };
+
+    let kind = prefix.psi.soi_kind;
+
+    // Determine protocol using socket_info.soi_protocol where possible.
+    // This is more robust than relying solely on soi_kind.
+    let protocol = match prefix.psi.soi_protocol {
+        x if x == libc::IPPROTO_TCP => Protocol::Tcp,
+        x if x == libc::IPPROTO_UDP => Protocol::Udp,
+        _ => match kind {
+            SOCKINFO_TCP => Protocol::Tcp,
+            SOCKINFO_IN => Protocol::Udp,
+            _ => {
+                return Err(SysprimsError::internal(
+                    "unsupported socket kind for port bindings",
+                ))
+            }
+        },
     };
 
+    let proto_off = mem::size_of::<SocketFdInfoPrefix>();
+    if (result as usize) < proto_off + mem::size_of::<InSockInfo>() {
+        return Err(SysprimsError::internal("socket proto truncated"));
+    }
+    let proto_ptr = unsafe { buf.as_ptr().add(proto_off) };
+
     let (local_addr, local_port) = unsafe {
-        match protocol {
-            Protocol::Tcp => read_tcp_binding(&info.psi.soi_proto.pri_tcp)?,
-            Protocol::Udp => read_in_binding(&info.psi.soi_proto.pri_in)?,
-        }
+        match kind {
+            SOCKINFO_TCP => {
+                if (result as usize) < proto_off + mem::size_of::<TcpSockInfo>() {
+                    return Err(SysprimsError::internal("tcp sockinfo truncated"));
+                }
+                let tcp: TcpSockInfo = std::ptr::read_unaligned(proto_ptr as *const TcpSockInfo);
+                read_tcp_binding(&tcp)
+            }
+            SOCKINFO_IN => {
+                let inet: InSockInfo = std::ptr::read_unaligned(proto_ptr as *const InSockInfo);
+                read_in_binding(&inet)
+            }
+            _ => Err(SysprimsError::internal(
+                "unsupported socket kind for port bindings",
+            )),
+        }?
     };
 
     if local_port == 0 {
         return Err(SysprimsError::internal("socket has no local port"));
     }
 
-    let state = if protocol == Protocol::Tcp
-        && unsafe { info.psi.soi_proto.pri_tcp.tcpsi_state } == TSI_S_LISTEN
-    {
-        Some("listen".to_string())
+    let state = if protocol == Protocol::Tcp {
+        if kind != SOCKINFO_TCP {
+            // We can't reliably read TCP state from non-TCP socket kinds.
+            return Err(SysprimsError::internal(
+                "tcp socket kind unsupported for listener detection",
+            ));
+        }
+
+        let tcp: TcpSockInfo = unsafe { std::ptr::read_unaligned(proto_ptr as *const TcpSockInfo) };
+        if tcp.tcpsi_state == TSI_S_LISTEN {
+            Some("listen".to_string())
+        } else {
+            // Keep semantics strict: only return listening TCP sockets.
+            return Err(SysprimsError::internal("tcp socket not listening"));
+        }
     } else {
         None
     };

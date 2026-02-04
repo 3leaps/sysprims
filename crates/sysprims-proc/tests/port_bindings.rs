@@ -38,8 +38,19 @@ fn test_listening_ports_self_listener_tcp() {
         .any(|b| b.local_port == port && b.pid == Some(pid));
 
     if !found {
+        // On macOS, the current process should be introspectable without special privileges.
+        // If we can't see our own listener, treat as a bug.
+        if cfg!(target_os = "macos") {
+            panic!(
+                "Did not find self listener pid={} port={}; warnings={:?} bindings={}",
+                pid,
+                port,
+                snapshot.warnings,
+                snapshot.bindings.len()
+            );
+        }
+
         // Best-effort: socket introspection can be limited by permissions:
-        // - macOS: SIP/TCC can block even for same-user processes
         // - Linux: /proc/<pid>/fd requires root or same-user for inode->pid mapping
         // - Windows: unprivileged users may have limited netstat access
         //
@@ -49,7 +60,7 @@ fn test_listening_ports_self_listener_tcp() {
             .iter()
             .any(|w| w.contains("permission") || w.contains("Permission"));
 
-        if cfg!(target_os = "macos") || has_permission_warnings {
+        if has_permission_warnings {
             eprintln!(
                 "Did not find self listener pid={} port={}; warnings={:?} bindings={} (best-effort: permission-limited)",
                 pid,
