@@ -1,7 +1,6 @@
-import { SysprimsError, SysprimsErrorCode } from "./errors";
-
 import fs from "node:fs";
 import path from "node:path";
+import { SysprimsError, SysprimsErrorCode } from "./errors";
 
 import { loadNativeBinding } from "./native";
 

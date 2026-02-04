@@ -6,17 +6,17 @@ import test from "node:test";
 import {
   forceKill,
   listeningPorts,
+  listFds,
   processList,
   procGet,
-  listFds,
   SysprimsError,
   SysprimsErrorCode,
   selfPGID,
   selfSID,
-  terminate,
-  waitPID,
-  terminateTree,
   spawnInGroup,
+  terminate,
+  terminateTree,
+  waitPID,
 } from "../src/index";
 
 // -----------------------------------------------------------------------------
@@ -207,9 +207,7 @@ test("terminateTree kills a spawned child process", async () => {
 test("spawnInGroup returns a pid", () => {
   // This is a smoke test; we terminate via terminateTree to avoid leaking processes.
   const argv =
-    process.platform === "win32"
-      ? ["cmd", "/C", "ping -n 60 127.0.0.1 >NUL"]
-      : ["sleep", "60"];
+    process.platform === "win32" ? ["cmd", "/C", "ping -n 60 127.0.0.1 >NUL"] : ["sleep", "60"];
   const r = spawnInGroup({ argv });
   assert.ok(r.pid > 0);
   terminateTree(r.pid, { grace_timeout_ms: 100, kill_timeout_ms: 1000 });

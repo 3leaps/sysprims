@@ -10,11 +10,11 @@ import type {
   ProcessFilter,
   ProcessInfo,
   ProcessSnapshot,
-  WaitPidResult,
-  TerminateTreeConfig,
-  TerminateTreeResult,
   SpawnInGroupConfig,
   SpawnInGroupResult,
+  TerminateTreeConfig,
+  TerminateTreeResult,
+  WaitPidResult,
 } from "./types";
 
 export { SysprimsError, SysprimsErrorCode };
@@ -31,11 +31,11 @@ export type {
   ProcessSnapshot,
   ProcessState,
   Protocol,
-  WaitPidResult,
-  TerminateTreeConfig,
-  TerminateTreeResult,
   SpawnInGroupConfig,
   SpawnInGroupResult,
+  TerminateTreeConfig,
+  TerminateTreeResult,
+  WaitPidResult,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -380,8 +380,8 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
     ...config,
   };
 
-  return callJsonReturn(
-    () => lib.sysprimsTerminateTree(pid >>> 0, JSON.stringify(cfg)),
+  return callJsonReturn(() =>
+    lib.sysprimsTerminateTree(pid >>> 0, JSON.stringify(cfg)),
   ) as TerminateTreeResult;
 }
 
