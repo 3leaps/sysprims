@@ -36,7 +36,13 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 ### Scope Control (Recommended)
 
 - [ ] Confirm release scope is intentional and minimal.
-  - For v0.1.7: keep scope to the TypeScript Node-API bindings rollout only (no extra refactors).
+   - For v0.1.7: keep scope to TypeScript Node-API bindings rollout only (no extra refactors).
+
+### Pre-Tag Verification
+
+- [ ] **Run preflight checks**: `make release-preflight`
+  - Validates: working tree clean, prepush checks pass, version synced, release notes exist, local/remote sync
+  - **Must pass before tagging**
 
 ### Commit & Tag
 
@@ -276,6 +282,7 @@ git push origin main
 
 | Target | Description |
 |--------|-------------|
+| `make release-preflight` | **REQUIRED**: Verify pre-tag requirements (tree, checks, version, notes, sync) |
 | `make release-clean` | Remove dist/release contents |
 | `make release-download` | Download CI artifacts from GitHub |
 | `make release-checksums` | Generate SHA256SUMS and SHA512SUMS |

@@ -2,6 +2,7 @@
 
 ## Release Checklist
 
+- [ ] **Run preflight**: `make release-preflight` (REQUIRED before tagging)
 - [ ] All CI green on Linux/macOS/Windows
 - [ ] Changelog updated
 - [ ] Schema versions updated if needed (meta-validated)

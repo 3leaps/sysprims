@@ -17,7 +17,7 @@
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
-.PHONY: release-verify-keys release-notes release-upload
+.PHONY: release-verify-keys release-notes release-upload release-preflight
 .PHONY: version-patch version-minor version-major version-set
 
 # -----------------------------------------------------------------------------
@@ -87,6 +87,7 @@ help: ## Show available targets
 	@echo "  msrv            Verify build with MSRV (Rust 1.81)"
 	@echo ""
 	@echo "Release (manual signing workflow):"
+	@echo "  release-preflight     Verify all pre-tag requirements (REQUIRED before tagging)"
 	@echo "  release-download      Download CI artifacts from GitHub"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
@@ -653,6 +654,59 @@ release-notes: ## Copy release notes to dist
 
 release-upload: release-verify release-notes ## Upload signed artifacts to GitHub release
 	./scripts/upload-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
+
+release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
+	@echo "Running release preflight checks..."
+	@echo ""
+	@# Check 1: Working tree must be clean
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
+		echo "[!!] Working tree not clean - commit or stash changes first"; \
+		git status --short; \
+		exit 1; \
+	fi
+	@echo "[ok] Working tree is clean"
+	@# Check 2: Prepush quality gates
+	@$(MAKE) prepush --silent
+	@echo "[ok] Prepush checks passed"
+	@# Check 3: Version sync
+	@version_file=$$(cat $(VERSION_FILE) 2>/dev/null); \
+	if [ -z "$$version_file" ]; then \
+		echo "[!!] VERSION file not found"; \
+		exit 1; \
+	fi; \
+	cargo_version=$$(grep '^\[workspace\.package\]' Cargo.toml -A 2 | grep '^version' | head -1 | sed 's/version = "\(.*\)"/\1/' | tr -d '"'); \
+	if [ "$$version_file" != "$$cargo_version" ]; then \
+		echo "[!!] Version mismatch: VERSION=$$version_file, Cargo.toml=$$cargo_version"; \
+		echo "    Run: make version-sync"; \
+		exit 1; \
+	fi
+	@echo "[ok] Version synced: $$version_file"
+	@# Check 4: Release notes exist
+	@release_notes="docs/releases/$$version_file.md"; \
+	if [ ! -f "$$release_notes" ]; then \
+		echo "[!!] Release notes not found at $$release_notes"; \
+		exit 1; \
+	fi
+	@echo "[ok] Release notes exist: $$release_notes"
+	@# Check 5: Local/remote sync
+	@echo "[..] Verifying local/remote sync..."; \
+	git fetch origin >/dev/null 2>&1; \
+	local_only=$$(git log --oneline origin/main..HEAD 2>/dev/null | wc -l | tr -d ' '); \
+	remote_only=$$(git log --oneline HEAD..origin/main 2>/dev/null | wc -l | tr -d ' '); \
+	if [ "$$local_only" -gt 0 ] || [ "$$remote_only" -gt 0 ]; then \
+		echo "[!!] Local and remote are out of sync"; \
+		if [ "$$local_only" -gt 0 ]; then \
+			echo "    $$local_only local commit(s) not pushed"; \
+		fi; \
+		if [ "$$remote_only" -gt 0 ]; then \
+			echo "    $$remote_only remote commit(s) not pulled"; \
+		fi; \
+		exit 1; \
+	fi
+	@echo "[ok] Local and remote are in sync"
+	@echo ""
+	@echo "[ok] All preflight checks passed - ready to tag"
+	@echo "    Next: git tag \"v$$version_file\" -m \"Release $$version_file\""
 
 release: release-clean release-download release-checksums release-sign release-export-keys release-upload ## Full release workflow (after CI build)
 	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) complete"

@@ -19,5 +19,6 @@ These guides are intended for:
 ## Related Documentation
 
 - [Release Checklist](../RELEASE_CHECKLIST.md) - Step-by-step release process
+- [Makefile Quick Reference](../../Makefile) - `make help` shows all targets including `release-preflight`
 - [Platform Support](../standards/platform-support.md) - Supported platforms matrix
 - [Language Bindings Guide](../guides/language-bindings.md) - Binding architecture overview
