@@ -12,6 +12,7 @@
       "type": "array",
       "items": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
     },
+    "ppid": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
     "state_in": {
       "type": "array",
       "items": {
@@ -20,6 +21,7 @@
       }
     },
     "cpu_above": { "type": "number", "minimum": 0, "maximum": 100 },
-    "memory_above_kb": { "type": "integer", "minimum": 0 }
+    "memory_above_kb": { "type": "integer", "minimum": 0 },
+    "running_for_at_least_secs": { "type": "integer", "minimum": 0 }
   }
 }

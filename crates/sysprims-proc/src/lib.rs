@@ -42,10 +42,12 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use sysprims_core::schema::{
-    FD_SNAPSHOT_V1, PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
+    DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1, PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1,
+    WAIT_PID_RESULT_V1,
 };
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
@@ -335,6 +337,9 @@ pub struct ProcessFilter {
     /// Filter to specific PIDs.
     pub pid_in: Option<Vec<u32>>,
 
+    /// Filter by parent PID.
+    pub ppid: Option<u32>,
+
     /// Filter by process state.
     pub state_in: Option<Vec<ProcessState>>,
 
@@ -343,6 +348,11 @@ pub struct ProcessFilter {
 
     /// Filter by minimum memory usage in KB.
     pub memory_above_kb: Option<u64>,
+
+    /// Filter by minimum process age in seconds.
+    ///
+    /// Uses `elapsed_seconds` (best-effort, already cross-platform).
+    pub running_for_at_least_secs: Option<u64>,
 }
 
 impl ProcessFilter {
@@ -441,6 +451,13 @@ impl ProcessFilter {
             }
         }
 
+        // Parent PID
+        if let Some(ppid) = self.ppid {
+            if proc.ppid != ppid {
+                return false;
+            }
+        }
+
         // State in list
         if let Some(ref states) = self.state_in {
             if !states.contains(&proc.state) {
@@ -458,6 +475,13 @@ impl ProcessFilter {
         // Memory above threshold
         if let Some(threshold) = self.memory_above_kb {
             if proc.memory_kb < threshold {
+                return false;
+            }
+        }
+
+        // Process age (minimum elapsed seconds)
+        if let Some(min_secs) = self.running_for_at_least_secs {
+            if proc.elapsed_seconds < min_secs {
                 return false;
             }
         }
@@ -642,6 +666,145 @@ pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
     }
     platform::get_process_impl(pid)
+}
+
+// ============================================================================
+// Descendants API
+// ============================================================================
+
+/// A single level in a descendants result.
+#[derive(Debug, Clone, Serialize)]
+pub struct DescendantsLevel {
+    /// Depth level (1 = direct children, 2 = grandchildren, etc.).
+    pub level: u32,
+
+    /// Processes at this level.
+    pub processes: Vec<ProcessInfo>,
+}
+
+/// Result of a descendants traversal.
+#[derive(Debug, Clone, Serialize)]
+pub struct DescendantsResult {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+
+    /// Root PID that was traversed from.
+    pub root_pid: u32,
+
+    /// Maximum depth that was requested.
+    pub max_levels: u32,
+
+    /// Processes grouped by depth level.
+    pub levels: Vec<DescendantsLevel>,
+
+    /// Total number of descendant processes found (before filtering).
+    pub total_found: usize,
+
+    /// Number of processes matching the filter (after filtering).
+    pub matched_by_filter: usize,
+
+    /// Timestamp (ISO 8601).
+    pub timestamp: String,
+
+    /// Platform identifier.
+    pub platform: &'static str,
+}
+
+/// Get descendants of a process using BFS traversal.
+///
+/// Performs a single snapshot and builds a parent→children map, then traverses
+/// from `root_pid` up to `max_levels` deep. An optional filter is applied to
+/// the results after traversal.
+///
+/// # Arguments
+///
+/// * `root_pid` - PID to start traversal from (must exist).
+/// * `max_levels` - Maximum depth (1 = children only, u32::MAX = all).
+/// * `filter` - Optional filter applied to descendant processes.
+///
+/// # Safety
+///
+/// Validates `root_pid` against ADR-0011 forbidden values (0, > i32::MAX).
+pub fn descendants(
+    root_pid: u32,
+    max_levels: u32,
+    filter: Option<&ProcessFilter>,
+) -> SysprimsResult<DescendantsResult> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if root_pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if root_pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            root_pid, MAX_SAFE_PID
+        )));
+    }
+
+    // Verify root exists.
+    let _ = get_process(root_pid)?;
+
+    // Single snapshot for consistent traversal.
+    let snap = snapshot()?;
+
+    // Build parent → children map.
+    let mut children_map: HashMap<u32, Vec<ProcessInfo>> = HashMap::new();
+    for proc in snap.processes {
+        children_map.entry(proc.ppid).or_default().push(proc);
+    }
+
+    // BFS traversal.
+    let mut levels: Vec<DescendantsLevel> = Vec::new();
+    let mut current_pids = vec![root_pid];
+    let mut total_found: usize = 0;
+
+    for depth in 1..=max_levels {
+        let mut level_procs = Vec::new();
+        let mut next_pids = Vec::new();
+
+        for &pid in &current_pids {
+            if let Some(children) = children_map.get(&pid) {
+                for child in children {
+                    level_procs.push(child.clone());
+                    next_pids.push(child.pid);
+                }
+            }
+        }
+
+        if level_procs.is_empty() {
+            break;
+        }
+
+        total_found += level_procs.len();
+        levels.push(DescendantsLevel {
+            level: depth,
+            processes: level_procs,
+        });
+        current_pids = next_pids;
+    }
+
+    // Apply filter if provided.
+    let mut matched_by_filter = total_found;
+    if let Some(f) = filter {
+        for level in &mut levels {
+            level.processes.retain(|p| f.matches(p));
+        }
+        matched_by_filter = levels.iter().map(|l| l.processes.len()).sum();
+        // Remove empty levels after filtering.
+        levels.retain(|l| !l.processes.is_empty());
+    }
+
+    Ok(DescendantsResult {
+        schema_id: DESCENDANTS_RESULT_V1,
+        root_pid,
+        max_levels,
+        levels,
+        total_found,
+        matched_by_filter,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+    })
 }
 
 /// Wait for a PID to exit, up to the provided timeout.
