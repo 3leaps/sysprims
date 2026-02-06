@@ -10,6 +10,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-02-06
+
+Process tree operations & enhanced discovery release. Adds process tree traversal with ASCII visualization, surgical subtree termination, age-based filtering, and parent PID filtering.
+
+### Added
+
+- **CLI: `sysprims descendants`** (`sysprims-cli`)
+  - List child processes of a root PID with depth control
+  - ASCII tree visualization with `--tree` flag
+  - Filter by name, user, CPU, memory, age, and parent PID
+  - Depth control via `--max-levels N` (1 = direct children, "all" = full subtree)
+  
+- **CLI: `sysprims kill-descendants`** (`sysprims-cli`)
+  - Send signals to descendants of a process without affecting parent
+  - Same filter options as `descendants`
+  - Safety defaults: preview mode unless `--yes`, excludes parent/self/PID1/root
+  - Force override with `--force` for protected targets
+
+- **CLI: Enhanced `sysprims pstat`** (`sysprims-cli`)
+  - `--ppid <PID>` filter option for parent-based filtering
+  - `--running-for <DURATION>` filter option for age-based filtering
+  - Filter support extended to all existing filter options
+
+- **CLI: Enhanced `sysprims kill`** (`sysprims-cli`)
+  - All filter options (`--ppid`, `--name`, `--user`, `--cpu-above`, `--memory-above`, `--running-for`) now supported
+
+### Fixed
+
+- **Process Filter**: Age-based filtering now works correctly on all platforms
+- **CLI Safety**: `descendants --max-levels` and `kill-descendants` now exclude parent/root/self by default
+- **CLI Feature**: `descendants` accepts "all" keyword for full subtree traversal
+- **Bug**: Parent process included in `kill-descendants` dry-run output (fixed with explicit exclusion)
+- **Security**: Updated `time` crate from 0.3.45 to 0.3.47 (fixes RUSTSEC-2026-0009 DoS via stack exhaustion)
+
+### Changed
+
+- **CLI**: `descendants` output format includes level grouping and matched filter counts
+- **Schema**: Added `ppid` and `running_for_at_least_secs` fields to `process-filter.schema.json`
+- **Schema**: Added `descendants-result.schema.json` for `descendants` command output
+
+---
+
 ## [0.1.11] - 2026-02-04
 
 macOS port discovery and Bun runtime support release. Fixes `listeningPorts()` returning empty results on macOS and adds a new `ports` CLI command.
@@ -425,7 +467,8 @@ Initial release validating CI/CD pipeline and release signing workflow.
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/3leaps/sysprims/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/3leaps/sysprims/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/3leaps/sysprims/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/3leaps/sysprims/compare/v0.1.8...v0.1.9
