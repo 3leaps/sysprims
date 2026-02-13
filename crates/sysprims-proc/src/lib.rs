@@ -952,6 +952,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn test_own_process_has_cmdline() {
+        let snap = snapshot().unwrap();
+        let own_pid = std::process::id();
+        let own_proc = snap
+            .processes
+            .iter()
+            .find(|p| p.pid == own_pid)
+            .expect("Should find own process in snapshot");
+        assert!(
+            !own_proc.cmdline.is_empty(),
+            "Own process should have cmdline, got empty"
+        );
+    }
+
+    #[test]
     fn test_get_self_has_valid_fields() {
         let pid = std::process::id();
         let info = get_process(pid).unwrap();

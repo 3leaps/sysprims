@@ -1,4 +1,4 @@
-//! macOS implementation using libproc
+//! macOS implementation using libproc and sysctl
 //!
 //! Uses the following APIs:
 //! - `proc_listpids()` - enumerate all PIDs
@@ -6,6 +6,7 @@
 //! - `proc_pidinfo()` with `PROC_PIDTASKINFO` - resource info (CPU, memory)
 //! - `proc_name()` - get process name
 //! - `mach_timebase_info()` - convert Mach time units to nanoseconds
+//! - `sysctl(CTL_KERN, KERN_PROCARGS2)` - read process command-line arguments
 
 use crate::{
     aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
@@ -902,12 +903,7 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         _ => ProcessState::Unknown,
     };
 
-    // Get command line (not easily available on macOS, use name)
-    let cmdline = if name.is_empty() {
-        vec![]
-    } else {
-        vec![name.clone()]
-    };
+    let cmdline = read_cmdline(pid);
 
     Ok(ProcessInfo {
         pid,
@@ -922,6 +918,95 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         state,
         cmdline,
     })
+}
+
+/// Read command-line arguments for a process via `sysctl(CTL_KERN, KERN_PROCARGS2)`.
+///
+/// Returns the full argv vector (e.g. `["bun", "run", "scripts/dev.ts", "--root", "/path"]`).
+/// Returns an empty vector if the process doesn't exist, we lack permissions, or parsing fails.
+fn read_cmdline(pid: u32) -> Vec<String> {
+    // Defensive: avoid pid_t overflow / negative semantics via cast.
+    if pid == 0 || pid > i32::MAX as u32 {
+        return Vec::new();
+    }
+
+    let mut mib: [c_int; 3] = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as c_int];
+
+    // First call: query buffer size
+    let mut size: usize = 0;
+    let ret = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ret != 0 || size == 0 {
+        return Vec::new();
+    }
+
+    // Second call: read the data
+    let mut buf: Vec<u8> = vec![0u8; size];
+    let ret = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr() as *mut c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ret != 0 {
+        return Vec::new();
+    }
+    buf.truncate(size);
+
+    // Parse KERN_PROCARGS2 format:
+    //   [argc: i32] [exec_path\0] [padding \0s] [argv[0]\0] [argv[1]\0] ...
+    if buf.len() < mem::size_of::<c_int>() {
+        return Vec::new();
+    }
+
+    // argc is untrusted data from the kernel buffer; cap it to avoid pathological allocations.
+    const MAX_ARGC: i32 = 4096;
+
+    let argc = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if argc <= 0 || argc > MAX_ARGC {
+        return Vec::new();
+    }
+
+    // Skip past exec_path (null-terminated string after argc)
+    let mut pos = mem::size_of::<c_int>();
+    // Scan past the exec_path
+    while pos < buf.len() && buf[pos] != 0 {
+        pos += 1;
+    }
+    // Skip the null terminator and any padding null bytes
+    while pos < buf.len() && buf[pos] == 0 {
+        pos += 1;
+    }
+
+    // Read argc null-terminated argument strings
+    let mut args = Vec::with_capacity(argc as usize);
+    for _ in 0..argc {
+        if pos >= buf.len() {
+            break;
+        }
+        let start = pos;
+        while pos < buf.len() && buf[pos] != 0 {
+            pos += 1;
+        }
+        if start != pos {
+            args.push(String::from_utf8_lossy(&buf[start..pos]).into_owned());
+        }
+        pos += 1; // skip null terminator
+    }
+
+    args
 }
 
 /// Get BSD info for a process.
