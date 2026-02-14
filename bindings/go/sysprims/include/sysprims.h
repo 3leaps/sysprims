@@ -422,6 +422,75 @@ SysprimsErrorCode sysprims_proc_get(uint32_t pid, char **result_json_out);
 SysprimsErrorCode sysprims_proc_wait_pid(uint32_t pid, uint64_t timeout_ms, char **result_json_out);
 
 /**
+ * Get descendants of a process.
+ *
+ * Returns a JSON object matching `descendants-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `root_pid` - PID to traverse descendants from (must be > 0 and <= i32::MAX)
+ * * `max_levels` - Maximum depth (1 = children only, `u32::MAX` = all levels)
+ * * `filter_json` - Optional JSON filter (may be NULL for no filtering)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Filter JSON Format
+ *
+ * Same as `sysprims_proc_list` filter — see `process-filter.schema.json`.
+ *
+ * # Returns
+ *
+ * * `SYSPRIMS_OK` on success
+ * * `SYSPRIMS_ERR_INVALID_ARGUMENT` if root_pid is 0 or filter JSON is invalid
+ * * `SYSPRIMS_ERR_NOT_FOUND` if root process doesn't exist
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_descendants(uint32_t root_pid,
+                                            uint32_t max_levels,
+                                            const char *filter_json,
+                                            char **result_json_out);
+
+/**
+ * Kill descendants of a process.
+ *
+ * Traverses the process tree from `root_pid`, collects descendant PIDs, and
+ * sends the specified signal to each. Safety rules are enforced in this layer:
+ * the root PID, self, PID 1, and parent are excluded from the kill list.
+ *
+ * Returns a JSON object with `schema_id`, `signal_sent`, `succeeded`, `failed`,
+ * and `skipped_safety` fields.
+ *
+ * # Arguments
+ *
+ * * `root_pid` - PID to traverse descendants from
+ * * `max_levels` - Maximum depth (`u32::MAX` = all levels)
+ * * `signal` - Signal number to send (e.g., 15 for SIGTERM)
+ * * `filter_json` - Optional JSON filter (may be NULL)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety Rules (enforced here, not in bindings)
+ *
+ * The following PIDs are always excluded from the kill list:
+ * - The root PID itself (descendants-only)
+ * - The calling process (self)
+ * - PID 1 (init/launchd)
+ * - The calling process's parent
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_kill_descendants(uint32_t root_pid,
+                                                 uint32_t max_levels,
+                                                 int32_t signal,
+                                                 const char *filter_json,
+                                                 char **result_json_out);
+
+/**
  * Get the current process group ID (PGID).
  *
  * On Unix, this calls `getpgid(0)`.
@@ -651,55 +720,5 @@ SysprimsErrorCode sysprims_timeout_run(const struct SysprimsTimeoutConfig *confi
 SysprimsErrorCode sysprims_terminate_tree(uint32_t pid,
                                           const char *config_json,
                                           char **result_json_out);
-
-/**
- * Get descendants of a process.
- *
- * Returns a JSON object matching `descendants-result.schema.json`.
- *
- * # Arguments
- *
- * * `root_pid` - PID to traverse descendants from (must be > 0 and <= i32::MAX)
- * * `max_levels` - Maximum depth (1 = children only, UINT32_MAX = all levels)
- * * `filter_json` - Optional JSON filter (may be NULL for no filtering)
- * * `result_json_out` - Output pointer for result JSON string
- *
- * # Safety
- *
- * * `result_json_out` must be a valid pointer to a `char*`
- * * The result string must be freed with `sysprims_free_string()`
- */
-SysprimsErrorCode sysprims_proc_descendants(uint32_t root_pid,
-                                             uint32_t max_levels,
-                                             const char *filter_json,
-                                             char **result_json_out);
-
-/**
- * Kill descendants of a process.
- *
- * Traverses the process tree from `root_pid`, collects descendant PIDs, and
- * sends the specified signal. Safety rules are enforced: root PID, self, PID 1,
- * and parent are excluded from the kill list.
- *
- * Returns a JSON object with succeeded/failed/skipped_safety fields.
- *
- * # Arguments
- *
- * * `root_pid` - PID to traverse descendants from
- * * `max_levels` - Maximum depth (UINT32_MAX = all levels)
- * * `signal` - Signal number to send (e.g., 15 for SIGTERM)
- * * `filter_json` - Optional JSON filter (may be NULL)
- * * `result_json_out` - Output pointer for result JSON string
- *
- * # Safety
- *
- * * `result_json_out` must be a valid pointer to a `char*`
- * * The result string must be freed with `sysprims_free_string()`
- */
-SysprimsErrorCode sysprims_proc_kill_descendants(uint32_t root_pid,
-                                                  uint32_t max_levels,
-                                                  int32_t signal,
-                                                  const char *filter_json,
-                                                  char **result_json_out);
 
 #endif  /* SYSPRIMS_H */
