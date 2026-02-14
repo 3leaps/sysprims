@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-02-13
+
+macOS command-line fidelity fix and binding coverage expansion.
+
+### Fixed
+
+- **macOS cmdline truncation** (`sysprims-proc`): `processList()` and `pstat` now return the full argument vector on macOS instead of just the process name. Uses `sysctl(CTL_KERN, KERN_PROCARGS2)` to read the actual argv from the kernel. Previously returned `["bun"]` instead of `["bun", "run", "scripts/dev.ts", "--root", "/path"]`, breaking downstream consumers that filter by command-line arguments. Includes PID safety guard, argc cap (4096), and empty-entry filtering.
+
+### Added
+
+- **FFI: `sysprims_proc_descendants()`** and **`sysprims_proc_kill_descendants()`** (`sysprims-ffi`): Exports v0.1.12 process tree capabilities through the C-ABI FFI layer with JSON config/result pattern
+- **Go binding: `Descendants()`** and **`KillDescendants()`** (`bindings/go`): Process tree traversal and targeted subtree termination with option pattern
+- **TypeScript binding: `descendants()`** and **`killDescendants()`** (`bindings/typescript`): N-API native addon for process tree operations
+- **Role: `deliverylead`** (`config/agentic/roles/`): Delivery coordination role for readiness assessments and release gating
+
+### Changed
+
+- **Co-Authored-By email policy**: All AI model trailers now use `noreply@3leaps.net` to prevent third-party email squatting on GitHub contributor attribution
+
 ## [0.1.12] - 2026-02-06
 
 Process tree operations & enhanced discovery release. Adds process tree traversal with ASCII visualization, surgical subtree termination, age-based filtering, and parent PID filtering.
