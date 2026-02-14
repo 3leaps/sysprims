@@ -116,6 +116,9 @@ sysprims pstat --json
 # List processes with filters and table output
 sysprims pstat --name nginx --cpu-above 5 --table
 
+# Find actively high-CPU processes (Activity Monitor style)
+sysprims pstat --cpu-mode monitor --sample "5s" --cpu-above 80 --table
+
 # Inspect open file descriptors for a process
 sysprims fds --pid 1234 --table
 
@@ -127,6 +130,60 @@ sysprims ports --table
 
 # Filter by protocol and port
 sysprims ports --protocol tcp --local-port 8080 --json
+```
+
+### Common Patterns
+
+#### Finding Runaway/High-CPU Processes
+
+The default CPU measurement (`--cpu-mode lifetime`) takes an instantaneous snapshot, which may miss processes that spike between measurements. For finding actively consuming processes like Activity Monitor shows, use `--cpu-mode monitor` with sampling:
+
+```bash
+# Find processes actively using CPU (matches Activity Monitor behavior)
+sysprims pstat --cpu-mode monitor --sample "5s" --cpu-above 80 --table
+
+# Kill high-CPU descendants of a process (e.g., runaway IDE plugins)
+sysprims kill-descendants 1234 --cpu-mode monitor --sample "3s" --cpu-above 90 --signal KILL --yes
+
+# Find long-running processes that have accumulated high CPU time
+sysprims pstat --cpu-above 50 --running-for "10m" --table
+```
+
+**Why monitor mode?** Activity Monitor and `top` show sustained CPU usage averaged over time. The default `lifetime` mode measures CPU at a single instant, which can miss bursty processes between spikes. Use `--cpu-mode monitor --sample "5s"` to catch intermittent high-CPU processes.
+
+#### Process Tree Operations
+
+```bash
+# View process hierarchy with ASCII tree
+sysprims descendants 7825 --tree
+
+# Find high-CPU descendants of a parent
+sysprims descendants 7825 --cpu-above 80 --tree
+
+# Kill all descendants of a process (parent survives)
+sysprims kill-descendants 7825 --yes
+
+# Kill only high-CPU descendants (surgical cleanup)
+sysprims kill-descendants 7825 --cpu-above 90 --signal KILL --yes
+
+# Preview what would be killed (dry-run)
+sysprims kill-descendants 7825 --cpu-above 80 --dry-run
+```
+
+#### Process Inspection Workflow
+
+```bash
+# 1. Find high-CPU processes
+sysprims pstat --cpu-mode monitor --sample "5s" --cpu-above 50 --sort cpu --table
+
+# 2. Inspect what files they have open
+sysprims fds --pid <PID> --kind file --json
+
+# 3. Check their process tree
+sysprims descendants <PID> --tree
+
+# 4. Terminate surgically (just the problematic descendants)
+sysprims kill-descendants <PID> --cpu-above 80 --signal KILL --yes
 ```
 
 ### Exit Codes
@@ -252,8 +309,12 @@ sysprims fds --pid 1234 --kind file --json     # Filter by type
 | `--pid <PID>` | Show only a specific process |
 | `--name <NAME>` | Filter by name (substring, case-insensitive) |
 | `--user <USER>` | Filter by username |
-| `--cpu-above <PERCENT>` | Filter by minimum CPU usage (0-100) |
+| `--ppid <PID>` | Filter by parent PID |
+| `--cpu-above <PERCENT>` | Filter by minimum CPU usage |
+| `--cpu-mode <MODE>` | CPU measurement: `lifetime` (default, instant) or `monitor` (Activity Monitor style) |
+| `--sample <DURATION>` | Sample CPU over interval (e.g., "5s") - use with `monitor` mode |
 | `--memory-above <KB>` | Filter by minimum memory in KB |
+| `--running-for <DURATION>` | Filter by minimum process age (e.g., "10m", "2h") |
 | `--sort <FIELD>` | Sort by: pid, name, cpu, memory (default: pid) |
 
 ## Platform Support

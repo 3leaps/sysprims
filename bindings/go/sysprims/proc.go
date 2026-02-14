@@ -104,12 +104,16 @@ type ProcessFilter struct {
 	UserEquals *string `json:"user_equals,omitempty"`
 	// PIDIn filters to only these PIDs.
 	PIDIn []uint32 `json:"pid_in,omitempty"`
+	// PPID filters by parent process ID.
+	PPID *uint32 `json:"ppid,omitempty"`
 	// StateIn filters by process state.
 	StateIn []string `json:"state_in,omitempty"`
 	// CPUAbove filters to processes using more than this CPU percentage.
 	CPUAbove *float64 `json:"cpu_above,omitempty"`
 	// MemoryAboveKB filters to processes using more than this memory (KB).
 	MemoryAboveKB *uint64 `json:"memory_above_kb,omitempty"`
+	// RunningForAtLeastSecs filters to processes running at least this many seconds.
+	RunningForAtLeastSecs *uint64 `json:"running_for_at_least_secs,omitempty"`
 }
 
 // FdInfo describes an open file descriptor.
@@ -260,6 +264,115 @@ func WaitPID(pid uint32, timeout time.Duration) (*WaitPidResult, error) {
 	defer C.sysprims_free_string(resultCStr)
 
 	var result WaitPidResult
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &result, nil
+}
+
+// DescendantsLevel represents a single depth level in a descendants result.
+type DescendantsLevel struct {
+	// Level is the depth (1 = direct children, 2 = grandchildren, etc.).
+	Level uint32 `json:"level"`
+	// Processes at this level.
+	Processes []ProcessInfo `json:"processes"`
+}
+
+// DescendantsResult is the result of a descendants traversal.
+type DescendantsResult struct {
+	SchemaID        string             `json:"schema_id"`
+	RootPID         uint32             `json:"root_pid"`
+	MaxLevels       uint32             `json:"max_levels"`
+	Levels          []DescendantsLevel `json:"levels"`
+	TotalFound      int                `json:"total_found"`
+	MatchedByFilter int                `json:"matched_by_filter"`
+	Timestamp       string             `json:"timestamp"`
+	Platform        string             `json:"platform"`
+}
+
+// KillDescendantsResult is the result of a kill-descendants operation.
+type KillDescendantsResult struct {
+	SchemaID       string                `json:"schema_id"`
+	SignalSent     int                   `json:"signal_sent"`
+	RootPID        uint32                `json:"root_pid"`
+	Succeeded      []uint32              `json:"succeeded"`
+	Failed         []KillDescendantsFail `json:"failed"`
+	SkippedSafety  int                   `json:"skipped_safety"`
+}
+
+// KillDescendantsFail is a single failure in a kill-descendants operation.
+type KillDescendantsFail struct {
+	PID   uint32 `json:"pid"`
+	Error string `json:"error"`
+}
+
+// Descendants returns the process subtree rooted at pid.
+//
+// maxLevels controls the traversal depth (1 = children only). Pass 0 or
+// math.MaxUint32 to traverse all levels.
+//
+// # Errors
+//
+//   - [ErrInvalidArgument]: root_pid is 0 or filter is invalid
+//   - [ErrNotFound]: root process doesn't exist
+func Descendants(pid uint32, maxLevels uint32, filter *ProcessFilter) (*DescendantsResult, error) {
+	var filterCStr *C.char
+	if filter != nil {
+		filterJSON, err := json.Marshal(filter)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+		}
+		filterCStr = C.CString(string(filterJSON))
+		defer C.free(unsafe.Pointer(filterCStr))
+	}
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_descendants(C.uint32_t(pid), C.uint32_t(maxLevels), filterCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var result DescendantsResult
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &result, nil
+}
+
+// KillDescendants sends a signal to descendants of a process.
+//
+// Safety rules are enforced by the FFI layer: root PID, self, PID 1, and
+// parent are excluded from the kill list. The result includes a
+// SkippedSafety count indicating how many PIDs were excluded.
+//
+// # Errors
+//
+//   - [ErrInvalidArgument]: root_pid is 0 or filter is invalid
+//   - [ErrNotFound]: root process doesn't exist
+func KillDescendants(pid uint32, signal int, maxLevels uint32, filter *ProcessFilter) (*KillDescendantsResult, error) {
+	var filterCStr *C.char
+	if filter != nil {
+		filterJSON, err := json.Marshal(filter)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+		}
+		filterCStr = C.CString(string(filterJSON))
+		defer C.free(unsafe.Pointer(filterCStr))
+	}
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_kill_descendants(C.uint32_t(pid), C.uint32_t(maxLevels), C.int32_t(signal), filterCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var result KillDescendantsResult
 	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
 		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
 	}

@@ -31,9 +31,11 @@ export interface ProcessFilter {
   name_equals?: string;
   user_equals?: string;
   pid_in?: number[];
+  ppid?: number;
   state_in?: ProcessState[];
   cpu_above?: number;
   memory_above_kb?: number;
+  running_for_at_least_secs?: number;
 }
 
 /**
@@ -178,4 +180,69 @@ export interface BatchKillFailure {
 export interface BatchKillResult {
   succeeded: number[];
   failed: BatchKillFailure[];
+}
+
+// Descendants types
+
+/**
+ * A single level in a descendants traversal result.
+ */
+export interface DescendantsLevel {
+  level: number;
+  processes: ProcessInfo[];
+}
+
+/**
+ * Result of a descendants traversal.
+ * Matches schema: descendants-result.schema.json
+ */
+export interface DescendantsResult {
+  schema_id: string;
+  root_pid: number;
+  max_levels: number;
+  levels: DescendantsLevel[];
+  total_found: number;
+  matched_by_filter: number;
+  timestamp: string;
+  platform: string;
+}
+
+/**
+ * Options for descendants traversal.
+ */
+export interface DescendantsOptions {
+  /** Maximum depth (1 = children only). Omit or use Infinity for all levels. */
+  maxLevels?: number;
+  /** Optional filter applied to descendant processes. */
+  filter?: ProcessFilter;
+}
+
+/**
+ * Options for kill-descendants operation.
+ */
+export interface KillDescendantsOptions {
+  /** Maximum depth. Omit or use Infinity for all levels. */
+  maxLevels?: number;
+  /** Optional filter applied to descendant processes. */
+  filter?: ProcessFilter;
+}
+
+/**
+ * A single failure in a kill-descendants operation.
+ */
+export interface KillDescendantsFailure {
+  pid: number;
+  error: string;
+}
+
+/**
+ * Result of a kill-descendants operation.
+ */
+export interface KillDescendantsResult {
+  schema_id: string;
+  signal_sent: number;
+  root_pid: number;
+  succeeded: number[];
+  failed: KillDescendantsFailure[];
+  skipped_safety: number;
 }

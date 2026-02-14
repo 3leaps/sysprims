@@ -238,6 +238,158 @@ pub fn sysprims_proc_wait_pid(pid: u32, timeout_ms: u32) -> SysprimsCallJsonResu
 }
 
 // -----------------------------------------------------------------------------
+// Descendants
+// -----------------------------------------------------------------------------
+
+#[napi]
+pub fn sysprims_proc_descendants(
+    root_pid: u32,
+    max_levels: u32,
+    filter_json: String,
+) -> SysprimsCallJsonResult {
+    let filter = if filter_json.is_empty() || filter_json == "{}" {
+        None
+    } else {
+        match serde_json::from_str::<ProcessFilter>(&filter_json) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                return err_json(SysprimsError::invalid_argument(format!(
+                    "invalid filter JSON: {}",
+                    e
+                )))
+            }
+        }
+    };
+
+    if let Some(ref f) = filter {
+        if let Err(e) = f.validate() {
+            return err_json(e);
+        }
+    }
+
+    match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => ok_json(json),
+            Err(e) => err_json(SysprimsError::internal(format!(
+                "failed to serialize descendants result: {}",
+                e
+            ))),
+        },
+        Err(e) => err_json(e),
+    }
+}
+
+#[napi]
+pub fn sysprims_proc_kill_descendants(
+    root_pid: u32,
+    max_levels: u32,
+    signal: i32,
+    filter_json: String,
+) -> SysprimsCallJsonResult {
+    let filter = if filter_json.is_empty() || filter_json == "{}" {
+        None
+    } else {
+        match serde_json::from_str::<ProcessFilter>(&filter_json) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                return err_json(SysprimsError::invalid_argument(format!(
+                    "invalid filter JSON: {}",
+                    e
+                )))
+            }
+        }
+    };
+
+    if let Some(ref f) = filter {
+        if let Err(e) = f.validate() {
+            return err_json(e);
+        }
+    }
+
+    // Traverse descendants
+    let desc_result = match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+        Ok(r) => r,
+        Err(e) => return err_json(e),
+    };
+
+    // Collect all descendant PIDs
+    let mut target_pids: Vec<u32> = desc_result
+        .levels
+        .iter()
+        .flat_map(|l| l.processes.iter().map(|p| p.pid))
+        .collect();
+    target_pids.sort_unstable();
+    target_pids.dedup();
+
+    // Safety: exclude root PID (descendants-only)
+    target_pids.retain(|&pid| pid != root_pid);
+
+    // Safety: exclude self, PID 1, parent
+    let self_pid = std::process::id();
+    let parent_pid = sysprims_proc::get_process(self_pid).ok().map(|p| p.ppid);
+
+    let before = target_pids.len();
+    target_pids.retain(|&pid| pid != self_pid && pid != 1);
+    if let Some(ppid) = parent_pid {
+        target_pids.retain(|&pid| pid != ppid);
+    }
+    let skipped_safety = before.saturating_sub(target_pids.len());
+
+    // Build result
+    let (succeeded, failed) = if target_pids.is_empty() {
+        (Vec::new(), Vec::<KillDescendantsFailureWire>::new())
+    } else {
+        match sysprims_signal::kill_many(&target_pids, signal) {
+            Ok(batch) => {
+                let failed_entries: Vec<KillDescendantsFailureWire> = batch
+                    .failed
+                    .iter()
+                    .map(|f| KillDescendantsFailureWire {
+                        pid: f.pid,
+                        error: f.error.to_string(),
+                    })
+                    .collect();
+                (batch.succeeded, failed_entries)
+            }
+            Err(e) => return err_json(e),
+        }
+    };
+
+    let result = KillDescendantsResultWire {
+        schema_id: sysprims_core::schema::BATCH_KILL_RESULT_V1.to_string(),
+        signal_sent: signal,
+        root_pid,
+        succeeded,
+        failed,
+        skipped_safety,
+    };
+
+    match serde_json::to_string(&result) {
+        Ok(json) => ok_json(json),
+        Err(e) => err_json(SysprimsError::internal(format!(
+            "failed to serialize kill-descendants result: {}",
+            e
+        ))),
+    }
+}
+
+#[derive(serde::Serialize)]
+struct KillDescendantsFailureWire {
+    pid: u32,
+    error: String,
+}
+
+#[derive(serde::Serialize)]
+struct KillDescendantsResultWire {
+    schema_id: String,
+    signal_sent: i32,
+    root_pid: u32,
+    succeeded: Vec<u32>,
+    failed: Vec<KillDescendantsFailureWire>,
+    skipped_safety: usize,
+}
+
+// -----------------------------------------------------------------------------
 // Self Introspection
 // -----------------------------------------------------------------------------
 

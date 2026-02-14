@@ -652,4 +652,54 @@ SysprimsErrorCode sysprims_terminate_tree(uint32_t pid,
                                           const char *config_json,
                                           char **result_json_out);
 
+/**
+ * Get descendants of a process.
+ *
+ * Returns a JSON object matching `descendants-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `root_pid` - PID to traverse descendants from (must be > 0 and <= i32::MAX)
+ * * `max_levels` - Maximum depth (1 = children only, UINT32_MAX = all levels)
+ * * `filter_json` - Optional JSON filter (may be NULL for no filtering)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_descendants(uint32_t root_pid,
+                                             uint32_t max_levels,
+                                             const char *filter_json,
+                                             char **result_json_out);
+
+/**
+ * Kill descendants of a process.
+ *
+ * Traverses the process tree from `root_pid`, collects descendant PIDs, and
+ * sends the specified signal. Safety rules are enforced: root PID, self, PID 1,
+ * and parent are excluded from the kill list.
+ *
+ * Returns a JSON object with succeeded/failed/skipped_safety fields.
+ *
+ * # Arguments
+ *
+ * * `root_pid` - PID to traverse descendants from
+ * * `max_levels` - Maximum depth (UINT32_MAX = all levels)
+ * * `signal` - Signal number to send (e.g., 15 for SIGTERM)
+ * * `filter_json` - Optional JSON filter (may be NULL)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_kill_descendants(uint32_t root_pid,
+                                                  uint32_t max_levels,
+                                                  int32_t signal,
+                                                  const char *filter_json,
+                                                  char **result_json_out);
+
 #endif  /* SYSPRIMS_H */

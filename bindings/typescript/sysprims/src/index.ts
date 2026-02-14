@@ -3,8 +3,12 @@ import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
 import type {
   BatchKillFailure,
   BatchKillResult,
+  DescendantsOptions,
+  DescendantsResult,
   FdFilter,
   FdSnapshot,
+  KillDescendantsOptions,
+  KillDescendantsResult,
   PortBindingsSnapshot,
   PortFilter,
   ProcessFilter,
@@ -21,8 +25,14 @@ export { SysprimsError, SysprimsErrorCode };
 export type {
   BatchKillFailure,
   BatchKillResult,
+  DescendantsLevel,
+  DescendantsOptions,
+  DescendantsResult,
   FdFilter,
   FdSnapshot,
+  KillDescendantsFailure,
+  KillDescendantsOptions,
+  KillDescendantsResult,
   PortBinding,
   PortBindingsSnapshot,
   PortFilter,
@@ -121,6 +131,86 @@ export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
   const filterJson = filter ? JSON.stringify(filter) : "";
   const result = callJsonReturn(() => lib.sysprimsProcListeningPorts(filterJson));
   return result as PortBindingsSnapshot;
+}
+
+// -----------------------------------------------------------------------------
+// Descendants
+// -----------------------------------------------------------------------------
+
+const MAX_LEVELS_ALL = 0xFFFFFFFF; // u32::MAX
+
+/**
+ * Get descendants of a process.
+ *
+ * Performs a BFS traversal of the process tree starting at `pid` and returns
+ * processes grouped by depth level.
+ *
+ * @param pid - Root process ID to traverse from
+ * @param options - Optional traversal configuration
+ * @returns Descendants grouped by level with metadata
+ * @throws {SysprimsError} NotFound if root process does not exist
+ * @throws {SysprimsError} InvalidArgument if pid is 0 or filter is invalid
+ *
+ * @example
+ * // Get all descendants
+ * const result = descendants(1234);
+ *
+ * @example
+ * // Get direct children only
+ * const result = descendants(1234, { maxLevels: 1 });
+ *
+ * @example
+ * // Filter descendants by name
+ * const result = descendants(1234, { filter: { name_contains: "worker" } });
+ */
+export function descendants(pid: number, options?: DescendantsOptions): DescendantsResult {
+  const lib = loadSysprims();
+  const maxLevels = options?.maxLevels != null && isFinite(options.maxLevels)
+    ? options.maxLevels >>> 0
+    : MAX_LEVELS_ALL;
+  const filterJson = options?.filter ? JSON.stringify(options.filter) : "";
+  return callJsonReturn(() =>
+    lib.sysprimsProcDescendants(pid >>> 0, maxLevels, filterJson),
+  ) as DescendantsResult;
+}
+
+/**
+ * Kill descendants of a process.
+ *
+ * Traverses the process tree from `pid`, collects descendant PIDs, and sends
+ * the specified signal. Safety rules are enforced: root PID, self, PID 1, and
+ * parent are automatically excluded from the kill list.
+ *
+ * @param pid - Root process ID (will NOT be killed)
+ * @param signal - Signal number to send (default: 15 = SIGTERM)
+ * @param options - Optional configuration
+ * @returns Result with succeeded/failed PIDs and safety skip count
+ * @throws {SysprimsError} NotFound if root process does not exist
+ * @throws {SysprimsError} InvalidArgument if pid is 0 or filter is invalid
+ *
+ * @example
+ * // Kill all descendants with SIGTERM
+ * const result = killDescendants(1234);
+ *
+ * @example
+ * // Force kill descendants matching a filter
+ * const result = killDescendants(1234, 9, {
+ *   filter: { cpu_above: 90 },
+ * });
+ */
+export function killDescendants(
+  pid: number,
+  signal = 15,
+  options?: KillDescendantsOptions,
+): KillDescendantsResult {
+  const lib = loadSysprims();
+  const maxLevels = options?.maxLevels != null && isFinite(options.maxLevels)
+    ? options.maxLevels >>> 0
+    : MAX_LEVELS_ALL;
+  const filterJson = options?.filter ? JSON.stringify(options.filter) : "";
+  return callJsonReturn(() =>
+    lib.sysprimsProcKillDescendants(pid >>> 0, maxLevels, signal | 0, filterJson),
+  ) as KillDescendantsResult;
 }
 
 // -----------------------------------------------------------------------------

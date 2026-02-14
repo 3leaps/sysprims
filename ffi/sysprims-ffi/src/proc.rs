@@ -488,6 +488,299 @@ pub unsafe extern "C" fn sysprims_proc_wait_pid(
     SysprimsErrorCode::Ok
 }
 
+/// Get descendants of a process.
+///
+/// Returns a JSON object matching `descendants-result.schema.json`.
+///
+/// # Arguments
+///
+/// * `root_pid` - PID to traverse descendants from (must be > 0 and <= i32::MAX)
+/// * `max_levels` - Maximum depth (1 = children only, `u32::MAX` = all levels)
+/// * `filter_json` - Optional JSON filter (may be NULL for no filtering)
+/// * `result_json_out` - Output pointer for result JSON string
+///
+/// # Filter JSON Format
+///
+/// Same as `sysprims_proc_list` filter — see `process-filter.schema.json`.
+///
+/// # Returns
+///
+/// * `SYSPRIMS_OK` on success
+/// * `SYSPRIMS_ERR_INVALID_ARGUMENT` if root_pid is 0 or filter JSON is invalid
+/// * `SYSPRIMS_ERR_NOT_FOUND` if root process doesn't exist
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_descendants(
+    root_pid: u32,
+    max_levels: u32,
+    filter_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    // Parse optional filter
+    let filter = if filter_json.is_null() {
+        None
+    } else {
+        let filter_str = match CStr::from_ptr(filter_json).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                let err = SysprimsError::invalid_argument("filter_json is not valid UTF-8");
+                set_error(&err);
+                return SysprimsErrorCode::InvalidArgument;
+            }
+        };
+
+        if filter_str.is_empty() || filter_str == "{}" {
+            None
+        } else {
+            match serde_json::from_str::<ProcessFilter>(filter_str) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    let err =
+                        SysprimsError::invalid_argument(format!("invalid filter JSON: {}", e));
+                    set_error(&err);
+                    return SysprimsErrorCode::InvalidArgument;
+                }
+            }
+        }
+    };
+
+    if let Some(ref f) = filter {
+        if let Err(e) = f.validate() {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    }
+
+    let result = match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&result) {
+        Ok(j) => j,
+        Err(e) => {
+            let err =
+                SysprimsError::internal(format!("failed to serialize descendants result: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
+
+/// Kill descendants of a process.
+///
+/// Traverses the process tree from `root_pid`, collects descendant PIDs, and
+/// sends the specified signal to each. Safety rules are enforced in this layer:
+/// the root PID, self, PID 1, and parent are excluded from the kill list.
+///
+/// Returns a JSON object with `schema_id`, `signal_sent`, `succeeded`, `failed`,
+/// and `skipped_safety` fields.
+///
+/// # Arguments
+///
+/// * `root_pid` - PID to traverse descendants from
+/// * `max_levels` - Maximum depth (`u32::MAX` = all levels)
+/// * `signal` - Signal number to send (e.g., 15 for SIGTERM)
+/// * `filter_json` - Optional JSON filter (may be NULL)
+/// * `result_json_out` - Output pointer for result JSON string
+///
+/// # Safety Rules (enforced here, not in bindings)
+///
+/// The following PIDs are always excluded from the kill list:
+/// - The root PID itself (descendants-only)
+/// - The calling process (self)
+/// - PID 1 (init/launchd)
+/// - The calling process's parent
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_kill_descendants(
+    root_pid: u32,
+    max_levels: u32,
+    signal: i32,
+    filter_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    // Parse optional filter
+    let filter = if filter_json.is_null() {
+        None
+    } else {
+        let filter_str = match CStr::from_ptr(filter_json).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                let err = SysprimsError::invalid_argument("filter_json is not valid UTF-8");
+                set_error(&err);
+                return SysprimsErrorCode::InvalidArgument;
+            }
+        };
+
+        if filter_str.is_empty() || filter_str == "{}" {
+            None
+        } else {
+            match serde_json::from_str::<ProcessFilter>(filter_str) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    let err =
+                        SysprimsError::invalid_argument(format!("invalid filter JSON: {}", e));
+                    set_error(&err);
+                    return SysprimsErrorCode::InvalidArgument;
+                }
+            }
+        }
+    };
+
+    if let Some(ref f) = filter {
+        if let Err(e) = f.validate() {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    }
+
+    // Traverse descendants
+    let desc_result = match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    // Collect all descendant PIDs
+    let mut target_pids: Vec<u32> = desc_result
+        .levels
+        .iter()
+        .flat_map(|l| l.processes.iter().map(|p| p.pid))
+        .collect();
+    target_pids.sort_unstable();
+    target_pids.dedup();
+
+    // Safety: exclude root PID (descendants-only)
+    target_pids.retain(|&pid| pid != root_pid);
+
+    // Safety: exclude self, PID 1, parent
+    let self_pid = std::process::id();
+    let parent_pid = sysprims_proc::get_process(self_pid).ok().map(|p| p.ppid);
+
+    let before = target_pids.len();
+    target_pids.retain(|&pid| pid != self_pid && pid != 1);
+    if let Some(ppid) = parent_pid {
+        target_pids.retain(|&pid| pid != ppid);
+    }
+    let skipped_safety = before.saturating_sub(target_pids.len());
+
+    // Build result
+    let (succeeded, failed) = if target_pids.is_empty() {
+        (Vec::new(), Vec::<KillDescendantsFailure>::new())
+    } else {
+        match sysprims_signal::kill_many(&target_pids, signal) {
+            Ok(batch) => {
+                let failed_entries: Vec<KillDescendantsFailure> = batch
+                    .failed
+                    .iter()
+                    .map(|f| KillDescendantsFailure {
+                        pid: f.pid,
+                        error: f.error.to_string(),
+                    })
+                    .collect();
+                (batch.succeeded, failed_entries)
+            }
+            Err(e) => {
+                set_error(&e);
+                return SysprimsErrorCode::from(&e);
+            }
+        }
+    };
+
+    let result = KillDescendantsResultJson {
+        schema_id: sysprims_core::schema::BATCH_KILL_RESULT_V1,
+        signal_sent: signal,
+        root_pid,
+        succeeded,
+        failed,
+        skipped_safety,
+    };
+
+    let json = match serde_json::to_string(&result) {
+        Ok(j) => j,
+        Err(e) => {
+            let err = SysprimsError::internal(format!(
+                "failed to serialize kill-descendants result: {}",
+                e
+            ));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
+
+/// JSON-serializable failure entry for kill-descendants results.
+#[derive(serde::Serialize)]
+struct KillDescendantsFailure {
+    pid: u32,
+    error: String,
+}
+
+/// JSON-serializable result for kill-descendants.
+#[derive(serde::Serialize)]
+struct KillDescendantsResultJson {
+    schema_id: &'static str,
+    signal_sent: i32,
+    root_pid: u32,
+    succeeded: Vec<u32>,
+    failed: Vec<KillDescendantsFailure>,
+    skipped_safety: usize,
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -700,5 +993,163 @@ mod tests {
         assert!(json.contains("\"timed_out\":true"));
 
         unsafe { sysprims_free_string(result) };
+    }
+
+    // ========================================================================
+    // Descendants FFI tests
+    // ========================================================================
+
+    #[test]
+    fn test_proc_descendants_self() {
+        let pid = std::process::id();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code =
+            unsafe { sysprims_proc_descendants(pid, u32::MAX, std::ptr::null(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("\"schema_id\""));
+        assert!(json.contains("\"root_pid\""));
+        assert!(json.contains("\"levels\""));
+        assert!(json.contains("\"total_found\""));
+
+        unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_proc_descendants_invalid_pid_zero() {
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_descendants(0, u32::MAX, std::ptr::null(), &mut result) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_descendants_nonexistent_pid() {
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code =
+            unsafe { sysprims_proc_descendants(99999999, u32::MAX, std::ptr::null(), &mut result) };
+        assert_eq!(code, SysprimsErrorCode::NotFound);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_descendants_null_output() {
+        let pid = std::process::id();
+        let code = unsafe {
+            sysprims_proc_descendants(pid, u32::MAX, std::ptr::null(), std::ptr::null_mut())
+        };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn test_proc_descendants_with_filter() {
+        let pid = std::process::id();
+        let filter = CString::new(r#"{"name_contains": "nonexistent_proc_xyz"}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code =
+            unsafe { sysprims_proc_descendants(pid, u32::MAX, filter.as_ptr(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        // The filter should result in matched_by_filter == 0
+        assert!(json.contains("\"matched_by_filter\":0"));
+
+        unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_proc_descendants_invalid_filter() {
+        let pid = std::process::id();
+        let filter = CString::new(r#"{"unknown_field": true}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code =
+            unsafe { sysprims_proc_descendants(pid, u32::MAX, filter.as_ptr(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
+    }
+
+    // ========================================================================
+    // Kill-descendants FFI tests
+    // ========================================================================
+
+    #[test]
+    fn test_proc_kill_descendants_null_output() {
+        let pid = std::process::id();
+        let code = unsafe {
+            sysprims_proc_kill_descendants(
+                pid,
+                u32::MAX,
+                15,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn test_proc_kill_descendants_invalid_pid_zero() {
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code = unsafe {
+            sysprims_proc_kill_descendants(0, u32::MAX, 15, std::ptr::null(), &mut result)
+        };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_kill_descendants_nonexistent_pid() {
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code = unsafe {
+            sysprims_proc_kill_descendants(99999999, u32::MAX, 15, std::ptr::null(), &mut result)
+        };
+        assert_eq!(code, SysprimsErrorCode::NotFound);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_kill_descendants_self_returns_json() {
+        // Calling kill-descendants on self should succeed (no actual children
+        // in a test process), returning an empty result with skipped_safety.
+        let pid = std::process::id();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            sysprims_proc_kill_descendants(pid, u32::MAX, 15, std::ptr::null(), &mut result)
+        };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("\"schema_id\""));
+        assert!(json.contains("\"signal_sent\":15"));
+        assert!(json.contains("\"root_pid\""));
+        assert!(json.contains("\"skipped_safety\""));
+
+        unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_proc_kill_descendants_invalid_filter() {
+        let pid = std::process::id();
+        let filter = CString::new(r#"{"bad_field": 123}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            sysprims_proc_kill_descendants(pid, u32::MAX, 15, filter.as_ptr(), &mut result)
+        };
+
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
     }
 }

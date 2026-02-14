@@ -42,6 +42,19 @@ export type SysprimsLib = {
   sysprimsProcWaitPid: (pid: number, timeoutMs: number) => SysprimsCallJsonResult;
   sysprimsProcListFds: (pid: number, filterJson: string) => SysprimsCallJsonResult;
 
+  // Descendants
+  sysprimsProcDescendants: (
+    rootPid: number,
+    maxLevels: number,
+    filterJson: string,
+  ) => SysprimsCallJsonResult;
+  sysprimsProcKillDescendants: (
+    rootPid: number,
+    maxLevels: number,
+    signal: number,
+    filterJson: string,
+  ) => SysprimsCallJsonResult;
+
   // Self introspection
   sysprimsSelfGetpgid: () => SysprimsCallU32Result;
   sysprimsSelfGetsid: () => SysprimsCallU32Result;
