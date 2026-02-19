@@ -1509,29 +1509,76 @@ fn run_pstat(args: PstatArgs) -> Result<i32, SysprimsError> {
         std::time::Duration::from_secs(0)
     };
 
-    // If specific PID requested, just get that one
+    // If specific PID requested, route through snapshot envelope for schema compliance.
     if let Some(pid) = args.pid {
-        let mut proc_info = get_process(pid)?;
+        // Preserve `get_process(pid)` error semantics (NotFound vs PermissionDenied),
+        // while still returning a schema-compliant snapshot envelope for JSON output.
+        let mut proc_opt = match get_process(pid) {
+            Ok(p) => Some(p),
+            Err(SysprimsError::NotFound { .. }) => None,
+            Err(e) => return Err(e),
+        };
 
+        let mut sampled = false;
         if sampling {
-            let sample = sample_duration;
-            let cpu0 = cpu_total_time_ns(pid)?;
-            std::thread::sleep(sample);
-            let cpu1 = cpu_total_time_ns(pid)?;
-            let dt_ns = sample.as_nanos() as f64;
-            let delta = cpu1.saturating_sub(cpu0) as f64;
-            if dt_ns > 0.0 {
-                proc_info.cpu_percent = (delta / dt_ns) * 100.0;
+            if sample_duration.is_zero() {
+                return Err(SysprimsError::invalid_argument(
+                    "sample duration must be > 0",
+                ));
+            }
+
+            if let Some(ref proc0) = proc_opt {
+                let sample = sample_duration;
+                let start0 = proc0.start_time_unix_ms;
+                let cpu0 = cpu_total_time_ns(proc0.pid)?;
+                std::thread::sleep(sample);
+
+                match get_process(pid) {
+                    Ok(mut proc1) => {
+                        // PID reuse guard: only compute if start time matches.
+                        if start0.is_none()
+                            || proc1.start_time_unix_ms.is_none()
+                            || start0 == proc1.start_time_unix_ms
+                        {
+                            let cpu1 = cpu_total_time_ns(proc1.pid)?;
+                            let dt_ns = sample.as_nanos() as f64;
+                            let delta = cpu1.saturating_sub(cpu0) as f64;
+                            if dt_ns > 0.0 {
+                                proc1.cpu_percent = (delta / dt_ns) * 100.0;
+                            }
+                        }
+
+                        proc_opt = Some(proc1);
+                    }
+                    Err(SysprimsError::NotFound { .. }) => {
+                        proc_opt = None;
+                    }
+                    Err(e) => return Err(e),
+                }
+
+                // Sampling changes CPU semantics (can exceed 100 for multi-core).
+                sampled = true;
             }
         }
 
         if args.table {
-            print_process_table(&[proc_info]);
-        } else {
-            // Default to JSON
-            println!("{}", serde_json::to_string_pretty(&proc_info).unwrap());
+            if let Some(p) = proc_opt {
+                print_process_table(&[p]);
+                return Ok(0);
+            }
+            return Err(SysprimsError::not_found(pid));
         }
-        return Ok(0);
+
+        // Default to JSON: always emit the snapshot envelope shape.
+        // We reuse `snapshot()` as the source of timestamp + schema_id.
+        let mut snap = snapshot()?;
+        snap.processes = proc_opt.into_iter().collect();
+        if sampled {
+            snap.schema_id = PROCESS_INFO_SAMPLED_V1;
+        }
+
+        println!("{}", serde_json::to_string_pretty(&snap).unwrap());
+        return Ok(if snap.processes.is_empty() { 1 } else { 0 });
     }
 
     // Parse --running-for duration.
