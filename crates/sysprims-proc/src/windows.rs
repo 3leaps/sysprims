@@ -9,8 +9,9 @@
 
 use crate::{
     aggregate_error_warning, make_port_snapshot, make_snapshot, FdInfo, PortBinding,
-    PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState, Protocol,
+    PortBindingsSnapshot, ProcessInfo, ProcessOptions, ProcessSnapshot, ProcessState, Protocol,
 };
+use std::collections::HashMap;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use sysprims_core::{SysprimsError, SysprimsResult};
@@ -29,7 +30,8 @@ use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use std::time::Duration;
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, Thread32First, Thread32Next,
+    PROCESSENTRY32W, TH32CS_SNAPPROCESS, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
@@ -42,7 +44,7 @@ use windows_sys::Win32::System::Threading::{
 // Implementation
 // ============================================================================
 
-pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
+pub fn snapshot_impl(options: &ProcessOptions) -> SysprimsResult<ProcessSnapshot> {
     let mut processes = Vec::new();
 
     unsafe {
@@ -57,9 +59,18 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
         let mut entry: PROCESSENTRY32W = mem::zeroed();
         entry.dwSize = mem::size_of::<PROCESSENTRY32W>() as u32;
 
+        #[cfg(feature = "proc_ext")]
+        let thread_counts = if options.include_threads {
+            collect_thread_counts().unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+        #[cfg(not(feature = "proc_ext"))]
+        let thread_counts: HashMap<u32, u32> = HashMap::new();
+
         if Process32FirstW(snapshot, &mut entry) != 0 {
             loop {
-                if let Ok(info) = process_entry_to_info(&entry) {
+                if let Ok(info) = process_entry_to_info(&entry, options, &thread_counts) {
                     processes.push(info);
                 }
 
@@ -82,13 +93,25 @@ pub fn list_fds_impl(_pid: u32) -> SysprimsResult<(Vec<FdInfo>, Vec<String>)> {
     ))
 }
 
-pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
-    // Find process in snapshot
-    let snap = snapshot_impl()?;
-    snap.processes
+pub fn get_process_impl(pid: u32, options: &ProcessOptions) -> SysprimsResult<ProcessInfo> {
+    // Find process in snapshot.
+    let snap = snapshot_impl(&ProcessOptions::default())?;
+    let mut process = snap
+        .processes
         .into_iter()
         .find(|p| p.pid == pid)
-        .ok_or_else(|| SysprimsError::not_found(pid))
+        .ok_or_else(|| SysprimsError::not_found(pid))?;
+
+    #[cfg(feature = "proc_ext")]
+    if options.include_threads {
+        let thread_counts = collect_thread_counts().unwrap_or_default();
+        process.thread_count = thread_counts.get(&pid).copied();
+    }
+
+    #[cfg(not(feature = "proc_ext"))]
+    let _ = options;
+
+    Ok(process)
 }
 
 pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitPidResult> {
@@ -172,7 +195,11 @@ pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
 }
 
 /// Convert PROCESSENTRY32W to ProcessInfo.
-unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<ProcessInfo> {
+unsafe fn process_entry_to_info(
+    entry: &PROCESSENTRY32W,
+    options: &ProcessOptions,
+    thread_counts: &HashMap<u32, u32>,
+) -> SysprimsResult<ProcessInfo> {
     let pid = entry.th32ProcessID;
     let ppid = entry.th32ParentProcessID;
 
@@ -192,6 +219,18 @@ unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<Proce
 
     let exe_path = get_process_exe_path(pid);
 
+    #[cfg(not(feature = "proc_ext"))]
+    let _ = options;
+
+    #[cfg(feature = "proc_ext")]
+    let thread_count = if options.include_threads {
+        thread_counts.get(&pid).copied()
+    } else {
+        None
+    };
+    #[cfg(not(feature = "proc_ext"))]
+    let thread_count = None;
+
     Ok(ProcessInfo {
         pid,
         ppid,
@@ -204,7 +243,38 @@ unsafe fn process_entry_to_info(entry: &PROCESSENTRY32W) -> SysprimsResult<Proce
         exe_path,
         state: ProcessState::Unknown, // Windows doesn't expose this simply
         cmdline: vec![name],
+        env: None,
+        thread_count,
     })
+}
+
+#[cfg(feature = "proc_ext")]
+fn collect_thread_counts() -> Option<HashMap<u32, u32>> {
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return None;
+        }
+
+        let mut counts = HashMap::<u32, u32>::new();
+        let mut entry: THREADENTRY32 = mem::zeroed();
+        entry.dwSize = mem::size_of::<THREADENTRY32>() as u32;
+
+        if Thread32First(snapshot, &mut entry) != 0 {
+            loop {
+                let owner_pid = entry.th32OwnerProcessID;
+                let counter = counts.entry(owner_pid).or_insert(0);
+                *counter = counter.saturating_add(1);
+
+                if Thread32Next(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(snapshot);
+        Some(counts)
+    }
 }
 
 fn read_tcp_table(af: u16) -> SysprimsResult<(Vec<PortBinding>, usize)> {
@@ -622,14 +692,14 @@ mod tests {
 
     #[test]
     fn test_snapshot_not_empty() {
-        let snap = snapshot_impl().unwrap();
+        let snap = snapshot_impl(&ProcessOptions::default()).unwrap();
         assert!(!snap.processes.is_empty());
     }
 
     #[test]
     fn test_get_self() {
         let pid = std::process::id();
-        let info = get_process_impl(pid).unwrap();
+        let info = get_process_impl(pid, &ProcessOptions::default()).unwrap();
         assert_eq!(info.pid, pid);
     }
 }

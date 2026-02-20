@@ -10,10 +10,14 @@
 
 use crate::{
     aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
-    FdInfo, FdKind, PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState,
-    Protocol,
+    FdInfo, FdKind, PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessOptions,
+    ProcessSnapshot, ProcessState, Protocol,
 };
+#[cfg(feature = "proc_ext")]
+use crate::{MAX_ENV_ENTRIES, MAX_ENV_KEY_BYTES, MAX_ENV_TOTAL_BYTES, MAX_ENV_VALUE_BYTES};
 use libc::{c_int, c_void, pid_t, uid_t};
+#[cfg(feature = "proc_ext")]
+use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -324,7 +328,7 @@ fn mach_time_to_ns(mach_time: u64) -> u64 {
 // Implementation
 // ============================================================================
 
-pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
+pub fn snapshot_impl(options: &ProcessOptions) -> SysprimsResult<ProcessSnapshot> {
     let pids = list_all_pids()?;
     let mut processes = Vec::with_capacity(pids.len());
 
@@ -333,7 +337,7 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
             continue;
         }
         // Silently skip processes we can't read
-        if let Ok(info) = read_process_info(pid as u32) {
+        if let Ok(info) = read_process_info(pid as u32, options) {
             processes.push(info);
         }
     }
@@ -341,8 +345,8 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
     Ok(make_snapshot(processes))
 }
 
-pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
-    read_process_info(pid)
+pub fn get_process_impl(pid: u32, options: &ProcessOptions) -> SysprimsResult<ProcessInfo> {
+    read_process_info(pid, options)
 }
 
 pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitPidResult> {
@@ -354,7 +358,7 @@ pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitP
         let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
         if rc == 0 {
             // Treat zombies as exited (kill(pid, 0) still succeeds for zombies).
-            if let Ok(info) = read_process_info(pid) {
+            if let Ok(info) = read_process_info(pid, &ProcessOptions::default()) {
                 if info.state == crate::ProcessState::Zombie {
                     return Ok(crate::make_wait_pid_result(pid, true, false, None, vec![]));
                 }
@@ -798,7 +802,7 @@ fn read_socket_binding(pid: pid_t, fd: i32) -> SysprimsResult<PortBinding> {
         None
     };
 
-    let process = read_process_info(pid as u32).ok();
+    let process = read_process_info(pid as u32, &ProcessOptions::default()).ok();
 
     Ok(PortBinding {
         protocol,
@@ -840,7 +844,7 @@ fn read_in_addr(info: &InSockInfo) -> SysprimsResult<Option<IpAddr>> {
 }
 
 /// Read process information for a single PID.
-fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
+fn read_process_info(pid: u32, options: &ProcessOptions) -> SysprimsResult<ProcessInfo> {
     let bsd_info = get_bsd_info(pid)?;
     let task_info = get_task_info(pid).ok();
     let name = get_process_name(pid).unwrap_or_else(|| extract_name(&bsd_info));
@@ -903,7 +907,36 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         _ => ProcessState::Unknown,
     };
 
-    let cmdline = read_cmdline(pid);
+    let procargs = read_procargs(pid);
+    let cmdline = procargs
+        .as_ref()
+        .map(|buf| parse_cmdline_from_procargs(buf))
+        .unwrap_or_default();
+
+    #[cfg(not(feature = "proc_ext"))]
+    let _ = options;
+
+    #[cfg(feature = "proc_ext")]
+    let env = if options.include_env {
+        procargs
+            .as_ref()
+            .and_then(|buf| parse_env_from_procargs(buf))
+    } else {
+        None
+    };
+    #[cfg(not(feature = "proc_ext"))]
+    let env = None;
+
+    #[cfg(feature = "proc_ext")]
+    let thread_count = if options.include_threads {
+        task_info
+            .as_ref()
+            .and_then(|t| u32::try_from(t.pti_threadnum).ok())
+    } else {
+        None
+    };
+    #[cfg(not(feature = "proc_ext"))]
+    let thread_count = None;
 
     Ok(ProcessInfo {
         pid,
@@ -917,17 +950,15 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         exe_path,
         state,
         cmdline,
+        env,
+        thread_count,
     })
 }
 
-/// Read command-line arguments for a process via `sysctl(CTL_KERN, KERN_PROCARGS2)`.
-///
-/// Returns the full argv vector (e.g. `["bun", "run", "scripts/dev.ts", "--root", "/path"]`).
-/// Returns an empty vector if the process doesn't exist, we lack permissions, or parsing fails.
-fn read_cmdline(pid: u32) -> Vec<String> {
+fn read_procargs(pid: u32) -> Option<Vec<u8>> {
     // Defensive: avoid pid_t overflow / negative semantics via cast.
     if pid == 0 || pid > i32::MAX as u32 {
-        return Vec::new();
+        return None;
     }
 
     let mut mib: [c_int; 3] = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as c_int];
@@ -945,7 +976,7 @@ fn read_cmdline(pid: u32) -> Vec<String> {
         )
     };
     if ret != 0 || size == 0 {
-        return Vec::new();
+        return None;
     }
 
     // Second call: read the data
@@ -961,14 +992,15 @@ fn read_cmdline(pid: u32) -> Vec<String> {
         )
     };
     if ret != 0 {
-        return Vec::new();
+        return None;
     }
     buf.truncate(size);
+    Some(buf)
+}
 
-    // Parse KERN_PROCARGS2 format:
-    //   [argc: i32] [exec_path\0] [padding \0s] [argv[0]\0] [argv[1]\0] ...
+fn procargs_argv_start(buf: &[u8]) -> Option<(i32, usize)> {
     if buf.len() < mem::size_of::<c_int>() {
-        return Vec::new();
+        return None;
     }
 
     // argc is untrusted data from the kernel buffer; cap it to avoid pathological allocations.
@@ -976,21 +1008,26 @@ fn read_cmdline(pid: u32) -> Vec<String> {
 
     let argc = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]);
     if argc <= 0 || argc > MAX_ARGC {
-        return Vec::new();
+        return None;
     }
 
     // Skip past exec_path (null-terminated string after argc)
     let mut pos = mem::size_of::<c_int>();
-    // Scan past the exec_path
     while pos < buf.len() && buf[pos] != 0 {
         pos += 1;
     }
-    // Skip the null terminator and any padding null bytes
     while pos < buf.len() && buf[pos] == 0 {
         pos += 1;
     }
 
-    // Read argc null-terminated argument strings
+    Some((argc, pos))
+}
+
+fn parse_cmdline_from_procargs(buf: &[u8]) -> Vec<String> {
+    let Some((argc, mut pos)) = procargs_argv_start(buf) else {
+        return Vec::new();
+    };
+
     let mut args = Vec::with_capacity(argc as usize);
     for _ in 0..argc {
         if pos >= buf.len() {
@@ -1003,10 +1040,79 @@ fn read_cmdline(pid: u32) -> Vec<String> {
         if start != pos {
             args.push(String::from_utf8_lossy(&buf[start..pos]).into_owned());
         }
-        pos += 1; // skip null terminator
+        if pos < buf.len() {
+            pos += 1; // skip null terminator
+        }
     }
 
     args
+}
+
+#[cfg(feature = "proc_ext")]
+fn parse_env_from_procargs(buf: &[u8]) -> Option<BTreeMap<String, String>> {
+    let (argc, mut pos) = procargs_argv_start(buf)?;
+
+    for _ in 0..argc {
+        if pos >= buf.len() {
+            break;
+        }
+        while pos < buf.len() && buf[pos] != 0 {
+            pos += 1;
+        }
+        if pos < buf.len() {
+            pos += 1;
+        }
+    }
+
+    let mut env = BTreeMap::new();
+    let mut total_bytes = 0usize;
+
+    while pos < buf.len() {
+        while pos < buf.len() && buf[pos] == 0 {
+            pos += 1;
+        }
+        if pos >= buf.len() {
+            break;
+        }
+
+        let start = pos;
+        while pos < buf.len() && buf[pos] != 0 {
+            pos += 1;
+        }
+
+        if start == pos {
+            continue;
+        }
+
+        if env.len() >= MAX_ENV_ENTRIES {
+            break;
+        }
+
+        let pair = String::from_utf8_lossy(&buf[start..pos]);
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key.is_empty() {
+            continue;
+        }
+        if key.len() > MAX_ENV_KEY_BYTES {
+            continue;
+        }
+
+        if value.len() > MAX_ENV_VALUE_BYTES {
+            continue;
+        }
+
+        let entry_bytes = key.len().saturating_add(value.len());
+        total_bytes = total_bytes.saturating_add(entry_bytes);
+        if total_bytes > MAX_ENV_TOTAL_BYTES {
+            return None;
+        }
+
+        env.insert(key.to_string(), value.to_string());
+    }
+
+    Some(env)
 }
 
 /// Get BSD info for a process.
@@ -1194,7 +1300,7 @@ mod tests {
     #[test]
     fn test_read_self() {
         let pid = std::process::id();
-        let info = read_process_info(pid).unwrap();
+        let info = read_process_info(pid, &ProcessOptions::default()).unwrap();
         assert_eq!(info.pid, pid);
     }
 
@@ -1202,7 +1308,7 @@ mod tests {
     fn test_read_pid_1_or_permission_denied() {
         // On macOS with SIP, launchd (PID 1) may not be readable
         // This is expected behavior, so we accept either success or permission denied
-        match read_process_info(1) {
+        match read_process_info(1, &ProcessOptions::default()) {
             Ok(info) => {
                 assert_eq!(info.pid, 1);
                 assert_eq!(info.ppid, 0);
@@ -1218,7 +1324,7 @@ mod tests {
 
     #[test]
     fn test_nonexistent_pid() {
-        let result = read_process_info(99999999);
+        let result = read_process_info(99999999, &ProcessOptions::default());
         assert!(matches!(result, Err(SysprimsError::NotFound { .. })));
     }
 

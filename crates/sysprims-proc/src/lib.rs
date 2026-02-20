@@ -42,7 +42,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
 use std::time::Duration;
 use sysprims_core::schema::{
@@ -248,6 +248,48 @@ pub struct FdSnapshot {
     pub warnings: Vec<String>,
 }
 
+/// Options controlling optional process detail collection.
+///
+/// These options are additive and opt-in. Existing APIs default to both values
+/// disabled to avoid extra syscall/parse overhead.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProcessOptions {
+    /// Include environment variables in `ProcessInfo.env`.
+    ///
+    /// Platform notes:
+    /// - Linux/macOS: best-effort for visible processes.
+    /// - Windows: currently unsupported in v0.1.14 (`env` remains `None`).
+    pub include_env: bool,
+
+    /// Include thread count in `ProcessInfo.thread_count`.
+    pub include_threads: bool,
+}
+
+impl ProcessOptions {
+    /// Enable environment variable collection.
+    pub fn with_env(mut self) -> Self {
+        self.include_env = true;
+        self
+    }
+
+    /// Enable thread count collection.
+    pub fn with_threads(mut self) -> Self {
+        self.include_threads = true;
+        self
+    }
+}
+
+/// Safety caps for environment collection when proc_ext is enabled.
+#[cfg(feature = "proc_ext")]
+pub(crate) const MAX_ENV_ENTRIES: usize = 1024;
+#[cfg(feature = "proc_ext")]
+pub(crate) const MAX_ENV_KEY_BYTES: usize = 1024;
+#[cfg(feature = "proc_ext")]
+pub(crate) const MAX_ENV_VALUE_BYTES: usize = 4096;
+#[cfg(feature = "proc_ext")]
+pub(crate) const MAX_ENV_TOTAL_BYTES: usize = 1_048_576;
+
 /// Information about a single process.
 ///
 /// All fields are populated on a best-effort basis. Fields that cannot be read
@@ -298,6 +340,14 @@ pub struct ProcessInfo {
     ///
     /// May be empty if command line cannot be read (permissions, zombie process).
     pub cmdline: Vec<String>,
+
+    /// Process environment variables (best-effort, opt-in via `ProcessOptions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<BTreeMap<String, String>>,
+
+    /// Thread count (best-effort, opt-in via `ProcessOptions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_count: Option<u32>,
 }
 
 /// Process state.
@@ -369,6 +419,24 @@ impl ProcessFilter {
         }
         Ok(())
     }
+}
+
+fn validate_process_options(options: &ProcessOptions) -> SysprimsResult<()> {
+    #[cfg(feature = "proc_ext")]
+    {
+        let _ = options;
+    }
+
+    #[cfg(not(feature = "proc_ext"))]
+    {
+        if options.include_env || options.include_threads {
+            return Err(SysprimsError::invalid_argument(
+                "include_env/include_threads require the proc_ext feature",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 impl PortFilter {
@@ -508,7 +576,13 @@ impl ProcessFilter {
 /// }
 /// ```
 pub fn snapshot() -> SysprimsResult<ProcessSnapshot> {
-    platform::snapshot_impl()
+    snapshot_with_options(ProcessOptions::default())
+}
+
+/// Get a snapshot of all processes with optional extended fields.
+pub fn snapshot_with_options(options: ProcessOptions) -> SysprimsResult<ProcessSnapshot> {
+    validate_process_options(&options)?;
+    platform::snapshot_impl(&options)
 }
 
 /// Get total CPU time consumed by a process (kernel + user) in nanoseconds.
@@ -641,9 +715,18 @@ fn aggregate_error_warning(skipped: usize, label: &str) -> Option<String> {
 /// let snap = sysprims_proc::snapshot_filtered(&filter).unwrap();
 /// ```
 pub fn snapshot_filtered(filter: &ProcessFilter) -> SysprimsResult<ProcessSnapshot> {
-    filter.validate()?;
+    snapshot_filtered_with_options(filter, ProcessOptions::default())
+}
 
-    let mut snap = snapshot()?;
+/// Get a snapshot with filter applied and optional extended fields.
+pub fn snapshot_filtered_with_options(
+    filter: &ProcessFilter,
+    options: ProcessOptions,
+) -> SysprimsResult<ProcessSnapshot> {
+    filter.validate()?;
+    validate_process_options(&options)?;
+
+    let mut snap = snapshot_with_options(options)?;
     snap.processes.retain(|p| filter.matches(p));
     Ok(snap)
 }
@@ -662,10 +745,16 @@ pub fn snapshot_filtered(filter: &ProcessFilter) -> SysprimsResult<ProcessSnapsh
 /// println!("Current process: {}", self_info.name);
 /// ```
 pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
+    get_process_with_options(pid, ProcessOptions::default())
+}
+
+/// Get information for a single process with optional extended fields.
+pub fn get_process_with_options(pid: u32, options: ProcessOptions) -> SysprimsResult<ProcessInfo> {
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
     }
-    platform::get_process_impl(pid)
+    validate_process_options(&options)?;
+    platform::get_process_impl(pid, &options)
 }
 
 // ============================================================================
@@ -730,6 +819,16 @@ pub fn descendants(
     max_levels: u32,
     filter: Option<&ProcessFilter>,
 ) -> SysprimsResult<DescendantsResult> {
+    descendants_with_options(root_pid, max_levels, filter, ProcessOptions::default())
+}
+
+/// Get descendants of a process using BFS traversal with optional extended fields.
+pub fn descendants_with_options(
+    root_pid: u32,
+    max_levels: u32,
+    filter: Option<&ProcessFilter>,
+    options: ProcessOptions,
+) -> SysprimsResult<DescendantsResult> {
     const MAX_SAFE_PID: u32 = i32::MAX as u32;
 
     if root_pid == 0 {
@@ -742,11 +841,13 @@ pub fn descendants(
         )));
     }
 
+    validate_process_options(&options)?;
+
     // Verify root exists.
-    let _ = get_process(root_pid)?;
+    let _ = get_process_with_options(root_pid, options)?;
 
     // Single snapshot for consistent traversal.
-    let snap = snapshot()?;
+    let snap = snapshot_with_options(options)?;
 
     // Build parent → children map.
     let mut children_map: HashMap<u32, Vec<ProcessInfo>> = HashMap::new();
@@ -1137,6 +1238,49 @@ mod tests {
     #[test]
     fn test_port_filter_schema_id() {
         assert!(PortFilter::schema_id().contains("port-filter"));
+    }
+
+    #[test]
+    fn test_process_options_builder() {
+        let opts = ProcessOptions::default();
+        assert!(!opts.include_env);
+        assert!(!opts.include_threads);
+
+        let opts = ProcessOptions::default().with_env().with_threads();
+        assert!(opts.include_env);
+        assert!(opts.include_threads);
+    }
+
+    #[test]
+    fn test_get_process_with_default_options_has_no_proc_ext_fields() {
+        let pid = std::process::id();
+        let info = get_process_with_options(pid, ProcessOptions::default()).unwrap();
+        assert!(info.env.is_none());
+        assert!(info.thread_count.is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "proc_ext")]
+    fn test_get_process_with_threads_populates_thread_count() {
+        let pid = std::process::id();
+        let info = get_process_with_options(pid, ProcessOptions::default().with_threads()).unwrap();
+        assert!(info.thread_count.is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "proc_ext")]
+    fn test_get_process_with_env_populates_env_map() {
+        let pid = std::process::id();
+        let info = get_process_with_options(pid, ProcessOptions::default().with_env()).unwrap();
+        assert!(info.env.is_some());
+    }
+
+    #[test]
+    #[cfg(not(feature = "proc_ext"))]
+    fn test_proc_ext_options_rejected_when_feature_disabled() {
+        let pid = std::process::id();
+        let err = get_process_with_options(pid, ProcessOptions::default().with_env()).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
     }
 
     #[test]

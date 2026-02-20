@@ -8,9 +8,13 @@
 
 use crate::{
     aggregate_error_warning, aggregate_permission_warning, make_port_snapshot, make_snapshot,
-    FdInfo, FdKind, PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessSnapshot, ProcessState,
-    Protocol,
+    FdInfo, FdKind, PortBinding, PortBindingsSnapshot, ProcessInfo, ProcessOptions,
+    ProcessSnapshot, ProcessState, Protocol,
 };
+#[cfg(feature = "proc_ext")]
+use crate::{MAX_ENV_ENTRIES, MAX_ENV_KEY_BYTES, MAX_ENV_TOTAL_BYTES, MAX_ENV_VALUE_BYTES};
+#[cfg(feature = "proc_ext")]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs;
@@ -26,7 +30,7 @@ use sysprims_core::{SysprimsError, SysprimsResult};
 // Implementation
 // ============================================================================
 
-pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
+pub fn snapshot_impl(options: &ProcessOptions) -> SysprimsResult<ProcessSnapshot> {
     let mut processes = Vec::new();
 
     // Read /proc directory for numeric entries (PIDs)
@@ -60,7 +64,7 @@ pub fn snapshot_impl() -> SysprimsResult<ProcessSnapshot> {
         }
 
         // Silently skip processes we can't read
-        if let Ok(info) = read_process_info(pid) {
+        if let Ok(info) = read_process_info(pid, options) {
             processes.push(info);
         }
     }
@@ -141,8 +145,8 @@ pub fn list_fds_impl(pid: u32) -> SysprimsResult<(Vec<FdInfo>, Vec<String>)> {
     Ok((fds, warnings))
 }
 
-pub fn get_process_impl(pid: u32) -> SysprimsResult<ProcessInfo> {
-    read_process_info(pid)
+pub fn get_process_impl(pid: u32, options: &ProcessOptions) -> SysprimsResult<ProcessInfo> {
+    read_process_info(pid, options)
 }
 
 pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitPidResult> {
@@ -156,7 +160,7 @@ pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitP
             // Still running.
             // On Unix, an exited-but-unreaped child remains as a zombie and still
             // responds to kill(pid, 0). Treat zombies as exited for supervisor use.
-            if let Ok(info) = read_process_info(pid) {
+            if let Ok(info) = read_process_info(pid, &ProcessOptions::default()) {
                 if info.state == crate::ProcessState::Zombie {
                     return Ok(crate::make_wait_pid_result(pid, true, false, None, vec![]));
                 }
@@ -213,7 +217,7 @@ pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
         if let Some(inode) = binding_inode(binding) {
             if let Some(pid) = inode_to_pid.get(&inode) {
                 binding.pid = Some(*pid);
-                if let Ok(process) = read_process_info(*pid) {
+                if let Ok(process) = read_process_info(*pid, &ProcessOptions::default()) {
                     binding.process = Some(process);
                 }
             }
@@ -225,7 +229,7 @@ pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
 }
 
 /// Read process information from /proc/[pid]/*.
-fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
+fn read_process_info(pid: u32, options: &ProcessOptions) -> SysprimsResult<ProcessInfo> {
     let proc_path = Path::new("/proc").join(pid.to_string());
 
     // Check if process exists
@@ -248,6 +252,27 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
 
     // Read /proc/[pid]/cmdline (handles non-UTF-8 gracefully)
     let cmdline = read_cmdline(&proc_path.join("cmdline"));
+
+    #[cfg(not(feature = "proc_ext"))]
+    let _ = options;
+
+    #[cfg(feature = "proc_ext")]
+    let env = if options.include_env {
+        read_env(&proc_path.join("environ"))
+    } else {
+        None
+    };
+    #[cfg(not(feature = "proc_ext"))]
+    let env = None;
+
+    #[cfg(feature = "proc_ext")]
+    let thread_count = if options.include_threads {
+        parse_thread_count(&status_content)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "proc_ext"))]
+    let thread_count = None;
 
     // Calculate elapsed time
     let boot_time = get_boot_time();
@@ -304,6 +329,8 @@ fn read_process_info(pid: u32) -> SysprimsResult<ProcessInfo> {
         exe_path,
         state,
         cmdline,
+        env,
+        thread_count,
     })
 }
 
@@ -601,6 +628,60 @@ fn parse_uid(content: &str) -> Option<u32> {
         }
     }
     None
+}
+
+fn parse_thread_count(content: &str) -> Option<u32> {
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("Threads:") {
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            if let Some(first) = fields.first() {
+                return first.parse().ok();
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "proc_ext")]
+fn read_env(path: &Path) -> Option<BTreeMap<String, String>> {
+    let bytes = fs::read(path).ok()?;
+
+    let mut env = BTreeMap::new();
+    let mut total_bytes = 0usize;
+
+    for entry in bytes.split(|&b| b == 0) {
+        if entry.is_empty() {
+            continue;
+        }
+        if env.len() >= MAX_ENV_ENTRIES {
+            break;
+        }
+
+        let pair = String::from_utf8_lossy(entry);
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key.is_empty() {
+            continue;
+        }
+        if key.len() > MAX_ENV_KEY_BYTES {
+            continue;
+        }
+
+        if value.len() > MAX_ENV_VALUE_BYTES {
+            continue;
+        }
+
+        let entry_bytes = key.len().saturating_add(value.len());
+        total_bytes = total_bytes.saturating_add(entry_bytes);
+        if total_bytes > MAX_ENV_TOTAL_BYTES {
+            return None;
+        }
+
+        env.insert(key.to_string(), value.to_string());
+    }
+
+    Some(env)
 }
 
 /// Parse memory from /proc/[pid]/statm.

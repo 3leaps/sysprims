@@ -59,22 +59,22 @@
 pub const TIMEOUT_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/timeout-result.schema.json";
 
-/// Schema ID for process info JSON output (v1.0.0).
+/// Schema ID for process info JSON output (v1.1.0).
 ///
 /// This schema defines the structure of `sysprims pstat --json` output.
 ///
-/// Schema location: `schemas/process/v1.0.0/process-info.schema.json`
+/// Schema location: `schemas/process/v1.1.0/process-info.schema.json`
 pub const PROCESS_INFO_V1: &str =
-    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info.schema.json";
+    "https://schemas.3leaps.dev/sysprims/process/v1.1.0/process-info.schema.json";
 
-/// Schema ID for process snapshot output with sampled (monitor-style) CPU (v1.0.0).
+/// Schema ID for process snapshot output with sampled (monitor-style) CPU (v1.1.0).
 ///
 /// This schema matches the shape of `process-info.schema.json` but relaxes
 /// `cpu_percent` to allow values > 100 when a process uses multiple cores.
 ///
-/// Schema location: `schemas/process/v1.0.0/process-info-sampled.schema.json`
+/// Schema location: `schemas/process/v1.1.0/process-info-sampled.schema.json`
 pub const PROCESS_INFO_SAMPLED_V1: &str =
-    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info-sampled.schema.json";
+    "https://schemas.3leaps.dev/sysprims/process/v1.1.0/process-info-sampled.schema.json";
 
 /// Schema ID for process filter input (v1.0.0).
 ///
@@ -284,10 +284,12 @@ mod tests {
         assert!(SPAWN_IN_GROUP_RESULT_V1.ends_with(".schema.json"));
         assert!(DESCENDANTS_RESULT_V1.ends_with(".schema.json"));
 
-        // All v1.0.0 schemas should have version in path
+        // Process snapshot schemas are v1.1.0 (additive ProcessInfo fields).
+        assert!(PROCESS_INFO_V1.contains("/v1.1.0/"));
+        assert!(PROCESS_INFO_SAMPLED_V1.contains("/v1.1.0/"));
+
+        // Remaining schemas are currently v1.0.0.
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
-        assert!(PROCESS_INFO_V1.contains("/v1.0.0/"));
-        assert!(PROCESS_INFO_SAMPLED_V1.contains("/v1.0.0/"));
         assert!(PROC_FILTER_V1.contains("/v1.0.0/"));
         assert!(PORT_BINDINGS_V1.contains("/v1.0.0/"));
         assert!(PORT_FILTER_V1.contains("/v1.0.0/"));

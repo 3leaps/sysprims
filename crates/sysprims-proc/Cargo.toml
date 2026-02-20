@@ -8,6 +8,10 @@ authors.workspace = true
 rust-version.workspace = true
 description = "Process inspection and enumeration utilities"
 
+[features]
+default = ["proc_ext"]
+proc_ext = []
+
 [dependencies]
 sysprims-core.workspace = true
 serde.workspace = true
