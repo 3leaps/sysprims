@@ -352,6 +352,19 @@ SysprimsErrorCode sysprims_proc_listening_ports(const char *filter_json, char **
 SysprimsErrorCode sysprims_proc_list(const char *filter_json, char **result_json_out);
 
 /**
+ * List processes with optional filter and optional process detail options.
+ *
+ * `options_json` format:
+ *
+ * ```json
+ * {"include_env": true, "include_threads": true}
+ * ```
+ */
+SysprimsErrorCode sysprims_proc_list_ex(const char *filter_json,
+                                        const char *options_json,
+                                        char **result_json_out);
+
+/**
  * Get information for a single process by PID.
  *
  * Returns JSON for a single process. If the process doesn't exist,
@@ -404,6 +417,19 @@ SysprimsErrorCode sysprims_proc_list(const char *filter_json, char **result_json
 SysprimsErrorCode sysprims_proc_get(uint32_t pid, char **result_json_out);
 
 /**
+ * Get process info with optional process detail options.
+ *
+ * `options_json` format:
+ *
+ * ```json
+ * {"include_env": true, "include_threads": true}
+ * ```
+ */
+SysprimsErrorCode sysprims_proc_get_ex(uint32_t pid,
+                                       const char *options_json,
+                                       char **result_json_out);
+
+/**
  * Wait for a PID to exit, up to a timeout.
  *
  * Returns a JSON object matching `wait-pid-result.schema.json`.
@@ -452,6 +478,21 @@ SysprimsErrorCode sysprims_proc_descendants(uint32_t root_pid,
                                             uint32_t max_levels,
                                             const char *filter_json,
                                             char **result_json_out);
+
+/**
+ * Get descendants with optional filter and optional process detail options.
+ *
+ * `options_json` format:
+ *
+ * ```json
+ * {"include_env": true, "include_threads": true}
+ * ```
+ */
+SysprimsErrorCode sysprims_proc_descendants_ex(uint32_t root_pid,
+                                               uint32_t max_levels,
+                                               const char *filter_json,
+                                               const char *options_json,
+                                               char **result_json_out);
 
 /**
  * Kill descendants of a process.

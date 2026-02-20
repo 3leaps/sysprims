@@ -20,6 +20,8 @@ export interface ProcessInfo {
   exe_path?: string | null;
   state: ProcessState;
   cmdline: string[];
+  env?: Record<string, string> | null;
+  thread_count?: number | null;
 }
 
 /**
@@ -36,6 +38,16 @@ export interface ProcessFilter {
   cpu_above?: number;
   memory_above_kb?: number;
   running_for_at_least_secs?: number;
+}
+
+/**
+ * Optional process detail collection controls.
+ *
+ * Uses camelCase at the TypeScript API boundary; converted to snake_case for FFI.
+ */
+export interface ProcessOptions {
+  includeEnv?: boolean;
+  includeThreads?: boolean;
 }
 
 /**

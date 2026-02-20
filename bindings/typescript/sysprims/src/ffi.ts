@@ -37,7 +37,9 @@ export type SysprimsLib = {
 
   // Process inspection
   sysprimsProcGet: (pid: number) => SysprimsCallJsonResult;
+  sysprimsProcGetEx: (pid: number, optionsJson: string) => SysprimsCallJsonResult;
   sysprimsProcList: (filterJson: string) => SysprimsCallJsonResult;
+  sysprimsProcListEx: (filterJson: string, optionsJson: string) => SysprimsCallJsonResult;
   sysprimsProcListeningPorts: (filterJson: string) => SysprimsCallJsonResult;
   sysprimsProcWaitPid: (pid: number, timeoutMs: number) => SysprimsCallJsonResult;
   sysprimsProcListFds: (pid: number, filterJson: string) => SysprimsCallJsonResult;

@@ -3,7 +3,7 @@ use std::time::Duration;
 use napi_derive::napi;
 use sysprims_core::schema::{SPAWN_IN_GROUP_CONFIG_V1, TERMINATE_TREE_CONFIG_V1};
 use sysprims_core::SysprimsError;
-use sysprims_proc::{FdFilter, PortFilter, ProcessFilter};
+use sysprims_proc::{FdFilter, PortFilter, ProcessFilter, ProcessOptions};
 use sysprims_timeout::{spawn_in_group, terminate_tree, SpawnInGroupConfig, TerminateTreeConfig};
 
 #[repr(i32)]
@@ -113,9 +113,40 @@ pub fn sysprims_abi_version() -> u32 {
 // Process Inspection
 // -----------------------------------------------------------------------------
 
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ProcessOptionsWire {
+    include_env: bool,
+    include_threads: bool,
+}
+
+fn parse_process_options(options_json: &str) -> Result<ProcessOptions, SysprimsError> {
+    if options_json.is_empty() || options_json == "{}" {
+        return Ok(ProcessOptions::default());
+    }
+
+    let wire: ProcessOptionsWire = serde_json::from_str(options_json)
+        .map_err(|e| SysprimsError::invalid_argument(format!("invalid options JSON: {}", e)))?;
+
+    Ok(ProcessOptions {
+        include_env: wire.include_env,
+        include_threads: wire.include_threads,
+    })
+}
+
 #[napi]
 pub fn sysprims_proc_get(pid: u32) -> SysprimsCallJsonResult {
-    match sysprims_proc::get_process(pid) {
+    sysprims_proc_get_ex(pid, String::new())
+}
+
+#[napi]
+pub fn sysprims_proc_get_ex(pid: u32, options_json: String) -> SysprimsCallJsonResult {
+    let options = match parse_process_options(&options_json) {
+        Ok(o) => o,
+        Err(e) => return err_json(e),
+    };
+
+    match sysprims_proc::get_process_with_options(pid, options) {
         Ok(info) => match serde_json::to_string(&info) {
             Ok(json) => ok_json(json),
             Err(e) => err_json(SysprimsError::internal(format!(
@@ -129,6 +160,11 @@ pub fn sysprims_proc_get(pid: u32) -> SysprimsCallJsonResult {
 
 #[napi]
 pub fn sysprims_proc_list(filter_json: String) -> SysprimsCallJsonResult {
+    sysprims_proc_list_ex(filter_json, String::new())
+}
+
+#[napi]
+pub fn sysprims_proc_list_ex(filter_json: String, options_json: String) -> SysprimsCallJsonResult {
     let filter = if filter_json.is_empty() || filter_json == "{}" {
         ProcessFilter::default()
     } else {
@@ -147,7 +183,12 @@ pub fn sysprims_proc_list(filter_json: String) -> SysprimsCallJsonResult {
         return err_json(e);
     }
 
-    match sysprims_proc::snapshot_filtered(&filter) {
+    let options = match parse_process_options(&options_json) {
+        Ok(o) => o,
+        Err(e) => return err_json(e),
+    };
+
+    match sysprims_proc::snapshot_filtered_with_options(&filter, options) {
         Ok(snapshot) => match serde_json::to_string(&snapshot) {
             Ok(json) => ok_json(json),
             Err(e) => err_json(SysprimsError::internal(format!(

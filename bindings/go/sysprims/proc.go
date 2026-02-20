@@ -35,6 +35,10 @@ type ProcessInfo struct {
 	State *string `json:"state,omitempty"`
 	// Cmdline is the command line arguments (may be empty if unavailable).
 	Cmdline []string `json:"cmdline,omitempty"`
+	// Env is process environment variables (same-user best-effort, may be nil).
+	Env map[string]string `json:"env,omitempty"`
+	// ThreadCount is the best-effort thread count for this process.
+	ThreadCount *uint32 `json:"thread_count,omitempty"`
 }
 
 // ProcessSnapshot represents a point-in-time listing of processes.
@@ -116,6 +120,16 @@ type ProcessFilter struct {
 	RunningForAtLeastSecs *uint64 `json:"running_for_at_least_secs,omitempty"`
 }
 
+// ProcessOptions controls optional process detail collection.
+//
+// Defaults are false/zero-value for all fields.
+type ProcessOptions struct {
+	// IncludeEnv requests collection of environment variables.
+	IncludeEnv bool `json:"include_env,omitempty"`
+	// IncludeThreads requests collection of process thread count.
+	IncludeThreads bool `json:"include_threads,omitempty"`
+}
+
 // FdInfo describes an open file descriptor.
 type FdInfo struct {
 	Fd   uint32  `json:"fd"`
@@ -191,6 +205,14 @@ func ListFds(pid uint32, filter *FdFilter) (*FdSnapshot, error) {
 //   - [ErrInvalidArgument]: Invalid filter JSON
 //   - [ErrSystem]: System error reading process information
 func ProcessList(filter *ProcessFilter) (*ProcessSnapshot, error) {
+	return ProcessListWithOptions(filter, nil)
+}
+
+// ProcessListWithOptions returns a snapshot of running processes, optionally filtered,
+// with opt-in extended fields.
+//
+// Pass nil for opts to use defaults (`include_env=false`, `include_threads=false`).
+func ProcessListWithOptions(filter *ProcessFilter, opts *ProcessOptions) (*ProcessSnapshot, error) {
 	var filterCStr *C.char
 	if filter != nil {
 		filterJSON, err := json.Marshal(filter)
@@ -201,9 +223,19 @@ func ProcessList(filter *ProcessFilter) (*ProcessSnapshot, error) {
 		defer C.free(unsafe.Pointer(filterCStr))
 	}
 
+	var optionsCStr *C.char
+	if opts != nil {
+		optionsJSON, err := json.Marshal(opts)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal options: " + err.Error()}
+		}
+		optionsCStr = C.CString(string(optionsJSON))
+		defer C.free(unsafe.Pointer(optionsCStr))
+	}
+
 	var resultCStr *C.char
 	if err := callAndCheck(func() C.SysprimsErrorCode {
-		return C.sysprims_proc_list(filterCStr, &resultCStr)
+		return C.sysprims_proc_list_ex(filterCStr, optionsCStr, &resultCStr)
 	}); err != nil {
 		return nil, err
 	}
@@ -225,9 +257,27 @@ func ProcessList(filter *ProcessFilter) (*ProcessSnapshot, error) {
 //   - [ErrNotFound]: Process doesn't exist
 //   - [ErrPermissionDenied]: Not permitted to read this process
 func ProcessGet(pid uint32) (*ProcessInfo, error) {
+	return ProcessGetWithOptions(pid, nil)
+}
+
+// ProcessGetWithOptions returns information for a single process by PID,
+// with opt-in extended fields.
+//
+// Pass nil for opts to use defaults (`include_env=false`, `include_threads=false`).
+func ProcessGetWithOptions(pid uint32, opts *ProcessOptions) (*ProcessInfo, error) {
+	var optionsCStr *C.char
+	if opts != nil {
+		optionsJSON, err := json.Marshal(opts)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal options: " + err.Error()}
+		}
+		optionsCStr = C.CString(string(optionsJSON))
+		defer C.free(unsafe.Pointer(optionsCStr))
+	}
+
 	var resultCStr *C.char
 	if err := callAndCheck(func() C.SysprimsErrorCode {
-		return C.sysprims_proc_get(C.uint32_t(pid), &resultCStr)
+		return C.sysprims_proc_get_ex(C.uint32_t(pid), optionsCStr, &resultCStr)
 	}); err != nil {
 		return nil, err
 	}
@@ -293,12 +343,12 @@ type DescendantsResult struct {
 
 // KillDescendantsResult is the result of a kill-descendants operation.
 type KillDescendantsResult struct {
-	SchemaID       string                `json:"schema_id"`
-	SignalSent     int                   `json:"signal_sent"`
-	RootPID        uint32                `json:"root_pid"`
-	Succeeded      []uint32              `json:"succeeded"`
-	Failed         []KillDescendantsFail `json:"failed"`
-	SkippedSafety  int                   `json:"skipped_safety"`
+	SchemaID      string                `json:"schema_id"`
+	SignalSent    int                   `json:"signal_sent"`
+	RootPID       uint32                `json:"root_pid"`
+	Succeeded     []uint32              `json:"succeeded"`
+	Failed        []KillDescendantsFail `json:"failed"`
+	SkippedSafety int                   `json:"skipped_safety"`
 }
 
 // KillDescendantsFail is a single failure in a kill-descendants operation.

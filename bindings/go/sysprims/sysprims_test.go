@@ -125,6 +125,24 @@ func TestProcessListWithFilter(t *testing.T) {
 	t.Logf("Found %d processes matching %q", len(snapshot.Processes), currentName)
 }
 
+func TestProcessListWithOptions(t *testing.T) {
+	pid := uint32(os.Getpid())
+	snapshot, err := sysprims.ProcessListWithOptions(&sysprims.ProcessFilter{PIDIn: []uint32{pid}}, &sysprims.ProcessOptions{
+		IncludeThreads: true,
+	})
+	if err != nil {
+		t.Fatalf("ProcessListWithOptions failed: %v", err)
+	}
+
+	if len(snapshot.Processes) == 0 {
+		t.Fatal("ProcessListWithOptions returned empty process list")
+	}
+
+	if snapshot.Processes[0].PID != pid {
+		t.Fatalf("ProcessListWithOptions returned wrong pid: got %d, expected %d", snapshot.Processes[0].PID, pid)
+	}
+}
+
 // TestProcessGetSelf verifies that ProcessGet works for the current process.
 func TestProcessGetSelf(t *testing.T) {
 	pid := uint32(os.Getpid())
@@ -143,6 +161,25 @@ func TestProcessGetSelf(t *testing.T) {
 	}
 
 	t.Logf("Process: %s (PID %d, PPID %d)", info.Name, info.PID, info.PPID)
+}
+
+func TestProcessGetWithOptionsSelf(t *testing.T) {
+	pid := uint32(os.Getpid())
+
+	info, err := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
+		IncludeThreads: true,
+	})
+	if err != nil {
+		t.Fatalf("ProcessGetWithOptions(%d) failed: %v", pid, err)
+	}
+
+	if info.PID != pid {
+		t.Errorf("ProcessGetWithOptions returned wrong PID: got %d, expected %d", info.PID, pid)
+	}
+
+	if info.ThreadCount != nil && *info.ThreadCount == 0 {
+		t.Error("ProcessGetWithOptions returned invalid thread_count of 0")
+	}
 }
 
 func TestListFdsSelf(t *testing.T) {

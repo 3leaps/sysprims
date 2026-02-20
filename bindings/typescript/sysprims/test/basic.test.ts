@@ -47,6 +47,14 @@ test("procGet(process.pid) returns matching pid", () => {
   assert.equal(info.pid, process.pid);
 });
 
+test("procGet(process.pid, { includeThreads }) returns matching pid", () => {
+  const info = procGet(process.pid, { includeThreads: true });
+  assert.equal(info.pid, process.pid);
+  if (info.thread_count != null) {
+    assert.ok(info.thread_count > 0, "thread_count should be > 0 when present");
+  }
+});
+
 test("processList() returns processes including current process", () => {
   const snapshot = processList();
 
@@ -63,6 +71,12 @@ test("processList() returns processes including current process", () => {
 test("processList({ pid_in: [...] }) filters correctly", () => {
   const snapshot = processList({ pid_in: [process.pid] });
 
+  assert.equal(snapshot.processes.length, 1, "should return exactly one process");
+  assert.equal(snapshot.processes[0].pid, process.pid);
+});
+
+test("processList(filter, { includeThreads }) accepts options", () => {
+  const snapshot = processList({ pid_in: [process.pid] }, { includeThreads: true });
   assert.equal(snapshot.processes.length, 1, "should return exactly one process");
   assert.equal(snapshot.processes[0].pid, process.pid);
 });

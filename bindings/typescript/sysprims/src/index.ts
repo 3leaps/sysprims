@@ -13,6 +13,7 @@ import type {
   PortFilter,
   ProcessFilter,
   ProcessInfo,
+  ProcessOptions,
   ProcessSnapshot,
   SpawnInGroupConfig,
   SpawnInGroupResult,
@@ -38,6 +39,7 @@ export type {
   PortFilter,
   ProcessFilter,
   ProcessInfo,
+  ProcessOptions,
   ProcessSnapshot,
   ProcessState,
   Protocol,
@@ -52,6 +54,26 @@ export type {
 // Process Inspection
 // -----------------------------------------------------------------------------
 
+function serializeProcessOptions(options?: ProcessOptions): string {
+  if (!options) {
+    return "";
+  }
+
+  const wire: { include_env?: boolean; include_threads?: boolean } = {};
+  if (options.includeEnv === true) {
+    wire.include_env = true;
+  }
+  if (options.includeThreads === true) {
+    wire.include_threads = true;
+  }
+
+  if (!wire.include_env && !wire.include_threads) {
+    return "";
+  }
+
+  return JSON.stringify(wire);
+}
+
 /**
  * Get information about a specific process by PID.
  *
@@ -60,9 +82,10 @@ export type {
  * @throws {SysprimsError} NotFound if process does not exist
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
-export function procGet(pid: number): ProcessInfo {
+export function procGet(pid: number, options?: ProcessOptions): ProcessInfo {
   const lib = loadSysprims();
-  const result = callJsonReturn(() => lib.sysprimsProcGet(pid >>> 0));
+  const optionsJson = serializeProcessOptions(options);
+  const result = callJsonReturn(() => lib.sysprimsProcGetEx(pid >>> 0, optionsJson));
   return result as ProcessInfo;
 }
 
@@ -93,10 +116,11 @@ export function procGet(pid: number): ProcessInfo {
  * // Filter by multiple criteria
  * const heavy = processList({ cpu_above: 50, memory_above_kb: 100000 });
  */
-export function processList(filter?: ProcessFilter): ProcessSnapshot {
+export function processList(filter?: ProcessFilter, options?: ProcessOptions): ProcessSnapshot {
   const lib = loadSysprims();
   const filterJson = filter ? JSON.stringify(filter) : "";
-  const result = callJsonReturn(() => lib.sysprimsProcList(filterJson));
+  const optionsJson = serializeProcessOptions(options);
+  const result = callJsonReturn(() => lib.sysprimsProcListEx(filterJson, optionsJson));
   return result as ProcessSnapshot;
 }
 

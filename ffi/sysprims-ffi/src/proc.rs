@@ -9,7 +9,38 @@ use std::time::Duration;
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
-use sysprims_proc::{FdFilter, PortFilter, ProcessFilter};
+use sysprims_proc::{FdFilter, PortFilter, ProcessFilter, ProcessOptions};
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ProcessOptionsWire {
+    include_env: bool,
+    include_threads: bool,
+}
+
+unsafe fn parse_process_options(
+    options_json: *const c_char,
+) -> Result<ProcessOptions, SysprimsError> {
+    if options_json.is_null() {
+        return Ok(ProcessOptions::default());
+    }
+
+    let options_str = CStr::from_ptr(options_json)
+        .to_str()
+        .map_err(|_| SysprimsError::invalid_argument("options_json is not valid UTF-8"))?;
+
+    if options_str.is_empty() || options_str == "{}" {
+        return Ok(ProcessOptions::default());
+    }
+
+    let wire: ProcessOptionsWire = serde_json::from_str(options_str)
+        .map_err(|e| SysprimsError::invalid_argument(format!("invalid options JSON: {}", e)))?;
+
+    Ok(ProcessOptions {
+        include_env: wire.include_env,
+        include_threads: wire.include_threads,
+    })
+}
 
 /// List open file descriptors for a PID, optionally filtered.
 ///
@@ -255,20 +286,47 @@ pub unsafe extern "C" fn sysprims_proc_list(
     filter_json: *const c_char,
     result_json_out: *mut *mut c_char,
 ) -> SysprimsErrorCode {
+    sysprims_proc_list_ex(filter_json, std::ptr::null(), result_json_out)
+}
+
+/// List processes with optional filter and optional process detail options.
+///
+/// `options_json` format:
+///
+/// ```json
+/// {"include_env": true, "include_threads": true}
+/// ```
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * `filter_json` and `options_json` must be NULL or valid UTF-8 C strings
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_list_ex(
+    filter_json: *const c_char,
+    options_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
     clear_error_state();
 
-    // Validate output pointer
     if result_json_out.is_null() {
         let err = SysprimsError::invalid_argument("result_json_out cannot be null");
         set_error(&err);
         return SysprimsErrorCode::InvalidArgument;
     }
 
-    // Parse filter if provided
+    let options = match parse_process_options(options_json) {
+        Ok(o) => o,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
     let filter = if filter_json.is_null() {
         ProcessFilter::default()
     } else {
-        // SAFETY: Caller guarantees filter_json is valid if non-null
         let filter_str = match CStr::from_ptr(filter_json).to_str() {
             Ok(s) => s,
             Err(_) => {
@@ -278,7 +336,6 @@ pub unsafe extern "C" fn sysprims_proc_list(
             }
         };
 
-        // Parse JSON (empty string = no filter)
         if filter_str.is_empty() || filter_str == "{}" {
             ProcessFilter::default()
         } else {
@@ -294,14 +351,12 @@ pub unsafe extern "C" fn sysprims_proc_list(
         }
     };
 
-    // Validate filter
     if let Err(e) = filter.validate() {
         set_error(&e);
         return SysprimsErrorCode::from(&e);
     }
 
-    // Get snapshot
-    let snapshot = match sysprims_proc::snapshot_filtered(&filter) {
+    let snapshot = match sysprims_proc::snapshot_filtered_with_options(&filter, options) {
         Ok(s) => s,
         Err(e) => {
             set_error(&e);
@@ -309,7 +364,6 @@ pub unsafe extern "C" fn sysprims_proc_list(
         }
     };
 
-    // Serialize to JSON
     let json = match serde_json::to_string(&snapshot) {
         Ok(j) => j,
         Err(e) => {
@@ -319,7 +373,6 @@ pub unsafe extern "C" fn sysprims_proc_list(
         }
     };
 
-    // Convert to C string
     let c_json = match CString::new(json) {
         Ok(c) => c,
         Err(e) => {
@@ -329,7 +382,6 @@ pub unsafe extern "C" fn sysprims_proc_list(
         }
     };
 
-    // SAFETY: We verified result_json_out is not null above
     *result_json_out = c_json.into_raw();
     SysprimsErrorCode::Ok
 }
@@ -387,17 +439,45 @@ pub unsafe extern "C" fn sysprims_proc_get(
     pid: u32,
     result_json_out: *mut *mut c_char,
 ) -> SysprimsErrorCode {
+    sysprims_proc_get_ex(pid, std::ptr::null(), result_json_out)
+}
+
+/// Get process info with optional process detail options.
+///
+/// `options_json` format:
+///
+/// ```json
+/// {"include_env": true, "include_threads": true}
+/// ```
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * `options_json` must be NULL or a valid UTF-8 C string
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_get_ex(
+    pid: u32,
+    options_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
     clear_error_state();
 
-    // Validate output pointer
     if result_json_out.is_null() {
         let err = SysprimsError::invalid_argument("result_json_out cannot be null");
         set_error(&err);
         return SysprimsErrorCode::InvalidArgument;
     }
 
-    // Get process info
-    let info = match sysprims_proc::get_process(pid) {
+    let options = match parse_process_options(options_json) {
+        Ok(o) => o,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let info = match sysprims_proc::get_process_with_options(pid, options) {
         Ok(i) => i,
         Err(e) => {
             set_error(&e);
@@ -405,7 +485,6 @@ pub unsafe extern "C" fn sysprims_proc_get(
         }
     };
 
-    // Serialize to JSON
     let json = match serde_json::to_string(&info) {
         Ok(j) => j,
         Err(e) => {
@@ -415,7 +494,6 @@ pub unsafe extern "C" fn sysprims_proc_get(
         }
     };
 
-    // Convert to C string
     let c_json = match CString::new(json) {
         Ok(c) => c,
         Err(e) => {
@@ -425,7 +503,6 @@ pub unsafe extern "C" fn sysprims_proc_get(
         }
     };
 
-    // SAFETY: We verified result_json_out is not null above
     *result_json_out = c_json.into_raw();
     SysprimsErrorCode::Ok
 }
@@ -520,6 +597,36 @@ pub unsafe extern "C" fn sysprims_proc_descendants(
     filter_json: *const c_char,
     result_json_out: *mut *mut c_char,
 ) -> SysprimsErrorCode {
+    sysprims_proc_descendants_ex(
+        root_pid,
+        max_levels,
+        filter_json,
+        std::ptr::null(),
+        result_json_out,
+    )
+}
+
+/// Get descendants with optional filter and optional process detail options.
+///
+/// `options_json` format:
+///
+/// ```json
+/// {"include_env": true, "include_threads": true}
+/// ```
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * `filter_json` and `options_json` must be NULL or valid UTF-8 C strings
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_descendants_ex(
+    root_pid: u32,
+    max_levels: u32,
+    filter_json: *const c_char,
+    options_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
     clear_error_state();
 
     if result_json_out.is_null() {
@@ -528,7 +635,14 @@ pub unsafe extern "C" fn sysprims_proc_descendants(
         return SysprimsErrorCode::InvalidArgument;
     }
 
-    // Parse optional filter
+    let options = match parse_process_options(options_json) {
+        Ok(o) => o,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
     let filter = if filter_json.is_null() {
         None
     } else {
@@ -563,7 +677,12 @@ pub unsafe extern "C" fn sysprims_proc_descendants(
         }
     }
 
-    let result = match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+    let result = match sysprims_proc::descendants_with_options(
+        root_pid,
+        max_levels,
+        filter.as_ref(),
+        options,
+    ) {
         Ok(r) => r,
         Err(e) => {
             set_error(&e);
@@ -972,6 +1091,35 @@ mod tests {
     fn test_proc_get_null_output() {
         let code = unsafe { sysprims_proc_get(1234, std::ptr::null_mut()) };
         assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn test_proc_get_ex_self_with_threads_option() {
+        let pid = std::process::id();
+        let options = CString::new(r#"{"include_threads":true}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe { sysprims_proc_get_ex(pid, options.as_ptr(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("\"pid\":"));
+
+        unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_proc_list_ex_invalid_options_json() {
+        let options = CString::new(r#"{"bad":true}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code =
+            unsafe { sysprims_proc_list_ex(std::ptr::null(), options.as_ptr(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
     }
 
     #[test]
