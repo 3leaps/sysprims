@@ -46,8 +46,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
 use std::time::Duration;
 use sysprims_core::schema::{
-    DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1, PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_V1,
-    WAIT_PID_RESULT_V1,
+    DESCENDANTS_RESULT_SAMPLED_V1, DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1, PORT_BINDINGS_V1,
+    PORT_FILTER_V1, PROCESS_INFO_SAMPLED_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
 };
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
@@ -799,6 +799,41 @@ pub struct DescendantsResult {
     pub platform: &'static str,
 }
 
+/// CPU measurement mode for descendants traversal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CpuMode {
+    /// Lifetime-average CPU usage (best-effort), normalized to 0-100.
+    #[default]
+    Lifetime,
+
+    /// Sampled CPU usage over an interval (Activity Monitor / top style).
+    ///
+    /// Sampled values may exceed 100 when a process uses multiple cores.
+    Monitor,
+}
+
+/// Configuration for descendants traversal.
+#[derive(Debug, Clone)]
+pub struct DescendantsConfig {
+    /// PID to start traversal from.
+    pub root_pid: u32,
+
+    /// Maximum depth (1 = children only). `None` means traverse all levels.
+    pub max_levels: Option<u32>,
+
+    /// Optional process filter applied after traversal.
+    pub filter: Option<ProcessFilter>,
+
+    /// CPU measurement mode used before applying `cpu_above` filters.
+    pub cpu_mode: CpuMode,
+
+    /// Optional sample interval used when `cpu_mode = Monitor`.
+    ///
+    /// Defaults to 1 second when omitted.
+    pub sample_duration: Option<Duration>,
+}
+
 /// Get descendants of a process using BFS traversal.
 ///
 /// Performs a single snapshot and builds a parent→children map, then traverses
@@ -829,25 +864,51 @@ pub fn descendants_with_options(
     filter: Option<&ProcessFilter>,
     options: ProcessOptions,
 ) -> SysprimsResult<DescendantsResult> {
+    descendants_with_config_and_options(
+        DescendantsConfig {
+            root_pid,
+            max_levels: Some(max_levels),
+            filter: filter.cloned(),
+            cpu_mode: CpuMode::Lifetime,
+            sample_duration: None,
+        },
+        options,
+    )
+}
+
+/// Get descendants using explicit traversal configuration.
+pub fn descendants_with_config(config: DescendantsConfig) -> SysprimsResult<DescendantsResult> {
+    descendants_with_config_and_options(config, ProcessOptions::default())
+}
+
+/// Get descendants using explicit traversal configuration and optional extended fields.
+pub fn descendants_with_config_and_options(
+    config: DescendantsConfig,
+    options: ProcessOptions,
+) -> SysprimsResult<DescendantsResult> {
     const MAX_SAFE_PID: u32 = i32::MAX as u32;
 
-    if root_pid == 0 {
+    if config.root_pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
     }
-    if root_pid > MAX_SAFE_PID {
+    if config.root_pid > MAX_SAFE_PID {
         return Err(SysprimsError::invalid_argument(format!(
             "PID {} exceeds maximum safe value {}",
-            root_pid, MAX_SAFE_PID
+            config.root_pid, MAX_SAFE_PID
         )));
     }
 
     validate_process_options(&options)?;
 
-    // Verify root exists.
-    let _ = get_process_with_options(root_pid, options)?;
+    if let Some(f) = config.filter.as_ref() {
+        f.validate()?;
+    }
 
-    // Single snapshot for consistent traversal.
-    let snap = snapshot_with_options(options)?;
+    // Verify root exists before any traversal/sampling work.
+    let _ = get_process_with_options(config.root_pid, options)?;
+
+    // Snapshot for consistent traversal; monitor mode samples at the snapshot level.
+    let snap = snapshot_for_descendants(options, config.cpu_mode, config.sample_duration)?;
 
     // Build parent → children map.
     let mut children_map: HashMap<u32, Vec<ProcessInfo>> = HashMap::new();
@@ -857,8 +918,9 @@ pub fn descendants_with_options(
 
     // BFS traversal.
     let mut levels: Vec<DescendantsLevel> = Vec::new();
-    let mut current_pids = vec![root_pid];
+    let mut current_pids = vec![config.root_pid];
     let mut total_found: usize = 0;
+    let max_levels = config.max_levels.unwrap_or(u32::MAX);
 
     for depth in 1..=max_levels {
         let mut level_procs = Vec::new();
@@ -887,7 +949,7 @@ pub fn descendants_with_options(
 
     // Apply filter if provided.
     let mut matched_by_filter = total_found;
-    if let Some(f) = filter {
+    if let Some(f) = config.filter.as_ref() {
         for level in &mut levels {
             level.processes.retain(|p| f.matches(p));
         }
@@ -897,8 +959,11 @@ pub fn descendants_with_options(
     }
 
     Ok(DescendantsResult {
-        schema_id: DESCENDANTS_RESULT_V1,
-        root_pid,
+        schema_id: match config.cpu_mode {
+            CpuMode::Lifetime => DESCENDANTS_RESULT_V1,
+            CpuMode::Monitor => DESCENDANTS_RESULT_SAMPLED_V1,
+        },
+        root_pid: config.root_pid,
         max_levels,
         levels,
         total_found,
@@ -906,6 +971,66 @@ pub fn descendants_with_options(
         timestamp: current_timestamp(),
         platform: get_platform(),
     })
+}
+
+fn snapshot_for_descendants(
+    options: ProcessOptions,
+    cpu_mode: CpuMode,
+    sample_duration: Option<Duration>,
+) -> SysprimsResult<ProcessSnapshot> {
+    match cpu_mode {
+        CpuMode::Lifetime => snapshot_with_options(options),
+        CpuMode::Monitor => {
+            let sample = sample_duration.unwrap_or_else(|| Duration::from_secs(1));
+            snapshot_with_sampled_cpu(options, sample)
+        }
+    }
+}
+
+fn snapshot_with_sampled_cpu(
+    options: ProcessOptions,
+    sample_duration: Duration,
+) -> SysprimsResult<ProcessSnapshot> {
+    if sample_duration.is_zero() {
+        return Err(SysprimsError::invalid_argument(
+            "sample duration must be > 0",
+        ));
+    }
+
+    let snap0 = snapshot_with_options(options)?;
+    let mut t0 = HashMap::<u32, (Option<u64>, u64)>::new();
+    for p in &snap0.processes {
+        if let Ok(cpu_ns) = cpu_total_time_ns(p.pid) {
+            t0.insert(p.pid, (p.start_time_unix_ms, cpu_ns));
+        }
+    }
+
+    std::thread::sleep(sample_duration);
+
+    let mut snap1 = snapshot_with_options(options)?;
+    let dt_ns = sample_duration.as_nanos() as f64;
+    if dt_ns > 0.0 {
+        for p in &mut snap1.processes {
+            if let Some((start0, cpu0)) = t0.get(&p.pid) {
+                // PID reuse guard: only compute if start time matches.
+                if start0.is_some()
+                    && p.start_time_unix_ms.is_some()
+                    && start0 != &p.start_time_unix_ms
+                {
+                    continue;
+                }
+
+                if let Ok(cpu1) = cpu_total_time_ns(p.pid) {
+                    let delta = cpu1.saturating_sub(*cpu0) as f64;
+                    p.cpu_percent = (delta / dt_ns) * 100.0;
+                }
+            }
+        }
+    }
+
+    // Sampled CPU semantics can exceed 100 on multi-core.
+    snap1.schema_id = PROCESS_INFO_SAMPLED_V1;
+    Ok(snap1)
 }
 
 /// Wait for a PID to exit, up to the provided timeout.
@@ -1280,6 +1405,67 @@ mod tests {
     fn test_proc_ext_options_rejected_when_feature_disabled() {
         let pid = std::process::id();
         let err = get_process_with_options(pid, ProcessOptions::default().with_env()).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn test_descendants_with_config_lifetime_self() {
+        let pid = std::process::id();
+        let config = DescendantsConfig {
+            root_pid: pid,
+            max_levels: Some(1),
+            filter: None,
+            cpu_mode: CpuMode::Lifetime,
+            sample_duration: None,
+        };
+
+        let result = descendants_with_config(config).unwrap();
+        assert_eq!(result.root_pid, pid);
+        assert_eq!(result.max_levels, 1);
+    }
+
+    #[test]
+    fn test_descendants_with_config_monitor_self() {
+        let pid = std::process::id();
+        let config = DescendantsConfig {
+            root_pid: pid,
+            max_levels: Some(1),
+            filter: None,
+            cpu_mode: CpuMode::Monitor,
+            sample_duration: Some(Duration::from_millis(1)),
+        };
+
+        let result = descendants_with_config(config).unwrap();
+        assert_eq!(result.schema_id, DESCENDANTS_RESULT_SAMPLED_V1);
+        assert_eq!(result.root_pid, pid);
+        assert_eq!(result.max_levels, 1);
+    }
+
+    #[test]
+    fn test_descendants_with_config_monitor_zero_sample_rejected() {
+        let config = DescendantsConfig {
+            root_pid: std::process::id(),
+            max_levels: Some(1),
+            filter: None,
+            cpu_mode: CpuMode::Monitor,
+            sample_duration: Some(Duration::ZERO),
+        };
+
+        let err = descendants_with_config(config).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn test_descendants_with_config_invalid_pid_zero_rejected_before_sampling() {
+        let config = DescendantsConfig {
+            root_pid: 0,
+            max_levels: Some(1),
+            filter: None,
+            cpu_mode: CpuMode::Monitor,
+            sample_duration: Some(Duration::from_secs(1)),
+        };
+
+        let err = descendants_with_config(config).unwrap_err();
         assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
     }
 

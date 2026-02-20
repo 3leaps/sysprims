@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/descendants-result-sampled.schema.json",
+  "title": "sysprims descendants result (sampled CPU)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "root_pid",
+    "max_levels",
+    "levels",
+    "total_found",
+    "matched_by_filter",
+    "timestamp",
+    "platform"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/descendants-result-sampled.schema.json"
+    },
+    "root_pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "max_levels": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "levels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "level",
+          "processes"
+        ],
+        "properties": {
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "$ref": "process-info-sampled.schema.json#/definitions/process_info"
+            }
+          }
+        }
+      }
+    },
+    "total_found": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "matched_by_filter": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "platform": {
+      "type": "string"
+    }
+  }
+}

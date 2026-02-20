@@ -162,6 +162,15 @@ pub const SPAWN_IN_GROUP_RESULT_V1: &str =
 pub const DESCENDANTS_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/descendants-result.schema.json";
 
+/// Schema ID for descendants result JSON output with sampled (monitor-style) CPU (v1.1.0).
+///
+/// This schema matches the descendants result shape but relaxes `cpu_percent` to
+/// allow values > 100 when a process uses multiple cores.
+///
+/// Schema location: `schemas/process/v1.1.0/descendants-result-sampled.schema.json`
+pub const DESCENDANTS_RESULT_SAMPLED_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.1.0/descendants-result-sampled.schema.json";
+
 // ============================================================================
 // Schema Host Constants
 // ============================================================================
@@ -194,6 +203,7 @@ mod tests {
         assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with("https://"));
         assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with("https://"));
         assert!(DESCENDANTS_RESULT_V1.starts_with("https://"));
+        assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with("https://"));
     }
 
     #[test]
@@ -261,6 +271,10 @@ mod tests {
             DESCENDANTS_RESULT_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
+        assert!(
+            DESCENDANTS_RESULT_SAMPLED_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
     }
 
     #[test]
@@ -283,10 +297,12 @@ mod tests {
         assert!(SPAWN_IN_GROUP_CONFIG_V1.ends_with(".schema.json"));
         assert!(SPAWN_IN_GROUP_RESULT_V1.ends_with(".schema.json"));
         assert!(DESCENDANTS_RESULT_V1.ends_with(".schema.json"));
+        assert!(DESCENDANTS_RESULT_SAMPLED_V1.ends_with(".schema.json"));
 
         // Process snapshot schemas are v1.1.0 (additive ProcessInfo fields).
         assert!(PROCESS_INFO_V1.contains("/v1.1.0/"));
         assert!(PROCESS_INFO_SAMPLED_V1.contains("/v1.1.0/"));
+        assert!(DESCENDANTS_RESULT_SAMPLED_V1.contains("/v1.1.0/"));
 
         // Remaining schemas are currently v1.0.0.
         assert!(TIMEOUT_RESULT_V1.contains("/v1.0.0/"));
@@ -367,6 +383,10 @@ mod tests {
             DESCENDANTS_RESULT_V1.contains("/process/"),
             "descendants-result schema should have process topic"
         );
+        assert!(
+            DESCENDANTS_RESULT_SAMPLED_V1.contains("/process/"),
+            "descendants-result-sampled schema should have process topic"
+        );
     }
 
     #[test]
@@ -387,6 +407,7 @@ mod tests {
             SPAWN_IN_GROUP_CONFIG_V1,
             SPAWN_IN_GROUP_RESULT_V1,
             DESCENDANTS_RESULT_V1,
+            DESCENDANTS_RESULT_SAMPLED_V1,
         ];
 
         // Check all pairs are different
@@ -421,5 +442,6 @@ mod tests {
         assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with(&prefix));
         assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with(&prefix));
         assert!(DESCENDANTS_RESULT_V1.starts_with(&prefix));
+        assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with(&prefix));
     }
 }
