@@ -3,6 +3,7 @@ export type JsonObject = Record<string, unknown>;
 // Process types
 
 export type ProcessState = "running" | "sleeping" | "stopped" | "zombie" | "unknown";
+export type CpuMode = "lifetime" | "monitor";
 
 /**
  * Information about a single process.
@@ -227,6 +228,10 @@ export interface DescendantsOptions {
   maxLevels?: number;
   /** Optional filter applied to descendant processes. */
   filter?: ProcessFilter;
+  /** CPU measurement mode used for cpu_above evaluation. */
+  cpuMode?: CpuMode;
+  /** Sampling interval in milliseconds (used with monitor mode). */
+  sampleDurationMs?: number;
 }
 
 /**
@@ -237,6 +242,10 @@ export interface KillDescendantsOptions {
   maxLevels?: number;
   /** Optional filter applied to descendant processes. */
   filter?: ProcessFilter;
+  /** CPU measurement mode used for cpu_above evaluation. */
+  cpuMode?: CpuMode;
+  /** Sampling interval in milliseconds (used with monitor mode). */
+  sampleDurationMs?: number;
 }
 
 /**

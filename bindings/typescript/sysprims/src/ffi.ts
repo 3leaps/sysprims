@@ -48,13 +48,13 @@ export type SysprimsLib = {
   sysprimsProcDescendants: (
     rootPid: number,
     maxLevels: number,
-    filterJson: string,
+    configJson: string,
   ) => SysprimsCallJsonResult;
   sysprimsProcKillDescendants: (
     rootPid: number,
     maxLevels: number,
     signal: number,
-    filterJson: string,
+    configJson: string,
   ) => SysprimsCallJsonResult;
 
   // Self introspection

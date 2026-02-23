@@ -3,6 +3,7 @@ import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
 import type {
   BatchKillFailure,
   BatchKillResult,
+  CpuMode,
   DescendantsOptions,
   DescendantsResult,
   FdFilter,
@@ -26,6 +27,7 @@ export { SysprimsError, SysprimsErrorCode };
 export type {
   BatchKillFailure,
   BatchKillResult,
+  CpuMode,
   DescendantsLevel,
   DescendantsOptions,
   DescendantsResult,
@@ -68,6 +70,49 @@ function serializeProcessOptions(options?: ProcessOptions): string {
   }
 
   if (!wire.include_env && !wire.include_threads) {
+    return "";
+  }
+
+  return JSON.stringify(wire);
+}
+
+function serializeDescendantsConfig(options?: {
+  filter?: ProcessFilter;
+  cpuMode?: CpuMode;
+  sampleDurationMs?: number;
+}): string {
+  if (!options) {
+    return "";
+  }
+
+  const wire: Record<string, unknown> = {};
+
+  if (options.filter) {
+    Object.assign(wire, options.filter);
+  }
+
+  if (options.cpuMode !== undefined) {
+    if (options.cpuMode !== "lifetime" && options.cpuMode !== "monitor") {
+      throw new SysprimsError(
+        SysprimsErrorCode.InvalidArgument,
+        `invalid cpuMode: ${String(options.cpuMode)}`,
+      );
+    }
+    wire.cpu_mode = options.cpuMode;
+  }
+
+  if (options.sampleDurationMs !== undefined) {
+    const sample = options.sampleDurationMs;
+    if (!Number.isFinite(sample) || sample < 0) {
+      throw new SysprimsError(
+        SysprimsErrorCode.InvalidArgument,
+        "sampleDurationMs must be a finite number >= 0",
+      );
+    }
+    wire.sample_duration_ms = Math.trunc(sample);
+  }
+
+  if (Object.keys(wire).length === 0) {
     return "";
   }
 
@@ -192,9 +237,9 @@ export function descendants(pid: number, options?: DescendantsOptions): Descenda
   const maxLevels = options?.maxLevels != null && isFinite(options.maxLevels)
     ? options.maxLevels >>> 0
     : MAX_LEVELS_ALL;
-  const filterJson = options?.filter ? JSON.stringify(options.filter) : "";
+  const configJson = serializeDescendantsConfig(options);
   return callJsonReturn(() =>
-    lib.sysprimsProcDescendants(pid >>> 0, maxLevels, filterJson),
+    lib.sysprimsProcDescendants(pid >>> 0, maxLevels, configJson),
   ) as DescendantsResult;
 }
 
@@ -231,9 +276,9 @@ export function killDescendants(
   const maxLevels = options?.maxLevels != null && isFinite(options.maxLevels)
     ? options.maxLevels >>> 0
     : MAX_LEVELS_ALL;
-  const filterJson = options?.filter ? JSON.stringify(options.filter) : "";
+  const configJson = serializeDescendantsConfig(options);
   return callJsonReturn(() =>
-    lib.sysprimsProcKillDescendants(pid >>> 0, maxLevels, signal | 0, filterJson),
+    lib.sysprimsProcKillDescendants(pid >>> 0, maxLevels, signal | 0, configJson),
   ) as KillDescendantsResult;
 }
 

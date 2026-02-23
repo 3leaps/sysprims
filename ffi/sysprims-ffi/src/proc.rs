@@ -9,13 +9,40 @@ use std::time::Duration;
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
-use sysprims_proc::{FdFilter, PortFilter, ProcessFilter, ProcessOptions};
+use sysprims_proc::{
+    descendants_with_config_and_options, CpuMode, DescendantsConfig, FdFilter, PortFilter,
+    ProcessFilter, ProcessOptions,
+};
 
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ProcessOptionsWire {
     include_env: bool,
     include_threads: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CpuModeWire {
+    #[default]
+    Lifetime,
+    Monitor,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DescendantsConfigWire {
+    #[serde(flatten)]
+    filter: ProcessFilter,
+    cpu_mode: CpuModeWire,
+    sample_duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Default)]
+struct ParsedDescendantsConfig {
+    filter: Option<ProcessFilter>,
+    cpu_mode: CpuMode,
+    sample_duration: Option<Duration>,
 }
 
 unsafe fn parse_process_options(
@@ -39,6 +66,56 @@ unsafe fn parse_process_options(
     Ok(ProcessOptions {
         include_env: wire.include_env,
         include_threads: wire.include_threads,
+    })
+}
+
+fn process_filter_has_criteria(filter: &ProcessFilter) -> bool {
+    filter.name_contains.is_some()
+        || filter.name_equals.is_some()
+        || filter.user_equals.is_some()
+        || filter.pid_in.is_some()
+        || filter.ppid.is_some()
+        || filter.state_in.is_some()
+        || filter.cpu_above.is_some()
+        || filter.memory_above_kb.is_some()
+        || filter.running_for_at_least_secs.is_some()
+}
+
+fn wire_cpu_mode_to_proc(mode: CpuModeWire) -> CpuMode {
+    match mode {
+        CpuModeWire::Lifetime => CpuMode::Lifetime,
+        CpuModeWire::Monitor => CpuMode::Monitor,
+    }
+}
+
+unsafe fn parse_descendants_config(
+    config_json: *const c_char,
+) -> Result<ParsedDescendantsConfig, SysprimsError> {
+    if config_json.is_null() {
+        return Ok(ParsedDescendantsConfig::default());
+    }
+
+    let config_str = CStr::from_ptr(config_json)
+        .to_str()
+        .map_err(|_| SysprimsError::invalid_argument("config_json is not valid UTF-8"))?;
+
+    if config_str.is_empty() || config_str == "{}" {
+        return Ok(ParsedDescendantsConfig::default());
+    }
+
+    let wire: DescendantsConfigWire = serde_json::from_str(config_str)
+        .map_err(|e| SysprimsError::invalid_argument(format!("invalid config JSON: {}", e)))?;
+
+    let filter = if process_filter_has_criteria(&wire.filter) {
+        Some(wire.filter)
+    } else {
+        None
+    };
+
+    Ok(ParsedDescendantsConfig {
+        filter,
+        cpu_mode: wire_cpu_mode_to_proc(wire.cpu_mode),
+        sample_duration: wire.sample_duration_ms.map(Duration::from_millis),
     })
 }
 
@@ -643,46 +720,23 @@ pub unsafe extern "C" fn sysprims_proc_descendants_ex(
         }
     };
 
-    let filter = if filter_json.is_null() {
-        None
-    } else {
-        let filter_str = match CStr::from_ptr(filter_json).to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                let err = SysprimsError::invalid_argument("filter_json is not valid UTF-8");
-                set_error(&err);
-                return SysprimsErrorCode::InvalidArgument;
-            }
-        };
-
-        if filter_str.is_empty() || filter_str == "{}" {
-            None
-        } else {
-            match serde_json::from_str::<ProcessFilter>(filter_str) {
-                Ok(f) => Some(f),
-                Err(e) => {
-                    let err =
-                        SysprimsError::invalid_argument(format!("invalid filter JSON: {}", e));
-                    set_error(&err);
-                    return SysprimsErrorCode::InvalidArgument;
-                }
-            }
-        }
-    };
-
-    if let Some(ref f) = filter {
-        if let Err(e) = f.validate() {
+    let parsed = match parse_descendants_config(filter_json) {
+        Ok(c) => c,
+        Err(e) => {
             set_error(&e);
             return SysprimsErrorCode::from(&e);
         }
-    }
+    };
 
-    let result = match sysprims_proc::descendants_with_options(
+    let config = DescendantsConfig {
         root_pid,
-        max_levels,
-        filter.as_ref(),
-        options,
-    ) {
+        max_levels: Some(max_levels),
+        filter: parsed.filter,
+        cpu_mode: parsed.cpu_mode,
+        sample_duration: parsed.sample_duration,
+    };
+
+    let result = match descendants_with_config_and_options(config, options) {
         Ok(r) => r,
         Err(e) => {
             set_error(&e);
@@ -727,7 +781,7 @@ pub unsafe extern "C" fn sysprims_proc_descendants_ex(
 /// * `root_pid` - PID to traverse descendants from
 /// * `max_levels` - Maximum depth (`u32::MAX` = all levels)
 /// * `signal` - Signal number to send (e.g., 15 for SIGTERM)
-/// * `filter_json` - Optional JSON filter (may be NULL)
+/// * `filter_json` - Optional JSON filter/config (may be NULL)
 /// * `result_json_out` - Output pointer for result JSON string
 ///
 /// # Safety Rules (enforced here, not in bindings)
@@ -750,6 +804,30 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants(
     filter_json: *const c_char,
     result_json_out: *mut *mut c_char,
 ) -> SysprimsErrorCode {
+    sysprims_proc_kill_descendants_ex(root_pid, max_levels, signal, filter_json, result_json_out)
+}
+
+/// Kill descendants with optional filter config and CPU sampling config.
+///
+/// `config_json` may include `ProcessFilter` fields plus:
+///
+/// ```json
+/// {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000}
+/// ```
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * `config_json` must be NULL or a valid UTF-8 C string
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_kill_descendants_ex(
+    root_pid: u32,
+    max_levels: u32,
+    signal: i32,
+    config_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
     clear_error_state();
 
     if result_json_out.is_null() {
@@ -758,43 +836,24 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants(
         return SysprimsErrorCode::InvalidArgument;
     }
 
-    // Parse optional filter
-    let filter = if filter_json.is_null() {
-        None
-    } else {
-        let filter_str = match CStr::from_ptr(filter_json).to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                let err = SysprimsError::invalid_argument("filter_json is not valid UTF-8");
-                set_error(&err);
-                return SysprimsErrorCode::InvalidArgument;
-            }
-        };
-
-        if filter_str.is_empty() || filter_str == "{}" {
-            None
-        } else {
-            match serde_json::from_str::<ProcessFilter>(filter_str) {
-                Ok(f) => Some(f),
-                Err(e) => {
-                    let err =
-                        SysprimsError::invalid_argument(format!("invalid filter JSON: {}", e));
-                    set_error(&err);
-                    return SysprimsErrorCode::InvalidArgument;
-                }
-            }
-        }
-    };
-
-    if let Some(ref f) = filter {
-        if let Err(e) = f.validate() {
+    let parsed = match parse_descendants_config(config_json) {
+        Ok(c) => c,
+        Err(e) => {
             set_error(&e);
             return SysprimsErrorCode::from(&e);
         }
-    }
+    };
 
-    // Traverse descendants
-    let desc_result = match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+    let config = DescendantsConfig {
+        root_pid,
+        max_levels: Some(max_levels),
+        filter: parsed.filter,
+        cpu_mode: parsed.cpu_mode,
+        sample_duration: parsed.sample_duration,
+    };
+
+    // Traverse descendants before sending any signal.
+    let desc_result = match descendants_with_config_and_options(config, ProcessOptions::default()) {
         Ok(r) => r,
         Err(e) => {
             set_error(&e);
@@ -802,7 +861,7 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants(
         }
     };
 
-    // Collect all descendant PIDs
+    // Collect all descendant PIDs.
     let mut target_pids: Vec<u32> = desc_result
         .levels
         .iter()
@@ -811,10 +870,10 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants(
     target_pids.sort_unstable();
     target_pids.dedup();
 
-    // Safety: exclude root PID (descendants-only)
+    // Safety: exclude root PID (descendants-only).
     target_pids.retain(|&pid| pid != root_pid);
 
-    // Safety: exclude self, PID 1, parent
+    // Safety: exclude self, PID 1, parent.
     let self_pid = std::process::id();
     let parent_pid = sysprims_proc::get_process(self_pid).ok().map(|p| p.ppid);
 
@@ -825,7 +884,7 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants(
     }
     let skipped_safety = before.saturating_sub(target_pids.len());
 
-    // Build result
+    // Build result.
     let (succeeded, failed) = if target_pids.is_empty() {
         (Vec::new(), Vec::<KillDescendantsFailure>::new())
     } else {
@@ -1225,6 +1284,24 @@ mod tests {
         assert!(result.is_null());
     }
 
+    #[test]
+    fn test_proc_descendants_monitor_config_uses_sampled_schema() {
+        let pid = std::process::id();
+        let config = CString::new(r#"{"cpu_mode":"monitor","sample_duration_ms":1}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code =
+            unsafe { sysprims_proc_descendants(pid, u32::MAX, config.as_ptr(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("descendants-result-sampled"));
+
+        unsafe { sysprims_free_string(result) };
+    }
+
     // ========================================================================
     // Kill-descendants FFI tests
     // ========================================================================
@@ -1295,6 +1372,20 @@ mod tests {
 
         let code = unsafe {
             sysprims_proc_kill_descendants(pid, u32::MAX, 15, filter.as_ptr(), &mut result)
+        };
+
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_kill_descendants_monitor_zero_sample_rejected() {
+        let pid = std::process::id();
+        let config = CString::new(r#"{"cpu_mode":"monitor","sample_duration_ms":0}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            sysprims_proc_kill_descendants(pid, u32::MAX, 15, config.as_ptr(), &mut result)
         };
 
         assert_eq!(code, SysprimsErrorCode::InvalidArgument);

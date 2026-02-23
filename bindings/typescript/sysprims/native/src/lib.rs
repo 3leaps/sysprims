@@ -3,7 +3,10 @@ use std::time::Duration;
 use napi_derive::napi;
 use sysprims_core::schema::{SPAWN_IN_GROUP_CONFIG_V1, TERMINATE_TREE_CONFIG_V1};
 use sysprims_core::SysprimsError;
-use sysprims_proc::{FdFilter, PortFilter, ProcessFilter, ProcessOptions};
+use sysprims_proc::{
+    descendants_with_config_and_options, CpuMode, DescendantsConfig, FdFilter, PortFilter,
+    ProcessFilter, ProcessOptions,
+};
 use sysprims_timeout::{spawn_in_group, terminate_tree, SpawnInGroupConfig, TerminateTreeConfig};
 
 #[repr(i32)]
@@ -131,6 +134,70 @@ fn parse_process_options(options_json: &str) -> Result<ProcessOptions, SysprimsE
     Ok(ProcessOptions {
         include_env: wire.include_env,
         include_threads: wire.include_threads,
+    })
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CpuModeWire {
+    #[default]
+    Lifetime,
+    Monitor,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DescendantsConfigWire {
+    #[serde(flatten)]
+    filter: ProcessFilter,
+    cpu_mode: CpuModeWire,
+    sample_duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Default)]
+struct ParsedDescendantsConfig {
+    filter: Option<ProcessFilter>,
+    cpu_mode: CpuMode,
+    sample_duration: Option<Duration>,
+}
+
+fn process_filter_has_criteria(filter: &ProcessFilter) -> bool {
+    filter.name_contains.is_some()
+        || filter.name_equals.is_some()
+        || filter.user_equals.is_some()
+        || filter.pid_in.is_some()
+        || filter.ppid.is_some()
+        || filter.state_in.is_some()
+        || filter.cpu_above.is_some()
+        || filter.memory_above_kb.is_some()
+        || filter.running_for_at_least_secs.is_some()
+}
+
+fn wire_cpu_mode_to_proc(mode: CpuModeWire) -> CpuMode {
+    match mode {
+        CpuModeWire::Lifetime => CpuMode::Lifetime,
+        CpuModeWire::Monitor => CpuMode::Monitor,
+    }
+}
+
+fn parse_descendants_config(config_json: &str) -> Result<ParsedDescendantsConfig, SysprimsError> {
+    if config_json.is_empty() || config_json == "{}" {
+        return Ok(ParsedDescendantsConfig::default());
+    }
+
+    let wire: DescendantsConfigWire = serde_json::from_str(config_json)
+        .map_err(|e| SysprimsError::invalid_argument(format!("invalid config JSON: {}", e)))?;
+
+    let filter = if process_filter_has_criteria(&wire.filter) {
+        Some(wire.filter)
+    } else {
+        None
+    };
+
+    Ok(ParsedDescendantsConfig {
+        filter,
+        cpu_mode: wire_cpu_mode_to_proc(wire.cpu_mode),
+        sample_duration: wire.sample_duration_ms.map(Duration::from_millis),
     })
 }
 
@@ -286,29 +353,22 @@ pub fn sysprims_proc_wait_pid(pid: u32, timeout_ms: u32) -> SysprimsCallJsonResu
 pub fn sysprims_proc_descendants(
     root_pid: u32,
     max_levels: u32,
-    filter_json: String,
+    config_json: String,
 ) -> SysprimsCallJsonResult {
-    let filter = if filter_json.is_empty() || filter_json == "{}" {
-        None
-    } else {
-        match serde_json::from_str::<ProcessFilter>(&filter_json) {
-            Ok(f) => Some(f),
-            Err(e) => {
-                return err_json(SysprimsError::invalid_argument(format!(
-                    "invalid filter JSON: {}",
-                    e
-                )))
-            }
-        }
+    let parsed = match parse_descendants_config(&config_json) {
+        Ok(c) => c,
+        Err(e) => return err_json(e),
     };
 
-    if let Some(ref f) = filter {
-        if let Err(e) = f.validate() {
-            return err_json(e);
-        }
-    }
+    let config = DescendantsConfig {
+        root_pid,
+        max_levels: Some(max_levels),
+        filter: parsed.filter,
+        cpu_mode: parsed.cpu_mode,
+        sample_duration: parsed.sample_duration,
+    };
 
-    match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+    match descendants_with_config_and_options(config, ProcessOptions::default()) {
         Ok(result) => match serde_json::to_string(&result) {
             Ok(json) => ok_json(json),
             Err(e) => err_json(SysprimsError::internal(format!(
@@ -325,30 +385,23 @@ pub fn sysprims_proc_kill_descendants(
     root_pid: u32,
     max_levels: u32,
     signal: i32,
-    filter_json: String,
+    config_json: String,
 ) -> SysprimsCallJsonResult {
-    let filter = if filter_json.is_empty() || filter_json == "{}" {
-        None
-    } else {
-        match serde_json::from_str::<ProcessFilter>(&filter_json) {
-            Ok(f) => Some(f),
-            Err(e) => {
-                return err_json(SysprimsError::invalid_argument(format!(
-                    "invalid filter JSON: {}",
-                    e
-                )))
-            }
-        }
+    let parsed = match parse_descendants_config(&config_json) {
+        Ok(c) => c,
+        Err(e) => return err_json(e),
     };
 
-    if let Some(ref f) = filter {
-        if let Err(e) = f.validate() {
-            return err_json(e);
-        }
-    }
+    let config = DescendantsConfig {
+        root_pid,
+        max_levels: Some(max_levels),
+        filter: parsed.filter,
+        cpu_mode: parsed.cpu_mode,
+        sample_duration: parsed.sample_duration,
+    };
 
-    // Traverse descendants
-    let desc_result = match sysprims_proc::descendants(root_pid, max_levels, filter.as_ref()) {
+    // Traverse descendants before sending any signal.
+    let desc_result = match descendants_with_config_and_options(config, ProcessOptions::default()) {
         Ok(r) => r,
         Err(e) => return err_json(e),
     };

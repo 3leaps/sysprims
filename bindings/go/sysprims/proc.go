@@ -70,6 +70,13 @@ const (
 	ProtocolUDP Protocol = "udp"
 )
 
+type CpuMode string
+
+const (
+	CpuModeLifetime CpuMode = "lifetime"
+	CpuModeMonitor  CpuMode = "monitor"
+)
+
 // PortBinding contains information about a listening socket binding.
 type PortBinding struct {
 	Protocol  Protocol     `json:"protocol"`
@@ -357,6 +364,30 @@ type KillDescendantsFail struct {
 	Error string `json:"error"`
 }
 
+type DescendantsOptions struct {
+	// MaxLevels controls traversal depth. Nil means all levels.
+	MaxLevels *uint32
+	// Filter applied to descendant processes.
+	Filter *ProcessFilter
+	// CpuMode controls CPU measurement semantics.
+	CpuMode CpuMode
+	// SampleDuration is used when CpuMode is monitor. 0 means default sample.
+	SampleDuration time.Duration
+}
+
+type KillDescendantsOptions struct {
+	// Signal to send. Zero defaults to SIGTERM (15).
+	Signal int
+	// MaxLevels controls traversal depth. Nil means all levels.
+	MaxLevels *uint32
+	// Filter applied to descendant processes.
+	Filter *ProcessFilter
+	// CpuMode controls CPU measurement semantics.
+	CpuMode CpuMode
+	// SampleDuration is used when CpuMode is monitor. 0 means default sample.
+	SampleDuration time.Duration
+}
+
 // Descendants returns the process subtree rooted at pid.
 //
 // maxLevels controls the traversal depth (1 = children only). Pass 0 or
@@ -364,22 +395,97 @@ type KillDescendantsFail struct {
 //
 // # Errors
 //
-//   - [ErrInvalidArgument]: root_pid is 0 or filter is invalid
+//   - [ErrInvalidArgument]: root_pid is 0 or filter/config is invalid
 //   - [ErrNotFound]: root process doesn't exist
 func Descendants(pid uint32, maxLevels uint32, filter *ProcessFilter) (*DescendantsResult, error) {
-	var filterCStr *C.char
+	return DescendantsWithOptions(pid, &DescendantsOptions{MaxLevels: &maxLevels, Filter: filter})
+}
+
+func normalizeCpuMode(mode CpuMode) (CpuMode, error) {
+	switch mode {
+	case "", CpuModeLifetime:
+		return CpuModeLifetime, nil
+	case CpuModeMonitor:
+		return CpuModeMonitor, nil
+	default:
+		return "", &Error{Code: ErrInvalidArgument, Message: "invalid cpu mode: " + string(mode)}
+	}
+}
+
+func buildDescendantsConfigJSON(filter *ProcessFilter, mode CpuMode, sample time.Duration) (string, error) {
+	config := make(map[string]interface{})
 	if filter != nil {
 		filterJSON, err := json.Marshal(filter)
 		if err != nil {
-			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+			return "", &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
 		}
-		filterCStr = C.CString(string(filterJSON))
-		defer C.free(unsafe.Pointer(filterCStr))
+		if err := json.Unmarshal(filterJSON, &config); err != nil {
+			return "", &Error{Code: ErrInvalidArgument, Message: "failed to decode filter JSON: " + err.Error()}
+		}
+	}
+
+	normalizedMode, err := normalizeCpuMode(mode)
+	if err != nil {
+		return "", err
+	}
+	if normalizedMode != CpuModeLifetime {
+		config["cpu_mode"] = string(normalizedMode)
+	}
+
+	if sample < 0 {
+		return "", &Error{Code: ErrInvalidArgument, Message: "sample duration must be >= 0"}
+	}
+	if sample > 0 {
+		config["sample_duration_ms"] = uint64(sample / time.Millisecond)
+	}
+
+	if len(config) == 0 {
+		return "", nil
+	}
+
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return "", &Error{Code: ErrInvalidArgument, Message: "failed to marshal descendants config: " + err.Error()}
+	}
+	return string(configJSON), nil
+}
+
+// DescendantsWithOptions returns descendants using optional cpu mode/sample config.
+func DescendantsWithOptions(pid uint32, opts *DescendantsOptions) (*DescendantsResult, error) {
+	maxLevels := uint32(^uint32(0))
+	var filter *ProcessFilter
+	cpuMode := CpuModeLifetime
+	sampleDuration := time.Duration(0)
+
+	if opts != nil {
+		if opts.MaxLevels != nil {
+			maxLevels = *opts.MaxLevels
+		}
+		filter = opts.Filter
+		cpuMode = opts.CpuMode
+		sampleDuration = opts.SampleDuration
+	}
+
+	configJSON, err := buildDescendantsConfigJSON(filter, cpuMode, sampleDuration)
+	if err != nil {
+		return nil, err
+	}
+
+	var configCStr *C.char
+	if configJSON != "" {
+		configCStr = C.CString(configJSON)
+		defer C.free(unsafe.Pointer(configCStr))
 	}
 
 	var resultCStr *C.char
 	if err := callAndCheck(func() C.SysprimsErrorCode {
-		return C.sysprims_proc_descendants(C.uint32_t(pid), C.uint32_t(maxLevels), filterCStr, &resultCStr)
+		return C.sysprims_proc_descendants_ex(
+			C.uint32_t(pid),
+			C.uint32_t(maxLevels),
+			configCStr,
+			nil,
+			&resultCStr,
+		)
 	}); err != nil {
 		return nil, err
 	}
@@ -401,22 +507,57 @@ func Descendants(pid uint32, maxLevels uint32, filter *ProcessFilter) (*Descenda
 //
 // # Errors
 //
-//   - [ErrInvalidArgument]: root_pid is 0 or filter is invalid
+//   - [ErrInvalidArgument]: root_pid is 0 or filter/config is invalid
 //   - [ErrNotFound]: root process doesn't exist
 func KillDescendants(pid uint32, signal int, maxLevels uint32, filter *ProcessFilter) (*KillDescendantsResult, error) {
-	var filterCStr *C.char
-	if filter != nil {
-		filterJSON, err := json.Marshal(filter)
-		if err != nil {
-			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+	return KillDescendantsWithOptions(pid, &KillDescendantsOptions{
+		Signal:    signal,
+		MaxLevels: &maxLevels,
+		Filter:    filter,
+	})
+}
+
+// KillDescendantsWithOptions sends a signal to descendants using optional
+// cpu mode/sample config for filter evaluation.
+func KillDescendantsWithOptions(pid uint32, opts *KillDescendantsOptions) (*KillDescendantsResult, error) {
+	signal := 15
+	maxLevels := uint32(^uint32(0))
+	var filter *ProcessFilter
+	cpuMode := CpuModeLifetime
+	sampleDuration := time.Duration(0)
+
+	if opts != nil {
+		if opts.Signal != 0 {
+			signal = opts.Signal
 		}
-		filterCStr = C.CString(string(filterJSON))
-		defer C.free(unsafe.Pointer(filterCStr))
+		if opts.MaxLevels != nil {
+			maxLevels = *opts.MaxLevels
+		}
+		filter = opts.Filter
+		cpuMode = opts.CpuMode
+		sampleDuration = opts.SampleDuration
+	}
+
+	configJSON, err := buildDescendantsConfigJSON(filter, cpuMode, sampleDuration)
+	if err != nil {
+		return nil, err
+	}
+
+	var configCStr *C.char
+	if configJSON != "" {
+		configCStr = C.CString(configJSON)
+		defer C.free(unsafe.Pointer(configCStr))
 	}
 
 	var resultCStr *C.char
 	if err := callAndCheck(func() C.SysprimsErrorCode {
-		return C.sysprims_proc_kill_descendants(C.uint32_t(pid), C.uint32_t(maxLevels), C.int32_t(signal), filterCStr, &resultCStr)
+		return C.sysprims_proc_kill_descendants_ex(
+			C.uint32_t(pid),
+			C.uint32_t(maxLevels),
+			C.int32_t(signal),
+			configCStr,
+			&resultCStr,
+		)
 	}); err != nil {
 		return nil, err
 	}

@@ -359,6 +359,12 @@ SysprimsErrorCode sysprims_proc_list(const char *filter_json, char **result_json
  * ```json
  * {"include_env": true, "include_threads": true}
  * ```
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * `filter_json` and `options_json` must be NULL or valid UTF-8 C strings
+ * * The result string must be freed with `sysprims_free_string()`
  */
 SysprimsErrorCode sysprims_proc_list_ex(const char *filter_json,
                                         const char *options_json,
@@ -424,6 +430,12 @@ SysprimsErrorCode sysprims_proc_get(uint32_t pid, char **result_json_out);
  * ```json
  * {"include_env": true, "include_threads": true}
  * ```
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * `options_json` must be NULL or a valid UTF-8 C string
+ * * The result string must be freed with `sysprims_free_string()`
  */
 SysprimsErrorCode sysprims_proc_get_ex(uint32_t pid,
                                        const char *options_json,
@@ -487,6 +499,12 @@ SysprimsErrorCode sysprims_proc_descendants(uint32_t root_pid,
  * ```json
  * {"include_env": true, "include_threads": true}
  * ```
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * `filter_json` and `options_json` must be NULL or valid UTF-8 C strings
+ * * The result string must be freed with `sysprims_free_string()`
  */
 SysprimsErrorCode sysprims_proc_descendants_ex(uint32_t root_pid,
                                                uint32_t max_levels,
@@ -509,7 +527,7 @@ SysprimsErrorCode sysprims_proc_descendants_ex(uint32_t root_pid,
  * * `root_pid` - PID to traverse descendants from
  * * `max_levels` - Maximum depth (`u32::MAX` = all levels)
  * * `signal` - Signal number to send (e.g., 15 for SIGTERM)
- * * `filter_json` - Optional JSON filter (may be NULL)
+ * * `filter_json` - Optional JSON filter/config (may be NULL)
  * * `result_json_out` - Output pointer for result JSON string
  *
  * # Safety Rules (enforced here, not in bindings)
@@ -530,6 +548,21 @@ SysprimsErrorCode sysprims_proc_kill_descendants(uint32_t root_pid,
                                                  int32_t signal,
                                                  const char *filter_json,
                                                  char **result_json_out);
+
+/**
+ * Kill descendants with optional filter config and CPU sampling config.
+ *
+ * `config_json` may include `ProcessFilter` fields plus:
+ *
+ * ```json
+ * {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000}
+ * ```
+ */
+SysprimsErrorCode sysprims_proc_kill_descendants_ex(uint32_t root_pid,
+                                                    uint32_t max_levels,
+                                                    int32_t signal,
+                                                    const char *config_json,
+                                                    char **result_json_out);
 
 /**
  * Get the current process group ID (PGID).

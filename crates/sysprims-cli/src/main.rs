@@ -7,8 +7,9 @@ use sysprims_core::{
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
 use sysprims_proc::{
-    cpu_total_time_ns, descendants, get_process, list_fds, listening_ports, snapshot,
-    snapshot_filtered, FdFilter, FdKind, PortFilter, ProcessFilter, Protocol,
+    cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports, snapshot,
+    snapshot_filtered, CpuMode as ProcCpuMode, DescendantsConfig, FdFilter, FdKind, PortFilter,
+    ProcessFilter, Protocol,
 };
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
@@ -294,6 +295,20 @@ struct DescendantsArgs {
     #[arg(long, value_name = "PERCENT")]
     cpu_above: Option<f64>,
 
+    /// CPU measurement mode.
+    ///
+    /// - lifetime: lifetime-average estimate (may under-report recent spikes)
+    /// - monitor: sampled CPU over a short interval (Activity Monitor / top style)
+    #[arg(long, value_enum, value_name = "MODE", default_value = "lifetime")]
+    cpu_mode: CpuMode,
+
+    /// Sample CPU usage over an interval (e.g., "250ms").
+    ///
+    /// When provided with `--cpu-mode monitor`, cpu_percent is computed as a
+    /// rate over this interval instead of a lifetime-average estimate.
+    #[arg(long, value_name = "DURATION")]
+    sample: Option<String>,
+
     /// Filter by minimum memory usage in KB.
     #[arg(long, value_name = "KB")]
     memory_above: Option<u64>,
@@ -333,6 +348,20 @@ struct KillDescendantsArgs {
     /// Filter by minimum CPU usage (0-100).
     #[arg(long, value_name = "PERCENT")]
     cpu_above: Option<f64>,
+
+    /// CPU measurement mode.
+    ///
+    /// - lifetime: lifetime-average estimate (may under-report recent spikes)
+    /// - monitor: sampled CPU over a short interval (Activity Monitor / top style)
+    #[arg(long, value_enum, value_name = "MODE", default_value = "lifetime")]
+    cpu_mode: CpuMode,
+
+    /// Sample CPU usage over an interval (e.g., "250ms").
+    ///
+    /// When provided with `--cpu-mode monitor`, cpu_percent is computed as a
+    /// rate over this interval instead of a lifetime-average estimate.
+    #[arg(long, value_name = "DURATION")]
+    sample: Option<String>,
 
     /// Filter by minimum memory usage in KB.
     #[arg(long, value_name = "KB")]
@@ -1158,6 +1187,13 @@ fn build_descendants_filter(
     }))
 }
 
+fn to_proc_cpu_mode(mode: CpuMode) -> ProcCpuMode {
+    match mode {
+        CpuMode::Lifetime => ProcCpuMode::Lifetime,
+        CpuMode::Monitor => ProcCpuMode::Monitor,
+    }
+}
+
 fn run_descendants(args: DescendantsArgs) -> Result<i32, SysprimsError> {
     let max_levels = parse_max_levels(&args.max_levels)?;
 
@@ -1168,8 +1204,16 @@ fn run_descendants(args: DescendantsArgs) -> Result<i32, SysprimsError> {
         args.memory_above,
         &args.running_for,
     )?;
+    let sample_duration = args.sample.as_deref().map(parse_duration).transpose()?;
+    let config = DescendantsConfig {
+        root_pid: args.pid,
+        max_levels: Some(max_levels),
+        filter,
+        cpu_mode: to_proc_cpu_mode(args.cpu_mode),
+        sample_duration,
+    };
 
-    let result = descendants(args.pid, max_levels, filter.as_ref())?;
+    let result = descendants_with_config(config)?;
 
     if args.tree {
         let root_info = get_process(args.pid).ok();
@@ -1386,8 +1430,16 @@ fn run_kill_descendants(args: KillDescendantsArgs) -> Result<i32, SysprimsError>
         args.memory_above,
         &args.running_for,
     )?;
+    let sample_duration = args.sample.as_deref().map(parse_duration).transpose()?;
+    let config = DescendantsConfig {
+        root_pid: args.pid,
+        max_levels: Some(max_levels),
+        filter,
+        cpu_mode: to_proc_cpu_mode(args.cpu_mode),
+        sample_duration,
+    };
 
-    let result = descendants(args.pid, max_levels, filter.as_ref())?;
+    let result = descendants_with_config(config)?;
 
     // Collect all PIDs from all levels.
     let mut target_pids: Vec<u32> = result
@@ -2002,6 +2054,10 @@ mod tests {
             "Helper",
             "--cpu-above",
             "50",
+            "--cpu-mode",
+            "monitor",
+            "--sample",
+            "3s",
             "--running-for",
             "1m",
             "--tree",
@@ -2015,6 +2071,8 @@ mod tests {
         assert_eq!(parse_max_levels(&args.max_levels).unwrap(), 3);
         assert_eq!(args.name.as_deref(), Some("Helper"));
         assert_eq!(args.cpu_above, Some(50.0));
+        assert_eq!(args.cpu_mode, CpuMode::Monitor);
+        assert_eq!(args.sample.as_deref(), Some("3s"));
         assert_eq!(args.running_for.as_deref(), Some("1m"));
         assert!(args.tree);
         assert!(!args.table);
@@ -2046,6 +2104,10 @@ mod tests {
             "KILL",
             "--cpu-above",
             "80",
+            "--cpu-mode",
+            "monitor",
+            "--sample",
+            "250ms",
             "--yes",
         ])
         .unwrap();
@@ -2057,6 +2119,8 @@ mod tests {
         assert_eq!(parse_max_levels(&args.max_levels).unwrap(), 2);
         assert_eq!(args.signal, "KILL");
         assert_eq!(args.cpu_above, Some(80.0));
+        assert_eq!(args.cpu_mode, CpuMode::Monitor);
+        assert_eq!(args.sample.as_deref(), Some("250ms"));
         assert!(args.yes);
     }
 
