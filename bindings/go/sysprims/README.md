@@ -16,6 +16,8 @@ go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.1.14
 
 v0.1.14 expands the process-intelligence API so common shell-outs can be replaced directly.
 
+Full guide: [Replace Your Shell-outs with sysprims (Go)](https://github.com/3leaps/sysprims/blob/main/docs/guides/replace-shell-outs-go.md)
+
 | Before (shell-out) | After (sysprims Go) |
 | --- | --- |
 | `ps eww -p <pid>` + parsing | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeEnv: true})` |

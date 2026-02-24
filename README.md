@@ -373,10 +373,17 @@ duplicate symbol errors such as `_rust_eh_personality`. Use the shared-library m
 to avoid Rust runtime symbol collisions.
 
 ```go
-import "github.com/3leaps/sysprims/bindings/go/sysprims"
+import (
+    "time"
+
+    "github.com/3leaps/sysprims/bindings/go/sysprims"
+)
+
+// Example target PID
+pid := uint32(1234)
 
 // Send signal to process
-sysprims.Kill(pid, sysprims.SIGTERM)
+_ = sysprims.Kill(pid, sysprims.SIGTERM)
 
 // Run command with timeout
 result, err := sysprims.RunWithTimeout(
@@ -389,10 +396,34 @@ result, err := sysprims.RunWithTimeout(
 proto := sysprims.ProtocolTCP
 port := uint16(8080)
 snap, _ := sysprims.ListeningPorts(&sysprims.PortFilter{
-    Protocol: &proto,
+    Protocol:  &proto,
     LocalPort: &port,
 })
+_ = snap
+
+// Get process with v0.1.14 opt-in fields (env + thread_count)
+info, _ := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
+    IncludeEnv:     true,
+    IncludeThreads: true,
+})
+_ = info
+_ = result
+_ = err
+
+// Find and kill actively hot descendants (monitor sampling)
+cpu := 90.0
+killResult, _ := sysprims.KillDescendantsWithOptions(pid, &sysprims.KillDescendantsOptions{
+    Signal:         sysprims.SIGKILL,
+    CpuMode:        sysprims.CpuModeMonitor,
+    SampleDuration: 3 * time.Second,
+    Filter: &sysprims.ProcessFilter{
+        CPUAbove: &cpu,
+    },
+})
+_ = killResult
 ```
+
+For a migration-focused walkthrough, see `docs/guides/replace-shell-outs-go.md`.
 
 **Shared mode (recommended for multi-Rust cgo builds):**
 
