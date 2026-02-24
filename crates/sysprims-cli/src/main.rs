@@ -123,6 +123,8 @@ struct KillArgs {
     user: Option<String>,
 
     /// Filter by minimum CPU usage (0-100, lifetime estimate).
+    ///
+    /// Set `SYSPRIMS_NO_HINTS=1` to suppress contextual CPU hints.
     #[arg(long, value_name = "PERCENT", conflicts_with = "list")]
     cpu_above: Option<f64>,
 
@@ -292,6 +294,8 @@ struct DescendantsArgs {
     user: Option<String>,
 
     /// Filter by minimum CPU usage (0-100).
+    ///
+    /// Set `SYSPRIMS_NO_HINTS=1` to suppress contextual CPU hints.
     #[arg(long, value_name = "PERCENT")]
     cpu_above: Option<f64>,
 
@@ -346,6 +350,8 @@ struct KillDescendantsArgs {
     user: Option<String>,
 
     /// Filter by minimum CPU usage (0-100).
+    ///
+    /// Set `SYSPRIMS_NO_HINTS=1` to suppress contextual CPU hints.
     #[arg(long, value_name = "PERCENT")]
     cpu_above: Option<f64>,
 
@@ -640,6 +646,8 @@ fn run_kill(args: KillArgs) -> Result<i32, SysprimsError> {
             "--group cannot be combined with process filters",
         ));
     }
+
+    maybe_emit_cpu_above_hint(args.cpu_above, args.json, CpuMode::Lifetime, false);
 
     // Parse signal
     let signal = parse_signal_arg(&args.signal)?;
@@ -1194,7 +1202,56 @@ fn to_proc_cpu_mode(mode: CpuMode) -> ProcCpuMode {
     }
 }
 
+fn cpu_mode_flag_explicit_from_argv() -> bool {
+    std::env::args().any(|arg| arg == "--cpu-mode" || arg.starts_with("--cpu-mode="))
+}
+
+fn hints_disabled_from_env() -> bool {
+    matches!(std::env::var("SYSPRIMS_NO_HINTS"), Ok(v) if v == "1")
+}
+
+fn should_emit_cpu_above_hint_base(
+    cpu_above: Option<f64>,
+    json_output: bool,
+    cpu_mode: CpuMode,
+    cpu_mode_explicit: bool,
+    hints_disabled: bool,
+) -> bool {
+    cpu_above.is_some()
+        && !json_output
+        && cpu_mode == CpuMode::Lifetime
+        && !cpu_mode_explicit
+        && !hints_disabled
+}
+
+fn maybe_emit_cpu_above_hint(
+    cpu_above: Option<f64>,
+    json_output: bool,
+    cpu_mode: CpuMode,
+    cpu_mode_explicit: bool,
+) {
+    if should_emit_cpu_above_hint_base(
+        cpu_above,
+        json_output,
+        cpu_mode,
+        cpu_mode_explicit,
+        hints_disabled_from_env(),
+    ) {
+        eprintln!(
+            "hint: --cpu-above uses lifetime CPU averaging; spinning/bursty processes may not appear."
+        );
+        eprintln!("      try: --cpu-mode monitor --sample 3s");
+    }
+}
+
 fn run_descendants(args: DescendantsArgs) -> Result<i32, SysprimsError> {
+    maybe_emit_cpu_above_hint(
+        args.cpu_above,
+        args.json,
+        args.cpu_mode.clone(),
+        cpu_mode_flag_explicit_from_argv(),
+    );
+
     let max_levels = parse_max_levels(&args.max_levels)?;
 
     let filter = build_descendants_filter(
@@ -1421,6 +1478,13 @@ fn print_descendants_tree(
 }
 
 fn run_kill_descendants(args: KillDescendantsArgs) -> Result<i32, SysprimsError> {
+    maybe_emit_cpu_above_hint(
+        args.cpu_above,
+        args.json,
+        args.cpu_mode.clone(),
+        cpu_mode_flag_explicit_from_argv(),
+    );
+
     let max_levels = parse_max_levels(&args.max_levels)?;
 
     let filter = build_descendants_filter(
@@ -2140,6 +2204,61 @@ mod tests {
         };
         assert_eq!(args.cpu_above, Some(90.0));
         assert_eq!(args.running_for.as_deref(), Some("5s"));
+    }
+
+    #[test]
+    fn cpu_above_hint_base_emits_for_lifetime_human_output() {
+        assert!(should_emit_cpu_above_hint_base(
+            Some(80.0),
+            false,
+            CpuMode::Lifetime,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn cpu_above_hint_base_suppressed_for_json_output() {
+        assert!(!should_emit_cpu_above_hint_base(
+            Some(80.0),
+            true,
+            CpuMode::Lifetime,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn cpu_above_hint_base_suppressed_for_monitor_mode() {
+        assert!(!should_emit_cpu_above_hint_base(
+            Some(80.0),
+            false,
+            CpuMode::Monitor,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn cpu_above_hint_base_suppressed_when_cpu_mode_explicit() {
+        assert!(!should_emit_cpu_above_hint_base(
+            Some(80.0),
+            false,
+            CpuMode::Lifetime,
+            true,
+            false,
+        ));
+    }
+
+    #[test]
+    fn cpu_above_hint_base_suppressed_by_env_flag() {
+        assert!(!should_emit_cpu_above_hint_base(
+            Some(80.0),
+            false,
+            CpuMode::Lifetime,
+            false,
+            true,
+        ));
     }
 
     #[test]
