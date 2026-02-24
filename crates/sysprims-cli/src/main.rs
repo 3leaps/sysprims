@@ -16,9 +16,46 @@ use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOut
 use tracing::info;
 use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
 
+const PSTAT_AFTER_HELP: &str = r#"Examples:
+  sysprims pstat --table
+  sysprims pstat --cpu-mode monitor --sample 3s --cpu-above 80 --table
+  sysprims pstat --pid 1234 --json
+  SYSPRIMS_NO_HINTS=1 sysprims pstat --cpu-above 70 --table
+"#;
+
+const DESCENDANTS_AFTER_HELP: &str = r#"Examples:
+  sysprims descendants 14796 --tree
+  sysprims descendants 14796 --max-levels all --table
+  sysprims descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --tree
+  SYSPRIMS_NO_HINTS=1 sysprims descendants 14796 --cpu-above 80 --table
+"#;
+
+const KILL_DESCENDANTS_AFTER_HELP: &str = r#"Examples:
+  sysprims kill-descendants 14796 --dry-run
+  sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --dry-run
+  sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --signal KILL --yes
+  sysprims kill-descendants 14796 --name worker --signal TERM --yes
+"#;
+
+const HELP_AFTER_HELP: &str = r#"Topics:
+  cpu-mode  Lifetime vs monitor CPU measurement
+  signals   Signal names, lookup, and platform behavior
+  safety    PID safety rules summary (ADR-0011)
+
+Examples:
+  sysprims help cpu-mode
+  sysprims help safety
+"#;
+
 /// A cross-platform process utility toolkit.
 #[derive(Parser, Debug)]
-#[command(name = "sysprims", version, about, long_about = None)]
+#[command(
+    name = "sysprims",
+    version,
+    about,
+    long_about = None,
+    disable_help_subcommand = true
+)]
 struct Cli {
     /// The format for log output.
     #[arg(long, value_name = "FORMAT", default_value = "text")]
@@ -73,6 +110,9 @@ enum Command {
 
     /// List listening port bindings.
     Ports(PortsArgs),
+
+    /// Explain concepts and safety guidance.
+    Help(HelpArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -199,6 +239,7 @@ struct TimeoutArgs {
 }
 
 #[derive(Parser, Debug)]
+#[command(after_help = PSTAT_AFTER_HELP)]
 struct PstatArgs {
     /// Output as JSON (default for automation).
     #[arg(long)]
@@ -264,6 +305,7 @@ struct PstatArgs {
 }
 
 #[derive(Parser, Debug)]
+#[command(after_help = DESCENDANTS_AFTER_HELP)]
 struct DescendantsArgs {
     /// Root process ID to traverse from.
     #[arg(value_name = "PID")]
@@ -323,6 +365,7 @@ struct DescendantsArgs {
 }
 
 #[derive(Parser, Debug)]
+#[command(after_help = KILL_DESCENDANTS_AFTER_HELP)]
 struct KillDescendantsArgs {
     /// Root process ID to traverse from.
     #[arg(value_name = "PID")]
@@ -400,6 +443,24 @@ enum CpuMode {
     Lifetime,
     /// Sampled CPU usage over an interval (Activity Monitor / top style).
     Monitor,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum HelpTopic {
+    /// Lifetime vs monitor CPU measurement.
+    CpuMode,
+    /// Signal names, lookup, and platform behavior.
+    Signals,
+    /// PID safety rules (ADR-0011 summary).
+    Safety,
+}
+
+#[derive(Parser, Debug)]
+#[command(after_help = HELP_AFTER_HELP)]
+struct HelpArgs {
+    /// Help topic to print.
+    #[arg(value_enum, value_name = "TOPIC")]
+    topic: HelpTopic,
 }
 
 #[derive(Parser, Debug)]
@@ -560,6 +621,25 @@ fn main() {
     info!("Main logic finished.");
 }
 
+fn help_topic_text(topic: HelpTopic) -> &'static str {
+    match topic {
+        HelpTopic::CpuMode => {
+            "CPU mode guidance\n\n- lifetime: quick, best-effort lifetime average; can under-report bursty/spinning processes.\n- monitor: sampled rate over an interval; best for finding active CPU spikes.\n\nCommon workflow:\n  sysprims descendants <pid> --cpu-mode monitor --sample 3s --cpu-above 80 --tree\n\nIf you use --cpu-above with lifetime mode, sysprims prints a hint by default.\nSet SYSPRIMS_NO_HINTS=1 to suppress hints in scripts/CI."
+        }
+        HelpTopic::Signals => {
+            "Signal guidance\n\nList signals:\n  sysprims kill -l\n\nResolve one signal:\n  sysprims kill -l TERM\n\nSend a signal:\n  sysprims kill --signal TERM 1234\n\nPlatform notes:\n- Unix: process and process-group signaling are supported.\n- Windows: only supported termination semantics are available for some signal values."
+        }
+        HelpTopic::Safety => {
+            "PID safety guidance (ADR-0011)\n\nNever target these values in signal/kill workflows:\n- PID 0: signals the caller's process group\n- PID 1: init/launchd\n- u32::MAX or values > i32::MAX: can map to broadcast semantics\n\nSafe testing targets:\n- std::process::id()\n- spawned child processes\n- high nonexistent PID like 99999\n\nFor kill-descendants, preview first:\n  sysprims kill-descendants <pid> --dry-run\n\nUse --force carefully: it bypasses some CLI safety checks (self/PID1/parent filtering)."
+        }
+    }
+}
+
+fn run_help(args: HelpArgs) -> i32 {
+    println!("{}", help_topic_text(args.topic));
+    0
+}
+
 fn run_command(command: Command) -> Result<i32, SysprimsError> {
     match command {
         Command::Kill(args) => run_kill(args),
@@ -573,6 +653,7 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
         Command::KillDescendants(args) => run_kill_descendants(args),
         Command::Fds(args) => run_fds(args),
         Command::Ports(args) => run_ports(args),
+        Command::Help(args) => Ok(run_help(args)),
     }
 }
 
@@ -2055,6 +2136,35 @@ mod tests {
         };
         assert!(args.pids.is_empty());
         assert!(matches!(args.list, Some(Some(ref s)) if s == "TERM"));
+    }
+
+    #[test]
+    fn help_parses_cpu_mode_topic() {
+        let cli = Cli::try_parse_from(["sysprims", "help", "cpu-mode"]).unwrap();
+        let Command::Help(args) = cli.command.unwrap() else {
+            panic!("expected help command");
+        };
+        assert_eq!(args.topic, HelpTopic::CpuMode);
+    }
+
+    #[test]
+    fn help_topic_text_mentions_expected_guidance() {
+        let cpu = help_topic_text(HelpTopic::CpuMode);
+        assert!(cpu.contains("lifetime"));
+        assert!(cpu.contains("monitor"));
+        assert!(cpu.contains("SYSPRIMS_NO_HINTS=1"));
+
+        let signals = help_topic_text(HelpTopic::Signals);
+        assert!(signals.contains("sysprims kill -l"));
+
+        let safety = help_topic_text(HelpTopic::Safety);
+        assert!(safety.contains("PID 0"));
+        assert!(safety.contains("u32::MAX"));
+        assert!(safety.contains("--force"));
+
+        assert!(HELP_AFTER_HELP.contains("cpu-mode"));
+        assert!(HELP_AFTER_HELP.contains("signals"));
+        assert!(HELP_AFTER_HELP.contains("safety"));
     }
 
     #[test]
