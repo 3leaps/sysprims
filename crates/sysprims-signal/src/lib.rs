@@ -159,7 +159,18 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// - `pid == 0`: Would signal the caller's process group (use [`killpg`] explicitly)
 /// - `pid > MAX_SAFE_PID`: Would overflow to negative, triggering POSIX broadcast
 ///
-/// See [ADR-0011](docs/architecture/adr/0011-pid-validation-safety.md) for rationale.
+/// See [ADR-0011](https://github.com/3leaps/sysprims/blob/main/docs/decisions/ADR-0011-pid-validation-safety.md)
+/// for rationale.
+/// Prefer this over shelling out to `kill -TERM <pid>` and parsing command failures.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_signal::SIGTERM;
+///
+/// // Replaces: kill -TERM 4242
+/// sysprims_signal::kill(4242, SIGTERM).ok();
+/// ```
 pub fn kill(pid: u32, signal: i32) -> SysprimsResult<()> {
     validate_pid(pid, "pid")?;
 
@@ -180,6 +191,16 @@ pub fn kill(pid: u32, signal: i32) -> SysprimsResult<()> {
 /// Returns [`SysprimsError::InvalidArgument`] if:
 /// - `pids` is empty
 /// - any PID in `pids` is invalid (e.g. 0 or > [`MAX_SAFE_PID`])
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_signal::SIGTERM;
+///
+/// // Replaces: kill -TERM 1234 && kill -TERM 5678
+/// let result = sysprims_signal::kill_many(&[1234, 5678], SIGTERM).unwrap();
+/// println!("sent to {}", result.succeeded.len());
+/// ```
 pub fn kill_many(pids: &[u32], signal: i32) -> SysprimsResult<BatchKillResult> {
     validate_pid_list(pids, "pids")?;
 
@@ -195,11 +216,25 @@ pub fn kill_many(pids: &[u32], signal: i32) -> SysprimsResult<BatchKillResult> {
 }
 
 /// Convenience wrapper: send `SIGTERM` to multiple processes.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: xargs -n1 kill -TERM
+/// let _ = sysprims_signal::terminate_many(&[1234, 5678]);
+/// ```
 pub fn terminate_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
     kill_many(pids, SIGTERM)
 }
 
 /// Convenience wrapper: send `SIGKILL` to multiple processes.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: xargs -n1 kill -KILL
+/// let _ = sysprims_signal::force_kill_many(&[1234, 5678]);
+/// ```
 pub fn force_kill_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
     kill_many(pids, SIGKILL)
 }
@@ -209,6 +244,13 @@ pub fn force_kill_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
 /// This uses rsfulmen's catalog plus a small normalization layer:
 /// - Accepts `SIGTERM`, `TERM`, or `sigterm`
 /// - Accepts short IDs like `term` or `int`
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -TERM 1234
+/// sysprims_signal::kill_by_name(1234, "TERM").ok();
+/// ```
 pub fn kill_by_name(pid: u32, signal_name: &str) -> SysprimsResult<()> {
     let signal = resolve_signal_number(signal_name).ok_or_else(|| {
         SysprimsError::invalid_argument(format!("unknown signal name: {signal_name}"))
@@ -226,7 +268,17 @@ pub fn kill_by_name(pid: u32, signal_name: &str) -> SysprimsResult<()> {
 /// - `pgid == 0`: Would signal the caller's process group
 /// - `pgid > MAX_SAFE_PID`: Would overflow to negative
 ///
-/// See [ADR-0011](docs/architecture/adr/0011-pid-validation-safety.md) for rationale.
+/// See [ADR-0011](https://github.com/3leaps/sysprims/blob/main/docs/decisions/ADR-0011-pid-validation-safety.md)
+/// for rationale.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_signal::SIGTERM;
+///
+/// // Replaces: kill -TERM -- -4242
+/// sysprims_signal::killpg(4242, SIGTERM).ok();
+/// ```
 pub fn killpg(pgid: u32, signal: i32) -> SysprimsResult<()> {
     validate_pid(pgid, "pgid")?;
 
@@ -244,6 +296,14 @@ pub fn killpg(pgid: u32, signal: i32) -> SysprimsResult<()> {
 ///
 /// Supports `*` (any sequence) and `?` (single char). Matching is
 /// ASCII case-insensitive and checks both the signal name and short ID.
+///
+/// # Examples
+///
+/// ```rust
+/// // Replaces: kill -l | grep -i term
+/// let matches = sysprims_signal::match_signal_names("*term*");
+/// assert!(matches.iter().any(|name| *name == "SIGTERM"));
+/// ```
 pub fn match_signal_names(pattern: &str) -> Vec<&'static str> {
     let trimmed = pattern.trim();
     if trimmed.is_empty() {
@@ -267,21 +327,49 @@ pub fn match_signal_names(pattern: &str) -> Vec<&'static str> {
 }
 
 /// Convenience wrapper: send `SIGTERM` (or Windows terminate).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -TERM 1234
+/// sysprims_signal::terminate(1234).ok();
+/// ```
 pub fn terminate(pid: u32) -> SysprimsResult<()> {
     kill(pid, SIGTERM)
 }
 
 /// Convenience wrapper: send `SIGKILL` (or Windows terminate).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -KILL 1234
+/// sysprims_signal::force_kill(1234).ok();
+/// ```
 pub fn force_kill(pid: u32) -> SysprimsResult<()> {
     kill(pid, SIGKILL)
 }
 
 /// Convenience wrapper: send `SIGTERM` to a process group.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -TERM -- -4242
+/// sysprims_signal::terminate_group(4242).ok();
+/// ```
 pub fn terminate_group(pgid: u32) -> SysprimsResult<()> {
     killpg(pgid, SIGTERM)
 }
 
 /// Convenience wrapper: send `SIGKILL` to a process group.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -KILL -- -4242
+/// sysprims_signal::force_kill_group(4242).ok();
+/// ```
 pub fn force_kill_group(pgid: u32) -> SysprimsResult<()> {
     killpg(pgid, SIGKILL)
 }

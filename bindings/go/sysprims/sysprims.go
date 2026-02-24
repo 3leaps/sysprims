@@ -3,6 +3,17 @@
 // sysprims offers GPL-free, cross-platform process control primitives with
 // group-by-default behavior - when you timeout a process, the entire tree dies.
 //
+// # Replacing Shell-outs (v0.1.14)
+//
+// Prefer typed APIs over parsing process tool output:
+//   - `ps eww -p <pid>` -> [ProcessGetWithOptions] with [ProcessOptions.IncludeEnv]
+//   - `ps -M -p <pid>` -> [ProcessGetWithOptions] with [ProcessOptions.IncludeThreads]
+//   - `lsof -p <pid>` -> [ListFds]
+//   - `kill -9 <pid>` -> [Kill] with [SIGKILL]
+//   - `kill` loops for process trees -> [KillDescendantsWithOptions] with filter + [CpuModeMonitor]
+//
+// This keeps behavior cross-platform and avoids fragile text parsing.
+//
 // # Memory Management
 //
 // All memory management is handled automatically by the Go bindings.

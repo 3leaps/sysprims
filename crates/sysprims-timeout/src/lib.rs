@@ -16,7 +16,7 @@
 //!
 //! This prevents orphaned processes that ignore SIGTERM or attempt to escape.
 //!
-//! # Example
+//! # Examples
 //!
 //! ```no_run
 //! use std::time::Duration;
@@ -207,10 +207,7 @@ pub struct TerminateTreeResult {
 // Spawn In Group / Job
 // =============================================================================
 
-/// Spawn a process in a new process group (Unix) or Job Object (Windows).
-///
-/// This is designed for supervisors that want kill-tree-safe jobs without
-/// using `run_with_timeout`.
+/// Configuration for [`spawn_in_group`].
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpawnInGroupConfig {
@@ -242,6 +239,25 @@ pub struct SpawnInGroupResult {
     pub warnings: Vec<String>,
 }
 
+/// Spawn a process in a new process group (Unix) or Job Object (Windows).
+///
+/// Use this when you would otherwise shell out to `setsid`/wrapper scripts to
+/// make jobs kill-tree safe.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_timeout::{spawn_in_group, SpawnInGroupConfig};
+///
+/// // Replaces: setsid sleep 5
+/// let result = spawn_in_group(SpawnInGroupConfig {
+///     argv: vec!["sleep".into(), "5".into()],
+///     cwd: None,
+///     env: None,
+/// })
+/// .unwrap();
+/// println!("spawned pid: {}", result.pid);
+/// ```
 pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult> {
     if config.argv.is_empty() {
         return Err(SysprimsError::invalid_argument("argv must not be empty"));
@@ -264,6 +280,16 @@ pub(crate) fn current_timestamp() -> String {
 ///
 /// PID-only API: if the target PID is a process group leader (Unix only), this will
 /// prefer group kill for better coverage. Otherwise it signals the PID directly.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_timeout::{terminate_tree, TerminateTreeConfig};
+///
+/// // Replaces: kill -TERM 1234; sleep 2; kill -KILL 1234
+/// let result = terminate_tree(1234, TerminateTreeConfig::default()).unwrap();
+/// println!("exited={} timed_out={}", result.exited, result.timed_out);
+/// ```
 pub fn terminate_tree(
     pid: u32,
     config: TerminateTreeConfig,
@@ -495,12 +521,13 @@ pub enum TimeoutOutcome {
 /// * `Ok(TimeoutOutcome::TimedOut { .. })` - Command was killed due to timeout
 /// * `Err(SysprimsError)` - Failed to spawn or fatal error
 ///
-/// # Example
+/// # Examples
 ///
 /// ```no_run
 /// use std::time::Duration;
 /// use sysprims_timeout::{run_with_timeout, TimeoutConfig};
 ///
+/// // Replaces: timeout 300s make build
 /// let result = run_with_timeout(
 ///     "make",
 ///     &["build"],
@@ -530,6 +557,16 @@ pub fn run_with_timeout(
 /// - Kill after: 10 seconds
 /// - Grouping: GroupByDefault
 /// - Preserve status: false
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::time::Duration;
+/// use sysprims_timeout::run_with_timeout_default;
+///
+/// // Replaces: timeout 2s sleep 1
+/// let _ = run_with_timeout_default("sleep", &["1"], Duration::from_secs(2));
+/// ```
 pub fn run_with_timeout_default(
     command: &str,
     args: &[&str],

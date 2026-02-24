@@ -20,7 +20,7 @@
 //! | CPU usage | /proc/[pid]/stat | proc_pidinfo | GetProcessTimes |
 //! | Memory usage | /proc/[pid]/statm | proc_pidinfo | GetProcessMemoryInfo |
 //!
-//! ## Example
+//! ## Examples
 //!
 //! ```rust,no_run
 //! use sysprims_proc::{snapshot, get_process, ProcessFilter};
@@ -567,9 +567,10 @@ impl ProcessFilter {
 /// Returns a list of all processes visible to the current user. Processes that
 /// cannot be read (e.g., due to permissions) are silently skipped.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust,no_run
+/// // Replaces: ps -eo pid,comm
 /// let snap = sysprims_proc::snapshot().unwrap();
 /// for proc in &snap.processes {
 ///     println!("{}: {}", proc.pid, proc.name);
@@ -580,6 +581,16 @@ pub fn snapshot() -> SysprimsResult<ProcessSnapshot> {
 }
 
 /// Get a snapshot of all processes with optional extended fields.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::ProcessOptions;
+///
+/// // Replaces: ps -M -p <pid> plus line counting
+/// let snap = sysprims_proc::snapshot_with_options(ProcessOptions::default().with_threads()).unwrap();
+/// println!("{} processes", snap.processes.len());
+/// ```
 pub fn snapshot_with_options(options: ProcessOptions) -> SysprimsResult<ProcessSnapshot> {
     validate_process_options(&options)?;
     platform::snapshot_impl(&options)
@@ -593,11 +604,34 @@ pub fn snapshot_with_options(options: ProcessOptions) -> SysprimsResult<ProcessS
 /// - The existing `ProcessInfo.cpu_percent` is a lifetime-average estimate.
 /// - For near-instant CPU usage, callers should sample this value twice and
 ///   compute a rate over an interval.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// let pid = std::process::id();
+/// // Replaces: parsing top/ps CPU time columns
+/// let total_ns = sysprims_proc::cpu_total_time_ns(pid).unwrap();
+/// println!("cpu total ns: {}", total_ns);
+/// ```
 pub fn cpu_total_time_ns(pid: u32) -> SysprimsResult<u64> {
     platform::cpu_total_time_ns_impl(pid)
 }
 
 /// Get a snapshot of listening ports.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::{listening_ports, PortFilter, Protocol};
+///
+/// // Replaces: lsof -nP -iTCP -sTCP:LISTEN
+/// let filter = PortFilter {
+///     protocol: Some(Protocol::Tcp),
+///     local_port: Some(8080),
+/// };
+/// let snap = listening_ports(Some(&filter)).unwrap();
+/// println!("bindings: {}", snap.bindings.len());
+/// ```
 pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindingsSnapshot> {
     let filter = filter.cloned().unwrap_or_default();
     filter.validate()?;
@@ -621,6 +655,15 @@ pub fn listening_ports(filter: Option<&PortFilter>) -> SysprimsResult<PortBindin
 /// - Linux: enumerates `/proc/<pid>/fd` symlinks.
 /// - macOS: enumerates via libproc (`proc_pidinfo(PROC_PIDLISTFDS)`) and attempts path recovery.
 /// - Windows: returns NotSupported.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// let pid = std::process::id();
+/// // Replaces: lsof -p <pid>
+/// let snap = sysprims_proc::list_fds(pid, None).unwrap();
+/// println!("fd count: {}", snap.fds.len());
+/// ```
 pub fn list_fds(pid: u32, filter: Option<&FdFilter>) -> SysprimsResult<FdSnapshot> {
     // Safety: avoid negative pid_t casting semantics on Unix.
     const MAX_SAFE_PID: u32 = i32::MAX as u32;
@@ -651,6 +694,16 @@ pub fn list_fds(pid: u32, filter: Option<&FdFilter>) -> SysprimsResult<FdSnapsho
 }
 
 /// Resolve a process by port and protocol.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::Protocol;
+///
+/// // Replaces: lsof -nP -iTCP:8080 -sTCP:LISTEN
+/// let proc = sysprims_proc::process_by_port(8080, Protocol::Tcp).unwrap();
+/// println!("{} {}", proc.pid, proc.name);
+/// ```
 pub fn process_by_port(port: u16, protocol: Protocol) -> SysprimsResult<ProcessInfo> {
     if port == 0 {
         return Err(SysprimsError::invalid_argument(
@@ -702,11 +755,12 @@ fn aggregate_error_warning(skipped: usize, label: &str) -> Option<String> {
 ///
 /// Filters are applied after enumeration. All filter criteria must match (AND logic).
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust,no_run
 /// use sysprims_proc::ProcessFilter;
 ///
+/// // Replaces: ps output grep/awk pipelines
 /// let filter = ProcessFilter {
 ///     name_contains: Some("nginx".into()),
 ///     cpu_above: Some(1.0),
@@ -719,6 +773,24 @@ pub fn snapshot_filtered(filter: &ProcessFilter) -> SysprimsResult<ProcessSnapsh
 }
 
 /// Get a snapshot with filter applied and optional extended fields.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::{ProcessFilter, ProcessOptions};
+///
+/// // Replaces: ps filters that require brittle grep/awk chains
+/// let filter = ProcessFilter {
+///     name_contains: Some("worker".into()),
+///     ..Default::default()
+/// };
+/// let snap = sysprims_proc::snapshot_filtered_with_options(
+///     &filter,
+///     ProcessOptions::default().with_threads(),
+/// )
+/// .unwrap();
+/// println!("{}", snap.processes.len());
+/// ```
 pub fn snapshot_filtered_with_options(
     filter: &ProcessFilter,
     options: ProcessOptions,
@@ -738,9 +810,10 @@ pub fn snapshot_filtered_with_options(
 /// Returns `NotFound` if the process does not exist.
 /// Returns `PermissionDenied` if the process cannot be read.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust,no_run
+/// // Replaces: ps -p <pid> -o ... plus parsing
 /// let self_info = sysprims_proc::get_process(std::process::id()).unwrap();
 /// println!("Current process: {}", self_info.name);
 /// ```
@@ -749,6 +822,17 @@ pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
 }
 
 /// Get information for a single process with optional extended fields.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::ProcessOptions;
+///
+/// // Replaces: ps eww -p <pid> when you need env/threads
+/// let pid = std::process::id();
+/// let proc = sysprims_proc::get_process_with_options(pid, ProcessOptions::default().with_threads()).unwrap();
+/// println!("threads: {:?}", proc.thread_count);
+/// ```
 pub fn get_process_with_options(pid: u32, options: ProcessOptions) -> SysprimsResult<ProcessInfo> {
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
@@ -849,6 +933,15 @@ pub struct DescendantsConfig {
 /// # Safety
 ///
 /// Validates `root_pid` against ADR-0011 forbidden values (0, > i32::MAX).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: pstree/ps --ppid traversal and text parsing
+/// let root = std::process::id();
+/// let result = sysprims_proc::descendants(root, 1, None).unwrap();
+/// println!("matched: {}", result.matched_by_filter);
+/// ```
 pub fn descendants(
     root_pid: u32,
     max_levels: u32,
@@ -858,6 +951,27 @@ pub fn descendants(
 }
 
 /// Get descendants of a process using BFS traversal with optional extended fields.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::{ProcessOptions, ProcessFilter};
+///
+/// // Replaces: pstree + ad hoc enrichment for thread/env fields
+/// let root = std::process::id();
+/// let filter = ProcessFilter {
+///     cpu_above: Some(1.0),
+///     ..Default::default()
+/// };
+/// let result = sysprims_proc::descendants_with_options(
+///     root,
+///     2,
+///     Some(&filter),
+///     ProcessOptions::default().with_threads(),
+/// )
+/// .unwrap();
+/// println!("levels: {}", result.levels.len());
+/// ```
 pub fn descendants_with_options(
     root_pid: u32,
     max_levels: u32,
@@ -877,11 +991,49 @@ pub fn descendants_with_options(
 }
 
 /// Get descendants using explicit traversal configuration.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::time::Duration;
+/// use sysprims_proc::{CpuMode, DescendantsConfig};
+///
+/// // Replaces: repeated ps sampling loops for active CPU trees
+/// let result = sysprims_proc::descendants_with_config(DescendantsConfig {
+///     root_pid: std::process::id(),
+///     max_levels: Some(2),
+///     filter: None,
+///     cpu_mode: CpuMode::Monitor,
+///     sample_duration: Some(Duration::from_millis(500)),
+/// })
+/// .unwrap();
+/// println!("total: {}", result.total_found);
+/// ```
 pub fn descendants_with_config(config: DescendantsConfig) -> SysprimsResult<DescendantsResult> {
     descendants_with_config_and_options(config, ProcessOptions::default())
 }
 
 /// Get descendants using explicit traversal configuration and optional extended fields.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::{CpuMode, DescendantsConfig, ProcessOptions};
+///
+/// // Replaces: custom parent-child map logic plus ps parsing
+/// let result = sysprims_proc::descendants_with_config_and_options(
+///     DescendantsConfig {
+///         root_pid: std::process::id(),
+///         max_levels: Some(1),
+///         filter: None,
+///         cpu_mode: CpuMode::Lifetime,
+///         sample_duration: None,
+///     },
+///     ProcessOptions::default().with_threads(),
+/// )
+/// .unwrap();
+/// println!("{}", result.matched_by_filter);
+/// ```
 pub fn descendants_with_config_and_options(
     config: DescendantsConfig,
     options: ProcessOptions,
@@ -1040,6 +1192,16 @@ fn snapshot_with_sampled_cpu(
 /// - `Ok` with `exited=true` if the process was observed to have exited.
 /// - `Err(NotFound)` if the PID does not exist at the time of the first check.
 /// - `Err(PermissionDenied)` if the platform forbids even querying liveness.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::time::Duration;
+///
+/// // Replaces: while kill -0 <pid>; do sleep ...; done
+/// let res = sysprims_proc::wait_pid(std::process::id(), Duration::from_millis(1)).unwrap();
+/// println!("timed_out: {}", res.timed_out);
+/// ```
 pub fn wait_pid(pid: u32, timeout: Duration) -> SysprimsResult<WaitPidResult> {
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
