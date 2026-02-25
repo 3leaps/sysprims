@@ -25,7 +25,7 @@ This repository implements OS-facing process control and inspection utilities. T
 Any code path that:
 
 - kills more than one process,
-- kills a process *tree*,
+- kills a process _tree_,
 - changes system-wide settings,
 - performs privileged inspection,
 
@@ -35,20 +35,20 @@ must require **explicit opt-in** via:
 - a library config field (default must be safe), or
 - a documented "dangerous API" module boundary
 
-**Note**: sysprims uses **group-by-default** semantics - tree-kill is the *default* because it's the safe behavior for CI/CD. The opt-out (`--foreground`) is for legacy compatibility.
+**Note**: sysprims uses **group-by-default** semantics - tree-kill is the _default_ because it's the safe behavior for CI/CD. The opt-out (`--foreground`) is for legacy compatibility.
 
 ## Quality Gate Requirements
 
 All of the following must pass in CI:
 
-| Gate | Command | Failure Action |
-|------|---------|----------------|
-| Format | `cargo fmt --check` | Block merge |
-| Lint | `cargo clippy` | Block merge (warnings are errors) |
-| Tests | `cargo test` | Block merge |
-| License | `cargo deny check licenses` | Block merge |
-| Advisories | `cargo deny check advisories` | Block merge |
-| Schema validation | Golden tests | Block merge |
+| Gate              | Command                       | Failure Action                    |
+| ----------------- | ----------------------------- | --------------------------------- |
+| Format            | `cargo fmt --check`           | Block merge                       |
+| Lint              | `cargo clippy`                | Block merge (warnings are errors) |
+| Tests             | `cargo test`                  | Block merge                       |
+| License           | `cargo deny check licenses`   | Block merge                       |
+| Advisories        | `cargo deny check advisories` | Block merge                       |
+| Schema validation | Golden tests                  | Block merge                       |
 
 ## Safety Testing Requirements
 

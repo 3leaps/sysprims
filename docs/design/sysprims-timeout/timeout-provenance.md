@@ -91,6 +91,7 @@ Make tree-kill the default, not opt-in.
 ### Rationale
 
 GNU timeout kills only the direct child. This leaves orphaned processes running when:
+
 - Child spawns grandchildren
 - Grandchildren ignore SIGTERM
 - Child forks and exits (orphaning the grandchild)
@@ -100,6 +101,7 @@ sysprims-timeout uses process groups (Unix) or Job Objects (Windows) to kill the
 ### Observable Fallback
 
 When tree-kill cannot be guaranteed (e.g., setpgid fails), the implementation:
+
 - Falls back to direct child kill
 - Reports `tree_kill_reliability: best_effort` in output
 - Does NOT silently fail or lie about behavior
@@ -112,13 +114,13 @@ This design principle is original to sysprims.
 
 Match GNU timeout exit codes for compatibility.
 
-| Exit | Meaning |
-|------|---------|
-| 124 | Timeout occurred |
-| 125 | Internal error |
-| 126 | Command not executable |
-| 127 | Command not found |
-| 128+N | Killed by signal N |
+| Exit  | Meaning                |
+| ----- | ---------------------- |
+| 124   | Timeout occurred       |
+| 125   | Internal error         |
+| 126   | Command not executable |
+| 127   | Command not found      |
+| 128+N | Killed by signal N     |
 
 ### Rationale
 
@@ -166,6 +168,6 @@ No GPL/LGPL/AGPL source code was consulted during development.
 
 ---
 
-*Provenance version: 1.0*
-*Last updated: 2026-01-09*
-*Maintainer: sysprims team*
+_Provenance version: 1.0_
+_Last updated: 2026-01-09_
+_Maintainer: sysprims team_

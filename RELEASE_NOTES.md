@@ -6,6 +6,128 @@
 
 ---
 
+## v0.1.14 - 2026-02-24
+
+**Status:** Process Intelligence & Go Team Depth Release
+
+This release closes the gap between what sysprims knows about a process and what it exposes to
+callers. The headline capability is `proc_ext` — environment variables and thread count surfaced
+through the Rust library, FFI, and Go/TypeScript bindings — enabling Go teams to replace `ps` and
+`lsof` shell-outs with typed, license-clean library calls. A secondary focus is CPU measurement
+parity on process-tree commands, fixing a dogfooding gap where lifetime averaging missed 2 of 4
+actively spinning zombie processes.
+
+### Highlights
+
+- **`proc_ext`**: `env` and `thread_count` on `ProcessInfo` — opt-in via `ProcessOptions`, zero
+  cost when not requested. Available in Rust, FFI, Go, and TypeScript.
+- **CPU mode on `descendants`/`kill-descendants`**: `--cpu-mode monitor --sample 3s` now applies
+  to all process-tree commands, not just `pstat`. Catches bursty/spinning processes that lifetime
+  averaging misses.
+- **Schema compliance fix**: `pstat --pid --json` now emits the `schema_id` envelope required by
+  ADR-0005. Previously returned a flat object — a contract violation, not just a style issue.
+- **Contextual hints**: `--cpu-above` without `--cpu-mode monitor` emits a one-line stderr hint
+  suggesting the more accurate measurement mode. Suppress with `SYSPRIMS_NO_HINTS=1` or `--json`.
+- **CLI help system**: `sysprims help <topic>` subcommand (`cpu-mode`, `signals`, `safety`) plus
+  `after_help` examples on high-complexity subcommands.
+
+### `proc_ext`: Environment Variables and Thread Count
+
+Activates the `proc_ext` extension defined in ADR-0002 (`# Extended info (env, threads, IO)`),
+designed into the architecture from the start and implemented in this release.
+
+New optional fields on `ProcessInfo` (default `null`/`None`):
+
+```rust
+pub env: Option<BTreeMap<String, String>>,  // opt-in: ProcessOptions::with_env()
+pub thread_count: Option<u32>,              // opt-in: ProcessOptions::with_threads()
+```
+
+**Go binding** — the primary consumer target:
+
+```go
+// Replace: ps eww -p <pid> + text parsing
+// Replace: ps -M -p <pid> + line count
+info, err := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
+    IncludeEnv:     true,
+    IncludeThreads: true,
+})
+fmt.Println(info.Env["NODE_ENV"])
+fmt.Println(info.ThreadCount)
+```
+
+**Platform coverage:**
+
+| Platform |               `env`                |         `thread_count`         |
+| -------- | :--------------------------------: | :----------------------------: |
+| Linux    |       `/proc/[pid]/environ`        | `/proc/[pid]/status` (Threads) |
+| macOS    | `sysctl(KERN_PROCARGS2)` env block | `proc_taskinfo.pti_threadnum`  |
+| Windows  |   Not supported v0.1.14 (`null`)   |           Toolhelp32           |
+
+macOS uses the same `KERN_PROCARGS2` kernel buffer introduced for cmdline in v0.1.13 — env is
+the next block after argv. Same syscall, second pass over the same data.
+
+**Security**: reads same-uid processes only. EPERM → `env: null`, no error propagation.
+
+### CPU Mode Parity on Tree Commands
+
+**The dogfooding gap** (2026-02-18): Four zombie VSCodium plugin processes were spinning at ~100%
+CPU. Lifetime mode found 2 of 4. Monitor mode with 3-second sampling found all 4. The
+`kill-descendants --cpu-above` workflow — the use case shown in the README — could not reliably
+target the offending processes with lifetime CPU averaging.
+
+```bash
+# v0.1.13 — missed 2 of 4 spinning zombie processes
+descendants 14796 --cpu-above 80
+→ 2 matched
+
+# v0.1.14 — finds all 4
+descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80
+→ 4 matched (all showing 100–101% over the sample window)
+```
+
+Full surgical cleanup workflow:
+
+```bash
+sysprims descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --tree
+sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --signal KILL --yes
+```
+
+### Schema Compliance Fix: `pstat --pid --json`
+
+**Before (v0.1.13):**
+
+```json
+{"pid": 1234, "name": "nginx", "cpu_percent": 0.5, ...}
+```
+
+**After (v0.1.14):**
+
+```json
+{
+  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info.schema.json",
+  "timestamp": "...",
+  "processes": [{"pid": 1234, "name": "nginx", "cpu_percent": 0.5, ...}]
+}
+```
+
+Root cause: the `--pid` code path short-circuited to direct `ProcessInfo` serialization instead of
+routing through the `SnapshotResult` envelope used by the list path. CLI-only fix, no library
+changes.
+
+### Upgrade Notes
+
+- **Mostly additive** — `proc_ext` fields (`env`, `thread_count`) are `null` by default; existing
+  callers are unaffected unless they opt in via `ProcessOptions`.
+- **Breaking for `pstat --pid --json` consumers**: output gains `schema_id` wrapper and moves to
+  `processes: [...]` array. This fixes an ADR-0005 contract violation — the old flat output was
+  non-conformant.
+- `descendants` and `kill-descendants` CLI flags are strictly additive — no existing invocations
+  break.
+- Go binding option types are additive — no existing call sites break.
+
+---
+
 ## v0.1.13 - 2026-02-13
 
 **Status:** macOS Command-Line Fidelity Fix & Binding Coverage
@@ -22,13 +144,19 @@ This release fixes a high-severity bug where `processList()` returned truncated 
 ### Bug Fix: macOS `cmdline` Truncation
 
 **Before (v0.1.12):**
+
 ```json
-{"pid": 12345, "name": "bun", "cmdline": ["bun"]}
+{ "pid": 12345, "name": "bun", "cmdline": ["bun"] }
 ```
 
 **After (v0.1.13):**
+
 ```json
-{"pid": 12345, "name": "bun", "cmdline": ["bun", "run", "scripts/dev.ts", "--root", "/some/path"]}
+{
+  "pid": 12345,
+  "name": "bun",
+  "cmdline": ["bun", "run", "scripts/dev.ts", "--root", "/some/path"]
+}
 ```
 
 **Root cause:** The macOS implementation used `proc_name()` as a placeholder for `cmdline`, which only returns the process name (16 chars max). The fix uses `sysctl(CTL_KERN, KERN_PROCARGS2)` — the same kernel API that `ps` uses — to read the actual argv.
@@ -36,6 +164,7 @@ This release fixes a high-severity bug where `processList()` returned truncated 
 **Impact:** Any consumer filtering by `cmdline` arguments on macOS was affected. Known affected: kitfly `discoverOrphans()` which filters by `p.cmdline.some(arg => arg.includes("scripts/dev.ts"))`.
 
 **Safety hardening (devrev):**
+
 - PID 0 and overflow-range PIDs rejected before sysctl call
 - `argc` capped at 4096 to prevent pathological allocation from malformed kernel data
 - Empty argv entries filtered (consistent with Linux `/proc/[pid]/cmdline` behavior)
@@ -44,12 +173,13 @@ This release fixes a high-severity bug where `processList()` returned truncated 
 
 v0.1.12 added `descendants` and `kill-descendants` to the CLI and Rust crates. This release makes them available to language binding consumers:
 
-| Function | FFI | Go | TypeScript |
-|----------|:---:|:--:|:----------:|
-| `descendants()` | New | New | New |
-| `killDescendants()` | New | New | New |
+| Function            | FFI | Go  | TypeScript |
+| ------------------- | :-: | :-: | :--------: |
+| `descendants()`     | New | New |    New     |
+| `killDescendants()` | New | New |    New     |
 
 **FFI functions:**
+
 ```c
 int32_t sysprims_proc_descendants(const char *config_json, char **result_json_out);
 int32_t sysprims_proc_kill_descendants(const char *config_json, char **result_json_out);
@@ -104,17 +234,17 @@ sysprims descendants 7825 --running-for "1h" --tree
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--max-levels <N>` | Maximum traversal depth (1 = direct children, "all" = full subtree) |
-| `--json` | Output as JSON (default) |
-| `--table` | Human-readable table format (flat, grouped by level) |
-| `--tree` | ASCII art tree with hierarchy visualization |
-| `--name <NAME>` | Filter by process name (substring match) |
-| `--user <USER>` | Filter by username |
-| `--cpu-above <PERCENT>` | Filter by minimum CPU usage |
-| `--memory-above <KB>` | Filter by minimum memory usage |
-| `--running-for <DURATION>` | Filter by minimum process age (e.g., "5s", "1m", "2h") |
+| Option                     | Description                                                         |
+| -------------------------- | ------------------------------------------------------------------- |
+| `--max-levels <N>`         | Maximum traversal depth (1 = direct children, "all" = full subtree) |
+| `--json`                   | Output as JSON (default)                                            |
+| `--table`                  | Human-readable table format (flat, grouped by level)                |
+| `--tree`                   | ASCII art tree with hierarchy visualization                         |
+| `--name <NAME>`            | Filter by process name (substring match)                            |
+| `--user <USER>`            | Filter by username                                                  |
+| `--cpu-above <PERCENT>`    | Filter by minimum CPU usage                                         |
+| `--memory-above <KB>`      | Filter by minimum memory usage                                      |
+| `--running-for <DURATION>` | Filter by minimum process age (e.g., "5s", "1m", "2h")              |
 
 ### CLI: `sysprims kill-descendants` Command
 
@@ -138,6 +268,7 @@ sysprims kill-descendants 7825 --max-levels all --yes
 ```
 
 **Safety behaviors:**
+
 - **Preview mode**: Filter-based selection defaults to `--dry-run` unless `--yes` is explicitly provided
 - **Self exclusion**: Never targets CLI's own process
 - **Parent protection**: Never targets parent process of selected descendants (unless `--force`)
@@ -146,19 +277,19 @@ sysprims kill-descendants 7825 --max-levels all --yes
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--max-levels <N>` | Maximum traversal depth (same as `descendants`) |
-| `-s, --signal <SIGNAL>` | Signal name or number (default: TERM) |
-| `--name <NAME>` | Filter by process name |
-| `--user <USER>` | Filter by username |
-| `--cpu-above <PERCENT>` | Filter by minimum CPU usage |
-| `--memory-above <KB>` | Filter by minimum memory usage |
-| `--running-for <DURATION>` | Filter by minimum process age |
-| `--dry-run` | Print matched targets but do not send signals |
-| `--yes` | Proceed with kill (required for filter-based selection) |
-| `--force` | Proceed even if CLI safety checks would normally refuse |
-| `--json` | Output as JSON |
+| Option                     | Description                                             |
+| -------------------------- | ------------------------------------------------------- |
+| `--max-levels <N>`         | Maximum traversal depth (same as `descendants`)         |
+| `-s, --signal <SIGNAL>`    | Signal name or number (default: TERM)                   |
+| `--name <NAME>`            | Filter by process name                                  |
+| `--user <USER>`            | Filter by username                                      |
+| `--cpu-above <PERCENT>`    | Filter by minimum CPU usage                             |
+| `--memory-above <KB>`      | Filter by minimum memory usage                          |
+| `--running-for <DURATION>` | Filter by minimum process age                           |
+| `--dry-run`                | Print matched targets but do not send signals           |
+| `--yes`                    | Proceed with kill (required for filter-based selection) |
+| `--force`                  | Proceed even if CLI safety checks would normally refuse |
+| `--json`                   | Output as JSON                                          |
 
 ### CLI: Enhanced `sysprims pstat` Options
 
@@ -177,9 +308,9 @@ sysprims pstat --ppid 7825 --cpu-above 90 --running-for "10m" --table
 
 **New filter options:**
 
-| Option | Available on |
-|--------|--------------|
-| `--ppid <PID>` | `pstat`, `kill` |
+| Option                     | Available on                                       |
+| -------------------------- | -------------------------------------------------- |
+| `--ppid <PID>`             | `pstat`, `kill`                                    |
 | `--running-for <DURATION>` | `pstat`, `kill`, `descendants`, `kill-descendants` |
 
 ### CLI: Enhanced `sysprims kill` Options
@@ -207,6 +338,7 @@ sysprims kill --ppid 7825 --yes --force
 Tested on macOS arm64 (Darwin 25.2.0):
 
 **Descendants command:**
+
 ```bash
 $ sysprims descendants 7825 --max-levels 1 --table
 --- Level 1 ---
@@ -218,6 +350,7 @@ $ sysprims descendants 7825 --max-levels 1 --table
 ```
 
 **ASCII tree visualization:**
+
 ```bash
 $ sysprims descendants 7825 --tree | head -15
 7825 Electron [0.1% CPU, 160M, 7d18h]
@@ -228,6 +361,7 @@ $ sysprims descendants 7825 --tree | head -15
 ```
 
 **Kill-descendants safety:**
+
 ```bash
 # Parent excluded by default
 $ sysprims kill-descendants 7825 --dry-run
@@ -241,12 +375,14 @@ $ sysprims kill-descendants 7825 --dry-run --force
 ### Filter Validation
 
 **Parent PID filter:**
+
 ```bash
 $ sysprims pstat --ppid 7825 --table
 # Shows 32 direct children of VSCodium Electron process
 ```
 
 **Age-based filtering:**
+
 ```bash
 # Find processes >90% CPU running >1 hour
 $ sysprims pstat --cpu-above 90 --running-for "1h" --table
@@ -283,16 +419,19 @@ $ sysprims kill-descendants 67566 --name "Helper (Renderer)" --cpu-above 100 --m
 ### macOS
 
 **Process tree traversal** works correctly with `libproc`:
+
 - Uses `proc_pidinfo(PROC_PIDTBSDINFO)` for parent-child relationships
 - BFS traversal respects `--max-levels` depth limit
 - Parent process exclusion enforced for `kill-descendants`
 
 **Age filtering availability:**
+
 - Process start time available via `proc_pidinfo()`
 - `start_time_unix_ms` field populated for all processes
 - `--running-for` filters work on macOS
 
 **ASCII tree visualization:**
+
 - Requires terminal supporting box-drawing characters (UTF-8)
 - Falls back gracefully on terminals without tree line support
 - Uses `├──`, `│   `, `└──` for tree structure
@@ -345,7 +484,11 @@ New schema for `descendants` command output:
   "levels": [
     {
       "level": "integer",
-      "processes": [{ /* Process objects */ }]
+      "processes": [
+        {
+          /* Process objects */
+        }
+      ]
     }
   ],
   "total_found": "integer",
@@ -412,84 +555,3 @@ $ sysprims kill-descendants 7825 --cpu-above 80 --yes
 - **ADR-0011**: PID Validation Safety
 - **Platform Support**: `docs/standards/platform-support.md`
 - **Schema contracts**: `docs/standards/schema-contracts.md`
-
----
-
-## [0.1.11] - 2026-02-04
-
-**Status:** macOS Port Discovery & Bun Runtime Support Release
-
-Fixes `listeningPorts()` returning empty results on macOS, adds a new `ports` CLI command, and enables Bun runtime support for TypeScript bindings.
-
-### Highlights
-
-- **macOS Port Discovery Fixed**: `listeningPorts()` now works on macOS (was returning empty)
-- **New CLI Command**: `sysprims ports` for listing listening port bindings
-- **Bun Runtime Support**: TypeScript bindings now work under Bun
-
-### New CLI Command: `sysprims ports`
-
-List listening port bindings with optional filtering:
-
-```bash
-# Table output for human inspection
-sysprims ports --table
-
-# Filter by protocol
-sysprims ports --protocol tcp --table
-
-# Filter by specific port (JSON output)
-sysprims ports --protocol tcp --local-port 8080 --json
-```
-
-Output includes full process details (name, PID, exe_path, cmdline, user).
-
-### macOS Port Discovery Fix
-
-The `listeningPorts()` function was returning empty results on macOS due to SDK struct layout mismatches in socket fdinfo parsing. This release fixes the issue:
-
-**Before (v0.1.10):**
-```
-Found 0 bindings
-```
-
-**After (v0.1.11):**
-```
-Found 68 bindings
-  tcp *:9999 -> pid=54659 (bun)
-  tcp 127.0.0.1:8080 -> pid=40672 (namelens)
-  ...
-```
-
-**Technical changes:**
-- UID filtering: scans current-user processes only (reduces SIP/TCC permission errors)
-- Heuristic vinfo_stat size detection (136/144 bytes) for SDK compatibility
-- Offset-based parsing instead of fixed struct layout
-- Strict TCP listener filtering (`TSI_S_LISTEN` state only)
-
-### Bun Runtime Support
-
-TypeScript bindings now work under Bun. The explicit Bun block has been removed:
-
-```typescript
-// REMOVED in v0.1.11:
-if (process.versions?.bun) {
-  throw new Error("sysprims TypeScript bindings are not yet validated on Bun...");
-}
-```
-
-Validated functionality under Bun:
-
-| Feature | Status |
-|---------|--------|
-| Module loading | Works |
-| `procGet()` | Works |
-| `terminate()` | Works |
-| `listeningPorts()` | Works (with macOS fix) |
-
-### Upgrade Notes
-
-- No breaking changes
-- macOS users will now see port bindings that were previously invisible
-- Bun users can use sysprims directly without workarounds
-

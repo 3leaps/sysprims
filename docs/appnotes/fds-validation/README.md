@@ -18,6 +18,7 @@ make build
 ## Synthetic Test Script
 
 The `synthetic-fd-holder.sh` script intentionally opens:
+
 - A temp file (to test `kind: file` with path resolution)
 - A TCP socket (to test `kind: socket`)
 - A pipe (to test `kind: pipe`)
@@ -35,6 +36,7 @@ chmod +x *.sh
 ```
 
 Output:
+
 ```
 [synthetic-fd-holder] PID 12345 holding FDs...
   - temp file: /tmp/synthetic-fd-holder-12345-*.txt
@@ -51,6 +53,7 @@ In another terminal, inspect its FDs:
 ```
 
 Expected output:
+
 ```
    FD KIND     PATH/INFO
 --------------------------------------------------------------------------------
@@ -83,7 +86,9 @@ Filter by kind:
 ## Demo 3: Platform Behavior Differences
 
 ### Linux
+
 File paths are resolved via `/proc/<pid>/fd/` symlinks. You should see full paths:
+
 ```json
 {
   "fd": 3,
@@ -93,7 +98,9 @@ File paths are resolved via `/proc/<pid>/fd/` symlinks. You should see full path
 ```
 
 ### macOS
+
 Uses `proc_pidinfo()` with best-effort path recovery. Paths may be `-` when unavailable:
+
 ```json
 {
   "fd": 3,
@@ -103,7 +110,9 @@ Uses `proc_pidinfo()` with best-effort path recovery. Paths may be `-` when unav
 ```
 
 ### Windows
+
 Returns `NotSupported` - handle enumeration requires elevated privileges:
+
 ```bash
 ./target/debug/sysprims fds --pid 12345
 # Error: open file descriptor enumeration is not supported on windows
@@ -118,6 +127,7 @@ Automated validation that sysprims detects expected FDs:
 ```
 
 This script:
+
 1. Runs `sysprims fds --json`
 2. Checks for at least one file FD
 3. Checks for at least one socket FD
@@ -133,6 +143,7 @@ Inspect the current shell's FDs:
 ```
 
 Compare with:
+
 ```bash
 # Traditional (GPL) approach
 lsof -p $$
@@ -150,12 +161,12 @@ Kill the synthetic process:
 
 ## When to Use fds
 
-| Scenario | Command |
-|----------|---------|
-| Debug runaway processes | `sysprims fds --pid <PID> --table` |
+| Scenario                           | Command                                                        |
+| ---------------------------------- | -------------------------------------------------------------- |
+| Debug runaway processes            | `sysprims fds --pid <PID> --table`                             |
 | Find which process has a file open | `sysprims pstat --name <name>` then `sysprims fds --pid <PID>` |
-| Scripting/automation | `sysprims fds --pid <PID> --json` |
-| Filter by resource type | `sysprims fds --pid <PID> --kind socket` |
+| Scripting/automation               | `sysprims fds --pid <PID> --json`                              |
+| Filter by resource type            | `sysprims fds --pid <PID> --kind socket`                       |
 
 ## See Also
 

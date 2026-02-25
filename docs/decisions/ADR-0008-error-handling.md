@@ -7,12 +7,14 @@
 ## Context
 
 sysprims needs consistent error handling across:
+
 1. Rust library API
 2. CLI tools
 3. FFI boundary (C-ABI)
 4. Language bindings (Go, Python, TypeScript)
 
 Errors must be:
+
 - Informative for debugging
 - Structured for programmatic handling
 - Consistent across all interfaces
@@ -81,6 +83,7 @@ char* message = osu_last_error();           // Allocates; must free
 ```
 
 Contract:
+
 - After successful call: `osu_last_error()` returns `""`
 - After failing call: `osu_last_error()` returns descriptive message
 - Thread-local: Each thread has independent error state
@@ -90,23 +93,24 @@ Contract:
 
 CLI tools map errors to exit codes:
 
-| Error | Exit Code | Notes |
-|-------|-----------|-------|
-| Success | 0 | |
-| Invalid argument | 1 | |
-| Spawn failed | 125 | GNU timeout compatible |
-| Not executable | 126 | GNU compatible |
-| Command not found | 127 | GNU compatible |
-| Timeout | 124 | GNU timeout compatible |
-| Signal N | 128+N | GNU compatible |
-| Permission denied | 1 | |
-| Internal error | 1 | |
+| Error             | Exit Code | Notes                  |
+| ----------------- | --------- | ---------------------- |
+| Success           | 0         |                        |
+| Invalid argument  | 1         |                        |
+| Spawn failed      | 125       | GNU timeout compatible |
+| Not executable    | 126       | GNU compatible         |
+| Command not found | 127       | GNU compatible         |
+| Timeout           | 124       | GNU timeout compatible |
+| Signal N          | 128+N     | GNU compatible         |
+| Permission denied | 1         |                        |
+| Internal error    | 1         |                        |
 
 ### Binding Error Mapping
 
 Each binding maps to idiomatic error handling:
 
 **Go**:
+
 ```go
 type SysprimsError struct {
     Code    SysprimsErrorCode
@@ -125,6 +129,7 @@ type PermissionError struct {
 ```
 
 **Python**:
+
 ```python
 class SysprimsError(Exception):
     def __init__(self, code: int, message: str):
@@ -139,19 +144,26 @@ class PermissionDeniedError(SysprimsError):
 ```
 
 **TypeScript**:
+
 ```typescript
 export class SysprimsError extends Error {
-    constructor(public code: SysprimsErrorCode, message: string) {
-        super(message);
-        this.name = 'SysprimsError';
-    }
+  constructor(
+    public code: SysprimsErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SysprimsError";
+  }
 }
 
 export class PermissionDeniedError extends SysprimsError {
-    constructor(public pid: number, message: string) {
-        super(SysprimsErrorCode.PermissionDenied, message);
-        this.name = 'PermissionDeniedError';
-    }
+  constructor(
+    public pid: number,
+    message: string,
+  ) {
+    super(SysprimsErrorCode.PermissionDenied, message);
+    this.name = "PermissionDeniedError";
+  }
 }
 ```
 
@@ -163,12 +175,14 @@ export class PermissionDeniedError extends SysprimsError {
 4. **Be consistent**: Use same phrasing across crates
 
 Good:
+
 ```
 "Permission denied for 'terminate' on PID 1234"
 "Signal HUP not supported on Windows; use TERM instead"
 ```
 
 Bad:
+
 ```
 "Error"
 "Permission denied at /home/user/.config/secret.txt"

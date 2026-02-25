@@ -21,6 +21,7 @@ Enterprise users need confidence that including sysprims in their products won't
 sysprims is dual-licensed under **MIT OR Apache-2.0**, following Rust ecosystem conventions.
 
 **Rationale**:
+
 - MIT provides maximum permissiveness
 - Apache-2.0 provides explicit patent grants (valuable for enterprise)
 - Dual licensing gives users flexibility
@@ -29,30 +30,30 @@ sysprims is dual-licensed under **MIT OR Apache-2.0**, following Rust ecosystem 
 
 Only dependencies with the following licenses are permitted:
 
-| License | SPDX ID | Notes |
-|---------|---------|-------|
-| MIT | MIT | Permissive |
-| Apache-2.0 | Apache-2.0 | Permissive + patent grant |
-| BSD-2-Clause | BSD-2-Clause | Permissive |
-| BSD-3-Clause | BSD-3-Clause | Permissive |
-| ISC | ISC | MIT-equivalent |
-| Zlib | Zlib | Permissive |
-| 0BSD | 0BSD | Public domain equivalent |
-| Unlicense | Unlicense | Public domain |
-| CC0-1.0 | CC0-1.0 | Public domain |
+| License      | SPDX ID      | Notes                     |
+| ------------ | ------------ | ------------------------- |
+| MIT          | MIT          | Permissive                |
+| Apache-2.0   | Apache-2.0   | Permissive + patent grant |
+| BSD-2-Clause | BSD-2-Clause | Permissive                |
+| BSD-3-Clause | BSD-3-Clause | Permissive                |
+| ISC          | ISC          | MIT-equivalent            |
+| Zlib         | Zlib         | Permissive                |
+| 0BSD         | 0BSD         | Public domain equivalent  |
+| Unlicense    | Unlicense    | Public domain             |
+| CC0-1.0      | CC0-1.0      | Public domain             |
 
 ### Dependency Denylist
 
 The following licenses are **strictly prohibited**:
 
-| License | SPDX ID | Reason |
-|---------|---------|--------|
-| GPL-2.0 | GPL-2.0-only | Copyleft |
-| GPL-3.0 | GPL-3.0-only | Copyleft |
+| License  | SPDX ID       | Reason                                  |
+| -------- | ------------- | --------------------------------------- |
+| GPL-2.0  | GPL-2.0-only  | Copyleft                                |
+| GPL-3.0  | GPL-3.0-only  | Copyleft                                |
 | LGPL-2.0 | LGPL-2.0-only | Weak copyleft (static linking concerns) |
-| LGPL-2.1 | LGPL-2.1-only | Weak copyleft |
-| LGPL-3.0 | LGPL-3.0-only | Weak copyleft |
-| AGPL-3.0 | AGPL-3.0-only | Network copyleft |
+| LGPL-2.1 | LGPL-2.1-only | Weak copyleft                           |
+| LGPL-3.0 | LGPL-3.0-only | Weak copyleft                           |
+| AGPL-3.0 | AGPL-3.0-only | Network copyleft                        |
 
 ### Enforcement
 

@@ -8,6 +8,7 @@
 sysprims is a process control library. By design, it can terminate processes. This power comes with responsibility - incorrect use can kill unintended processes, including critical system components.
 
 This document explains:
+
 1. POSIX signal semantics that make certain PID values dangerous
 2. How sysprims protects against accidental misuse
 3. What you need to know when using the library
@@ -16,12 +17,12 @@ This document explains:
 
 The `kill(2)` system call has special behavior for certain PID values:
 
-| PID Value | What Happens |
-|-----------|--------------|
-| `> 0` | Signal sent to that specific process |
-| `0` | Signal sent to **all processes in caller's process group** |
-| `-1` | Signal sent to **ALL processes** caller can signal |
-| `< -1` | Signal sent to all processes in process group `abs(pid)` |
+| PID Value | What Happens                                               |
+| --------- | ---------------------------------------------------------- |
+| `> 0`     | Signal sent to that specific process                       |
+| `0`       | Signal sent to **all processes in caller's process group** |
+| `-1`      | Signal sent to **ALL processes** caller can signal         |
+| `< -1`    | Signal sent to all processes in process group `abs(pid)`   |
 
 ### The Danger of kill(-1, sig)
 
@@ -142,6 +143,7 @@ make test-diabolical
 ```
 
 This is the only safe way to test:
+
 - Broadcast signal behavior (`kill -1`)
 - Process group signal behavior (`killpg`)
 - Tree escape scenarios
@@ -172,13 +174,13 @@ This is the only safe way to test:
 
 ## Summary
 
-| Situation | sysprims Behavior |
-|-----------|-------------------|
-| `pid == 0` | Rejected with `InvalidArgument` |
-| `pid > i32::MAX` | Rejected with `InvalidArgument` |
-| `pid` doesn't exist | Returns `NotFound` |
-| No permission to signal `pid` | Returns `PermissionDenied` |
-| Valid `pid`, valid signal | Signal sent |
+| Situation                     | sysprims Behavior               |
+| ----------------------------- | ------------------------------- |
+| `pid == 0`                    | Rejected with `InvalidArgument` |
+| `pid > i32::MAX`              | Rejected with `InvalidArgument` |
+| `pid` doesn't exist           | Returns `NotFound`              |
+| No permission to signal `pid` | Returns `PermissionDenied`      |
+| Valid `pid`, valid signal     | Signal sent                     |
 
 **sysprims makes it impossible to accidentally broadcast signals.** This is intentional and non-negotiable. If you genuinely need `kill(-1, sig)` semantics, call libc directly - but understand the consequences.
 

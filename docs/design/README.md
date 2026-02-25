@@ -13,13 +13,13 @@ These documents serve to:
 
 ## Module Index
 
-| Module | Purpose | Status |
-|--------|---------|--------|
-| [sysprims-proc](./sysprims-proc/) | Process enumeration, wait_pid | Complete (v1.1) |
-| [sysprims-signal](./sysprims-signal/) | Signal dispatch | Complete |
+| Module                                  | Purpose                                         | Status          |
+| --------------------------------------- | ----------------------------------------------- | --------------- |
+| [sysprims-proc](./sysprims-proc/)       | Process enumeration, wait_pid                   | Complete (v1.1) |
+| [sysprims-signal](./sysprims-signal/)   | Signal dispatch                                 | Complete        |
 | [sysprims-timeout](./sysprims-timeout/) | Process timeout, spawn_in_group, terminate_tree | Complete (v1.1) |
-| [sysprims-session](./sysprims-session/) | Session management | Complete |
-| [sysprims-cli](./sysprims-cli/) | CLI wrapper | Complete |
+| [sysprims-session](./sysprims-session/) | Session management                              | Complete        |
+| [sysprims-cli](./sysprims-cli/)         | CLI wrapper                                     | Complete        |
 
 ## v0.1.6 Changes
 
@@ -32,12 +32,12 @@ The following specs were updated for v0.1.6:
 
 Each module directory contains:
 
-| Document | Purpose |
-|----------|---------|
-| `*-spec.md` | API contract and design rationale |
+| Document                 | Purpose                               |
+| ------------------------ | ------------------------------------- |
+| `*-spec.md`              | API contract and design rationale     |
 | `*-equivalence-tests.md` | Test protocol and acceptance criteria |
-| `*-compliance.md` | Evidence that requirements are met |
-| `*-provenance.md` | Sources consulted and avoided |
+| `*-compliance.md`        | Evidence that requirements are met    |
+| `*-provenance.md`        | Sources consulted and avoided         |
 
 ## For Reviewers
 
@@ -48,13 +48,13 @@ Each module directory contains:
 
 ### Key Questions
 
-| Question | Where to Look |
-|----------|---------------|
-| What does this module do? | `*-spec.md` §1 (Overview) |
+| Question                       | Where to Look                         |
+| ------------------------------ | ------------------------------------- |
+| What does this module do?      | `*-spec.md` §1 (Overview)             |
 | What standards does it follow? | `*-spec.md` §2 (Normative References) |
-| What's the API contract? | `*-spec.md` §4 (Rust Interface) |
-| How is correctness verified? | `*-equivalence-tests.md` |
-| What sources were used? | `*-provenance.md` |
+| What's the API contract?       | `*-spec.md` §4 (Rust Interface)       |
+| How is correctness verified?   | `*-equivalence-tests.md`              |
+| What sources were used?        | `*-provenance.md`                     |
 
 ## Templates
 
@@ -62,4 +62,4 @@ Templates for creating new module documentation are in [`../templates/module-des
 
 ---
 
-*Last updated: 2026-01-25*
+_Last updated: 2026-01-25_

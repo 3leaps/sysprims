@@ -13,6 +13,7 @@ sysprims provides TypeScript bindings via napi-rs, which compiles to native Node
 3. Authenticating with npm registry
 
 We initially attempted OIDC trusted publishing but encountered repeated failures due to:
+
 - npm CLI version requirements (>= 11.5.1)
 - Token-based auth interfering with OIDC flow
 - Workflow file version resolution from tags
@@ -25,6 +26,7 @@ This ADR establishes the standard configuration for reliable npm publishing.
 ### 1. OIDC Trusted Publishing (No Tokens)
 
 We use npm OIDC trusted publishing exclusively. **No `NPM_TOKEN` or `NODE_AUTH_TOKEN` secrets shall be stored** in:
+
 - Repository secrets
 - Environment secrets
 - Organization secrets
@@ -62,6 +64,7 @@ Rationale: `actions/setup-node` with `registry-url` creates `.npmrc` referencing
 ### 4. GitHub Environment Protection
 
 The publish workflow uses GitHub environment `publish-npm` with:
+
 - Deployment restricted to `v*` tags
 - Optional: approval requirements for manual gate
 
@@ -90,6 +93,7 @@ The release process follows this strict order:
 ```
 
 **Critical constraints:**
+
 - Tags must point to commits that include Go bindings
 - Prebuilds must run from tag ref (SHA validation in publish)
 - npm publish must run from tag ref (OIDC + environment protection)

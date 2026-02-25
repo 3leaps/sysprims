@@ -21,14 +21,15 @@ Validate that sysprims-session:
 
 ### Unix
 
-| Tool | License | Usage |
-|------|---------|-------|
+| Tool            | License             | Usage                      |
+| --------------- | ------------------- | -------------------------- |
 | System `setsid` | Various (often GPL) | Subprocess comparison only |
-| System `nohup` | Various (often GPL) | Subprocess comparison only |
+| System `nohup`  | Various (often GPL) | Subprocess comparison only |
 
 **Note:** We invoke system tools as subprocesses only. No source code reading.
 
 **Availability:**
+
 - Linux: util-linux (setsid), coreutils (nohup)
 - macOS: BSD implementations
 - Windows: Not available
@@ -37,25 +38,26 @@ Validate that sysprims-session:
 
 ### Platforms
 
-| Platform | CI Runner | Reference Tools | Notes |
-|----------|-----------|-----------------|-------|
-| Linux | ubuntu-latest | setsid, nohup | Primary equivalence |
-| macOS | macos-latest | nohup | setsid may need install |
-| Windows | windows-latest | N/A | NotSupported tests only |
+| Platform | CI Runner      | Reference Tools | Notes                   |
+| -------- | -------------- | --------------- | ----------------------- |
+| Linux    | ubuntu-latest  | setsid, nohup   | Primary equivalence     |
+| macOS    | macos-latest   | nohup           | setsid may need install |
+| Windows  | windows-latest | N/A             | NotSupported tests only |
 
 ## 4) Test Categories
 
 ### Category A: setsid Semantics
 
-| Test Case | Expected |
-|-----------|----------|
-| Child becomes session leader | SID = child PID |
-| Child becomes process group leader | PGID = child PID |
-| Child detaches from terminal | No controlling terminal |
-| Fork if caller is pgrp leader | setsid succeeds |
-| Wait mode returns exit status | ExitStatus propagated |
+| Test Case                          | Expected                |
+| ---------------------------------- | ----------------------- |
+| Child becomes session leader       | SID = child PID         |
+| Child becomes process group leader | PGID = child PID        |
+| Child detaches from terminal       | No controlling terminal |
+| Fork if caller is pgrp leader      | setsid succeeds         |
+| Wait mode returns exit status      | ExitStatus propagated   |
 
 **Verification method:**
+
 ```bash
 # Our implementation
 sysprims setsid sleep 60 &
@@ -66,14 +68,15 @@ ps -o pid,pgid,sid -p $PID
 
 ### Category B: nohup Semantics
 
-| Test Case | Expected |
-|-----------|----------|
-| SIGHUP ignored | Process survives SIGHUP |
+| Test Case                      | Expected                             |
+| ------------------------------ | ------------------------------------ |
+| SIGHUP ignored                 | Process survives SIGHUP              |
 | Output redirected to nohup.out | File created when stdout is terminal |
-| Custom output file | Uses specified path |
-| Non-terminal stdout | No redirection |
+| Custom output file             | Uses specified path                  |
+| Non-terminal stdout            | No redirection                       |
 
 **Verification method:**
+
 ```bash
 # Our implementation
 sysprims nohup ./long-job.sh &
@@ -83,16 +86,17 @@ kill -HUP $!
 
 ### Category C: Error Handling
 
-| Test Case | Expected Error |
-|-----------|----------------|
-| Command not found | NotFound (exit 127) |
+| Test Case              | Expected Error              |
+| ---------------------- | --------------------------- |
+| Command not found      | NotFound (exit 127)         |
 | Command not executable | PermissionDenied (exit 126) |
-| setsid on Windows | NotSupported |
-| nohup on Windows | NotSupported |
+| setsid on Windows      | NotSupported                |
+| nohup on Windows       | NotSupported                |
 
 ### Category D: Behavioral Equivalence
 
 **setsid comparison:**
+
 ```bash
 # System tool
 setsid sleep 60 &
@@ -108,6 +112,7 @@ ps -o pid,pgid,sid -p $OUR_PID
 ```
 
 **nohup comparison:**
+
 ```bash
 # System tool
 nohup ./test.sh &
@@ -118,12 +123,12 @@ sysprims nohup ./test.sh &
 ls nohup.out
 ```
 
-| Aspect | Must Match |
-|--------|------------|
-| Session leader (setsid) | SID = child PID |
-| Process group leader (setsid) | PGID = child PID |
-| SIGHUP immunity (nohup) | Process survives |
-| Output redirection (nohup) | nohup.out created |
+| Aspect                        | Must Match        |
+| ----------------------------- | ----------------- |
+| Session leader (setsid)       | SID = child PID   |
+| Process group leader (setsid) | PGID = child PID  |
+| SIGHUP immunity (nohup)       | Process survives  |
+| Output redirection (nohup)    | nohup.out created |
 
 ## 5) Determinism and Flake Policy
 
@@ -134,32 +139,32 @@ ls nohup.out
 
 ### Test Fixtures
 
-| Fixture | Purpose | Behavior |
-|---------|---------|----------|
-| `sleep N` | Simple detached process | Sleeps then exits |
-| `signal-logger` | Signal verification | Logs received signals |
+| Fixture         | Purpose                 | Behavior              |
+| --------------- | ----------------------- | --------------------- |
+| `sleep N`       | Simple detached process | Sleeps then exits     |
+| `signal-logger` | Signal verification     | Logs received signals |
 
 ## 6) Test Locations
 
-| Test Type | Location |
-|-----------|----------|
-| Unit tests (config) | `crates/sysprims-session/src/lib.rs` |
-| Integration tests | `crates/sysprims-session/tests/` |
+| Test Type           | Location                               |
+| ------------------- | -------------------------------------- |
+| Unit tests (config) | `crates/sysprims-session/src/lib.rs`   |
+| Integration tests   | `crates/sysprims-session/tests/`       |
 | Equivalence harness | `tests/equivalence/session/` (planned) |
 
 ## 7) Traceability to Spec
 
-| Spec Requirement | Test Category | Test IDs |
-|------------------|---------------|----------|
-| Session leader semantics | A | integration |
-| Process group leader | A | integration |
-| SIGHUP immunity | B | integration |
-| Output redirection | B | integration |
-| Windows NotSupported | C | unit |
-| Fork if pgrp leader | A | integration |
-| Default wait=false | A | `setsid_config_defaults` |
+| Spec Requirement         | Test Category | Test IDs                 |
+| ------------------------ | ------------- | ------------------------ |
+| Session leader semantics | A             | integration              |
+| Process group leader     | A             | integration              |
+| SIGHUP immunity          | B             | integration              |
+| Output redirection       | B             | integration              |
+| Windows NotSupported     | C             | unit                     |
+| Fork if pgrp leader      | A             | integration              |
+| Default wait=false       | A             | `setsid_config_defaults` |
 
 ---
 
-*Protocol version: 1.0*
-*Last updated: 2026-01-09*
+_Protocol version: 1.0_
+_Last updated: 2026-01-09_

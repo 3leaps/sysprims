@@ -64,6 +64,7 @@ This document records the sources consulted for implementing `sysprims-proc`, en
 The implementation uses standard platform APIs:
 
 **Linux:**
+
 1. Enumerate PIDs via `/proc` directory listing
 2. Read `/proc/[pid]/stat` for process state and CPU times
 3. Read `/proc/[pid]/statm` for memory usage
@@ -71,11 +72,13 @@ The implementation uses standard platform APIs:
 5. Read `/proc/[pid]/cmdline` for command line
 
 **macOS:**
+
 1. Use `proc_listpids()` for enumeration
 2. Use `proc_pidinfo()` with `PROC_PIDTASKINFO` for details
 3. Use `proc_name()` for process name
 
 **Windows:**
+
 1. Use `CreateToolhelp32Snapshot()` for enumeration
 2. Use `OpenProcess()` and related APIs for details
 3. Use `GetProcessTimes()` for CPU usage
@@ -87,7 +90,7 @@ This is straightforward platform API usage - no complex algorithms derived from 
 
 ### Design Decision
 
-CPU percentage is normalized to 0-100 across all cores (not 0-N*100).
+CPU percentage is normalized to 0-100 across all cores (not 0-N\*100).
 
 ### Rationale
 
@@ -153,6 +156,6 @@ No GPL/LGPL/AGPL source code was consulted during development.
 
 ---
 
-*Provenance version: 1.0*
-*Last updated: 2026-01-09*
-*Maintainer: sysprims team*
+_Provenance version: 1.0_
+_Last updated: 2026-01-09_
+_Maintainer: sysprims team_

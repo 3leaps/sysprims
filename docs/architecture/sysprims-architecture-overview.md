@@ -59,14 +59,14 @@ sysprims is a cross-platform process utilities library implemented in Rust with 
 
 ### Core Crates
 
-| Crate | Responsibility | Key Types |
-|-------|----------------|-----------|
-| `sysprims-core` | Shared types, errors, telemetry trait | `SysprimsError`, `Signal`, `TelemetryEmitter` |
-| `sysprims-timeout` | Process execution with deadlines | `TimeoutConfig`, `TimeoutOutcome`, `GroupingMode` |
-| `sysprims-signal` | Signal dispatch and process groups | `send_signal()`, `terminate()`, `force_kill()` |
-| `sysprims-proc` | Process inspection and enumeration | `ProcessSnapshot`, `ProcessInfo`, `ProcessFilter` |
-| `sysprims-cli` | CLI binaries (thin wrappers) | Binary entry points |
-| `sysprims-ffi` | C-ABI exports | `sysprims_timeout_run()`, `sysprims_proc_list()`, etc. |
+| Crate              | Responsibility                        | Key Types                                              |
+| ------------------ | ------------------------------------- | ------------------------------------------------------ |
+| `sysprims-core`    | Shared types, errors, telemetry trait | `SysprimsError`, `Signal`, `TelemetryEmitter`          |
+| `sysprims-timeout` | Process execution with deadlines      | `TimeoutConfig`, `TimeoutOutcome`, `GroupingMode`      |
+| `sysprims-signal`  | Signal dispatch and process groups    | `send_signal()`, `terminate()`, `force_kill()`         |
+| `sysprims-proc`    | Process inspection and enumeration    | `ProcessSnapshot`, `ProcessInfo`, `ProcessFilter`      |
+| `sysprims-cli`     | CLI binaries (thin wrappers)          | Binary entry points                                    |
+| `sysprims-ffi`     | C-ABI exports                         | `sysprims_timeout_run()`, `sysprims_proc_list()`, etc. |
 
 ### Component Interaction
 
@@ -120,6 +120,7 @@ sysprims is a cross-platform process utilities library implemented in Rust with 
 The core reliability differentiator. See [ADR-0003](./adr/0003-group-by-default.md) for full details.
 
 **Unix Flow**:
+
 ```
 spawn() ──► setpgid(0, 0) ──► child becomes group leader
                 │
@@ -128,6 +129,7 @@ timeout ──► killpg(pgid, SIGTERM) ──► wait ──► killpg(pgid, SI
 ```
 
 **Windows Flow**:
+
 ```
 CreateJobObject() ──► SetInformationJobObject(KILL_ON_CLOSE)
         │
@@ -139,11 +141,12 @@ timeout ──► CloseHandle(job) ──► all processes terminated
 ```
 
 **Fallback Observable**:
+
 ```json
 {
   "grouping_requested": "group_by_default",
   "grouping_effective": "group_by_default",
-  "tree_kill_reliability": "best_effort"  // ← Job Object failed
+  "tree_kill_reliability": "best_effort" // ← Job Object failed
 }
 ```
 
@@ -374,36 +377,36 @@ sysprims-pstat --json            ┌──────────────�
 
 ### Performance
 
-| Operation | Target | Measurement |
-|-----------|--------|-------------|
-| Timeout spawn overhead | < 5ms | vs. raw `Command::spawn` |
-| Process enumeration (1000 procs) | < 50ms | End-to-end snapshot |
-| Signal delivery | < 1ms | PID to signal delivery |
-| Memory footprint (CLI) | < 10MB | RSS at steady state |
+| Operation                        | Target | Measurement              |
+| -------------------------------- | ------ | ------------------------ |
+| Timeout spawn overhead           | < 5ms  | vs. raw `Command::spawn` |
+| Process enumeration (1000 procs) | < 50ms | End-to-end snapshot      |
+| Signal delivery                  | < 1ms  | PID to signal delivery   |
+| Memory footprint (CLI)           | < 10MB | RSS at steady state      |
 
 ### Reliability
 
-| Metric | Target | Enforcement |
-|--------|--------|-------------|
-| Tree kill success rate | 100% (guaranteed mode) | Integration tests |
-| Signal delivery success | 100% (valid PID) | Unit tests |
-| JSON schema compliance | 100% | Golden tests |
+| Metric                  | Target                 | Enforcement       |
+| ----------------------- | ---------------------- | ----------------- |
+| Tree kill success rate  | 100% (guaranteed mode) | Integration tests |
+| Signal delivery success | 100% (valid PID)       | Unit tests        |
+| JSON schema compliance  | 100%                   | Golden tests      |
 
 ### Security
 
-| Concern | Mitigation |
-|---------|------------|
+| Concern              | Mitigation                             |
+| -------------------- | -------------------------------------- |
 | Privilege escalation | No implicit elevation; explicit errors |
-| PID injection | Validate all external PID inputs |
-| Memory safety | Rust ownership; careful FFI contracts |
+| PID injection        | Validate all external PID inputs       |
+| Memory safety        | Rust ownership; careful FFI contracts  |
 
 ### Maintainability
 
-| Metric | Target |
-|--------|--------|
-| Test coverage | ≥ 80% |
-| Documentation coverage | 100% public API |
-| MSRV stability | 1.81.0 (policy: announce bumps) |
+| Metric                 | Target                          |
+| ---------------------- | ------------------------------- |
+| Test coverage          | ≥ 80%                           |
+| Documentation coverage | 100% public API                 |
+| MSRV stability         | 1.81.0 (policy: announce bumps) |
 
 ## Cross-References
 

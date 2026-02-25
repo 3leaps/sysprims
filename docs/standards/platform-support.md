@@ -15,15 +15,15 @@ All CI/CD workflows, language bindings, and release assets MUST conform to this 
 
 ## Supported Platforms
 
-| Platform | Rust Target | Go GOOS/GOARCH | Node Platform | Status |
-|----------|-------------|----------------|---------------|--------|
-| Linux x64 (glibc) | `x86_64-unknown-linux-gnu` | `linux/amd64` | `linux-x64-gnu` | **Supported** |
-| Linux x64 (musl) | `x86_64-unknown-linux-musl` | `linux/amd64` (musl) | `linux-x64-musl` | **Supported** |
-| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu` | `linux/arm64` | `linux-arm64-gnu` | **Supported** |
-| Linux arm64 (musl) | `aarch64-unknown-linux-musl` | `linux/arm64` (musl) | `linux-arm64-musl` | **Supported** |
-| macOS arm64 | `aarch64-apple-darwin` | `darwin/arm64` | `darwin-arm64` | **Supported** |
-| Windows x64 | `x86_64-pc-windows-msvc` (CLI) / `x86_64-pc-windows-gnu` (FFI) | `windows/amd64` | `win32-x64-msvc` | **Supported** |
-| Windows arm64 | `aarch64-pc-windows-msvc` | N/A | `win32-arm64-msvc` | **Supported** (CLI, TypeScript only) |
+| Platform            | Rust Target                                                    | Go GOOS/GOARCH       | Node Platform      | Status                               |
+| ------------------- | -------------------------------------------------------------- | -------------------- | ------------------ | ------------------------------------ |
+| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`                                     | `linux/amd64`        | `linux-x64-gnu`    | **Supported**                        |
+| Linux x64 (musl)    | `x86_64-unknown-linux-musl`                                    | `linux/amd64` (musl) | `linux-x64-musl`   | **Supported**                        |
+| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`                                    | `linux/arm64`        | `linux-arm64-gnu`  | **Supported**                        |
+| Linux arm64 (musl)  | `aarch64-unknown-linux-musl`                                   | `linux/arm64` (musl) | `linux-arm64-musl` | **Supported**                        |
+| macOS arm64         | `aarch64-apple-darwin`                                         | `darwin/arm64`       | `darwin-arm64`     | **Supported**                        |
+| Windows x64         | `x86_64-pc-windows-msvc` (CLI) / `x86_64-pc-windows-gnu` (FFI) | `windows/amd64`      | `win32-x64-msvc`   | **Supported**                        |
+| Windows arm64       | `aarch64-pc-windows-msvc`                                      | N/A                  | `win32-arm64-msvc` | **Supported** (CLI, TypeScript only) |
 
 **Note on Windows arm64 Go bindings**: Go bindings do not support Windows arm64 because Go's CGo on Windows
 requires MinGW, and MinGW does not support the arm64 target. A future release may address this via llvm-mingw
@@ -31,10 +31,10 @@ or pure-Go implementations. See v0.1.8 brief for details.
 
 ## Explicitly Unsupported Platforms
 
-| Platform | Rust Target | Reason | Since |
-|----------|-------------|--------|-------|
-| macOS x64 (Intel) | `x86_64-apple-darwin` | Intel Macs are end-of-life; Apple Silicon is standard | v0.1.7 |
-| Linux x86 (32-bit) | `i686-unknown-linux-gnu` | Legacy; no modern use case | v0.1.0 |
+| Platform           | Rust Target              | Reason                                                | Since  |
+| ------------------ | ------------------------ | ----------------------------------------------------- | ------ |
+| macOS x64 (Intel)  | `x86_64-apple-darwin`    | Intel Macs are end-of-life; Apple Silicon is standard | v0.1.7 |
+| Linux x86 (32-bit) | `i686-unknown-linux-gnu` | Legacy; no modern use case                            | v0.1.0 |
 
 **Note on macOS x64**: macOS x64 is not supported for sysprims artifacts as of v0.1.7. New adopters should use
 Apple Silicon (arm64) Macs.
@@ -83,14 +83,14 @@ Platform packages published to npm (when enabled):
 
 ### GitHub Actions Runners
 
-| Platform | Runner | Notes |
-|----------|--------|-------|
-| Linux x64 | `ubuntu-latest` | Default glibc builds |
-| Linux arm64 | `ubuntu-latest-arm64-s` | Native arm64 builds |
-| macOS arm64 | `macos-14` | Apple Silicon |
-| Windows x64 | `windows-latest` | MSVC for CLI, MinGW for FFI |
-| Windows arm64 | `windows-latest-arm64-s` | MSVC only (no Go bindings) |
-| Alpine/musl | `ubuntu-latest` + container | `node:20-alpine` or custom |
+| Platform      | Runner                      | Notes                       |
+| ------------- | --------------------------- | --------------------------- |
+| Linux x64     | `ubuntu-latest`             | Default glibc builds        |
+| Linux arm64   | `ubuntu-latest-arm64-s`     | Native arm64 builds         |
+| macOS arm64   | `macos-14`                  | Apple Silicon               |
+| Windows x64   | `windows-latest`            | MSVC for CLI, MinGW for FFI |
+| Windows arm64 | `windows-latest-arm64-s`    | MSVC only (no Go bindings)  |
+| Alpine/musl   | `ubuntu-latest` + container | `node:20-alpine` or custom  |
 
 ### Cross-Compilation
 

@@ -86,13 +86,14 @@ If group/job creation fails (e.g., nested Job Objects on Windows, permission iss
   "status": "timeout",
   "grouping_requested": "group_by_default",
   "grouping_effective": "group_by_default",
-  "tree_kill_reliability": "guaranteed"  // or "best_effort"
+  "tree_kill_reliability": "guaranteed" // or "best_effort"
 }
 ```
 
 ### Opt-Out
 
 Users can opt out with:
+
 - CLI: `--foreground` flag
 - Library: `GroupingMode::Foreground`
 

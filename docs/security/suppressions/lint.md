@@ -13,12 +13,14 @@ This document records configuration decisions for lint tools in sysprims.
 ### Context
 
 yamllint's default 80-character line limit is too restrictive for:
+
 - GitHub Actions workflows (long `run:` commands, URLs, matrix expressions)
 - YAML config files with inline arrays
 
 ### Decision
 
 Relax line-length to 120 characters. This aligns with:
+
 - Common editor defaults (120 chars)
 - GitHub's code review display width
 - Practical YAML readability
@@ -67,15 +69,16 @@ Configure truthy rule to allow `on` and `off` in addition to `true` and `false`.
 
 checkmake's default maxbodylength of 20 lines is overly restrictive for real-world Makefiles. The sysprims Makefile has legitimate targets that exceed this:
 
-| Target | Lines | Purpose |
-|--------|-------|---------|
-| help | 41 | Auto-generated help from target comments |
-| bootstrap | 67 | Multi-platform toolchain setup |
-| tools | 46 | Development tool installation |
+| Target    | Lines | Purpose                                  |
+| --------- | ----- | ---------------------------------------- |
+| help      | 41    | Auto-generated help from target comments |
+| bootstrap | 67    | Multi-platform toolchain setup           |
+| tools     | 46    | Development tool installation            |
 
 ### Decision
 
 Increase maxbodylength to 70 lines. These targets are:
+
 - Well-documented with comments
 - Logically organized
 - Necessary for comprehensive developer tooling
@@ -86,8 +89,8 @@ Splitting them would reduce readability without improving maintainability.
 
 ## Configuration Audit Log
 
-| Date | LDR | Action | Author |
-|------|-----|--------|--------|
+| Date       | LDR     | Action  | Author          |
+| ---------- | ------- | ------- | --------------- |
 | 2026-01-14 | LDR-001 | Created | Claude Opus 4.5 |
 | 2026-01-14 | LDR-002 | Created | Claude Opus 4.5 |
 | 2026-01-14 | LDR-003 | Created | Claude Opus 4.5 |

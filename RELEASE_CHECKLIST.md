@@ -36,7 +36,7 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 ### Scope Control (Recommended)
 
 - [ ] Confirm release scope is intentional and minimal.
-   - For v0.1.7: keep scope to TypeScript Node-API bindings rollout only (no extra refactors).
+  - For v0.1.7: keep scope to TypeScript Node-API bindings rollout only (no extra refactors).
 
 ### Pre-Tag Verification
 
@@ -52,18 +52,21 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   git commit -m "release: prepare vX.Y.Z"
   ```
 - [ ] Push to main:
+
   ```bash
   git push origin main
   ```
 
 - [ ] **Verify local/remote sync** (required before running workflows):
-  Before running any release workflows, confirm local and remote are in sync:
+      Before running any release workflows, confirm local and remote are in sync:
+
   ```bash
   git fetch origin
   # Must show no output (no divergence):
   git log --oneline origin/main..HEAD
   git log --oneline HEAD..origin/main
   ```
+
   If there's divergence, resolve it before proceeding. The Go bindings workflow
   runs on the remote HEAD, so any unpushed local commits will cause the PR merge
   to diverge from your local state. See [Troubleshooting: Local/Remote Divergence](#troubleshooting-localremote-divergence).
@@ -94,6 +97,7 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     ```
 
 - [ ] Create and push tags (must point to the SAME commit):
+
   ```bash
   VERSION=$(cat VERSION)
 
@@ -111,6 +115,7 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   ```
 
 Notes:
+
 - Go requires the path-prefixed tag because the module is `github.com/3leaps/sysprims/bindings/go/sysprims`.
 - Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
 - See `docs/decisions/ADR-0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
@@ -143,10 +148,12 @@ Notes:
 
   TypeScript bindings (run AFTER signing, from the tag ref):
   1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
+
      ```bash
      VERSION=$(cat VERSION)
      gh workflow run "TypeScript N-API Prebuilds" --ref "v${VERSION}"
      ```
+
      Wait for completion. This builds `.node` binaries and stages npm package directories.
 
   2. Run npm publish workflow on the tag (requires OIDC trusted publishing):
@@ -183,19 +190,23 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
 ### Signing Steps
 
 1. **Clean previous release artifacts**
+
    ```bash
    make release-clean
    ```
 
 2. **Download artifacts from GitHub draft release**
+
    ```bash
    make release-download
    ```
 
 3. **Generate checksum manifests**
+
    ```bash
    make release-checksums
    ```
+
    Produces: `SHA256SUMS`, `SHA512SUMS`
 
    Notes:
@@ -204,36 +215,46 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
      SBOM/metadata JSON, licenses, and copied release notes.
 
 4. **Sign checksum manifests** (minisign + PGP)
+
    ```bash
    make release-sign
    ```
+
    Produces: `.minisig` and `.asc` signatures for both checksum files
 
 5. **Export public keys**
+
    ```bash
    make release-export-keys
    ```
+
    Produces: `sysprims-minisign.pub`, `sysprims-release-signing-key.asc`
 
 6. **Verify everything before upload**
+
    ```bash
    make release-verify
    ```
+
    Validates:
    - Checksums match artifacts
    - Signatures verify correctly
    - Exported keys are public-only (no secret key material)
 
 7. **Copy release notes**
+
    ```bash
    make release-notes
    ```
+
    Copies `docs/releases/vX.Y.Z.md` to `dist/release/release-notes-vX.Y.Z.md`
 
 8. **Upload signed artifacts to GitHub**
+
    ```bash
    make release-upload
    ```
+
    > **Note:** Uses `--clobber` to overwrite existing assets. Safe to rerun.
 
 9. **Publish the release**
@@ -280,24 +301,25 @@ git push origin main
 
 ## Quick Reference: All Release Targets
 
-| Target | Description |
-|--------|-------------|
-| `make release-preflight` | **REQUIRED**: Verify pre-tag requirements (tree, checks, version, notes, sync) |
-| `make release-clean` | Remove dist/release contents |
-| `make release-download` | Download CI artifacts from GitHub |
-| `make release-checksums` | Generate SHA256SUMS and SHA512SUMS |
-| `make release-sign` | Sign checksums with minisign + PGP |
-| `make release-export-keys` | Export public signing keys |
-| `make release-verify` | Verify checksums, signatures, and keys |
-| `make release-notes` | Copy release notes to dist |
-| `make release-upload` | Upload signed artifacts to GitHub |
-| `make release` | Full workflow (clean → upload) |
+| Target                     | Description                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `make release-preflight`   | **REQUIRED**: Verify pre-tag requirements (tree, checks, version, notes, sync) |
+| `make release-clean`       | Remove dist/release contents                                                   |
+| `make release-download`    | Download CI artifacts from GitHub                                              |
+| `make release-checksums`   | Generate SHA256SUMS and SHA512SUMS                                             |
+| `make release-sign`        | Sign checksums with minisign + PGP                                             |
+| `make release-export-keys` | Export public signing keys                                                     |
+| `make release-verify`      | Verify checksums, signatures, and keys                                         |
+| `make release-notes`       | Copy release notes to dist                                                     |
+| `make release-upload`      | Upload signed artifacts to GitHub                                              |
+| `make release`             | Full workflow (clean → upload)                                                 |
 
 ## Troubleshooting
 
 ### "SYSPRIMS_MINISIGN_KEY not set"
 
 Source the vars file or set the environment variable:
+
 ```bash
 source ~/devsecops/vars/3leaps-sysprims-cicd.sh
 ```
@@ -305,6 +327,7 @@ source ~/devsecops/vars/3leaps-sysprims-cicd.sh
 ### "No release notes found"
 
 Create the release notes file:
+
 ```bash
 mkdir -p docs/releases
 # Write release notes to docs/releases/vX.Y.Z.md
@@ -334,12 +357,15 @@ Remote: A -- B -- D -- E (Go bindings PR merge)
 ```
 
 **Symptoms:**
+
 - `git pull` fails with "divergent branches" error
 - `git log origin/main..HEAD` shows local commits not on remote
 - `git log HEAD..origin/main` shows remote commits not on local
 
 **Resolution:**
+
 1. If the local commit should be part of the release:
+
    ```bash
    git merge origin/main -m "Merge remote Go bindings PR"
    git push origin main
@@ -352,6 +378,7 @@ Remote: A -- B -- D -- E (Go bindings PR merge)
    ```
 
 **Prevention:** Always verify sync before running release workflows:
+
 ```bash
 git fetch origin
 git log --oneline origin/main..HEAD  # should be empty
@@ -361,6 +388,7 @@ git log --oneline HEAD..origin/main  # should be empty
 ## Key Rotation
 
 If rotating signing keys, update:
+
 - [ ] `RELEASE_CHECKLIST.md` - verification example public key
 - [ ] `README.md` - verification snippet
 - [ ] `docs/security/signing-runbook.md`

@@ -11,12 +11,12 @@ This directory contains templates for documenting sysprims modules per the [Modu
 
 ## Templates
 
-| Template | Purpose |
-|----------|---------|
-| `spec-template.md` | Module specification and API contract |
+| Template                        | Purpose                               |
+| ------------------------------- | ------------------------------------- |
+| `spec-template.md`              | Module specification and API contract |
 | `equivalence-tests-template.md` | Test protocol and acceptance criteria |
-| `compliance-template.md` | Evidence that requirements are met |
-| `provenance-template.md` | Sources consulted and avoided |
+| `compliance-template.md`        | Evidence that requirements are met    |
+| `provenance-template.md`        | Sources consulted and avoided         |
 
 ## Example
 

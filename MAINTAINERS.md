@@ -55,14 +55,14 @@ For governance policies, see:
 
 ## Review Requirements
 
-| Change Type | Reviewer Required |
-| ----------- | ----------------- |
-| Code changes | Lead maintainer |
-| FFI boundary changes | Lead maintainer + secrev role |
+| Change Type          | Reviewer Required                        |
+| -------------------- | ---------------------------------------- |
+| Code changes         | Lead maintainer                          |
+| FFI boundary changes | Lead maintainer + secrev role            |
 | Dependency additions | Lead maintainer (license check required) |
-| ADR changes | Lead maintainer |
-| Documentation | Lead maintainer |
-| CI/CD changes | Lead maintainer |
+| ADR changes          | Lead maintainer                          |
+| Documentation        | Lead maintainer                          |
+| CI/CD changes        | Lead maintainer                          |
 
 ## Release Authority
 

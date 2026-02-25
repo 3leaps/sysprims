@@ -40,22 +40,22 @@ To prevent confusion and tight coupling between the versions of the codebase and
 
 - Once the repository reaches a stable `1.0.0` release, schemas will transition to Semantic Versioning (e.g., `v1.0.0`, `v1.1.0`).
 - Version bumps will follow standard SemVer rules:
-    - **MAJOR** (`v1.0.0` -> `v2.0.0`): A breaking change (removing a field, changing a type, removing an enum value).
-    - **MINOR** (`v1.0.0` -> `v1.1.0`): A non-breaking, additive change (adding a new optional field, adding an enum value).
-    - **PATCH** (`v1.0.0` -> `v1.0.1`): A non-breaking change that does not alter the structure (e.g., fixing a typo in a `description`).
+  - **MAJOR** (`v1.0.0` -> `v2.0.0`): A breaking change (removing a field, changing a type, removing an enum value).
+  - **MINOR** (`v1.0.0` -> `v1.1.0`): A non-breaking, additive change (adding a new optional field, adding an enum value).
+  - **PATCH** (`v1.0.0` -> `v1.0.1`): A non-breaking change that does not alter the structure (e.g., fixing a typo in a `description`).
 - Example: `schemas/v1.1.0/proc/process-info.schema.yaml`
 
 ## Consequences
 
 - **Positive**:
-    - Schema versions are decoupled from the repository version during early development, providing flexibility.
-    - The `v0` convention clearly communicates instability to consumers.
-    - A clear plan exists for migrating to a stable, predictable SemVer strategy post-1.0.0.
-    - The schema host provides a stable, long-term location for schema definitions.
+  - Schema versions are decoupled from the repository version during early development, providing flexibility.
+  - The `v0` convention clearly communicates instability to consumers.
+  - A clear plan exists for migrating to a stable, predictable SemVer strategy post-1.0.0.
+  - The schema host provides a stable, long-term location for schema definitions.
 - **Negative**:
-    - Requires a conscious transition from the `v0` convention to the SemVer convention at the `1.0.0` milestone.
+  - Requires a conscious transition from the `v0` convention to the SemVer convention at the `1.0.0` milestone.
 - **Neutral**:
-    - Build tooling (`goneat`) will be configured to validate schemas from this structure.
+  - Build tooling (`goneat`) will be configured to validate schemas from this structure.
 
 ## Alternatives Considered
 

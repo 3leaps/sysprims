@@ -17,18 +17,18 @@ adr_refs: ["ADR-0005", "ADR-0008"]
 
 **Subcommands (v0.1.0):**
 
-| Command | Library | Purpose |
-|---------|---------|---------|
-| `kill` | sysprims-signal | Send signal to process |
-| `timeout` | sysprims-timeout | Run command with timeout |
-| `pstat` | sysprims-proc | Process listing and inspection |
+| Command   | Library          | Purpose                        |
+| --------- | ---------------- | ------------------------------ |
+| `kill`    | sysprims-signal  | Send signal to process         |
+| `timeout` | sysprims-timeout | Run command with timeout       |
+| `pstat`   | sysprims-proc    | Process listing and inspection |
 
 **Planned (v0.2.0):**
 
-| Command | Library | Purpose |
-|---------|---------|---------|
-| `setsid` | sysprims-session | Run in new session |
-| `nohup` | sysprims-session | Run immune to SIGHUP |
+| Command  | Library          | Purpose              |
+| -------- | ---------------- | -------------------- |
+| `setsid` | sysprims-session | Run in new session   |
+| `nohup`  | sysprims-session | Run immune to SIGHUP |
 
 ## 2) Binary Name
 
@@ -38,12 +38,12 @@ Installed as single binary with subcommand dispatch.
 
 ## 3) Global Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--log-format <FORMAT>` | Log output format (text, json) | text |
-| `--log-level <LEVEL>` | Minimum log level | info |
-| `--version` | Print version | - |
-| `--help` | Print help | - |
+| Option                  | Description                    | Default |
+| ----------------------- | ------------------------------ | ------- |
+| `--log-format <FORMAT>` | Log output format (text, json) | text    |
+| `--log-level <LEVEL>`   | Minimum log level              | info    |
+| `--version`             | Print version                  | -       |
+| `--help`                | Print help                     | -       |
 
 ## 4) Subcommand Contracts
 
@@ -55,18 +55,18 @@ sysprims kill [-s SIGNAL] [--json] <PID> [PID...]
 
 **Options:**
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-s, --signal <SIG>` | Signal name or number | TERM |
-| `-g, --group` | Treat PID as a PGID and signal the process group (Unix-only; requires exactly one PID) | false |
-| `--json` | Print per-PID batch result as JSON | false |
+| Option               | Description                                                                            | Default |
+| -------------------- | -------------------------------------------------------------------------------------- | ------- |
+| `-s, --signal <SIG>` | Signal name or number                                                                  | TERM    |
+| `-g, --group`        | Treat PID as a PGID and signal the process group (Unix-only; requires exactly one PID) | false   |
+| `--json`             | Print per-PID batch result as JSON                                                     | false   |
 
 **Exit codes:**
 
-| Code | Condition |
-|------|-----------|
-| 0 | All targets signaled successfully |
-| 1 | Any target failed (or argument/parse error) |
+| Code | Condition                                   |
+| ---- | ------------------------------------------- |
+| 0    | All targets signaled successfully           |
+| 1    | Any target failed (or argument/parse error) |
 
 ### 4.2 sysprims timeout
 
@@ -76,12 +76,12 @@ sysprims timeout [OPTIONS] <DURATION> <COMMAND> [ARGS...]
 
 **Options:**
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-s, --signal <SIG>` | Signal on timeout | TERM |
-| `-k, --kill-after <DUR>` | Delay before SIGKILL | 10s |
-| `--foreground` | Don't create process group | false |
-| `--preserve-status` | Propagate child exit code | false |
+| Option                   | Description                | Default |
+| ------------------------ | -------------------------- | ------- |
+| `-s, --signal <SIG>`     | Signal on timeout          | TERM    |
+| `-k, --kill-after <DUR>` | Delay before SIGKILL       | 10s     |
+| `--foreground`           | Don't create process group | false   |
+| `--preserve-status`      | Propagate child exit code  | false   |
 
 **Exit codes:** Per sysprims-timeout spec (124 timeout, 125 error, 126/127 command errors).
 
@@ -93,26 +93,26 @@ sysprims pstat [OPTIONS]
 
 **Options:**
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--json` | JSON output with schema_id | true* |
-| `--table` | Human-readable table | false |
-| `--pid <PID>` | Show specific process | - |
-| `--name <NAME>` | Filter by name | - |
-| `--user <USER>` | Filter by user | - |
-| `--cpu-above <PERCENT>` | Filter by CPU | - |
-| `--cpu-mode <MODE>` | CPU measurement mode (lifetime, monitor) | lifetime |
-| `--sample <DURATION>` | Sample CPU over interval (enables monitor-style CPU) | - |
-| `--top <N>` | Limit output to top N processes | - |
-| `--memory-above <KB>` | Filter by memory | - |
-| `--sort <FIELD>` | Sort by field | pid |
+| Option                  | Description                                          | Default  |
+| ----------------------- | ---------------------------------------------------- | -------- |
+| `--json`                | JSON output with schema_id                           | true\*   |
+| `--table`               | Human-readable table                                 | false    |
+| `--pid <PID>`           | Show specific process                                | -        |
+| `--name <NAME>`         | Filter by name                                       | -        |
+| `--user <USER>`         | Filter by user                                       | -        |
+| `--cpu-above <PERCENT>` | Filter by CPU                                        | -        |
+| `--cpu-mode <MODE>`     | CPU measurement mode (lifetime, monitor)             | lifetime |
+| `--sample <DURATION>`   | Sample CPU over interval (enables monitor-style CPU) | -        |
+| `--top <N>`             | Limit output to top N processes                      | -        |
+| `--memory-above <KB>`   | Filter by memory                                     | -        |
+| `--sort <FIELD>`        | Sort by field                                        | pid      |
 
 **CPU modes:**
 
 - `lifetime`: lifetime-average estimate (may under-report recent spikes)
 - `monitor`: sampled CPU over a short interval (Activity Monitor / top style). Defaults to 1s if `--sample` is not provided.
 
-*Default output is JSON for automation.
+\*Default output is JSON for automation.
 
 **Exit codes:** Per sysprims-proc spec (0 success, 1 error).
 
@@ -120,26 +120,26 @@ sysprims pstat [OPTIONS]
 
 Both `timeout` duration and `--kill-after` support:
 
-| Format | Example | Duration |
-|--------|---------|----------|
-| Plain number | `5` | 5 seconds |
-| Milliseconds | `500ms` | 500ms |
-| Seconds | `5s` | 5 seconds |
-| Minutes | `2m` | 2 minutes |
-| Hours | `1h` | 1 hour |
-| Decimal | `1.5s` | 1.5 seconds |
+| Format       | Example | Duration    |
+| ------------ | ------- | ----------- |
+| Plain number | `5`     | 5 seconds   |
+| Milliseconds | `500ms` | 500ms       |
+| Seconds      | `5s`    | 5 seconds   |
+| Minutes      | `2m`    | 2 minutes   |
+| Hours        | `1h`    | 1 hour      |
+| Decimal      | `1.5s`  | 1.5 seconds |
 
 ## 6) Exit Code Summary
 
-| Code | Meaning | Source |
-|------|---------|--------|
-| 0 | Success | All commands |
-| 1 | General error | All commands |
-| 124 | Timeout occurred | timeout |
-| 125 | Tool error | timeout |
-| 126 | Command not executable | timeout |
-| 127 | Command not found | timeout |
-| 128+N | Killed by signal N | timeout |
+| Code  | Meaning                | Source       |
+| ----- | ---------------------- | ------------ |
+| 0     | Success                | All commands |
+| 1     | General error          | All commands |
+| 124   | Timeout occurred       | timeout      |
+| 125   | Tool error             | timeout      |
+| 126   | Command not executable | timeout      |
+| 127   | Command not found      | timeout      |
+| 128+N | Killed by signal N     | timeout      |
 
 ## 7) Output Formats
 
@@ -157,16 +157,16 @@ Structured logging via tracing with configurable format and level.
 
 ## 8) Traceability Matrix
 
-| Requirement | Spec Section | Implementation | Tests | Status |
-|-------------|--------------|----------------|-------|--------|
-| Subcommand dispatch | §1 | `clap::Subcommand` | integration | Pass |
-| kill delegates to signal | §4.1 | `sysprims_signal::kill_by_name` | integration | Pass |
-| timeout delegates to timeout | §4.2 | `sysprims_timeout::run_with_timeout` | integration | Pass |
-| pstat delegates to proc | §4.3 | `sysprims_proc::snapshot*` | integration | Pass |
-| Duration parsing | §5 | `parse_duration` | unit | Pass |
-| Exit codes match spec | §6 | main.rs exit handling | integration | Pass |
+| Requirement                  | Spec Section | Implementation                       | Tests       | Status |
+| ---------------------------- | ------------ | ------------------------------------ | ----------- | ------ |
+| Subcommand dispatch          | §1           | `clap::Subcommand`                   | integration | Pass   |
+| kill delegates to signal     | §4.1         | `sysprims_signal::kill_by_name`      | integration | Pass   |
+| timeout delegates to timeout | §4.2         | `sysprims_timeout::run_with_timeout` | integration | Pass   |
+| pstat delegates to proc      | §4.3         | `sysprims_proc::snapshot*`           | integration | Pass   |
+| Duration parsing             | §5           | `parse_duration`                     | unit        | Pass   |
+| Exit codes match spec        | §6           | main.rs exit handling                | integration | Pass   |
 
 ---
 
-*Spec version: 1.0*
-*Last updated: 2026-01-09*
+_Spec version: 1.0_
+_Last updated: 2026-01-09_

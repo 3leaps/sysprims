@@ -38,27 +38,31 @@ adr_refs: ["ADR-0007", "ADR-0008", "ADR-0011"]
 ### POSIX (authoritative for Unix)
 
 **`kill` utility:**
+
 - https://pubs.opengroup.org/onlinepubs/9699919799/utilities/kill.html
 
 **`kill()` function:**
+
 - https://pubs.opengroup.org/onlinepubs/9699919799/functions/kill.html
 - Linux man page: https://man7.org/linux/man-pages/man2/kill.2.html
 
 ### Key POSIX Semantics
 
-| PID Value | Semantics |
-|-----------|-----------|
-| `> 0` | Signal sent to that specific process |
-| `0` | Signal sent to all processes in caller's process group |
-| `-1` | Signal sent to **ALL** processes caller has permission to signal |
-| `< -1` | Signal sent to all processes in process group `abs(pid)` |
+| PID Value | Semantics                                                        |
+| --------- | ---------------------------------------------------------------- |
+| `> 0`     | Signal sent to that specific process                             |
+| `0`       | Signal sent to all processes in caller's process group           |
+| `-1`      | Signal sent to **ALL** processes caller has permission to signal |
+| `< -1`    | Signal sent to all processes in process group `abs(pid)`         |
 
 ### Windows
 
 **TerminateProcess:**
+
 - https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
 
 **GenerateConsoleCtrlEvent (for SIGINT):**
+
 - https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent
 
 ## 3) Literal Interface Reference (POSIX kill)
@@ -78,7 +82,7 @@ kill -l [exit_status]
 ### Exit status
 
 - 0 — at least one signal was sent successfully
-- >0 — an error occurred
+- > 0 — an error occurred
 
 ## 4) sysprims Required Interface (Rust)
 
@@ -135,12 +139,12 @@ pub use rsfulmen::foundry::signals::*;
 
 Per ADR-0008:
 
-| Error | Condition |
-|-------|-----------|
-| `InvalidArgument` | pid == 0, pid > MAX_SAFE_PID, unknown signal name |
-| `NotFound` | Process doesn't exist (ESRCH) |
-| `PermissionDenied` | Insufficient privileges (EPERM) |
-| `NotSupported` | Signal/operation not available on platform |
+| Error              | Condition                                         |
+| ------------------ | ------------------------------------------------- |
+| `InvalidArgument`  | pid == 0, pid > MAX_SAFE_PID, unknown signal name |
+| `NotFound`         | Process doesn't exist (ESRCH)                     |
+| `PermissionDenied` | Insufficient privileges (EPERM)                   |
+| `NotSupported`     | Signal/operation not available on platform        |
 
 ### 4.5 Invariants
 
@@ -169,31 +173,31 @@ sysprims kill [-s SIGNAL] [--json] <PID> [PID...]
 
 ### Options
 
-| Option | Description |
-|--------|-------------|
-| `-s, --signal <SIG>` | Signal to send (name or number, default: TERM) |
-| `-g, --group` | Treat PID as a PGID and signal the process group (Unix-only; requires exactly one PID) |
-| `--json` | Print per-PID batch result as JSON |
+| Option               | Description                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `-s, --signal <SIG>` | Signal to send (name or number, default: TERM)                                         |
+| `-g, --group`        | Treat PID as a PGID and signal the process group (Unix-only; requires exactly one PID) |
+| `--json`             | Print per-PID batch result as JSON                                                     |
 
 ### Exit Codes
 
-| Code | Condition |
-|------|-----------|
-| 0 | All targets signaled successfully |
-| 1 | Any target failed (or argument/parse error) |
+| Code | Condition                                   |
+| ---- | ------------------------------------------- |
+| 0    | All targets signaled successfully           |
+| 1    | Any target failed (or argument/parse error) |
 
 ## 6) Platform Signal Mapping
 
-| Signal | Linux | macOS | Windows |
-|--------|-------|-------|---------|
-| SIGTERM (15) | Native | Native | TerminateProcess |
-| SIGKILL (9) | Native | Native | TerminateProcess |
-| SIGINT (2) | Native | Native | GenerateConsoleCtrlEvent* |
-| SIGHUP (1) | Native | Native | NotSupported |
-| SIGUSR1 | Native (10) | Native (30) | NotSupported |
-| SIGUSR2 | Native (12) | Native (31) | NotSupported |
+| Signal       | Linux       | macOS       | Windows                    |
+| ------------ | ----------- | ----------- | -------------------------- |
+| SIGTERM (15) | Native      | Native      | TerminateProcess           |
+| SIGKILL (9)  | Native      | Native      | TerminateProcess           |
+| SIGINT (2)   | Native      | Native      | GenerateConsoleCtrlEvent\* |
+| SIGHUP (1)   | Native      | Native      | NotSupported               |
+| SIGUSR1      | Native (10) | Native (30) | NotSupported               |
+| SIGUSR2      | Native (12) | Native (31) | NotSupported               |
 
-*SIGINT on Windows is best-effort and depends on console attachment.
+\*SIGINT on Windows is best-effort and depends on console attachment.
 
 ## 7) FFI Contract
 
@@ -211,17 +215,17 @@ SysprimsErrorCode sysprims_force_kill(uint32_t pid);
 
 ## 8) Traceability Matrix
 
-| Requirement | Reference | Rust API | CLI | Tests | Status |
-|-------------|-----------|----------|-----|-------|--------|
-| Parse TERM/SIGTERM/15 | POSIX | `kill_by_name` | `-s` | `resolve_signal_number_*` | Pass |
-| Send TERM to PID | POSIX | `kill(pid, SIGTERM)` | default | integration | Pass |
-| NotFound for missing PID | POSIX ESRCH | `NotFound` | any | integration | Pass |
-| PermissionDenied | POSIX EPERM | `PermissionDenied` | any | integration | Pass |
-| Reject PID 0 | ADR-0011 | `validate_pid` | any | `kill_rejects_pid_zero` | Pass |
-| Reject PID > MAX_SAFE_PID | ADR-0011 | `validate_pid` | any | `kill_rejects_pid_exceeding_*` | Pass |
-| NotSupported for Windows | ADR-0007 | `NotSupported` | any | `killpg_is_not_supported_*` | Pass |
+| Requirement               | Reference   | Rust API             | CLI     | Tests                          | Status |
+| ------------------------- | ----------- | -------------------- | ------- | ------------------------------ | ------ |
+| Parse TERM/SIGTERM/15     | POSIX       | `kill_by_name`       | `-s`    | `resolve_signal_number_*`      | Pass   |
+| Send TERM to PID          | POSIX       | `kill(pid, SIGTERM)` | default | integration                    | Pass   |
+| NotFound for missing PID  | POSIX ESRCH | `NotFound`           | any     | integration                    | Pass   |
+| PermissionDenied          | POSIX EPERM | `PermissionDenied`   | any     | integration                    | Pass   |
+| Reject PID 0              | ADR-0011    | `validate_pid`       | any     | `kill_rejects_pid_zero`        | Pass   |
+| Reject PID > MAX_SAFE_PID | ADR-0011    | `validate_pid`       | any     | `kill_rejects_pid_exceeding_*` | Pass   |
+| NotSupported for Windows  | ADR-0007    | `NotSupported`       | any     | `killpg_is_not_supported_*`    | Pass   |
 
 ---
 
-*Spec version: 1.0*
-*Last updated: 2026-01-09*
+_Spec version: 1.0_
+_Last updated: 2026-01-09_

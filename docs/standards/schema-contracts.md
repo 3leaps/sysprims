@@ -21,11 +21,11 @@ All schemas MUST use **JSON Schema Draft 2020-12**. See [Schema Validation Polic
 
 ## Validated Outputs
 
-| Schema | Direction | Validation |
-|--------|-----------|------------|
-| `timeout-result` | Output | Required |
-| `process-snapshot` | Output | Required |
-| `proc-filter` | Input | Strict (no unknown keys) |
+| Schema             | Direction | Validation               |
+| ------------------ | --------- | ------------------------ |
+| `timeout-result`   | Output    | Required                 |
+| `process-snapshot` | Output    | Required                 |
+| `proc-filter`      | Input     | Strict (no unknown keys) |
 
 ## CI Expectations
 

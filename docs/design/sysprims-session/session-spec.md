@@ -30,18 +30,18 @@ adr_refs: ["ADR-0007"]
 
 ### setsid
 
-| Reference | URL | License |
-|-----------|-----|---------|
-| POSIX.1-2017 setsid(2) | https://pubs.opengroup.org/onlinepubs/9699919799/functions/setsid.html | Spec |
-| FreeBSD setsid(2) man | https://www.freebsd.org/cgi/man.cgi?query=setsid&sektion=2 | BSD |
+| Reference              | URL                                                                    | License |
+| ---------------------- | ---------------------------------------------------------------------- | ------- |
+| POSIX.1-2017 setsid(2) | https://pubs.opengroup.org/onlinepubs/9699919799/functions/setsid.html | Spec    |
+| FreeBSD setsid(2) man  | https://www.freebsd.org/cgi/man.cgi?query=setsid&sektion=2             | BSD     |
 
 ### nohup
 
-| Reference | URL | License |
-|-----------|-----|---------|
-| POSIX.1-2017 nohup utility | https://pubs.opengroup.org/onlinepubs/9699919799/utilities/nohup.html | Spec |
-| FreeBSD nohup(1) man | https://www.freebsd.org/cgi/man.cgi?query=nohup | BSD |
-| OpenBSD nohup.c | https://cvsweb.openbsd.org/src/usr.bin/nohup/ | ISC |
+| Reference                  | URL                                                                   | License |
+| -------------------------- | --------------------------------------------------------------------- | ------- |
+| POSIX.1-2017 nohup utility | https://pubs.opengroup.org/onlinepubs/9699919799/utilities/nohup.html | Spec    |
+| FreeBSD nohup(1) man       | https://www.freebsd.org/cgi/man.cgi?query=nohup                       | BSD     |
+| OpenBSD nohup.c            | https://cvsweb.openbsd.org/src/usr.bin/nohup/                         | ISC     |
 
 ## 3) sysprims Required Interface (Rust)
 
@@ -130,14 +130,14 @@ pub fn getpgid(pid: u32) -> SysprimsResult<u32>;
 
 ### 3.3 Platform Support
 
-| Function | Unix | Windows |
-|----------|------|---------|
+| Function     | Unix | Windows      |
+| ------------ | ---- | ------------ |
 | `run_setsid` | Full | NotSupported |
-| `run_nohup` | Full | NotSupported |
-| `setsid` | Full | Not compiled |
-| `getsid` | Full | Not compiled |
-| `setpgid` | Full | Not compiled |
-| `getpgid` | Full | Not compiled |
+| `run_nohup`  | Full | NotSupported |
+| `setsid`     | Full | Not compiled |
+| `getsid`     | Full | Not compiled |
+| `setpgid`    | Full | Not compiled |
+| `getpgid`    | Full | Not compiled |
 
 ### 3.4 Invariants
 
@@ -170,28 +170,28 @@ OPTIONS:
 
 ### Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Internal error |
-| 126 | Command not executable |
-| 127 | Command not found |
+| Code  | Meaning                                |
+| ----- | -------------------------------------- |
+| 0     | Success                                |
+| 1     | Internal error                         |
+| 126   | Command not executable                 |
+| 127   | Command not found                      |
 | 128+N | Child killed by signal N (when --wait) |
 
 ## 5) Traceability Matrix
 
-| Requirement | Reference | Rust API | CLI | Tests | Status |
-|-------------|-----------|----------|-----|-------|--------|
-| New session creation | POSIX setsid(2) | `run_setsid` | `sysprims setsid` | integration | Pass |
-| Session leader semantics | POSIX setsid(2) | `setsid()` | `sysprims setsid` | integration | Pass |
-| SIGHUP immunity | POSIX nohup | `run_nohup` | `sysprims nohup` | integration | Pass |
-| Output redirection | POSIX nohup | `run_nohup` | `sysprims nohup` | integration | Pass |
-| Windows NotSupported | Platform contract | all | all | unit | Pass |
-| Fork if pgrp leader | POSIX setsid(2) | `run_setsid` | `sysprims setsid` | integration | Pass |
-| Default wait=false | spec | `SetsidConfig::default()` | default | `setsid_config_defaults` | Pass |
-| Default output=nohup.out | spec | `NohupConfig::default()` | default | `nohup_config_defaults` | Pass |
+| Requirement              | Reference         | Rust API                  | CLI               | Tests                    | Status |
+| ------------------------ | ----------------- | ------------------------- | ----------------- | ------------------------ | ------ |
+| New session creation     | POSIX setsid(2)   | `run_setsid`              | `sysprims setsid` | integration              | Pass   |
+| Session leader semantics | POSIX setsid(2)   | `setsid()`                | `sysprims setsid` | integration              | Pass   |
+| SIGHUP immunity          | POSIX nohup       | `run_nohup`               | `sysprims nohup`  | integration              | Pass   |
+| Output redirection       | POSIX nohup       | `run_nohup`               | `sysprims nohup`  | integration              | Pass   |
+| Windows NotSupported     | Platform contract | all                       | all               | unit                     | Pass   |
+| Fork if pgrp leader      | POSIX setsid(2)   | `run_setsid`              | `sysprims setsid` | integration              | Pass   |
+| Default wait=false       | spec              | `SetsidConfig::default()` | default           | `setsid_config_defaults` | Pass   |
+| Default output=nohup.out | spec              | `NohupConfig::default()`  | default           | `nohup_config_defaults`  | Pass   |
 
 ---
 
-*Spec version: 1.0*
-*Last updated: 2026-01-09*
+_Spec version: 1.0_
+_Last updated: 2026-01-09_

@@ -15,14 +15,14 @@ Each binding ships with prebuilt libraries for all supported platforms and provi
 
 See [Platform Support Matrix](../standards/platform-support.md) for the canonical reference.
 
-| Platform | Rust Target | Library Name | Linker Flags |
-|----------|-------------|--------------|--------------|
-| Linux x64 (glibc) | `x86_64-unknown-linux-gnu` | `libsysprims_ffi.a` | `-lm -lpthread -ldl` |
-| Linux x64 (musl) | `x86_64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread` |
-| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu` | `libsysprims_ffi.a` | `-lm -lpthread -ldl` |
-| Linux arm64 (musl) | `aarch64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread` |
-| macOS arm64 | `aarch64-apple-darwin` | `libsysprims_ffi.a` | `-lm -lpthread` |
-| Windows x64 | `x86_64-pc-windows-gnu` | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
+| Platform            | Rust Target                  | Library Name        | Linker Flags                  |
+| ------------------- | ---------------------------- | ------------------- | ----------------------------- |
+| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`   | `libsysprims_ffi.a` | `-lm -lpthread -ldl`          |
+| Linux x64 (musl)    | `x86_64-unknown-linux-musl`  | `libsysprims_ffi.a` | `-lm -lpthread`               |
+| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`  | `libsysprims_ffi.a` | `-lm -lpthread -ldl`          |
+| Linux arm64 (musl)  | `aarch64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread`               |
+| macOS arm64         | `aarch64-apple-darwin`       | `libsysprims_ffi.a` | `-lm -lpthread`               |
+| Windows x64         | `x86_64-pc-windows-gnu`      | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
 
@@ -53,11 +53,11 @@ TypeScript bindings use a Node-API native addon and do not require MinGW.
 
 MinGW-w64 runtime licensing is GPL-free:
 
-| Component | License | Static Link Safe? |
-|-----------|---------|-------------------|
-| MinGW-w64 runtime | ZPL / Public Domain / BSD | ✅ Yes |
-| Wine-imported headers | LGPL | ✅ Headers only - no effect |
-| GCC compiler | GPL | ✅ Output not covered |
+| Component             | License                   | Static Link Safe?           |
+| --------------------- | ------------------------- | --------------------------- |
+| MinGW-w64 runtime     | ZPL / Public Domain / BSD | ✅ Yes                      |
+| Wine-imported headers | LGPL                      | ✅ Headers only - no effect |
+| GCC compiler          | GPL                       | ✅ Output not covered       |
 
 No GPL license toxicity issues with static linking.
 
@@ -135,7 +135,7 @@ test-go:
       include:
         - os: ubuntu-latest
         - os: macos-latest
-        - os: windows-latest  # Uses MinGW via msys2/setup-msys2
+        - os: windows-latest # Uses MinGW via msys2/setup-msys2
 ```
 
 ### Release: Updating Prebuilt Libraries
@@ -181,14 +181,14 @@ TypeScript bindings use a Node-API (N-API) native addon (napi-rs).
 
 See [Platform Support Matrix](../standards/platform-support.md) for the canonical reference.
 
-| Platform | Status |
-|----------|--------|
-| Linux x64 (glibc) | Supported |
-| Linux x64 (musl) | Supported |
+| Platform            | Status    |
+| ------------------- | --------- |
+| Linux x64 (glibc)   | Supported |
+| Linux x64 (musl)    | Supported |
 | Linux arm64 (glibc) | Supported |
-| Linux arm64 (musl) | Supported |
-| macOS arm64 | Supported |
-| Windows x64 | Supported |
+| Linux arm64 (musl)  | Supported |
+| macOS arm64         | Supported |
+| Windows x64         | Supported |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
 
@@ -205,6 +205,7 @@ npm run build:native  # Builds the N-API addon
 ```
 
 **Requirements for building from source:**
+
 - Rust toolchain (1.81+)
 - C/C++ compiler
 - Node.js 18+
@@ -224,20 +225,20 @@ No build tools required when using npm prebuilds.
 
 The TypeScript bindings provide parity with Go bindings:
 
-| Function | Description |
-|----------|-------------|
-| `procGet(pid)` | Get process info by PID (includes `start_time_unix_ms`, `exe_path`) |
-| `processList(filter?)` | List processes with optional filtering |
-| `listeningPorts(filter?)` | Map listening ports to processes |
-| `selfPGID()` | Get current process group ID (Unix) |
-| `selfSID()` | Get current session ID (Unix) |
-| `signalSend(pid, signal)` | Send signal to process |
-| `signalSendGroup(pgid, signal)` | Send signal to process group (Unix) |
-| `terminate(pid)` | Graceful termination |
-| `forceKill(pid)` | Immediate kill |
-| `waitPID(pid, timeoutMs)` | Wait for process exit with timeout (v0.1.6+) |
-| `spawnInGroup(config)` | Spawn process in new group/Job Object (v0.1.6+) |
-| `terminateTree(pid, config?)` | Graceful-then-kill tree termination (v0.1.6+) |
+| Function                        | Description                                                         |
+| ------------------------------- | ------------------------------------------------------------------- |
+| `procGet(pid)`                  | Get process info by PID (includes `start_time_unix_ms`, `exe_path`) |
+| `processList(filter?)`          | List processes with optional filtering                              |
+| `listeningPorts(filter?)`       | Map listening ports to processes                                    |
+| `selfPGID()`                    | Get current process group ID (Unix)                                 |
+| `selfSID()`                     | Get current session ID (Unix)                                       |
+| `signalSend(pid, signal)`       | Send signal to process                                              |
+| `signalSendGroup(pgid, signal)` | Send signal to process group (Unix)                                 |
+| `terminate(pid)`                | Graceful termination                                                |
+| `forceKill(pid)`                | Immediate kill                                                      |
+| `waitPID(pid, timeoutMs)`       | Wait for process exit with timeout (v0.1.6+)                        |
+| `spawnInGroup(config)`          | Spawn process in new group/Job Object (v0.1.6+)                     |
+| `terminateTree(pid, config?)`   | Graceful-then-kill tree termination (v0.1.6+)                       |
 
 ### Filter Conventions
 
@@ -246,15 +247,15 @@ Filter fields use **snake_case** to match FFI/schema conventions directly:
 ```typescript
 // ProcessFilter
 const filter = {
-  name_contains: "nginx",    // substring match
-  cpu_above: 50,             // percentage
-  memory_above_kb: 100000    // kilobytes
+  name_contains: "nginx", // substring match
+  cpu_above: 50, // percentage
+  memory_above_kb: 100000, // kilobytes
 };
 
 // PortFilter
 const portFilter = {
   protocol: "tcp",
-  local_port: 8080
+  local_port: 8080,
 };
 ```
 
@@ -263,11 +264,11 @@ const portFilter = {
 **waitPID** - Wait for a process to exit with timeout:
 
 ```typescript
-import { waitPID } from '@3leaps/sysprims';
+import { waitPID } from "@3leaps/sysprims";
 
 const outcome = waitPID(pid, 10000); // 10 seconds
 if (outcome.timed_out) {
-  console.log('Process did not exit in time');
+  console.log("Process did not exit in time");
 } else {
   console.log(`Exited with code ${outcome.exit_code}`);
 }
@@ -276,12 +277,12 @@ if (outcome.timed_out) {
 **spawnInGroup** - Spawn process in new process group/Job Object:
 
 ```typescript
-import { spawnInGroup } from '@3leaps/sysprims';
+import { spawnInGroup } from "@3leaps/sysprims";
 
 const result = spawnInGroup({
-  argv: ['./worker.sh', '--id', '42'],
-  cwd: '/app',
-  env: { LOG_LEVEL: 'debug' },
+  argv: ["./worker.sh", "--id", "42"],
+  cwd: "/app",
+  env: { LOG_LEVEL: "debug" },
 });
 
 console.log(`Spawned PID ${result.pid}`);
@@ -291,7 +292,7 @@ console.log(`Spawned PID ${result.pid}`);
 **terminateTree** - Graceful-then-kill tree termination:
 
 ```typescript
-import { terminateTree } from '@3leaps/sysprims';
+import { terminateTree } from "@3leaps/sysprims";
 
 const outcome = terminateTree(pid, {
   grace_timeout_ms: 5000,
@@ -299,18 +300,20 @@ const outcome = terminateTree(pid, {
 });
 
 if (outcome.escalated) {
-  console.log('Had to escalate to kill');
+  console.log("Had to escalate to kill");
 }
 ```
 
 ### Config Types (v0.1.6+)
 
 **SpawnInGroupConfig:**
+
 - `argv`: Command and arguments (required)
 - `cwd`: Working directory (optional)
 - `env`: Environment overrides (optional)
 
 **TerminateTreeConfig:**
+
 - `signal`: Initial signal (default: SIGTERM/15)
 - `grace_timeout_ms`: Wait before escalation (default: 10000)
 - `kill_signal`: Kill signal (default: SIGKILL/9)

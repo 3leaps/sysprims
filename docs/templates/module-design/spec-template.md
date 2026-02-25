@@ -16,18 +16,22 @@ adr_refs: []
 **Purpose:** <!-- Brief description of what this module does -->
 
 **In scope (v0.1.0):**
+
 - <!-- Feature 1 -->
 - <!-- Feature 2 -->
 
 **Out of scope (v0.1.0):**
+
 - <!-- Deferred feature 1 -->
 
 **Supported platforms:**
+
 - Linux (x64, musl + glibc)
 - macOS (x64, arm64)
 - Windows (x64)
 
 **Known limitations:**
+
 - <!-- Platform-specific limitation, if any -->
 
 ## 2) Normative References
@@ -36,17 +40,17 @@ adr_refs: []
 
 <!-- List authoritative specifications this module implements -->
 
-| Source | URL | Notes |
-|--------|-----|-------|
+| Source                  | URL          | Notes                        |
+| ----------------------- | ------------ | ---------------------------- |
 | <!-- e.g., POSIX ps --> | <!-- URL --> | <!-- What we use from it --> |
 
 ### Platform Implementation References
 
-| Platform | API | Reference |
-|----------|-----|-----------|
-| Linux | <!-- e.g., /proc --> | <!-- man page or doc URL --> |
-| macOS | <!-- e.g., libproc --> | <!-- doc URL --> |
-| Windows | <!-- e.g., Toolhelp32 --> | <!-- MSDN URL --> |
+| Platform | API                       | Reference                    |
+| -------- | ------------------------- | ---------------------------- |
+| Linux    | <!-- e.g., /proc -->      | <!-- man page or doc URL --> |
+| macOS    | <!-- e.g., libproc -->    | <!-- doc URL -->             |
+| Windows  | <!-- e.g., Toolhelp32 --> | <!-- MSDN URL -->            |
 
 ## 3) Literal Interface Reference
 
@@ -80,17 +84,17 @@ adr_refs: []
 
 Per ADR-0008, this module returns these errors:
 
-| Error | Condition |
-|-------|-----------|
-| `InvalidArgument` | <!-- When returned --> |
-| `NotFound` | <!-- When returned --> |
+| Error              | Condition              |
+| ------------------ | ---------------------- |
+| `InvalidArgument`  | <!-- When returned --> |
+| `NotFound`         | <!-- When returned --> |
 | `PermissionDenied` | <!-- When returned --> |
-| `NotSupported` | <!-- When returned --> |
+| `NotSupported`     | <!-- When returned --> |
 
 ### 4.4 Platform Behavior
 
-| Feature | Linux | macOS | Windows |
-|---------|-------|-------|---------|
+| Feature          | Linux             | macOS             | Windows           |
+| ---------------- | ----------------- | ----------------- | ----------------- |
 | <!-- Feature --> | <!-- Behavior --> | <!-- Behavior --> | <!-- Behavior --> |
 
 ## 5) CLI Contract
@@ -103,29 +107,31 @@ sysprims {{SUBCOMMAND}} [OPTIONS] [ARGS...]
 
 ### Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--json` | Output as JSON with schema_id | false |
-| <!-- Other options --> | <!-- Description --> | <!-- Default --> |
+| Option                 | Description                   | Default          |
+| ---------------------- | ----------------------------- | ---------------- |
+| `--json`               | Output as JSON with schema_id | false            |
+| <!-- Other options --> | <!-- Description -->          | <!-- Default --> |
 
 ### Exit Codes
 
-| Condition | Exit Code |
-|-----------|-----------|
-| Success | 0 |
+| Condition                 | Exit Code     |
+| ------------------------- | ------------- |
+| Success                   | 0             |
 | <!-- Other conditions --> | <!-- Code --> |
 
 ### Output Formats
 
 **Human readable (default):**
+
 ```
 <!-- Example output -->
 ```
 
 **JSON (`--json`):**
+
 ```json
 {
-  "schema_id": "https://schemas.3leaps.dev/sysprims/{{module}}/v1.0.0/{{type}}.schema.json",
+  "schema_id": "https://schemas.3leaps.dev/sysprims/{{module}}/v1.0.0/{{type}}.schema.json"
   // ...
 }
 ```
@@ -150,11 +156,11 @@ SysprimsErrorCode sysprims_{{module}}_{{function}}(...);
 
 ## 7) Traceability Matrix
 
-| Requirement | Reference | API | CLI | Tests | Evidence |
-|-------------|-----------|-----|-----|-------|----------|
-| <!-- Req --> | <!-- Spec section --> | `function()` | `sysprims cmd` | `test_*` | CI link |
+| Requirement  | Reference             | API          | CLI            | Tests    | Evidence |
+| ------------ | --------------------- | ------------ | -------------- | -------- | -------- |
+| <!-- Req --> | <!-- Spec section --> | `function()` | `sysprims cmd` | `test_*` | CI link  |
 
 ---
 
-*Spec version: 0.1*
-*Last updated: {{DATE}}*
+_Spec version: 0.1_
+_Last updated: {{DATE}}_

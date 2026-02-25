@@ -18,13 +18,13 @@ v0.1.14 expands the process-intelligence API so common shell-outs can be replace
 
 Full guide: [Replace Your Shell-outs with sysprims (Go)](https://github.com/3leaps/sysprims/blob/main/docs/guides/replace-shell-outs-go.md)
 
-| Before (shell-out) | After (sysprims Go) |
-| --- | --- |
-| `ps eww -p <pid>` + parsing | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeEnv: true})` |
+| Before (shell-out)               | After (sysprims Go)                                                 |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `ps eww -p <pid>` + parsing      | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeEnv: true})`     |
 | `ps -M -p <pid>` + line counting | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeThreads: true})` |
-| `lsof -p <pid>` + parsing | `ListFds(pid, nil)` |
-| `kill -9 <pid>` | `Kill(pid, SIGKILL)` |
-| `kill` loops for descendants | `KillDescendantsWithOptions(...)` with `CpuModeMonitor` + filters |
+| `lsof -p <pid>` + parsing        | `ListFds(pid, nil)`                                                 |
+| `kill -9 <pid>`                  | `Kill(pid, SIGKILL)`                                                |
+| `kill` loops for descendants     | `KillDescendantsWithOptions(...)` with `CpuModeMonitor` + filters   |
 
 ### Minimal setup
 

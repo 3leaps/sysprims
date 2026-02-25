@@ -7,10 +7,10 @@ GPL-free session and process group management primitives.
 This crate provides cross-platform primitives for session and process group
 management, replacing GPL-licensed tools:
 
-| Function | Replaces | Original License |
-|----------|----------|------------------|
-| `setsid` | util-linux setsid | GPL-2.0 |
-| `nohup` | coreutils nohup | GPL-3.0 |
+| Function | Replaces          | Original License |
+| -------- | ----------------- | ---------------- |
+| `setsid` | util-linux setsid | GPL-2.0          |
+| `nohup`  | coreutils nohup   | GPL-3.0          |
 
 ## Cleanroom Implementation
 
@@ -25,12 +25,12 @@ See [Provenance Documentation](#provenance) below for detailed source records.
 
 ## Platform Support
 
-| Platform | setsid | nohup | setpgid | getpgid | getsid | Notes |
-|----------|--------|-------|---------|---------|--------|-------|
-| Linux | Y | Y | Y | Y | Y | Full support via POSIX |
-| macOS | Y | Y | Y | Y | Y | Full support via POSIX |
-| FreeBSD | Y | Y | Y | Y | Y | Full support via POSIX |
-| Windows | - | - | - | - | - | No equivalent concept* |
+| Platform | setsid | nohup | setpgid | getpgid | getsid | Notes                   |
+| -------- | ------ | ----- | ------- | ------- | ------ | ----------------------- |
+| Linux    | Y      | Y     | Y       | Y       | Y      | Full support via POSIX  |
+| macOS    | Y      | Y     | Y       | Y       | Y      | Full support via POSIX  |
+| FreeBSD  | Y      | Y     | Y       | Y       | Y      | Full support via POSIX  |
+| Windows  | -      | -     | -       | -       | -      | No equivalent concept\* |
 
 \* Windows uses different process isolation model (Job Objects, sessions via
 `CreateProcessAsUser`). These are not direct equivalents and would be a
@@ -127,27 +127,33 @@ if stdout.is_tty() {
 ### setsid
 
 **Primary Sources (Specifications)**:
+
 - POSIX.1-2017 setsid(2): https://pubs.opengroup.org/onlinepubs/9699919799/functions/setsid.html
 - FreeBSD setsid(2) man page (BSD License)
 - Apple Darwin setsid(2) (APSL)
 
 **Reference Implementations (Consulted for Understanding)**:
+
 - [setsid-macosx](https://github.com/tzvetkoff/setsid-macosx) - BSD-2-Clause
 - [ersatz-setsid](https://github.com/jerrykuch/ersatz-setsid) - MIT
 
 **NOT Consulted**:
+
 - util-linux setsid.c (GPL-2.0)
 
 ### nohup
 
 **Primary Sources (Specifications)**:
+
 - POSIX.1-2017 nohup utility: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/nohup.html
 - FreeBSD nohup(1) man page (BSD License)
 
 **Reference Implementations (Consulted for Understanding)**:
+
 - OpenBSD nohup.c (ISC License)
 
 **NOT Consulted**:
+
 - GNU coreutils nohup.c (GPL-3.0)
 
 ## Behavioral Comparison Tests

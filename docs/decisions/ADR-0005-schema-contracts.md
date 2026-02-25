@@ -53,6 +53,7 @@ Every JSON output includes a `schema_id` field:
 ```
 
 This enables:
+
 - Runtime version detection
 - Binding routing to correct parser
 - Audit trail for debugging
@@ -61,21 +62,22 @@ This enables:
 
 Schema versions follow `vMAJOR.MINOR.PATCH`:
 
-| Change Type | Version Bump |
-|-------------|--------------|
-| Add optional field | Minor |
-| Add enum value | Minor |
-| Remove required field | **Major** |
-| Change field meaning | **Major** |
-| Remove enum value | **Major** |
-| Change field type | **Major** |
-| Documentation only | Patch |
+| Change Type           | Version Bump |
+| --------------------- | ------------ |
+| Add optional field    | Minor        |
+| Add enum value        | Minor        |
+| Remove required field | **Major**    |
+| Change field meaning  | **Major**    |
+| Remove enum value     | **Major**    |
+| Change field type     | **Major**    |
+| Documentation only    | Patch        |
 
 ### Compatibility Guarantees
 
 **Within major version**: All outputs remain valid against earlier minor schemas.
 
 **Example**:
+
 - v1.0.0 output validates against v1.0.0 schema ✓
 - v1.1.0 output validates against v1.0.0 schema ✓ (new fields ignored)
 - v2.0.0 output may NOT validate against v1.x schema
@@ -83,6 +85,7 @@ Schema versions follow `vMAJOR.MINOR.PATCH`:
 ### CI Validation
 
 Every sysprims build:
+
 1. Runs golden tests with expected JSON outputs
 2. Validates outputs against schemas
 3. Fails if schema_id is missing or invalid
@@ -107,9 +110,9 @@ The `proc-filter` schema defines allowed filter keys. Unknown keys result in `SY
 
 ```json
 {
-  "name_contains": "nginx",    // ✓ Valid
-  "cpu_above": 50,             // ✓ Valid
-  "custom_field": "foo"        // ✗ Error: unknown key
+  "name_contains": "nginx", // ✓ Valid
+  "cpu_above": 50, // ✓ Valid
+  "custom_field": "foo" // ✗ Error: unknown key
 }
 ```
 
@@ -174,6 +177,7 @@ All sysprims schemas MUST use **JSON Schema Draft 2020-12**:
 ```
 
 See [Schema Validation Policy](../../standards/schema-validation-policy.md) for:
+
 - Meta-validation requirements
 - Runtime validation policy
 - Exemption process

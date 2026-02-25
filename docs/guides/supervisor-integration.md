@@ -5,6 +5,7 @@ This guide covers integrating sysprims v0.1.6+ primitives into long-running supe
 ## Audience
 
 Teams building:
+
 - Job schedulers and supervisors (gonimbus, rampart lifecycle)
 - Test harnesses with process lifecycle management (gauntlet)
 - Container runtimes or orchestrators
@@ -66,6 +67,7 @@ func (j *Job) VerifyIdentity() (bool, error) {
 ```
 
 **Fallback behavior**:
+
 - If identity fields unavailable, compare `cmdline`/`name`
 - If ambiguous, require manual intervention or treat as "unknown"
 
@@ -74,6 +76,7 @@ func (j *Job) VerifyIdentity() (bool, error) {
 **Goal**: Single primitive for graceful-then-kill termination.
 
 Most supervisors implement:
+
 1. Send graceful termination signal
 2. Wait up to N seconds
 3. Escalate to force kill
@@ -104,11 +107,13 @@ for _, warning := range outcome.Warnings {
 ```
 
 **Observability fields to persist**:
+
 - `tree_kill_reliability`: "guaranteed" or "best_effort"
 - `escalated`: whether SIGKILL was required
 - `warnings`: platform-specific issues
 
 **Fallback behavior**:
+
 - If sysprims returns `PermissionDenied`, fall back to per-OS logic
 
 ### Phase 3: Adopt SpawnInGroup
@@ -139,6 +144,7 @@ if result.TreeKillReliability != "guaranteed" {
 ```
 
 **Platform notes**:
+
 - **Unix**: `PGID` contains the process group ID
 - **Windows**: `PGID` is nil; Job Object handles tree-kill internally
 - **Degradation**: If Job Object creation fails, reliability is "best_effort"
@@ -162,6 +168,7 @@ type LegacyAdapter struct{}
 ```
 
 **Rollout strategy**:
+
 1. Default to sysprims behind a feature flag
 2. Use legacy adapter as fallback for safe-to-degrade error classes
 3. Monitor metrics: tree_kill_reliability, escalation rate, warnings
@@ -199,11 +206,11 @@ type LegacyAdapter struct{}
 
 ## Error Handling
 
-| Error | Meaning | Recommended Action |
-|-------|---------|-------------------|
-| `NotFound` | Process does not exist | Job already dead, update state |
-| `PermissionDenied` | Cannot access process | Fall back to legacy or alert |
-| `InvalidArgument` | Invalid PID (0, etc.) | Bug in caller; fix immediately |
+| Error              | Meaning                | Recommended Action             |
+| ------------------ | ---------------------- | ------------------------------ |
+| `NotFound`         | Process does not exist | Job already dead, update state |
+| `PermissionDenied` | Cannot access process  | Fall back to legacy or alert   |
+| `InvalidArgument`  | Invalid PID (0, etc.)  | Bug in caller; fix immediately |
 
 **Note on grouping failures:** When Job Object creation fails (Windows) or `setpgid` fails (Unix), sysprims typically degrades gracefully rather than returning an error. Check `tree_kill_reliability` in the result and `warnings` array for degradation details.
 

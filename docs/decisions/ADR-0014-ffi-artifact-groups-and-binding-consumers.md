@@ -42,9 +42,9 @@ We standardize the sysprims FFI deliverables into explicit artifact groups.
 2. **FFI shared** (runtime loading)
    - Intended consumers: Python (cffi), other runtime `dlopen`/`LoadLibrary` consumers
    - Output:
-      - Linux: `libsysprims_ffi.so`
-      - macOS: `libsysprims_ffi.dylib`
-      - Windows (MSVC): `sysprims_ffi.dll`
+     - Linux: `libsysprims_ffi.so`
+     - macOS: `libsysprims_ffi.dylib`
+     - Windows (MSVC): `sysprims_ffi.dll`
 
 3. **Node-API addon** (Node.js runtime)
    - Intended consumers: TypeScript bindings (`@3leaps/sysprims`)
@@ -90,6 +90,7 @@ lib/
 ```
 
 Platform identifiers match existing sysprims conventions:
+
 - `linux-amd64`, `linux-arm64`, `darwin-arm64`, `windows-amd64`, `windows-arm64`
 
 ### 4) Binding Packaging Responsibilities
@@ -160,7 +161,6 @@ use an explicit loader that:
 - prefers a locally built addon at `dist/native/sysprims.<platform>.node` for git/local installs
 - otherwise requires the platform package `@3leaps/sysprims-<platform>`
 - rejects unsupported platform/arch combinations with a clear error
-
 
 ## References
 

@@ -5,6 +5,7 @@ Demonstrates batch signal delivery to multiple processes, contrasted with tree t
 ## The Scenario
 
 You have runaway processes consuming CPU. You want to kill specific PIDs without:
+
 - Killing parent/orchestrator processes
 - Running multiple `kill` commands
 - Losing track of which signals succeeded or failed
@@ -27,6 +28,7 @@ chmod +x *.sh
 ```
 
 Output:
+
 ```
 Orchestrator PID: 12345
 Spawning 3 workers...
@@ -64,6 +66,7 @@ Kill just the workers, leaving the orchestrator alive:
 ```
 
 Output:
+
 ```json
 {
   "schema_id": "https://schemas.3leaps.dev/sysprims/signal/v1.0.0/batch-kill-result.schema.json",
@@ -90,6 +93,7 @@ PIDS=$(./target/debug/sysprims pstat --name cpu-spinner --json 2>/dev/null | jq 
 ## Demo 4: Tree Termination (Contrast)
 
 Restart the orchestrator:
+
 ```bash
 ./spawn-workers.sh 3
 ```
@@ -113,12 +117,11 @@ Multi-PID kill validates all PIDs before sending any signals:
 ```
 
 Output shows which succeeded and which failed:
+
 ```json
 {
   "succeeded": [12346, 12347],
-  "failed": [
-    {"pid": 99999, "error": "Process 99999 not found"}
-  ]
+  "failed": [{ "pid": 99999, "error": "Process 99999 not found" }]
 }
 ```
 
@@ -133,11 +136,11 @@ pkill -f spawn-workers.sh
 
 ## When to Use Each Approach
 
-| Scenario | Command |
-|----------|---------|
+| Scenario                        | Command                               |
+| ------------------------------- | ------------------------------------- |
 | Kill specific runaway processes | `sysprims kill PID1 PID2 ... -s TERM` |
-| Kill entire process tree | `sysprims kill PARENT_PID -s TERM` |
-| Kill with timeout escalation | `sysprims timeout 5s -- command` |
+| Kill entire process tree        | `sysprims kill PARENT_PID -s TERM`    |
+| Kill with timeout escalation    | `sysprims timeout 5s -- command`      |
 
 ## See Also
 

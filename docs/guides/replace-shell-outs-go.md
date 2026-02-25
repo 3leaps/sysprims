@@ -24,13 +24,13 @@ license-clean (MIT/Apache-2.0, no copyleft utilities embedded into your applicat
 
 ## Before and after
 
-| Before (shell-out) | After (sysprims Go) |
-| --- | --- |
-| `exec.Command("ps", "eww", "-p", pid)` + parse env | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeEnv: true})` |
+| Before (shell-out)                                  | After (sysprims Go)                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------- |
+| `exec.Command("ps", "eww", "-p", pid)` + parse env  | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeEnv: true})`     |
 | `exec.Command("ps", "-M", "-p", pid)` + count lines | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeThreads: true})` |
-| `exec.Command("lsof", "-p", pid)` + text parse | `ListFds(pid, nil)` |
-| `exec.Command("kill", "-9", pid)` | `Kill(pid, SIGKILL)` |
-| manual loops over descendants + `kill -TERM` | `KillDescendantsWithOptions(...)` with filter + `CpuModeMonitor` |
+| `exec.Command("lsof", "-p", pid)` + text parse      | `ListFds(pid, nil)`                                                 |
+| `exec.Command("kill", "-9", pid)`                   | `Kill(pid, SIGKILL)`                                                |
+| manual loops over descendants + `kill -TERM`        | `KillDescendantsWithOptions(...)` with filter + `CpuModeMonitor`    |
 
 ## 1) Process metadata without `ps` parsing
 

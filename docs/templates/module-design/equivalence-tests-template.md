@@ -15,11 +15,13 @@ last_updated: "{{DATE}}"
 This document defines the test protocol for verifying {{MODULE}} behaves correctly and, where applicable, equivalently to reference implementations.
 
 **Equivalence means:**
+
 - CLI produces compatible output for common use cases
 - Library provides documented invariants
 - Errors are reported consistently
 
 **Equivalence does NOT mean:**
+
 - Byte-for-byte identical output
 - Supporting every flag/option of reference tools
 - Matching undocumented or quirky behavior
@@ -28,8 +30,8 @@ This document defines the test protocol for verifying {{MODULE}} behaves correct
 
 <!-- List tools we compare against, if any -->
 
-| Tool | Version | License | Platform | Notes |
-|------|---------|---------|----------|-------|
+| Tool              | Version          | License          | Platform    | Notes                    |
+| ----------------- | ---------------- | ---------------- | ----------- | ------------------------ |
 | <!-- e.g., ps --> | <!-- Version --> | <!-- License --> | Linux/macOS | <!-- What we compare --> |
 
 **Invocation method:** Subprocess only. We never read reference tool source code during testing.
@@ -38,18 +40,18 @@ This document defines the test protocol for verifying {{MODULE}} behaves correct
 
 ### Platforms
 
-| OS | Arch | CI Runner | Notes |
-|----|------|-----------|-------|
-| Linux | x64 | ubuntu-latest | Primary |
-| macOS | arm64 | macos-latest | |
-| Windows | x64 | windows-latest | |
+| OS      | Arch  | CI Runner      | Notes   |
+| ------- | ----- | -------------- | ------- |
+| Linux   | x64   | ubuntu-latest  | Primary |
+| macOS   | arm64 | macos-latest   |         |
+| Windows | x64   | windows-latest |         |
 
 ### Privilege Levels
 
-| Level | Tests | Runner |
-|-------|-------|--------|
-| Non-root | All standard tests | Default CI |
-| Root | <!-- Privileged tests, if any --> | Dedicated workflow |
+| Level    | Tests                             | Runner             |
+| -------- | --------------------------------- | ------------------ |
+| Non-root | All standard tests                | Default CI         |
+| Root     | <!-- Privileged tests, if any --> | Dedicated workflow |
 
 ## 4) Test Categories
 
@@ -57,40 +59,40 @@ This document defines the test protocol for verifying {{MODULE}} behaves correct
 
 <!-- Core functionality tests -->
 
-| Test | Description | Expected |
-|------|-------------|----------|
+| Test                     | Description            | Expected                  |
+| ------------------------ | ---------------------- | ------------------------- |
 | `test_{{feature}}_basic` | <!-- What it tests --> | <!-- Expected outcome --> |
 
 ### 4.2 Edge Cases
 
 <!-- Boundary conditions and unusual inputs -->
 
-| Test | Input | Expected |
-|------|-------|----------|
+| Test                 | Input                    | Expected                   |
+| -------------------- | ------------------------ | -------------------------- |
 | `test_{{edge_case}}` | <!-- Edge case input --> | <!-- Expected behavior --> |
 
 ### 4.3 Error Handling
 
 <!-- Error condition tests -->
 
-| Test | Condition | Expected Error |
-|------|-----------|----------------|
+| Test                       | Condition        | Expected Error            |
+| -------------------------- | ---------------- | ------------------------- |
 | `test_error_{{condition}}` | <!-- Trigger --> | `SysprimsError::{{Type}}` |
 
 ### 4.4 Platform-Specific
 
 <!-- Platform-specific behavior tests -->
 
-| Test | Platform | Behavior |
-|------|----------|----------|
+| Test                            | Platform          | Behavior          |
+| ------------------------------- | ----------------- | ----------------- |
 | `test_{{feature}}_{{platform}}` | <!-- Platform --> | <!-- Expected --> |
 
 ### 4.5 Schema Validation
 
-| Test | Description |
-|------|-------------|
+| Test                      | Description                          |
+| ------------------------- | ------------------------------------ |
 | `test_json_has_schema_id` | JSON output includes valid schema_id |
-| `test_json_schema_valid` | Output validates against schema |
+| `test_json_schema_valid`  | Output validates against schema      |
 
 ## 5) Equivalence Tests
 
@@ -116,9 +118,9 @@ fn {{module}}_matches_reference_{{aspect}}() {
 
 ### 5.2 Behavioral Equivalence
 
-| Behavior | Our Implementation | Reference | Match |
-|----------|-------------------|-----------|-------|
-| <!-- Behavior --> | <!-- Ours --> | <!-- Theirs --> | Yes/No/N/A |
+| Behavior          | Our Implementation | Reference       | Match      |
+| ----------------- | ------------------ | --------------- | ---------- |
+| <!-- Behavior --> | <!-- Ours -->      | <!-- Theirs --> | Yes/No/N/A |
 
 ## 6) Determinism and Flake Policy
 
@@ -132,36 +134,36 @@ fn {{module}}_matches_reference_{{aspect}}() {
 
 <!-- Documented acceptable differences -->
 
-| Field | Variation Allowed | Reason |
-|-------|-------------------|--------|
+| Field          | Variation Allowed  | Reason       |
+| -------------- | ------------------ | ------------ |
 | <!-- Field --> | <!-- Tolerance --> | <!-- Why --> |
 
 ### Fixture Processes
 
 <!-- Test fixtures with known behavior -->
 
-| Fixture | Purpose | Behavior |
-|---------|---------|----------|
+| Fixture          | Purpose           | Behavior              |
+| ---------------- | ----------------- | --------------------- |
 | <!-- Fixture --> | <!-- Why used --> | <!-- What it does --> |
 
 ## 7) Test Locations
 
-| Type | Location |
-|------|----------|
-| Unit tests | `crates/{{crate}}/src/**/*.rs` |
-| Integration tests | `crates/{{crate}}/tests/` |
+| Type              | Location                        |
+| ----------------- | ------------------------------- |
+| Unit tests        | `crates/{{crate}}/src/**/*.rs`  |
+| Integration tests | `crates/{{crate}}/tests/`       |
 | Equivalence tests | `tests/equivalence/{{module}}/` |
-| Golden tests | `tests/golden/{{module}}/` |
+| Golden tests      | `tests/golden/{{module}}/`      |
 
 ## 8) Artifacts
 
 ### CI Outputs
 
-| Artifact | Path | Purpose |
-|----------|------|---------|
-| Test results | `target/test-results/` | Pass/fail evidence |
-| Coverage | `target/coverage/` | Coverage metrics |
-| Golden outputs | `tests/golden/{{module}}/` | Reference outputs |
+| Artifact       | Path                       | Purpose            |
+| -------------- | -------------------------- | ------------------ |
+| Test results   | `target/test-results/`     | Pass/fail evidence |
+| Coverage       | `target/coverage/`         | Coverage metrics   |
+| Golden outputs | `tests/golden/{{module}}/` | Reference outputs  |
 
 ### Compliance Evidence
 
@@ -173,5 +175,5 @@ These artifacts are referenced in the compliance report:
 
 ---
 
-*Protocol version: 0.1*
-*Last updated: {{DATE}}*
+_Protocol version: 0.1_
+_Last updated: {{DATE}}_

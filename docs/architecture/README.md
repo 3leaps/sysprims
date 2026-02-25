@@ -10,12 +10,12 @@ This directory contains architectural documentation for **sysprims**, a GPL-free
 
 ## Quick Links
 
-| Document | Purpose |
-|----------|---------|
-| [Architecture Overview](./OVERVIEW.md) | High-level system architecture |
-| [Stack Management](./stack/README.md) | Dependency governance, SBOM, licensing |
-| [ADR Index](./adr/README.md) | Architecture Decision Records |
-| [Integration Guide](./integration/README.md) | Ecosystem integration patterns |
+| Document                                      | Purpose                                  |
+| --------------------------------------------- | ---------------------------------------- |
+| [Architecture Overview](./OVERVIEW.md)        | High-level system architecture           |
+| [Stack Management](./stack/README.md)         | Dependency governance, SBOM, licensing   |
+| [ADR Index](./adr/README.md)                  | Architecture Decision Records            |
+| [Integration Guide](./integration/README.md)  | Ecosystem integration patterns           |
 | [Security Architecture](./security/README.md) | Security model and threat considerations |
 
 ## Architecture Principles

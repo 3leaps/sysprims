@@ -23,10 +23,10 @@ sysprims provides a C-ABI FFI layer (ADR-0004) that enables bindings for multipl
 
 ### Target Languages
 
-| Language | FFI Mechanism | Priority |
-|----------|---------------|----------|
-| Go | CGo | v0.1.x (phased) |
-| Python | cffi/PyO3 | v0.1.x (phased) |
+| Language   | FFI Mechanism            | Priority        |
+| ---------- | ------------------------ | --------------- |
+| Go         | CGo                      | v0.1.x (phased) |
+| Python     | cffi/PyO3                | v0.1.x (phased) |
 | TypeScript | napi-rs (Node-API addon) | v0.1.x (phased) |
 
 **Release intent**: v0.1.x is considered feature-complete only once Go, Python, and
@@ -75,6 +75,7 @@ bindings/go/sysprims/lib/
 ```
 
 **Rationale**:
+
 - Users don't need Rust toolchain to use bindings
 - Go modules work via `go get` without build steps
 - Reproducible builds from tagged commits
@@ -82,19 +83,20 @@ bindings/go/sysprims/lib/
 
 ### 3. Platform Support Matrix
 
-| Platform | Architecture | C Library | Go | Python | TypeScript |
-|----------|--------------|-----------|:--:|:------:|:----------:|
-| Linux | x86_64 | glibc 2.17+ | ✅ | ✅ | ✅ |
-| Linux | x86_64 | musl | ✅ | ❌ | ✅ |
-| Linux | aarch64 | glibc 2.17+ | ✅ | ✅ | ✅ |
-| Linux | aarch64 | musl | ✅ | ❌ | ✅ |
-| macOS | x86_64 | - | ❌ | ❌ | ❌ |
-| macOS | aarch64 | - | ✅ | ✅ | ✅ |
-| Windows | x86_64 | GNU (Go) / MSVC (shared) | ✅ | ✅ | ✅ |
+| Platform | Architecture | C Library                | Go  | Python | TypeScript |
+| -------- | ------------ | ------------------------ | :-: | :----: | :--------: |
+| Linux    | x86_64       | glibc 2.17+              | ✅  |   ✅   |     ✅     |
+| Linux    | x86_64       | musl                     | ✅  |   ❌   |     ✅     |
+| Linux    | aarch64      | glibc 2.17+              | ✅  |   ✅   |     ✅     |
+| Linux    | aarch64      | musl                     | ✅  |   ❌   |     ✅     |
+| macOS    | x86_64       | -                        | ❌  |   ❌   |     ❌     |
+| macOS    | aarch64      | -                        | ✅  |   ✅   |     ✅     |
+| Windows  | x86_64       | GNU (Go) / MSVC (shared) | ✅  |   ✅   |     ✅     |
 
 | Windows | arm64 | MSVC | ❌ | ❌ | ✅ |
 
 **Notes**:
+
 - Linux musl is supported by Go and TypeScript (via Node-API addon); Python musl is deferred.
 - macOS x64 (Intel) is not supported as of v0.1.7.
 - Windows arm64 Go bindings are not supported (CGo requires MinGW; arm64 requires llvm-mingw).
@@ -104,23 +106,23 @@ bindings/go/sysprims/lib/
 
 sysprims supports multiple binding consumers with different toolchain needs.
 
-| Consumer | Platform | Primary Artifact | Notes |
-|----------|----------|------------------|-------|
-| Go (cgo) | Linux/macOS | `libsysprims_ffi.a` | Static linking |
-| Go (cgo) | Windows | `libsysprims_ffi.a` | Built for `x86_64-pc-windows-gnu` (MinGW) |
-| Python (runtime load) | Linux | `libsysprims_ffi.so` | Shared library |
-| Python (runtime load) | macOS | `libsysprims_ffi.dylib` | Shared library |
-| Python (runtime load) | Windows | `sysprims_ffi.dll` | Built for `x86_64-pc-windows-msvc` |
-| TypeScript (Node-API addon) | All | `sysprims.<platform>.node` | Published as npm platform packages |
+| Consumer                    | Platform    | Primary Artifact           | Notes                                     |
+| --------------------------- | ----------- | -------------------------- | ----------------------------------------- |
+| Go (cgo)                    | Linux/macOS | `libsysprims_ffi.a`        | Static linking                            |
+| Go (cgo)                    | Windows     | `libsysprims_ffi.a`        | Built for `x86_64-pc-windows-gnu` (MinGW) |
+| Python (runtime load)       | Linux       | `libsysprims_ffi.so`       | Shared library                            |
+| Python (runtime load)       | macOS       | `libsysprims_ffi.dylib`    | Shared library                            |
+| Python (runtime load)       | Windows     | `sysprims_ffi.dll`         | Built for `x86_64-pc-windows-msvc`        |
+| TypeScript (Node-API addon) | All         | `sysprims.<platform>.node` | Published as npm platform packages        |
 
 ### 5. CGo Link Flags by Platform
 
-| Platform | LDFLAGS |
-|----------|---------|
-| Linux (glibc) | `-lm -lpthread -ldl` |
-| Linux (musl) | `-lm -lpthread` |
-| macOS | `-lm -lpthread` |
-| Windows | `-lws2_32 -luserenv -lbcrypt` |
+| Platform      | LDFLAGS                       |
+| ------------- | ----------------------------- |
+| Linux (glibc) | `-lm -lpthread -ldl`          |
+| Linux (musl)  | `-lm -lpthread`               |
+| macOS         | `-lm -lpthread`               |
+| Windows       | `-lws2_32 -luserenv -lbcrypt` |
 
 **Rationale**: These are Rust std library dependencies for each platform.
 
@@ -149,11 +151,13 @@ we MUST create an additional tag that is prefixed by the module subdirectory:
 - Go module tag: `bindings/go/sysprims/vX.Y.Z`
 
 Rules:
+
 - Both tags MUST point at the same git commit.
 - The Go module tag exists solely to let `go get` resolve a semantic version for the submodule.
 - If the Go module tag is missing, consumers will fall back to pseudo-versions.
 
 Notes on other bindings:
+
 - Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
   They should still use the same X.Y.Z version numbers for ecosystem consistency, but they do not
   require path-prefixed git tags.
@@ -187,11 +191,11 @@ CGo LDFLAGS search order: `lib/local/<platform>` first, then `lib/<platform>`.
 
 ### 9. Module Path Convention
 
-| Language | Module/Package Path |
-|----------|---------------------|
-| Go | `github.com/3leaps/sysprims/bindings/go/sysprims` |
-| Python | `sysprims` (PyPI) |
-| TypeScript | `@3leaps/sysprims` (npm) |
+| Language   | Module/Package Path                               |
+| ---------- | ------------------------------------------------- |
+| Go         | `github.com/3leaps/sysprims/bindings/go/sysprims` |
+| Python     | `sysprims` (PyPI)                                 |
+| TypeScript | `@3leaps/sysprims` (npm)                          |
 
 ### 10. Platform-Specific Behavior Documentation
 
@@ -235,6 +239,7 @@ func KillGroup(pgid uint32, signal int) error
 Each language binding in its own repository (e.g., `sysprims-go`, `sysprims-py`).
 
 **Rejected**:
+
 - Version synchronization complexity
 - Multiple CI configurations
 - Harder to maintain consistency
@@ -245,6 +250,7 @@ Each language binding in its own repository (e.g., `sysprims-go`, `sysprims-py`)
 Users build FFI library from source.
 
 **Rejected**:
+
 - Requires Rust toolchain for all binding users
 - Go modules don't support build steps
 - Poor developer experience
@@ -255,6 +261,7 @@ Users build FFI library from source.
 Ship `.so`/`.dylib`/`.dll` instead of static libraries.
 
 **Rejected**:
+
 - Runtime dependency management
 - Path configuration complexity
 - Static linking preferred for deployment simplicity
@@ -264,6 +271,7 @@ Ship `.so`/`.dylib`/`.dll` instead of static libraries.
 Single `lib/` at repo root shared by all bindings.
 
 **Rejected**:
+
 - Go modules require libs relative to go.mod
 - Each binding may need different platforms
 - seekable-zstd pattern puts libs in binding directory

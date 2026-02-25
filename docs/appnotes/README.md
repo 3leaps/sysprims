@@ -4,10 +4,10 @@ Hands-on demonstrations of sysprims features. Each app note is a self-contained 
 
 ## Index
 
-| App Note | Feature | Description |
-|----------|---------|-------------|
-| [fds-validation](fds-validation/) | `sysprims fds` | Inspect open file descriptors with synthetic test cases |
-| [multi-pid-kill](multi-pid-kill/) | `sysprims kill` | Batch signal delivery vs tree termination |
+| App Note                          | Feature         | Description                                             |
+| --------------------------------- | --------------- | ------------------------------------------------------- |
+| [fds-validation](fds-validation/) | `sysprims fds`  | Inspect open file descriptors with synthetic test cases |
+| [multi-pid-kill](multi-pid-kill/) | `sysprims kill` | Batch signal delivery vs tree termination               |
 
 ## Running App Notes
 

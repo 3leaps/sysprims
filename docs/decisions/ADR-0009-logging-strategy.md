@@ -50,14 +50,14 @@ When structured JSON logging is enabled, every log line will conform to a formal
 ## Consequences
 
 - **Positive**:
-    - Library is well-behaved and does not hijack application logging.
-    - CLI provides both human-friendly and machine-readable logging formats.
-    - Structured logging is consistent and contract-driven via a schema.
+  - Library is well-behaved and does not hijack application logging.
+  - CLI provides both human-friendly and machine-readable logging formats.
+  - Structured logging is consistent and contract-driven via a schema.
 - **Negative**:
-    - Adds a `tracing` dependency to the library's public API surface (though it's a well-established standard).
-    - Requires schema maintenance.
+  - Adds a `tracing` dependency to the library's public API surface (though it's a well-established standard).
+  - Requires schema maintenance.
 - **Neutral**:
-    - Consumers of the library must use a `tracing`-compatible subscriber to see logs.
+  - Consumers of the library must use a `tracing`-compatible subscriber to see logs.
 
 ## Alternatives Considered
 

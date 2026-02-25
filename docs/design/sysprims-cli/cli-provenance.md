@@ -28,17 +28,18 @@ The CLI is intentionally minimal:
 4. Return appropriate exit code
 
 No complex logic lives in the CLI. This ensures:
+
 - Functionality is testable via library APIs
 - Bindings get same behavior as CLI
 - CLI is just a "test vehicle" and convenience wrapper
 
 ### Dependencies
 
-| Crate | License | Purpose |
-|-------|---------|---------|
-| clap | MIT/Apache-2.0 | Argument parsing |
-| tracing | MIT | Logging |
-| tracing-subscriber | MIT | Log formatting |
+| Crate              | License        | Purpose          |
+| ------------------ | -------------- | ---------------- |
+| clap               | MIT/Apache-2.0 | Argument parsing |
+| tracing            | MIT            | Logging          |
+| tracing-subscriber | MIT            | Log formatting   |
 
 ### NOT Consulted
 
@@ -48,12 +49,12 @@ No external CLI implementations were consulted. The CLI design follows standard 
 
 Exit codes follow GNU conventions for timeout (124/125/126/127) and POSIX conventions for kill.
 
-| Code | Source |
-|------|--------|
-| 124 | GNU timeout convention |
-| 125 | GNU timeout convention |
-| 126 | POSIX convention (not executable) |
-| 127 | POSIX convention (not found) |
+| Code | Source                            |
+| ---- | --------------------------------- |
+| 124  | GNU timeout convention            |
+| 125  | GNU timeout convention            |
+| 126  | POSIX convention (not executable) |
+| 127  | POSIX convention (not found)      |
 
 These conventions are documented in public specifications and widely used. No GPL source code was consulted.
 
@@ -73,6 +74,6 @@ No GPL/LGPL/AGPL source code was consulted during development.
 
 ---
 
-*Provenance version: 1.0*
-*Last updated: 2026-01-09*
-*Maintainer: sysprims team*
+_Provenance version: 1.0_
+_Last updated: 2026-01-09_
+_Maintainer: sysprims team_

@@ -62,14 +62,14 @@ sysprims-ffi ──┬──► sysprims-timeout
 
 ### Visibility Rules
 
-| Crate | Public API | Internal Use |
-|-------|------------|--------------|
-| `sysprims-core` | Types, errors, traits | Platform abstractions |
-| `sysprims-timeout` | `run_with_timeout()`, config types | Spawn mechanics |
-| `sysprims-signal` | `send_signal()`, `terminate()` | Platform signal impl |
-| `sysprims-proc` | `snapshot()`, filter types | Platform enumeration |
-| `sysprims-cli` | Binary entry points only | Arg parsing |
-| `sysprims-ffi` | C-ABI functions only | JSON serialization |
+| Crate              | Public API                         | Internal Use          |
+| ------------------ | ---------------------------------- | --------------------- |
+| `sysprims-core`    | Types, errors, traits              | Platform abstractions |
+| `sysprims-timeout` | `run_with_timeout()`, config types | Spawn mechanics       |
+| `sysprims-signal`  | `send_signal()`, `terminate()`     | Platform signal impl  |
+| `sysprims-proc`    | `snapshot()`, filter types         | Platform enumeration  |
+| `sysprims-cli`     | Binary entry points only           | Arg parsing           |
+| `sysprims-ffi`     | C-ABI functions only               | JSON serialization    |
 
 ### Feature Flags
 

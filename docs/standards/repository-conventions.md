@@ -8,17 +8,17 @@ sysprims follows Rust ecosystem conventions as defined in [RFC 430](https://gith
 
 ### Summary Table
 
-| Asset Type | Convention | Examples |
-|------------|------------|----------|
-| Crate names | `kebab-case` | `sysprims-core`, `sysprims-timeout` |
-| Module files | `snake_case` | `process_info.rs`, `timeout_config.rs` |
-| Root repo files | `SCREAMING_CASE` | `README.md`, `LICENSE-MIT`, `CONTRIBUTING.md` |
-| Documentation files | `kebab-case` | `getting-started.md`, `0001-license-policy.md` |
-| Directories | `kebab-case` | `docs/architecture/`, `crates/sysprims-core/` |
-| Types/Traits | `UpperCamelCase` | `TimeoutConfig`, `ProcessInfo` |
-| Functions/Methods | `snake_case` | `run_with_timeout()`, `get_process_info()` |
-| Constants/Statics | `SCREAMING_SNAKE_CASE` | `DEFAULT_TIMEOUT`, `MAX_PID` |
-| Features | `kebab-case` | `sysinfo-backend`, `proc-ext` |
+| Asset Type          | Convention             | Examples                                       |
+| ------------------- | ---------------------- | ---------------------------------------------- |
+| Crate names         | `kebab-case`           | `sysprims-core`, `sysprims-timeout`            |
+| Module files        | `snake_case`           | `process_info.rs`, `timeout_config.rs`         |
+| Root repo files     | `SCREAMING_CASE`       | `README.md`, `LICENSE-MIT`, `CONTRIBUTING.md`  |
+| Documentation files | `kebab-case`           | `getting-started.md`, `0001-license-policy.md` |
+| Directories         | `kebab-case`           | `docs/architecture/`, `crates/sysprims-core/`  |
+| Types/Traits        | `UpperCamelCase`       | `TimeoutConfig`, `ProcessInfo`                 |
+| Functions/Methods   | `snake_case`           | `run_with_timeout()`, `get_process_info()`     |
+| Constants/Statics   | `SCREAMING_SNAKE_CASE` | `DEFAULT_TIMEOUT`, `MAX_PID`                   |
+| Features            | `kebab-case`           | `sysinfo-backend`, `proc-ext`                  |
 
 ### Root Repository Files
 
@@ -116,12 +116,12 @@ status: "draft"
 
 ### Status Values
 
-| Status | Meaning |
-|--------|---------|
-| `draft` | Work in progress |
-| `review` | Ready for review |
-| `approved` | Reviewed and approved |
-| `deprecated` | No longer current |
+| Status       | Meaning               |
+| ------------ | --------------------- |
+| `draft`      | Work in progress      |
+| `review`     | Ready for review      |
+| `approved`   | Reviewed and approved |
+| `deprecated` | No longer current     |
 
 ## Directory Structure
 
@@ -157,6 +157,7 @@ NNNN-short-title.md
 ```
 
 Examples:
+
 - `0001-license-policy.md`
 - `0002-crate-structure.md`
 - `0003-group-by-default.md`

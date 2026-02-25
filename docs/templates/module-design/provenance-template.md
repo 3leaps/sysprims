@@ -50,6 +50,7 @@ This document records the sources consulted for implementing `{{MODULE}}`, ensur
 <!-- Brief description of the approach derived from specs -->
 
 The implementation:
+
 1. <!-- Step 1 derived from spec -->
 2. <!-- Step 2 -->
 3. <!-- Step 3 -->
@@ -88,6 +89,6 @@ No GPL/LGPL/AGPL source code was consulted during development.
 
 ---
 
-*Provenance version: 0.1*
-*Last updated: {{DATE}}*
-*Maintainer: sysprims team*
+_Provenance version: 0.1_
+_Last updated: {{DATE}}_
+_Maintainer: sysprims team_

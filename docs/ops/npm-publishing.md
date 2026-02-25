@@ -70,7 +70,7 @@ The publish workflow (`typescript-npm-publish.yml`) requires:
 
 ```yaml
 permissions:
-  id-token: write  # Required for OIDC
+  id-token: write # Required for OIDC
   contents: read
 ```
 
@@ -91,6 +91,7 @@ gh workflow run typescript-npm-publish.yml
 ```
 
 The workflow:
+
 1. Validates release tag exists
 2. Downloads prebuild artifacts
 3. Publishes platform packages via OIDC

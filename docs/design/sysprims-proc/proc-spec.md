@@ -38,17 +38,18 @@ adr_refs: ["ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 ### POSIX Reference
 
 **`ps` utility:**
+
 - https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ps.html
 
 **Note:** POSIX `ps` has many implementation-defined aspects. sysprims defines its own stable subset contract rather than claiming full POSIX compatibility.
 
 ### Platform Implementation References
 
-| Platform | API | Reference |
-|----------|-----|-----------|
-| Linux | `/proc` filesystem | `proc(5)` man page |
-| macOS | `libproc` | Darwin headers |
-| Windows | Toolhelp32 API | MSDN documentation |
+| Platform | API                | Reference          |
+| -------- | ------------------ | ------------------ |
+| Linux    | `/proc` filesystem | `proc(5)` man page |
+| macOS    | `libproc`          | Darwin headers     |
+| Windows  | Toolhelp32 API     | MSDN documentation |
 
 ## 3) Literal Interface Reference (POSIX ps)
 
@@ -255,6 +256,7 @@ pub struct WaitPidResult {
 ```
 
 **Platform notes:**
+
 - **Unix**: Polling via `kill(pid, 0)` (works for arbitrary PIDs; not parent-specific)
 - **Windows**: `OpenProcess` + `WaitForSingleObject` (best-effort)
 
@@ -262,11 +264,11 @@ pub struct WaitPidResult {
 
 Per ADR-0008, this module returns:
 
-| Error | Condition |
-|-------|-----------|
-| `InvalidArgument` | PID is 0, filter has unknown fields, cpu_above out of range |
-| `NotFound` | Process does not exist |
-| `PermissionDenied` | Process cannot be read due to permissions |
+| Error              | Condition                                                   |
+| ------------------ | ----------------------------------------------------------- |
+| `InvalidArgument`  | PID is 0, filter has unknown fields, cpu_above out of range |
+| `NotFound`         | Process does not exist                                      |
+| `PermissionDenied` | Process cannot be read due to permissions                   |
 
 **Best-effort policy (ports):** `listening_ports` returns partial results whenever possible.
 It returns `PermissionDenied` only when the platform denies even self-process socket inspection;
@@ -278,7 +280,7 @@ otherwise it returns whatever it can and includes `warnings` describing omission
 
 2. **Optional fields:** Fields that cannot be read (permissions, platform limits) are set to default/None. Never faked with placeholder data.
 
-3. **CPU normalization:** `cpu_percent` is normalized 0-100 across all cores (not 0-N*100).
+3. **CPU normalization:** `cpu_percent` is normalized 0-100 across all cores (not 0-N\*100).
 
 4. **Filter strictness:**
    - Unknown JSON keys → `InvalidArgument`
@@ -300,24 +302,24 @@ sysprims pstat [OPTIONS]
 
 ### Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--json` | Output as JSON with schema_id | true |
-| `--table` | Output as human-readable table | false |
-| `--pid <PID>` | Show only specific process | - |
-| `--name <NAME>` | Filter by name (substring, case-insensitive) | - |
-| `--user <USER>` | Filter by username | - |
-| `--cpu-above <PERCENT>` | Filter by minimum CPU (0-100) | - |
-| `--memory-above <KB>` | Filter by minimum memory in KB | - |
-| `--sort <FIELD>` | Sort by: pid, name, cpu, memory | pid |
+| Option                  | Description                                  | Default |
+| ----------------------- | -------------------------------------------- | ------- |
+| `--json`                | Output as JSON with schema_id                | true    |
+| `--table`               | Output as human-readable table               | false   |
+| `--pid <PID>`           | Show only specific process                   | -       |
+| `--name <NAME>`         | Filter by name (substring, case-insensitive) | -       |
+| `--user <USER>`         | Filter by username                           | -       |
+| `--cpu-above <PERCENT>` | Filter by minimum CPU (0-100)                | -       |
+| `--memory-above <KB>`   | Filter by minimum memory in KB               | -       |
+| `--sort <FIELD>`        | Sort by: pid, name, cpu, memory              | pid     |
 
 ### Exit Codes
 
-| Condition | Exit Code |
-|-----------|-----------|
-| Success | 0 |
-| Invalid argument | 1 |
-| Process not found | 1 |
+| Condition         | Exit Code |
+| ----------------- | --------- |
+| Success           | 0         |
+| Invalid argument  | 1         |
+| Process not found | 1         |
 
 ### Output Formats
 
@@ -372,44 +374,44 @@ SysprimsErrorCode sysprims_proc_wait_pid(
 
 ## 7) Platform Implementation Notes
 
-| Feature | Linux | macOS | Windows |
-|---------|-------|-------|---------|
-| Enumeration | `/proc` readdir | `proc_listpids` | `CreateToolhelp32Snapshot` |
-| Process info | `/proc/[pid]/*` | `proc_pidinfo` | `OpenProcess` + queries |
-| CPU usage | `/proc/[pid]/stat` | `proc_pidinfo` | `GetProcessTimes` |
-| Memory | `/proc/[pid]/statm` | `proc_pidinfo` | `GetProcessMemoryInfo` |
-| cmdline | `/proc/[pid]/cmdline` | Best-effort (name only) | `QueryFullProcessImageName` |
-| User | `/proc/[pid]/status` Uid | `proc_pidinfo` | Token queries |
-| start_time_unix_ms | `/proc/[pid]/stat` starttime + boot time | `proc_pidinfo` | Process creation time |
-| exe_path | `/proc/[pid]/exe` readlink | `proc_pidpath` | `QueryFullProcessImageName` |
-| wait_pid | `kill(pid, 0)` polling | `kill(pid, 0)` polling | `WaitForSingleObject` |
+| Feature            | Linux                                    | macOS                   | Windows                     |
+| ------------------ | ---------------------------------------- | ----------------------- | --------------------------- |
+| Enumeration        | `/proc` readdir                          | `proc_listpids`         | `CreateToolhelp32Snapshot`  |
+| Process info       | `/proc/[pid]/*`                          | `proc_pidinfo`          | `OpenProcess` + queries     |
+| CPU usage          | `/proc/[pid]/stat`                       | `proc_pidinfo`          | `GetProcessTimes`           |
+| Memory             | `/proc/[pid]/statm`                      | `proc_pidinfo`          | `GetProcessMemoryInfo`      |
+| cmdline            | `/proc/[pid]/cmdline`                    | Best-effort (name only) | `QueryFullProcessImageName` |
+| User               | `/proc/[pid]/status` Uid                 | `proc_pidinfo`          | Token queries               |
+| start_time_unix_ms | `/proc/[pid]/stat` starttime + boot time | `proc_pidinfo`          | Process creation time       |
+| exe_path           | `/proc/[pid]/exe` readlink               | `proc_pidpath`          | `QueryFullProcessImageName` |
+| wait_pid           | `kill(pid, 0)` polling                   | `kill(pid, 0)` polling  | `WaitForSingleObject`       |
 
 Port bindings:
 
-| Platform | Port listing | Ownership attribution |
-|----------|--------------|----------------------|
-| Linux | `/proc/net/{tcp,tcp6,udp,udp6}` | inode map via `/proc/<pid>/fd` symlinks |
-| macOS | `proc_pidinfo(PROC_PIDLISTFDS)` + `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` | best-effort; SIP/TCC may deny per-PID |
-| Windows | `GetExtendedTcpTable` / `GetExtendedUdpTable` | provides owning PID for listeners |
+| Platform | Port listing                                                             | Ownership attribution                   |
+| -------- | ------------------------------------------------------------------------ | --------------------------------------- |
+| Linux    | `/proc/net/{tcp,tcp6,udp,udp6}`                                          | inode map via `/proc/<pid>/fd` symlinks |
+| macOS    | `proc_pidinfo(PROC_PIDLISTFDS)` + `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` | best-effort; SIP/TCC may deny per-PID   |
+| Windows  | `GetExtendedTcpTable` / `GetExtendedUdpTable`                            | provides owning PID for listeners       |
 
 ## 8) Traceability Matrix
 
-| Requirement | Reference | Rust API | CLI | Tests | Evidence |
-|-------------|-----------|----------|-----|-------|----------|
-| Required fields pid+name | spec §4.5 | `ProcessInfo` | `--json` | `test_get_self` | CI |
-| Strict filter schema | ADR-0005 | `ProcessFilter` | `--name` | `test_filter_unknown_field_rejected` | CI |
-| Unknown filter keys rejected | spec §4.5 | `deny_unknown_fields` | - | `test_filter_unknown_field_rejected` | CI |
-| cpu% normalized 0-100 | spec §4.5 | `cpu_percent` | `--json` | `test_cpu_normalized` | CI |
-| cpu_above range validation | spec §4.5 | `ProcessFilter::validate` | `--cpu-above` | `test_filter_validation_cpu_range` | CI |
-| schema_id embedded | ADR-0005 | `PROCESS_INFO_V1` | `--json` | `test_snapshot_has_schema_id` | CI |
-| No fake data | spec §4.5 | optional fields | any | `test_get_self_has_valid_fields` | CI |
-| PID 0 rejected | spec §4.5 | `get_process` | `--pid 0` | `test_invalid_pid_zero` | CI |
-| start_time_unix_ms (v0.1.6) | spec §4.1 | `ProcessInfo.start_time_unix_ms` | `--json` | `test_get_self_has_valid_fields` | CI |
-| exe_path (v0.1.6) | spec §4.1 | `ProcessInfo.exe_path` | `--json` | `test_get_self_has_valid_fields` | CI |
-| wait_pid timeout (v0.1.6) | spec §4.2 | `wait_pid` | - | `test_wait_pid_self_times_out` | CI |
-| wait_pid PID validation | ADR-0011 | `wait_pid` | - | `test_wait_pid_invalid_pid` | CI |
+| Requirement                  | Reference | Rust API                         | CLI           | Tests                                | Evidence |
+| ---------------------------- | --------- | -------------------------------- | ------------- | ------------------------------------ | -------- |
+| Required fields pid+name     | spec §4.5 | `ProcessInfo`                    | `--json`      | `test_get_self`                      | CI       |
+| Strict filter schema         | ADR-0005  | `ProcessFilter`                  | `--name`      | `test_filter_unknown_field_rejected` | CI       |
+| Unknown filter keys rejected | spec §4.5 | `deny_unknown_fields`            | -             | `test_filter_unknown_field_rejected` | CI       |
+| cpu% normalized 0-100        | spec §4.5 | `cpu_percent`                    | `--json`      | `test_cpu_normalized`                | CI       |
+| cpu_above range validation   | spec §4.5 | `ProcessFilter::validate`        | `--cpu-above` | `test_filter_validation_cpu_range`   | CI       |
+| schema_id embedded           | ADR-0005  | `PROCESS_INFO_V1`                | `--json`      | `test_snapshot_has_schema_id`        | CI       |
+| No fake data                 | spec §4.5 | optional fields                  | any           | `test_get_self_has_valid_fields`     | CI       |
+| PID 0 rejected               | spec §4.5 | `get_process`                    | `--pid 0`     | `test_invalid_pid_zero`              | CI       |
+| start_time_unix_ms (v0.1.6)  | spec §4.1 | `ProcessInfo.start_time_unix_ms` | `--json`      | `test_get_self_has_valid_fields`     | CI       |
+| exe_path (v0.1.6)            | spec §4.1 | `ProcessInfo.exe_path`           | `--json`      | `test_get_self_has_valid_fields`     | CI       |
+| wait_pid timeout (v0.1.6)    | spec §4.2 | `wait_pid`                       | -             | `test_wait_pid_self_times_out`       | CI       |
+| wait_pid PID validation      | ADR-0011  | `wait_pid`                       | -             | `test_wait_pid_invalid_pid`          | CI       |
 
 ---
 
-*Spec version: 1.1*
-*Last updated: 2026-01-25*
+_Spec version: 1.1_
+_Last updated: 2026-01-25_

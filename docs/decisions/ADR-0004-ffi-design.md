@@ -8,13 +8,14 @@
 
 sysprims must support bindings for Go, Python, and TypeScript. Each language has different FFI capabilities:
 
-| Language | FFI Mechanism | Memory Model | String Handling |
-|----------|---------------|--------------|-----------------|
-| Go | CGo | Manual | Requires copy or careful lifetime |
-| Python | PyO3 / cffi | Reference counted | UTF-8 with copy |
-| TypeScript | NAPI-RS / N-API | GC + ref counting | UTF-8 with copy |
+| Language   | FFI Mechanism   | Memory Model      | String Handling                   |
+| ---------- | --------------- | ----------------- | --------------------------------- |
+| Go         | CGo             | Manual            | Requires copy or careful lifetime |
+| Python     | PyO3 / cffi     | Reference counted | UTF-8 with copy                   |
+| TypeScript | NAPI-RS / N-API | GC + ref counting | UTF-8 with copy                   |
 
 We need an FFI design that:
+
 1. Works across all target languages
 2. Minimizes memory management complexity
 3. Provides stable ABI for versioning
@@ -156,6 +157,7 @@ void sysprims_destroy_handle(SysprimsHandle* handle);
 Return native C structs for process info, etc.
 
 **Rejected**:
+
 - Memory ownership unclear (who frees nested pointers?)
 - Struct layout versioning is fragile
 - Different padding/alignment across platforms
@@ -165,6 +167,7 @@ Return native C structs for process info, etc.
 Use a binary serialization format.
 
 **Rejected**:
+
 - Adds dependency complexity
 - JSON is human-readable for debugging
 - Target languages already have JSON parsing
@@ -174,6 +177,7 @@ Use a binary serialization format.
 Skip C-ABI, use native Rust bindings for each language.
 
 **Rejected**:
+
 - Go requires CGo (C-ABI)
 - Maintaining separate binding strategies increases complexity
 - C-ABI provides common baseline
@@ -183,6 +187,7 @@ Skip C-ABI, use native Rust bindings for each language.
 Caller allocates buffer, sysprims fills it.
 
 **Rejected**:
+
 - Buffer sizing is error-prone
 - JSON length is unpredictable
 - Rust-allocated strings are simpler

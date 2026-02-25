@@ -25,6 +25,7 @@ pub enum SysprimsError {
 ```
 
 Map errors to:
+
 - CLI exit codes (GNU-compatible)
 - FFI `SysprimsErrorCode`
 - JSON error objects (schema-backed)
@@ -62,12 +63,13 @@ tracing = ["dep:tracing"]
 
 "Group-by-default" MUST behave consistently:
 
-| Platform | Mechanism | Guarantee |
-|----------|-----------|-----------|
-| Windows | Job Objects | Guaranteed (when assignable) |
-| Unix | Process groups | Guaranteed |
+| Platform | Mechanism      | Guarantee                    |
+| -------- | -------------- | ---------------------------- |
+| Windows  | Job Objects    | Guaranteed (when assignable) |
+| Unix     | Process groups | Guaranteed                   |
 
 If a platform limitation prevents guarantees, the limitation MUST be:
+
 - Observable in structured output (`tree_kill_reliability` field)
 - Documented
 - Tested
@@ -94,9 +96,9 @@ See [ADR-0004: FFI Design](../architecture/adr/0004-ffi-design.md).
 
 Follow [Crucible Coding Baseline](https://crucible.3leaps.dev/coding/baseline):
 
-| Stream | Purpose |
-|--------|---------|
-| STDOUT | Structured data output (JSON) |
+| Stream | Purpose                          |
+| ------ | -------------------------------- |
+| STDOUT | Structured data output (JSON)    |
 | STDERR | Diagnostic output (logs, errors) |
 
 ## References

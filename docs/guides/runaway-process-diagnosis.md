@@ -6,17 +6,17 @@ This guide demonstrates using sysprims to identify and terminate runaway process
 
 Activity Monitor shows nine `VSCodium Helper (Plugin)` processes, each consuming 95-98% CPU:
 
-| PID   | CPU % | CPU Time    |
-|-------|-------|-------------|
-| 88680 | 96.5  | 14:22:21    |
-| 87620 | 97.5  | 14:19:06    |
-| 87799 | 98.5  | 13:40:15    |
-| 57490 | 96.6  | 5:06:52     |
-| 13343 | 97.8  | 35:54:31    |
-| 49457 | 97.9  | 34:07:26    |
-| 87446 | 98.7  | 14:19:34    |
-| 18709 | 97.0  | 13:06:52    |
-| 49501 | 97.5  | 13:18:29    |
+| PID   | CPU % | CPU Time |
+| ----- | ----- | -------- |
+| 88680 | 96.5  | 14:22:21 |
+| 87620 | 97.5  | 14:19:06 |
+| 87799 | 98.5  | 13:40:15 |
+| 57490 | 96.6  | 5:06:52  |
+| 13343 | 97.8  | 35:54:31 |
+| 49457 | 97.9  | 34:07:26 |
+| 87446 | 98.7  | 14:19:34 |
+| 18709 | 97.0  | 13:06:52 |
+| 49501 | 97.5  | 13:18:29 |
 
 These processes are Electron/Chromium utility processes that host VS Code extension code. The goal: identify ownership, confirm identity, and terminate the correct scope.
 
@@ -159,13 +159,13 @@ sysprims pstat --pid 88680 --json
 
 ### terminate-tree Result Fields
 
-| Field | Meaning |
-|-------|---------|
-| `signal_sent` | Signal used (15 = SIGTERM, 9 = SIGKILL) |
-| `escalated` | Whether SIGKILL was needed after SIGTERM |
-| `exited` | Process terminated successfully |
-| `tree_kill_reliability` | `"guaranteed"` if PGID kill was used |
-| `warnings` | Any edge cases encountered |
+| Field                   | Meaning                                  |
+| ----------------------- | ---------------------------------------- |
+| `signal_sent`           | Signal used (15 = SIGTERM, 9 = SIGKILL)  |
+| `escalated`             | Whether SIGKILL was needed after SIGTERM |
+| `exited`                | Process terminated successfully          |
+| `tree_kill_reliability` | `"guaranteed"` if PGID kill was used     |
+| `warnings`              | Any edge cases encountered               |
 
 ### Safety Options
 
@@ -231,6 +231,7 @@ Example output showing the extension state files:
 ```
 
 **Platform Notes:**
+
 - **Linux**: Full file paths available via `/proc/<pid>/fd/` symlinks
 - **macOS**: Best-effort path recovery; some paths may be unavailable
 - **Windows**: Not supported (requires elevated privileges; see `docs/appnotes/fds-validation/`)
@@ -242,11 +243,11 @@ This identifies which extension or workspace triggered the issue directly within
 ### TypeScript Example
 
 ```typescript
-import { procGet, processList, terminateTree } from '@3leaps/sysprims';
+import { procGet, processList, terminateTree } from "@3leaps/sysprims";
 
 // Find candidates
-const helpers = processList({ name_contains: 'VSCodium Helper' });
-const runaway = helpers.filter(p => p.cpu_percent > 50);
+const helpers = processList({ name_contains: "VSCodium Helper" });
+const runaway = helpers.filter((p) => p.cpu_percent > 50);
 
 // Group by parent
 const byParent = new Map<number, typeof runaway>();
@@ -268,23 +269,25 @@ for (const [ppid, children] of byParent) {
   });
 
   if (result.exited) {
-    console.log(`Terminated tree rooted at ${ppid} (${children.length} runaway children)`);
+    console.log(
+      `Terminated tree rooted at ${ppid} (${children.length} runaway children)`,
+    );
   }
 }
 ```
 
 ## Summary
 
-| Task | Command |
-|------|---------|
+| Task                                    | Command                                                       |
+| --------------------------------------- | ------------------------------------------------------------- |
 | Find high-CPU processes (instantaneous) | `sysprims pstat --cpu-mode monitor --cpu-above 50 --sort cpu` |
-| Find high-CPU processes (lifetime avg) | `sysprims pstat --cpu-above 50 --sort cpu` |
-| Inspect specific PID | `sysprims pstat --pid <PID> --json` |
-| Inspect open files/sockets | `sysprims fds --pid <PID> --table` |
-| Kill single process (try first) | `sysprims kill <PID> -s TERM` |
-| Kill single process (if TERM ignored) | `sysprims kill <PID> -s KILL` |
-| Kill multiple processes | `sysprims kill <PID> <PID> ... -s TERM --json` |
-| Terminate process tree (last resort) | `sysprims terminate-tree <PID> --require-exe-path <PATH>` |
+| Find high-CPU processes (lifetime avg)  | `sysprims pstat --cpu-above 50 --sort cpu`                    |
+| Inspect specific PID                    | `sysprims pstat --pid <PID> --json`                           |
+| Inspect open files/sockets              | `sysprims fds --pid <PID> --table`                            |
+| Kill single process (try first)         | `sysprims kill <PID> -s TERM`                                 |
+| Kill single process (if TERM ignored)   | `sysprims kill <PID> -s KILL`                                 |
+| Kill multiple processes                 | `sysprims kill <PID> <PID> ... -s TERM --json`                |
+| Terminate process tree (last resort)    | `sysprims terminate-tree <PID> --require-exe-path <PATH>`     |
 
 ---
 

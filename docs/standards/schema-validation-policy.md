@@ -33,13 +33,13 @@ This document defines the schema validation requirements for sysprims, ensuring 
 
 ### Covered Interfaces
 
-| Interface | Input Validation | Output Validation |
-|-----------|------------------|-------------------|
-| CLI JSON output (`--json`) | N/A | Required |
-| FFI return values | N/A | Required |
-| Filter/query parameters | Required | N/A |
-| Configuration files | Required | N/A |
-| API request/response | Required | Required |
+| Interface                  | Input Validation | Output Validation |
+| -------------------------- | ---------------- | ----------------- |
+| CLI JSON output (`--json`) | N/A              | Required          |
+| FFI return values          | N/A              | Required          |
+| Filter/query parameters    | Required         | N/A               |
+| Configuration files        | Required         | N/A               |
+| API request/response       | Required         | Required          |
 
 ### Schema Identifier Embedding
 
@@ -95,12 +95,12 @@ schemas/
 
 ### Default Behavior
 
-| Operation | Validation | Enforcement |
-|-----------|------------|-------------|
+| Operation              | Validation                       | Enforcement                      |
+| ---------------------- | -------------------------------- | -------------------------------- |
 | JSON output generation | No runtime jsonschema (ADR-0005) | CI/golden tests must catch drift |
-| Filter/query parsing | Validate on parse | Hard error on invalid |
-| Configuration loading | Validate on load | Hard error on invalid |
-| FFI input strings | UTF-8 validation | Hard error on invalid |
+| Filter/query parsing   | Validate on parse                | Hard error on invalid            |
+| Configuration loading  | Validate on load                 | Hard error on invalid            |
+| FFI input strings      | UTF-8 validation                 | Hard error on invalid            |
 
 ### Exemption Process
 
@@ -117,18 +117,23 @@ Runtime validation may be exempted ONLY when:
 # ADR-NNNN: Runtime Validation Exemption for <Component>
 
 ## Context
+
 <Why validation is being considered for exemption>
 
 ## Performance Analysis
+
 <Benchmark data showing overhead>
 
 ## Risk Assessment
+
 <How safety is maintained without runtime validation>
 
 ## Decision
+
 <Specific exemption granted>
 
 ## Monitoring
+
 <How exempted paths are observed>
 ```
 
@@ -161,13 +166,13 @@ tests/
 
 Follow semantic versioning for schemas:
 
-| Change | Version Bump | Example |
-|--------|--------------|---------|
-| Add optional field | Minor | v1.0.0 → v1.1.0 |
-| Add enum value | Minor | v1.0.0 → v1.1.0 |
-| Remove field | **Major** | v1.0.0 → v2.0.0 |
-| Change field type | **Major** | v1.0.0 → v2.0.0 |
-| Documentation only | Patch | v1.0.0 → v1.0.1 |
+| Change             | Version Bump | Example         |
+| ------------------ | ------------ | --------------- |
+| Add optional field | Minor        | v1.0.0 → v1.1.0 |
+| Add enum value     | Minor        | v1.0.0 → v1.1.0 |
+| Remove field       | **Major**    | v1.0.0 → v2.0.0 |
+| Change field type  | **Major**    | v1.0.0 → v2.0.0 |
+| Documentation only | Patch        | v1.0.0 → v1.0.1 |
 
 ## SSOT Location
 

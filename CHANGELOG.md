@@ -10,6 +10,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-02-24
+
+Process intelligence and Go team depth. Surfaces process environment variables and thread count
+through `proc_ext`, extends CPU measurement parity to all tree commands, fixes a schema compliance
+bug in `pstat --pid --json`, and ships a documentation sprint targeting Go platform team adoption.
+
+### Added
+
+- **`proc_ext`: `ProcessOptions` with `IncludeEnv` and `IncludeThreads`** (`sysprims-proc`,
+  `sysprims-ffi`, `bindings/go`, `bindings/typescript`): New opt-in fields on `ProcessInfo`
+  (`env: Option<BTreeMap<String, String>>`, `thread_count: Option<u32>`). Zero cost when not
+  requested. Linux: `/proc/[pid]/environ` + `/proc/[pid]/status`; macOS: `sysctl(KERN_PROCARGS2)`
+  env block + `proc_taskinfo` thread count; Windows: thread count only (env deferred).
+  EPERM on env read → `env: null`, no error propagation.
+
+- **CPU mode on `descendants` and `kill-descendants`** (`sysprims-proc`, `sysprims-cli`,
+  `sysprims-ffi`, `bindings/go`, `bindings/typescript`): `DescendantsConfig` gains
+  `cpu_mode: CpuMode` and `sample_duration: Option<Duration>`. CLI: `--cpu-mode monitor
+--sample 3s`. Found during dogfooding — 4 spinning zombie VSCodium plugin processes, only 2
+  visible to lifetime mode, all 4 visible with monitor sampling. Sampled output uses new
+  `descendants-result-sampled.schema.json` v1.1.0.
+
+- **CLI: `sysprims help <topic>` subcommand** (`sysprims-cli`): Concept-level reference for
+  `cpu-mode`, `signals`, and `safety` topics. Output suppressed when `SYSPRIMS_NO_HINTS=1`.
+
+- **CLI: `after_help` examples** (`sysprims-cli`): Workflow examples added to `pstat`,
+  `descendants`, and `kill-descendants` subcommands.
+
+- **Contextual hint: `--cpu-above` without monitor mode** (`sysprims-cli`): One-line stderr hint
+  suggesting `--cpu-mode monitor --sample 3s` when lifetime mode is active. Suppressed with
+  `--json`, `SYSPRIMS_NO_HINTS=1`, or explicit `--cpu-mode`.
+
+- **Rustdoc examples** (`sysprims-proc`, `sysprims-signal`, `sysprims-timeout`): `# Examples`
+  block on every public function; doc tests run in CI.
+
+- **Documentation** (`docs/guides/`): `replace-shell-outs-go.md` (DM-1),
+  `process-intelligence-without-shell-outs.md` (DM-2),
+  `docs/one-pagers/go-team-adoption-v0.1.14.md` (DM-3).
+
+### Fixed
+
+- **`pstat --pid --json` schema compliance** (`sysprims-cli`): Output now wraps in
+  `SnapshotResult` envelope with `schema_id` as required by ADR-0005. Previously returned a flat
+  `ProcessInfo` object — a contract violation. Process-not-found path returns empty `processes: []`
+  array instead of a JSON parse error.
+
+### Changed
+
+- **Schema**: `process-info.schema.json` and `process-info-sampled.schema.json` bumped to v1.1.0
+  (add optional `env` and `thread_count` fields — minor bump per ADR-0005).
+- **Schema**: New `descendants-result-sampled.schema.json` v1.1.0 for sampled tree output (CPU
+  values may exceed 100 for multi-core consumers).
+- **Go pkg docs**: Updated for v0.1.14 API surface including `ProcessGetWithOptions`,
+  `ProcessListWithOptions`, `DescendantsWithOptions`, and `KillDescendantsWithOptions` with CPU
+  mode options.
+- **README**: "As a Go Library" section updated to show `ProcessGetWithOptions` (env + threads)
+  and `KillDescendantsWithOptions` (monitor CPU mode) — the primary v0.1.14 surface.
+
+---
+
 ## [0.1.13] - 2026-02-13
 
 macOS command-line fidelity fix and binding coverage expansion.
@@ -40,7 +100,6 @@ Process tree operations & enhanced discovery release. Adds process tree traversa
   - ASCII tree visualization with `--tree` flag
   - Filter by name, user, CPU, memory, age, and parent PID
   - Depth control via `--max-levels N` (1 = direct children, "all" = full subtree)
-  
 - **CLI: `sysprims kill-descendants`** (`sysprims-cli`)
   - Send signals to descendants of a process without affecting parent
   - Same filter options as `descendants`
@@ -453,6 +512,7 @@ First language bindings release. Completes the FFI surface and ships Go bindings
 Initial release validating CI/CD pipeline and release signing workflow.
 
 ### Added
+
 - **CLI Commands**
   - `sysprims timeout` - Run commands with timeout and group-by-default tree-kill
   - `sysprims kill` - Send signals to processes
@@ -482,11 +542,14 @@ Initial release validating CI/CD pipeline and release signing workflow.
   - Release checklist and signing workflow
 
 ### Known Limitations
+
 - FFI surface is minimal (only `get_platform()` + `free_string()`)
 - No language bindings (Go, Python, TypeScript)
 - CLI `kill -l` not implemented
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/3leaps/sysprims/compare/v0.1.13...v0.1.14
+[0.1.13]: https://github.com/3leaps/sysprims/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/3leaps/sysprims/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/3leaps/sysprims/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/3leaps/sysprims/compare/v0.1.9...v0.1.10

@@ -9,12 +9,14 @@
 sysprims must support Linux, macOS, and Windows with consistent behavior where possible, while acknowledging platform differences when necessary.
 
 Key challenges:
+
 1. Signal semantics differ significantly (Unix vs Windows)
 2. Process enumeration uses different APIs per platform
 3. Process grouping mechanisms vary (Unix process groups vs Windows Job Objects)
 4. Some features are platform-specific (e.g., Unix signals HUP, USR1)
 
 We need a strategy that:
+
 - Maximizes code reuse
 - Makes platform differences explicit
 - Doesn't hide important behavioral differences
@@ -164,6 +166,7 @@ Platform differences are observable in output:
 Hide all platform differences behind unified API.
 
 **Rejected**:
+
 - Some features can't be abstracted (Unix signals)
 - Hides important behavioral differences
 - Leads to surprises when deploying cross-platform
@@ -173,6 +176,7 @@ Hide all platform differences behind unified API.
 Target Unix, emulate on Windows.
 
 **Rejected**:
+
 - Windows emulation is imperfect
 - Hides Windows-native solutions (Job Objects)
 - Poor Windows performance/reliability
@@ -182,6 +186,7 @@ Target Unix, emulate on Windows.
 `sysprims-linux`, `sysprims-macos`, `sysprims-windows`.
 
 **Rejected**:
+
 - Fragmented API surface
 - Users must handle platform selection
 - Duplicated shared code

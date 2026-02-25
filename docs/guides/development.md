@@ -68,13 +68,14 @@ goneat validate-data --schema schemas/timeout-result/v1.0.0.schema.json output.j
 
 **Rule**: Bindings MUST NOT re-implement business logic. They wrap `sysprims-ffi`.
 
-| Binding | Technology | Key Functions |
-|---------|------------|---------------|
-| Go | CGo | `sysprims_timeout_run`, `sysprims_proc_list` |
-| Python | PyO3/maturin | Same FFI surface |
-| TypeScript | NAPI-RS | Same FFI surface |
+| Binding    | Technology   | Key Functions                                |
+| ---------- | ------------ | -------------------------------------------- |
+| Go         | CGo          | `sysprims_timeout_run`, `sysprims_proc_list` |
+| Python     | PyO3/maturin | Same FFI surface                             |
+| TypeScript | NAPI-RS      | Same FFI surface                             |
 
 All bindings MUST:
+
 - Follow UTF-8 string contracts
 - Use `sysprims_free_string()` for memory cleanup
 - Pass FFI smoke tests

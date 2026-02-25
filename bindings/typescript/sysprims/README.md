@@ -5,6 +5,7 @@ TypeScript/Node.js bindings for sysprims using a Node-API (N-API) native addon (
 ## Platform support
 
 Supported:
+
 - macOS: arm64
 - Linux: glibc and musl (Alpine)
 - Windows: x64, arm64 (msvc)

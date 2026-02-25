@@ -176,6 +176,6 @@ This module's implementation is derived from:
 
 ---
 
-*Provenance version: 1.0*
-*Last updated: 2026-01-09*
-*Maintainer: sysprims team*
+_Provenance version: 1.0_
+_Last updated: 2026-01-09_
+_Maintainer: sysprims team_

@@ -42,15 +42,15 @@ See [agent-identity standard](https://crucible.3leaps.dev/repository/agent-ident
 
 ## Quick Reference
 
-| Task           | Command          |
-| -------------- | ---------------- |
-| Build          | `cargo build`    |
-| Test           | `cargo test`     |
-| Format         | `cargo fmt`      |
-| Lint           | `cargo clippy`   |
+| Task           | Command            |
+| -------------- | ------------------ |
+| Build          | `cargo build`      |
+| Test           | `cargo test`       |
+| Format         | `cargo fmt`        |
+| Lint           | `cargo clippy`     |
 | License check  | `cargo deny check` |
-| Security audit | `cargo audit`    |
-| Full check     | `make check`     |
+| Security audit | `cargo audit`      |
+| Full check     | `make check`       |
 
 ## Session Protocol
 
@@ -128,12 +128,12 @@ Before writing or modifying any code that **sends signals** or **terminates proc
 
 ### Dangerous PID Reference
 
-| Value | Cast to i32 | POSIX Semantics | Safety |
-|-------|-------------|-----------------|--------|
-| `0` | `0` | Signal caller's process group | **FORBIDDEN** |
-| `1` | `1` | Signal init/launchd | **FORBIDDEN** |
-| `u32::MAX` | `-1` | Signal ALL processes | **CATASTROPHIC** |
-| `> i32::MAX` | Negative | Various broadcast semantics | **FORBIDDEN** |
+| Value        | Cast to i32 | POSIX Semantics               | Safety           |
+| ------------ | ----------- | ----------------------------- | ---------------- |
+| `0`          | `0`         | Signal caller's process group | **FORBIDDEN**    |
+| `1`          | `1`         | Signal init/launchd           | **FORBIDDEN**    |
+| `u32::MAX`   | `-1`        | Signal ALL processes          | **CATASTROPHIC** |
+| `> i32::MAX` | Negative    | Various broadcast semantics   | **FORBIDDEN**    |
 
 **If unsure, ask the maintainer before running tests.**
 
@@ -212,39 +212,39 @@ See also [ADR-0007](docs/decisions/ADR-0007-platform-abstraction.md) for the abs
 
 ## Key Files
 
-| Path                        | Purpose                                    |
-| --------------------------- | ------------------------------------------ |
-| `REPOSITORY_SAFETY_PROTOCOLS.md` | **MANDATORY** - Process control safety rules |
-| `RELEASE_CHECKLIST.md`      | Release workflow with validation steps     |
-| `config/agentic/roles/`     | In-repo role definitions                   |
+| Path                                 | Purpose                                               |
+| ------------------------------------ | ----------------------------------------------------- |
+| `REPOSITORY_SAFETY_PROTOCOLS.md`     | **MANDATORY** - Process control safety rules          |
+| `RELEASE_CHECKLIST.md`               | Release workflow with validation steps                |
+| `config/agentic/roles/`              | In-repo role definitions                              |
 | `docs/standards/platform-support.md` | **Canonical platform matrix** - 6 supported platforms |
-| `crates/sysprims-core/`     | Shared types, errors, telemetry            |
-| `crates/sysprims-timeout/`  | Process timeout with group-by-default      |
-| `crates/sysprims-signal/`   | Signal dispatch and process groups         |
-| `crates/sysprims-proc/`     | Process inspection and enumeration         |
-| `crates/sysprims-cli/`      | CLI binaries                               |
-| `ffi/sysprims-ffi/`         | C-ABI exports via cbindgen                 |
-| `bindings/`                 | Go, Python, TypeScript wrappers            |
-| `docs/decisions/`           | Decision Records (ADR, DDR, SDR)           |
-| `docs/safety/`              | Safety guides (signal dispatch, etc.)      |
-| `docs/standards/`           | Repository conventions and policies        |
-| `deny.toml`                 | License and security policy                |
+| `crates/sysprims-core/`              | Shared types, errors, telemetry                       |
+| `crates/sysprims-timeout/`           | Process timeout with group-by-default                 |
+| `crates/sysprims-signal/`            | Signal dispatch and process groups                    |
+| `crates/sysprims-proc/`              | Process inspection and enumeration                    |
+| `crates/sysprims-cli/`               | CLI binaries                                          |
+| `ffi/sysprims-ffi/`                  | C-ABI exports via cbindgen                            |
+| `bindings/`                          | Go, Python, TypeScript wrappers                       |
+| `docs/decisions/`                    | Decision Records (ADR, DDR, SDR)                      |
+| `docs/safety/`                       | Safety guides (signal dispatch, etc.)                 |
+| `docs/standards/`                    | Repository conventions and policies                   |
+| `deny.toml`                          | License and security policy                           |
 
 ## Roles
 
 Role definitions live in [`config/agentic/roles/`](config/agentic/roles/) - all roles are in-repo with sysprims-specific customizations extending crucible baselines.
 
-| Role           | Source                                              | Focus                           |
-| -------------- | --------------------------------------------------- | ------------------------------- |
-| `devlead`      | [in-repo](config/agentic/roles/devlead.yaml)        | Implementation, FFI, safety     |
-| `deliverylead` | [in-repo](config/agentic/roles/deliverylead.yaml)   | Readiness, delivery coordination |
-| `secrev`       | [in-repo](config/agentic/roles/secrev.yaml)         | Security, PID validation, FFI   |
-| `qa`           | [in-repo](config/agentic/roles/qa.yaml)             | Testing, cross-platform         |
-| `releng`       | [in-repo](config/agentic/roles/releng.yaml)         | CI/CD + platform validation     |
-| `cicd`         | [in-repo](config/agentic/roles/cicd.yaml)           | Pipelines, runners, matrix      |
-| `infoarch`     | [in-repo](config/agentic/roles/infoarch.yaml)       | Docs, schemas, standards        |
-| `ffiarch`      | Project-specific (see below)                        | Bindings, cross-language        |
-| `entarch`      | Project-specific (see below)                        | Ecosystem integration           |
+| Role           | Source                                            | Focus                            |
+| -------------- | ------------------------------------------------- | -------------------------------- |
+| `devlead`      | [in-repo](config/agentic/roles/devlead.yaml)      | Implementation, FFI, safety      |
+| `deliverylead` | [in-repo](config/agentic/roles/deliverylead.yaml) | Readiness, delivery coordination |
+| `secrev`       | [in-repo](config/agentic/roles/secrev.yaml)       | Security, PID validation, FFI    |
+| `qa`           | [in-repo](config/agentic/roles/qa.yaml)           | Testing, cross-platform          |
+| `releng`       | [in-repo](config/agentic/roles/releng.yaml)       | CI/CD + platform validation      |
+| `cicd`         | [in-repo](config/agentic/roles/cicd.yaml)         | Pipelines, runners, matrix       |
+| `infoarch`     | [in-repo](config/agentic/roles/infoarch.yaml)     | Docs, schemas, standards         |
+| `ffiarch`      | Project-specific (see below)                      | Bindings, cross-language         |
+| `entarch`      | Project-specific (see below)                      | Ecosystem integration            |
 
 ### Role: releng
 
@@ -424,16 +424,16 @@ Enterprise Architect - Cross-system integration and Fulmen ecosystem alignment.
 
 Key architectural decisions:
 
-| ADR | Title | Relevance |
-| --- | ----- | --------- |
-| [0001](docs/decisions/ADR-0001-license-policy.md) | License Policy | Dependency decisions |
-| [0002](docs/decisions/ADR-0002-crate-structure.md) | Crate Structure | Module organization |
-| [0003](docs/decisions/ADR-0003-group-by-default.md) | Group-by-Default | Core differentiator |
-| [0004](docs/decisions/ADR-0004-ffi-design.md) | FFI Design | Binding architecture |
-| [0005](docs/decisions/ADR-0005-schema-contracts.md) | Schema Contracts | JSON output stability |
-| [0006](docs/decisions/ADR-0006-dependency-governance.md) | Dependency Governance | SBOM and compliance |
-| [0007](docs/decisions/ADR-0007-platform-abstraction.md) | Platform Abstraction | Cross-platform strategy |
-| [0008](docs/decisions/ADR-0008-error-handling.md) | Error Handling | Error taxonomy |
+| ADR                                                      | Title                     | Relevance                                  |
+| -------------------------------------------------------- | ------------------------- | ------------------------------------------ |
+| [0001](docs/decisions/ADR-0001-license-policy.md)        | License Policy            | Dependency decisions                       |
+| [0002](docs/decisions/ADR-0002-crate-structure.md)       | Crate Structure           | Module organization                        |
+| [0003](docs/decisions/ADR-0003-group-by-default.md)      | Group-by-Default          | Core differentiator                        |
+| [0004](docs/decisions/ADR-0004-ffi-design.md)            | FFI Design                | Binding architecture                       |
+| [0005](docs/decisions/ADR-0005-schema-contracts.md)      | Schema Contracts          | JSON output stability                      |
+| [0006](docs/decisions/ADR-0006-dependency-governance.md) | Dependency Governance     | SBOM and compliance                        |
+| [0007](docs/decisions/ADR-0007-platform-abstraction.md)  | Platform Abstraction      | Cross-platform strategy                    |
+| [0008](docs/decisions/ADR-0008-error-handling.md)        | Error Handling            | Error taxonomy                             |
 | [0011](docs/decisions/ADR-0011-pid-validation-safety.md) | **PID Validation Safety** | **CRITICAL** - Prevents kill(-1) disasters |
 
 ## Standards Reference

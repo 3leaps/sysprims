@@ -14,11 +14,13 @@ This project's value depends on correctness across OS boundaries.
 ### Integration Tests
 
 Spawn subprocess trees and validate:
+
 - Timeout escalation behavior
 - Group-by-default tree-kill behavior
 - `--foreground` (opt-out) behavior
 
 OS-specific tests:
+
 - Windows: Job Object behavior
 - Unix: Process group signaling
 
@@ -31,12 +33,14 @@ OS-specific tests:
 ### FFI Smoke Tests (Required)
 
 **C**:
+
 - Compile/link against `libsysprims`
 - Call version function
 - Run minimal timeout call
 - Free returned string via `sysprims_free_string()`
 
 **Go/Python/TypeScript**:
+
 - Can call the library
 - UTF-8 strings round-trip correctly
 - Memory ownership/free is correct
@@ -54,11 +58,11 @@ This is the **core differentiator** - see [ADR-0003](../architecture/adr/0003-gr
 
 ## CI Matrix
 
-| Platform | Variants |
-|----------|----------|
-| Linux | musl, glibc |
-| macOS | arm64, x86_64 |
-| Windows | x86_64 |
+| Platform | Variants      |
+| -------- | ------------- |
+| Linux    | musl, glibc   |
+| macOS    | arm64, x86_64 |
+| Windows  | x86_64        |
 
 ## References
 

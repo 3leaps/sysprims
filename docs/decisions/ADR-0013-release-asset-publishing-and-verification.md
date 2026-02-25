@@ -34,6 +34,7 @@ repeatable integrity and provenance model.
 Note: Binding-facing headers may still be committed when they define the stable language surface (see ADR-0012).
 
 Rationale:
+
 - Keeps the repo lean and source-focused
 - Avoids accidental drift between source and generated outputs
 - Supports the existing signing workflow that treats artifacts as external deliverables
@@ -44,6 +45,7 @@ Any file intentionally published as a GitHub Release asset MUST be included in t
 (SHA-256 and SHA-512) and therefore covered by signature verification.
 
 This includes (non-exhaustive):
+
 - Executable archives (`*.tar.gz`, `*.zip`)
 - Static libraries (standalone or archived)
 - Generated headers (`*.h`)
@@ -51,6 +53,7 @@ This includes (non-exhaustive):
 - Documentation archives (if intentionally published)
 
 Rationale:
+
 - Headers and libraries are inputs to downstream builds; they must be authenticated just like binaries
 - Prevents a class of "unsigned sidecar" issues where only the main archive is trusted
 
@@ -63,6 +66,7 @@ We use two local directories with distinct intent:
 - `dist/local/`: local workspace used for preview/beta artifacts built from a working tree.
 
 Rules:
+
 - `dist/local/` assets are volatile and MUST NOT be treated as official deliverables.
 - The layout of `dist/local/` SHOULD mirror the release asset layout closely enough that downstream
   consumers can wire up to it by path during a coordinated beta cycle. A preview may include only a
@@ -80,6 +84,7 @@ assets that are intended to be published MUST be present at that top level (or t
 updated accordingly).
 
 Rationale:
+
 - Ensures the checksum/signing system is complete and mechanically verifiable
 
 ### 5. Implementation Details Are Policy
@@ -93,7 +98,7 @@ so they can evolve without revisiting the ADR each time.
 
 ### Positive
 
-- Consumers can cryptographically validate *all* published artifacts (including headers)
+- Consumers can cryptographically validate _all_ published artifacts (including headers)
 - Clear separation between official release assets (`dist/release`) and preview artifacts (`dist/local`)
 - Reduced risk of shipping unauthenticated build inputs to language binding users
 
@@ -112,18 +117,21 @@ so they can evolve without revisiting the ADR each time.
 ### Alternative 1: Commit generated headers and/or artifacts
 
 Rejected:
+
 - Creates noisy diffs and repo bloat
 - Makes it unclear which artifacts are authoritative (repo vs release)
 
 ### Alternative 2: Checksum only the primary archives
 
 Rejected:
+
 - Leaves sidecar assets (headers, manifests, docs) unauthenticated
 - Downstream builds can be compromised by an untrusted header even if binaries are signed
 
 ### Alternative 3: Store all artifacts only inside archives
 
 Not chosen as a requirement:
+
 - Viable, but not necessary to achieve integrity
 - Some consumers benefit from standalone headers; the key requirement is checksum coverage
 

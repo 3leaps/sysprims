@@ -19,13 +19,13 @@ sysprims's value proposition includes minimal dependency footprint and GPL-free 
 
 Dependencies are classified into tiers based on when they're included:
 
-| Tier | Features | Target Size | Dependencies |
-|------|----------|-------------|--------------|
-| **Minimal** | `default-features = false` | ~800KB | libc, windows-sys, thiserror |
-| **Standard** | `default` | ~1.2MB | + serde, serde_json, time |
-| **Observable** | `tracing` | ~1.4MB | + tracing |
-| **Extended** | `proc_ext` | ~1.5MB | + syscall wrappers |
-| **Full** | `sysinfo_backend` | ~2.5MB | + sysinfo (~50 deps) |
+| Tier           | Features                   | Target Size | Dependencies                 |
+| -------------- | -------------------------- | ----------- | ---------------------------- |
+| **Minimal**    | `default-features = false` | ~800KB      | libc, windows-sys, thiserror |
+| **Standard**   | `default`                  | ~1.2MB      | + serde, serde_json, time    |
+| **Observable** | `tracing`                  | ~1.4MB      | + tracing                    |
+| **Extended**   | `proc_ext`                 | ~1.5MB      | + syscall wrappers           |
+| **Full**       | `sysinfo_backend`          | ~2.5MB      | + sysinfo (~50 deps)         |
 
 ### Enforcement Tools
 
@@ -84,6 +84,7 @@ cargo sbom --output-format spdx > sbom-${VERSION}.spdx.json
 6. **Security history**: Any past vulnerabilities?
 
 New dependencies require ADR if they:
+
 - Add >100KB to binary size
 - Add >10 transitive dependencies
 - Are not in the "well-known safe" list
@@ -92,17 +93,17 @@ New dependencies require ADR if they:
 
 These are pre-approved for use without additional review:
 
-| Crate | Tier | Purpose |
-|-------|------|---------|
-| libc | Minimal | POSIX syscalls |
-| windows-sys | Minimal | Win32 API |
-| cfg-if | Minimal | Platform conditionals |
-| thiserror | Minimal | Error derives |
-| serde | Standard | Serialization |
-| serde_json | Standard | JSON |
-| time | Standard | Timestamps |
-| clap | CLI | Argument parsing |
-| tracing | Observable | Telemetry |
+| Crate       | Tier       | Purpose               |
+| ----------- | ---------- | --------------------- |
+| libc        | Minimal    | POSIX syscalls        |
+| windows-sys | Minimal    | Win32 API             |
+| cfg-if      | Minimal    | Platform conditionals |
+| thiserror   | Minimal    | Error derives         |
+| serde       | Standard   | Serialization         |
+| serde_json  | Standard   | JSON                  |
+| time        | Standard   | Timestamps            |
+| clap        | CLI        | Argument parsing      |
+| tracing     | Observable | Telemetry             |
 
 ### CI Pipeline
 
@@ -140,6 +141,7 @@ cargo about generate about.hbs > THIRD_PARTY_NOTICES.md
 ```
 
 Contains:
+
 - All dependency names and versions
 - License text for each
 - Copyright notices

@@ -3,6 +3,7 @@
 Thanks for helping build **sysprims** — GPL-free process utilities + embeddable APIs.
 
 This repo aims to be:
+
 - **small and predictable** (library-first, schema-backed),
 - **cross-platform** (Linux/macOS/Windows),
 - **license-clean** (no GPL/AGPL, tight dependency policy),
@@ -10,12 +11,12 @@ This repo aims to be:
 
 ## Quick start (contributors)
 
-1) Install Rust (stable) and the repo toolchain:
+1. Install Rust (stable) and the repo toolchain:
 
 - `rustup toolchain install stable`
 - `rustup component add rustfmt clippy`
 
-2) Run the full local quality loop:
+2. Run the full local quality loop:
 
 - `cargo fmt --all`
 - `cargo clippy --workspace --all-targets --all-features`
@@ -26,17 +27,20 @@ This repo aims to be:
 ## How to contribute
 
 ### Issues
+
 - **Bug reports**: include OS, architecture, Rust version, expected vs actual behavior, and minimal repro steps.
 - **Feature requests**: explain the use case, expected CLI behavior, and any schema impacts.
 
 ### Pull requests
+
 PRs should be small, focused, and include tests.
 
 **PR checklist**
+
 - [ ] Tests added or updated (unit/integration/golden/ffi-smoke)
 - [ ] `cargo fmt` clean
 - [ ] `cargo clippy` clean
-- [ ] JSON outputs updated *with schema_id* if applicable
+- [ ] JSON outputs updated _with schema_id_ if applicable
 - [ ] Docs updated (if behavior changed)
 
 ## Dependency and licensing policy (high-level)
@@ -46,6 +50,7 @@ PRs should be small, focused, and include tests.
 - Avoid: LGPL unless explicitly reviewed and documented
 
 If you propose a new dependency:
+
 - explain why it is needed
 - prefer `default-features = false`
 - consider a feature-gated "heavy" option instead of a hard dependency
@@ -59,6 +64,7 @@ If you find a security issue, **do not open a public issue**; follow the securit
 ## Maintainers
 
 Maintainers may request:
+
 - API/FFI adjustments to preserve stability
 - schema versioning updates
 - additional cross-platform tests

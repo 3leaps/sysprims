@@ -4,8 +4,8 @@ This directory contains operational documentation for sysprims maintainers and r
 
 ## Guides
 
-| Guide | Description |
-|-------|-------------|
+| Guide                                  | Description                                                       |
+| -------------------------------------- | ----------------------------------------------------------------- |
 | [npm-publishing.md](npm-publishing.md) | TypeScript package publishing to npm with OIDC trusted publishing |
 
 ## Audience

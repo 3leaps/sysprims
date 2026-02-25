@@ -42,15 +42,18 @@ adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 - CLI option semantics (`--signal`, `--kill-after`, `--preserve-status`)
 
 **References:**
+
 - GNU coreutils `timeout`: https://www.gnu.org/software/coreutils/manual/html_node/timeout-invocation.html
 
 ### OS-Level Normative References
 
 **Unix (process groups):**
+
 - POSIX `setpgid()`: https://pubs.opengroup.org/onlinepubs/9699919799/functions/setpgid.html
 - POSIX `killpg()`: equivalent to `kill(-pgrp, sig)`
 
 **Windows (Job Objects):**
+
 - Job Objects: https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
 - `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` semantics
 
@@ -71,14 +74,14 @@ timeout [OPTION] DURATION COMMAND [ARG]...
 
 ### Exit codes (behavior target):
 
-| Exit Code | Condition |
-|-----------|-----------|
-| 124 | Command timed out |
-| 125 | `timeout` itself failed |
-| 126 | Command found but cannot be invoked |
-| 127 | Command not found |
-| 128+N | Command killed by signal N |
-| Other | Child's exit code (with `--preserve-status`) |
+| Exit Code | Condition                                    |
+| --------- | -------------------------------------------- |
+| 124       | Command timed out                            |
+| 125       | `timeout` itself failed                      |
+| 126       | Command found but cannot be invoked          |
+| 127       | Command not found                            |
+| 128+N     | Command killed by signal N                   |
+| Other     | Child's exit code (with `--preserve-status`) |
 
 ## 4) sysprims Required Interface (Rust)
 
@@ -214,6 +217,7 @@ pub struct SpawnInGroupResult {
 ```
 
 **Platform notes:**
+
 - **Unix**: Creates new process group via `setpgid(0, 0)`. Returns `pgid`.
 - **Windows**: Uses Job Objects when possible; `pgid` is not applicable (null/None). v0.1.6 does not expose a stable Job handle/token yet (planned follow-on).
 - **Degradation**: If grouping fails (nested Job Objects, privilege limits), returns `tree_kill_reliability: BestEffort`.
@@ -285,6 +289,7 @@ pub struct TerminateTreeResult {
 ```
 
 **Platform notes:**
+
 - **Unix**: Sends signal to process group if pgid available, otherwise direct PID.
 - **Windows**: Terminates Job Object if available, otherwise direct TerminateProcess. v0.1.6 does not expose a stable Job token in the API surface yet; tree kill without a Job is best-effort.
 
@@ -292,11 +297,11 @@ pub struct TerminateTreeResult {
 
 Per ADR-0008:
 
-| Error | Condition | CLI Exit |
-|-------|-----------|----------|
-| `NotFound` | Command not found | 127 |
-| `PermissionDenied` | Command not executable | 126 |
-| `SpawnFailed` | Failed to spawn process | 125 |
+| Error                 | Condition                         | CLI Exit                     |
+| --------------------- | --------------------------------- | ---------------------------- |
+| `NotFound`            | Command not found                 | 127                          |
+| `PermissionDenied`    | Command not executable            | 126                          |
+| `SpawnFailed`         | Failed to spawn process           | 125                          |
 | `GroupCreationFailed` | Process group/job creation failed | (continues with best-effort) |
 
 **Note:** The "CLI Exit" column applies to the `sysprims timeout` CLI contract only. Library APIs (`spawn_in_group`, `terminate_tree`) return `SysprimsError` directly and do not define exit codes.
@@ -330,54 +335,54 @@ sysprims timeout [OPTIONS] <DURATION> -- <COMMAND> [ARGS...]
 
 ### Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-s, --signal <SIG>` | Signal to send on timeout | TERM |
-| `-k, --kill-after <DUR>` | Delay before SIGKILL | 10s |
-| `--preserve-status` | Propagate child exit code | false |
-| `--foreground` | Don't create process group | false |
+| Option                   | Description                | Default |
+| ------------------------ | -------------------------- | ------- |
+| `-s, --signal <SIG>`     | Signal to send on timeout  | TERM    |
+| `-k, --kill-after <DUR>` | Delay before SIGKILL       | 10s     |
+| `--preserve-status`      | Propagate child exit code  | false   |
+| `--foreground`           | Don't create process group | false   |
 
 ### Exit Codes
 
-| Code | Condition |
-|------|-----------|
-| 0 | Command completed normally (no `--preserve-status`) |
-| Child's code | Command completed (with `--preserve-status`) |
-| 124 | Command timed out |
-| 125 | Internal failure / invalid usage |
-| 126 | Command found but cannot invoke |
-| 127 | Command not found |
-| 128+N | Child killed by signal N |
+| Code         | Condition                                           |
+| ------------ | --------------------------------------------------- |
+| 0            | Command completed normally (no `--preserve-status`) |
+| Child's code | Command completed (with `--preserve-status`)        |
+| 124          | Command timed out                                   |
+| 125          | Internal failure / invalid usage                    |
+| 126          | Command found but cannot invoke                     |
+| 127          | Command not found                                   |
+| 128+N        | Child killed by signal N                            |
 
 ## 6) Platform Implementation
 
-| Feature | Unix | Windows |
-|---------|------|---------|
-| Process grouping | `setpgid(0, 0)` | Job Object |
-| Tree kill | `killpg(-pgid, sig)` | `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` |
-| SIGTERM | Native signal | TerminateProcess |
-| SIGKILL | Native signal | TerminateProcess |
+| Feature          | Unix                 | Windows                              |
+| ---------------- | -------------------- | ------------------------------------ |
+| Process grouping | `setpgid(0, 0)`      | Job Object                           |
+| Tree kill        | `killpg(-pgid, sig)` | `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` |
+| SIGTERM          | Native signal        | TerminateProcess                     |
+| SIGKILL          | Native signal        | TerminateProcess                     |
 
 ## 7) Traceability Matrix
 
-| Requirement | Reference | Rust API | CLI | Tests | Status |
-|-------------|-----------|----------|-----|-------|--------|
-| Exit code 124 on timeout | GNU timeout | `TimedOut` | exit 124 | integration | Pass |
-| Exit code 125 on internal error | GNU timeout | `SysprimsError` | exit 125 | integration | Pass |
-| Exit code 126 on not executable | GNU timeout | `PermissionDenied` | exit 126 | integration | Pass |
-| Exit code 127 on not found | GNU timeout | `NotFound` | exit 127 | integration | Pass |
-| Signal escalation | GNU timeout | `kill_after`, `escalated` | `--kill-after` | integration | Pass |
-| Group-by-default | ADR-0003 | `GroupByDefault` | default | tree-escape | Pass |
-| Observable fallback | ADR-0003 | `TreeKillReliability` | `--json` | integration | Pass |
-| Default SIGTERM | spec | `TimeoutConfig::default()` | default | `default_config_*` | Pass |
-| Default 10s kill_after | spec | `TimeoutConfig::default()` | default | `default_config_*` | Pass |
-| spawn_in_group (v0.1.6) | spec §4.3 | `spawn_in_group` | - | `test_spawn_in_group_*` | Pass |
-| spawn_in_group PID validation | ADR-0011 | `spawn_in_group` | - | implicit | Pass |
-| terminate_tree (v0.1.6) | spec §4.4 | `terminate_tree` | - | `test_terminate_tree_*` | Pass |
-| terminate_tree PID validation | ADR-0011 | `terminate_tree` | - | `test_terminate_tree_invalid_pid` | Pass |
-| terminate_tree escalation | spec §4.4 | `TerminateTreeResult::escalated` | - | `test_terminate_tree_escalates` | Pass |
+| Requirement                     | Reference   | Rust API                         | CLI            | Tests                             | Status |
+| ------------------------------- | ----------- | -------------------------------- | -------------- | --------------------------------- | ------ |
+| Exit code 124 on timeout        | GNU timeout | `TimedOut`                       | exit 124       | integration                       | Pass   |
+| Exit code 125 on internal error | GNU timeout | `SysprimsError`                  | exit 125       | integration                       | Pass   |
+| Exit code 126 on not executable | GNU timeout | `PermissionDenied`               | exit 126       | integration                       | Pass   |
+| Exit code 127 on not found      | GNU timeout | `NotFound`                       | exit 127       | integration                       | Pass   |
+| Signal escalation               | GNU timeout | `kill_after`, `escalated`        | `--kill-after` | integration                       | Pass   |
+| Group-by-default                | ADR-0003    | `GroupByDefault`                 | default        | tree-escape                       | Pass   |
+| Observable fallback             | ADR-0003    | `TreeKillReliability`            | `--json`       | integration                       | Pass   |
+| Default SIGTERM                 | spec        | `TimeoutConfig::default()`       | default        | `default_config_*`                | Pass   |
+| Default 10s kill_after          | spec        | `TimeoutConfig::default()`       | default        | `default_config_*`                | Pass   |
+| spawn_in_group (v0.1.6)         | spec §4.3   | `spawn_in_group`                 | -              | `test_spawn_in_group_*`           | Pass   |
+| spawn_in_group PID validation   | ADR-0011    | `spawn_in_group`                 | -              | implicit                          | Pass   |
+| terminate_tree (v0.1.6)         | spec §4.4   | `terminate_tree`                 | -              | `test_terminate_tree_*`           | Pass   |
+| terminate_tree PID validation   | ADR-0011    | `terminate_tree`                 | -              | `test_terminate_tree_invalid_pid` | Pass   |
+| terminate_tree escalation       | spec §4.4   | `TerminateTreeResult::escalated` | -              | `test_terminate_tree_escalates`   | Pass   |
 
 ---
 
-*Spec version: 1.1*
-*Last updated: 2026-01-25*
+_Spec version: 1.1_
+_Last updated: 2026-01-25_

@@ -26,9 +26,10 @@ You're building software that needs to spawn processes with timeouts, send signa
 
 ### Group-by-Default: The Core Difference
 
-The fundamental reliability improvement over GNU alternatives isn't just license cleanliness—it's *correct behavior*.
+The fundamental reliability improvement over GNU alternatives isn't just license cleanliness—it's _correct behavior_.
 
 **The problem with typical process spawning:**
+
 ```
 Parent spawns Child
 Child spawns Grandchildren
@@ -40,6 +41,7 @@ Grandchildren continue running as orphans
 ```
 
 **sysprims behavior:**
+
 ```
 Parent spawns Child in new process group (Unix) / Job Object (Windows)
 Child spawns Grandchildren (automatically in same group/job)
@@ -188,15 +190,15 @@ sysprims kill-descendants <PID> --cpu-above 80 --signal KILL --yes
 
 ### Exit Codes
 
-| Condition | Exit Code |
-|-----------|-----------|
-| Command completed (default) | 0 |
+| Condition                                    | Exit Code         |
+| -------------------------------------------- | ----------------- |
+| Command completed (default)                  | 0                 |
 | Command completed (with `--preserve-status`) | Child's exit code |
-| Command timed out | 124 |
-| sysprims itself failed | 125 |
-| Command not executable | 126 |
-| Command not found | 127 |
-| Killed by signal N | 128+N |
+| Command timed out                            | 124               |
+| sysprims itself failed                       | 125               |
+| Command not executable                       | 126               |
+| Command not found                            | 127               |
+| Killed by signal N                           | 128+N             |
 
 ## Modules
 
@@ -246,12 +248,12 @@ killpg(pgid, SIGTERM)?;
 
 **Signal mapping:**
 
-| Signal | Linux/macOS | Windows |
-|--------|-------------|---------|
-| TERM | SIGTERM | TerminateProcess |
-| KILL | SIGKILL | TerminateProcess |
-| INT | SIGINT | GenerateConsoleCtrlEvent (best-effort) |
-| HUP, USR1, USR2 | Native | Not supported (returns error) |
+| Signal          | Linux/macOS | Windows                                |
+| --------------- | ----------- | -------------------------------------- |
+| TERM            | SIGTERM     | TerminateProcess                       |
+| KILL            | SIGKILL     | TerminateProcess                       |
+| INT             | SIGINT      | GenerateConsoleCtrlEvent (best-effort) |
+| HUP, USR1, USR2 | Native      | Not supported (returns error)          |
 
 Note: On Windows, `SIGINT` delivery is best-effort and depends on console
 attachment and process group membership.
@@ -261,7 +263,10 @@ attachment and process group membership.
 Process inspection, enumeration, and open file descriptor visibility.
 
 ```rust
-use sysprims_proc::{snapshot, get_process, ProcessFilter, list_fds, FdFilter, FdKind};
+use sysprims_proc::{
+    get_process_with_options, list_fds, snapshot, snapshot_filtered,
+    FdFilter, FdKind, ProcessFilter, ProcessOptions,
+};
 
 // Get all processes
 let snap = snapshot()?;
@@ -276,6 +281,14 @@ let filter = ProcessFilter::builder()
     .build();
 let filtered = snapshot_filtered(&filter)?;
 
+// Get process with optional env + thread count (proc_ext, v0.1.14)
+let info = get_process_with_options(
+    pid,
+    ProcessOptions::default().with_env().with_threads(),
+)?;
+println!("threads: {:?}", info.thread_count);
+println!("NODE_ENV: {:?}", info.env.as_ref().and_then(|e| e.get("NODE_ENV")));
+
 // Inspect open file descriptors (Linux/macOS)
 let fd_filter = FdFilter { kind: Some(FdKind::File) };
 let fds = list_fds(pid, Some(&fd_filter))?;
@@ -287,6 +300,7 @@ for fd in &fds.fds {
 ```
 
 **CLI:**
+
 ```bash
 # Process listing
 sysprims pstat [OPTIONS]
@@ -304,44 +318,44 @@ sysprims fds --pid 1234 --kind file --json     # Filter by type
 
 **Filter options:**
 
-| Option | Description |
-|--------|-------------|
-| `--pid <PID>` | Show only a specific process |
-| `--name <NAME>` | Filter by name (substring, case-insensitive) |
-| `--user <USER>` | Filter by username |
-| `--ppid <PID>` | Filter by parent PID |
-| `--cpu-above <PERCENT>` | Filter by minimum CPU usage |
-| `--cpu-mode <MODE>` | CPU measurement: `lifetime` (default, instant) or `monitor` (Activity Monitor style) |
-| `--sample <DURATION>` | Sample CPU over interval (e.g., "5s") - use with `monitor` mode |
-| `--memory-above <KB>` | Filter by minimum memory in KB |
-| `--running-for <DURATION>` | Filter by minimum process age (e.g., "10m", "2h") |
-| `--sort <FIELD>` | Sort by: pid, name, cpu, memory (default: pid) |
+| Option                     | Description                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| `--pid <PID>`              | Show only a specific process                                                         |
+| `--name <NAME>`            | Filter by name (substring, case-insensitive)                                         |
+| `--user <USER>`            | Filter by username                                                                   |
+| `--ppid <PID>`             | Filter by parent PID                                                                 |
+| `--cpu-above <PERCENT>`    | Filter by minimum CPU usage                                                          |
+| `--cpu-mode <MODE>`        | CPU measurement: `lifetime` (default, instant) or `monitor` (Activity Monitor style) |
+| `--sample <DURATION>`      | Sample CPU over interval (e.g., "5s") - use with `monitor` mode                      |
+| `--memory-above <KB>`      | Filter by minimum memory in KB                                                       |
+| `--running-for <DURATION>` | Filter by minimum process age (e.g., "10m", "2h")                                    |
+| `--sort <FIELD>`           | Sort by: pid, name, cpu, memory (default: pid)                                       |
 
 ## Platform Support
 
 See [Platform Support Matrix](docs/standards/platform-support.md) for the canonical reference.
 
-| Platform | Target | Status |
-|----------|--------|--------|
-| Linux x64 (glibc) | `x86_64-unknown-linux-gnu` | Supported |
-| Linux x64 (musl) | `x86_64-unknown-linux-musl` | Supported |
-| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu` | Supported |
-| Linux arm64 (musl) | `aarch64-unknown-linux-musl` | Supported |
-| macOS arm64 | `aarch64-apple-darwin` | Supported |
-| Windows x64 | `x86_64-pc-windows-msvc` | Supported |
+| Platform            | Target                       | Status    |
+| ------------------- | ---------------------------- | --------- |
+| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`   | Supported |
+| Linux x64 (musl)    | `x86_64-unknown-linux-musl`  | Supported |
+| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`  | Supported |
+| Linux arm64 (musl)  | `aarch64-unknown-linux-musl` | Supported |
+| macOS arm64         | `aarch64-apple-darwin`       | Supported |
+| Windows x64         | `x86_64-pc-windows-msvc`     | Supported |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware.
 
 ### Feature Parity
 
-| Feature | Linux | macOS | Windows |
-|---------|-------|-------|---------|
-| Process tree kill | setpgid/killpg | setpgid/killpg | Job Objects |
-| Signal TERM/KILL | Native | Native | Mapped |
-| Signal INT | Native | Native | Best-effort |
-| Signal HUP/USR1/2 | Native | Native | Not supported |
-| Process enumeration | /proc | libproc | Toolhelp32 |
-| Port enumeration | /proc/net/* | libproc (current user) | Not yet |
+| Feature             | Linux          | macOS                  | Windows       |
+| ------------------- | -------------- | ---------------------- | ------------- |
+| Process tree kill   | setpgid/killpg | setpgid/killpg         | Job Objects   |
+| Signal TERM/KILL    | Native         | Native                 | Mapped        |
+| Signal INT          | Native         | Native                 | Best-effort   |
+| Signal HUP/USR1/2   | Native         | Native                 | Not supported |
+| Process enumeration | /proc          | libproc                | Toolhelp32    |
+| Port enumeration    | /proc/net/\*   | libproc (current user) | Not yet       |
 
 ## FFI and Language Bindings
 
@@ -360,11 +374,11 @@ if (err == SYSPRIMS_OK) {
 
 **Language bindings:**
 
-| Language | Status | Package |
-|----------|--------|---------|
-| Go | Available | `github.com/3leaps/sysprims/bindings/go/sysprims` |
-| TypeScript | Available | `npm install @3leaps/sysprims` |
-| Python | Planned (v0.2.x) | `pip install sysprims` |
+| Language   | Status           | Package                                           |
+| ---------- | ---------------- | ------------------------------------------------- |
+| Go         | Available        | `github.com/3leaps/sysprims/bindings/go/sysprims` |
+| TypeScript | Available        | `npm install @3leaps/sysprims`                    |
+| Python     | Planned (v0.2.x) | `pip install sysprims`                            |
 
 ### As a Go Library
 
@@ -444,11 +458,17 @@ go test -v -tags="sysprims_shared,sysprims_shared_local" ./...
 ### As a TypeScript Library
 
 ```typescript
-import { processList, listeningPorts, terminate, procGet } from '@3leaps/sysprims';
+import {
+  processList,
+  listeningPorts,
+  terminate,
+  procGet,
+} from "@3leaps/sysprims";
 
-// Get process info by PID
-const proc = procGet(process.pid);
+// Get process info by PID (with optional env + thread count, v0.1.14)
+const proc = procGet(process.pid, { includeEnv: true, includeThreads: true });
 console.log(`Process ${proc.pid}: ${proc.name}`);
+console.log(`NODE_ENV: ${proc.env?.NODE_ENV}`);
 
 // List processes matching a filter
 const nginx = processList({ name_contains: "nginx" });

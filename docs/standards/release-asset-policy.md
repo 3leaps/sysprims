@@ -39,6 +39,7 @@ GitHub release assets are intentionally **flat** (top-level). Any richer structu
 Locally, release assets are expected to be present at the top level of `dist/release/` when generating checksums.
 
 Examples:
+
 - `sysprims-<version>-<platform>.tar.gz`
 - `sysprims-ffi-<version>-libs.tar.gz`
 - `sysprims.h`
@@ -52,6 +53,7 @@ If a preview only includes a subset of platforms, it still uses the same top-lev
 bundles, but will be incomplete.
 
 Minimum expectation for FFI preview testing (single-platform):
+
 - `dist/local/release/sysprims-ffi/`
   - `libsysprims_ffi.a`
   - `libsysprims_ffi.dylib` / `libsysprims_ffi.so` / `sysprims_ffi.dll` (when building shared artifacts)

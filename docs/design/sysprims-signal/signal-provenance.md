@@ -64,11 +64,13 @@ This document records the sources consulted for implementing `sysprims-signal`, 
 The implementation is straightforward from POSIX spec:
 
 **Unix:**
+
 1. Validate PID (0 and overflow checks per ADR-0011)
 2. Call `libc::kill(pid as i32, signal)`
 3. Map errno to SysprimsError
 
 **Windows:**
+
 1. Validate PID
 2. Open process handle with PROCESS_TERMINATE
 3. Call TerminateProcess for TERM/KILL
@@ -86,11 +88,13 @@ The implementation is straightforward from POSIX spec:
 ### Implementation Notes
 
 **Unix:**
+
 1. Validate PGID (same checks as PID)
 2. Call `libc::killpg(pgid as i32, signal)`
 3. Map errno to SysprimsError
 
 **Windows:**
+
 - Returns `NotSupported` - Windows has no equivalent concept
 
 ## PID Validation (ADR-0011)
@@ -102,10 +106,12 @@ Reject PID 0 and PIDs > i32::MAX at the API boundary.
 ### Rationale
 
 From POSIX kill(2):
+
 - `kill(0, sig)` signals all processes in the caller's process group
 - `kill(-1, sig)` signals ALL processes the caller can reach
 
 When `u32::MAX` is cast to `i32`, it becomes `-1`. This means:
+
 ```rust
 kill(u32::MAX, SIGTERM)  // becomes kill(-1, SIGTERM)
                          // which terminates EVERYTHING
@@ -162,6 +168,6 @@ No GPL/LGPL/AGPL source code was consulted during development.
 
 ---
 
-*Provenance version: 1.0*
-*Last updated: 2026-01-09*
-*Maintainer: sysprims team*
+_Provenance version: 1.0_
+_Last updated: 2026-01-09_
+_Maintainer: sysprims team_

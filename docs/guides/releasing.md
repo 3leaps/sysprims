@@ -19,14 +19,14 @@
 
 ## Build Artifacts
 
-| Platform | Target | Notes |
-|----------|--------|-------|
-| Linux | `x86_64-unknown-linux-musl` | Primary, distroless-compatible |
-| Linux | `x86_64-unknown-linux-gnu` | Enterprise compatibility |
-| Linux | `aarch64-unknown-linux-musl` | ARM servers |
-| macOS | `x86_64-apple-darwin` | Intel Macs |
-| macOS | `aarch64-apple-darwin` | Apple Silicon |
-| Windows | `x86_64-pc-windows-msvc` | Windows x64 |
+| Platform | Target                       | Notes                          |
+| -------- | ---------------------------- | ------------------------------ |
+| Linux    | `x86_64-unknown-linux-musl`  | Primary, distroless-compatible |
+| Linux    | `x86_64-unknown-linux-gnu`   | Enterprise compatibility       |
+| Linux    | `aarch64-unknown-linux-musl` | ARM servers                    |
+| macOS    | `x86_64-apple-darwin`        | Intel Macs                     |
+| macOS    | `aarch64-apple-darwin`       | Apple Silicon                  |
+| Windows  | `x86_64-pc-windows-msvc`     | Windows x64                    |
 
 ## Release Artifacts
 

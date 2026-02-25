@@ -12,28 +12,28 @@ last_updated: "{{DATE}}"
 
 ## Summary
 
-| Item | Status |
-|------|--------|
-| Spec version | 0.1 |
-| Implementation version | 0.1.0 |
-| Tests passing | <!-- Yes/No/Partial --> |
-| Schema validated | <!-- Yes/No --> |
-| Provenance complete | <!-- Yes/No --> |
+| Item                   | Status                  |
+| ---------------------- | ----------------------- |
+| Spec version           | 0.1                     |
+| Implementation version | 0.1.0                   |
+| Tests passing          | <!-- Yes/No/Partial --> |
+| Schema validated       | <!-- Yes/No -->         |
+| Provenance complete    | <!-- Yes/No -->         |
 
 ## Spec Compliance
 
 ### Requirements Traceability
 
-| Requirement | Spec Section | Implementation | Test | Evidence | Status |
-|-------------|--------------|----------------|------|----------|--------|
-| <!-- Req 1 --> | §4.1 | `function()` | `test_*` | [CI Run](#) | <!-- Pass/Fail/Partial --> |
+| Requirement    | Spec Section | Implementation | Test     | Evidence    | Status                     |
+| -------------- | ------------ | -------------- | -------- | ----------- | -------------------------- |
+| <!-- Req 1 --> | §4.1         | `function()`   | `test_*` | [CI Run](#) | <!-- Pass/Fail/Partial --> |
 
 ### Deviations
 
 <!-- Document any intentional deviations from spec -->
 
-| Deviation | Rationale | Tracking |
-|-----------|-----------|----------|
+| Deviation                  | Rationale    | Tracking            |
+| -------------------------- | ------------ | ------------------- |
 | <!-- None, or describe --> | <!-- Why --> | <!-- Issue link --> |
 
 ## Test Results
@@ -46,25 +46,25 @@ last_updated: "{{DATE}}"
 
 ### Coverage
 
-| Metric | Value | Target |
-|--------|-------|--------|
-| Line coverage | <!-- % --> | 80% |
-| Branch coverage | <!-- % --> | 70% |
+| Metric          | Value      | Target |
+| --------------- | ---------- | ------ |
+| Line coverage   | <!-- % --> | 80%    |
+| Branch coverage | <!-- % --> | 70%    |
 
 ### Test Summary
 
-| Category | Total | Passed | Failed | Skipped |
-|----------|-------|--------|--------|---------|
-| Unit | <!-- N --> | <!-- N --> | 0 | 0 |
-| Integration | <!-- N --> | <!-- N --> | 0 | 0 |
-| Equivalence | <!-- N --> | <!-- N --> | 0 | 0 |
+| Category    | Total      | Passed     | Failed | Skipped |
+| ----------- | ---------- | ---------- | ------ | ------- |
+| Unit        | <!-- N --> | <!-- N --> | 0      | 0       |
+| Integration | <!-- N --> | <!-- N --> | 0      | 0       |
+| Equivalence | <!-- N --> | <!-- N --> | 0      | 0       |
 
 ## Schema Compliance
 
 ### Schema Validation
 
-| Output | Schema ID | Valid |
-|--------|-----------|-------|
+| Output               | Schema ID                                                                    | Valid           |
+| -------------------- | ---------------------------------------------------------------------------- | --------------- |
 | <!-- Output type --> | `https://schemas.3leaps.dev/sysprims/{{module}}/v1.0.0/{{type}}.schema.json` | <!-- Yes/No --> |
 
 ### Schema Version
@@ -76,15 +76,15 @@ last_updated: "{{DATE}}"
 
 ### Feature Matrix
 
-| Feature | Linux | macOS | Windows | Notes |
-|---------|-------|-------|---------|-------|
+| Feature          | Linux           | macOS           | Windows         | Notes          |
+| ---------------- | --------------- | --------------- | --------------- | -------------- |
 | <!-- Feature --> | <!-- Status --> | <!-- Status --> | <!-- Status --> | <!-- Notes --> |
 
 ### Known Limitations
 
-| Platform | Limitation | Documented |
-|----------|------------|------------|
-| <!-- Platform --> | <!-- Limitation --> | Yes |
+| Platform          | Limitation          | Documented |
+| ----------------- | ------------------- | ---------- |
+| <!-- Platform --> | <!-- Limitation --> | Yes        |
 
 ## Provenance
 
@@ -94,20 +94,20 @@ last_updated: "{{DATE}}"
 
 ## Evidence Artifacts
 
-| Artifact | Location | Purpose |
-|----------|----------|---------|
-| CI test run | <!-- URL --> | Test pass evidence |
-| Coverage report | <!-- URL --> | Coverage evidence |
-| Schema validation | <!-- URL --> | Schema compliance |
+| Artifact          | Location     | Purpose            |
+| ----------------- | ------------ | ------------------ |
+| CI test run       | <!-- URL --> | Test pass evidence |
+| Coverage report   | <!-- URL --> | Coverage evidence  |
+| Schema validation | <!-- URL --> | Schema compliance  |
 
 ## Sign-off
 
-| Role | Name | Date | Status |
-|------|------|------|--------|
+| Role      | Name          | Date          | Status                    |
+| --------- | ------------- | ------------- | ------------------------- |
 | Developer | <!-- Name --> | <!-- Date --> | <!-- Approved/Pending --> |
-| Reviewer | <!-- Name --> | <!-- Date --> | <!-- Approved/Pending --> |
+| Reviewer  | <!-- Name --> | <!-- Date --> | <!-- Approved/Pending --> |
 
 ---
 
-*Compliance report version: 0.1*
-*Last updated: {{DATE}}*
+_Compliance report version: 0.1_
+_Last updated: {{DATE}}_

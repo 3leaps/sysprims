@@ -27,12 +27,12 @@ This SOP applies to:
 
 Each module MUST have the following artifacts before release:
 
-| Artifact | Location | Purpose |
-|----------|----------|---------|
-| Module Spec | `docs/design/<module>/<module>-spec.md` | API contract and design rationale |
+| Artifact          | Location                                             | Purpose                               |
+| ----------------- | ---------------------------------------------------- | ------------------------------------- |
+| Module Spec       | `docs/design/<module>/<module>-spec.md`              | API contract and design rationale     |
 | Equivalence Tests | `docs/design/<module>/<module>-equivalence-tests.md` | Test protocol and acceptance criteria |
-| Compliance Report | `docs/design/<module>/<module>-compliance.md` | Evidence that requirements are met |
-| Provenance | `docs/design/<module>/<module>-provenance.md` | Sources consulted (and avoided) |
+| Compliance Report | `docs/design/<module>/<module>-compliance.md`        | Evidence that requirements are met    |
+| Provenance        | `docs/design/<module>/<module>-provenance.md`        | Sources consulted (and avoided)       |
 
 Templates for each artifact are in `docs/templates/module-design/`.
 
@@ -89,38 +89,39 @@ If a PR changes any public surface area (Rust API, CLI flags, JSON output, FFI),
 
 Per ADR-0008, all modules use consistent error semantics:
 
-| Code | Name | Meaning |
-|------|------|---------|
-| 0 | Success | Operation completed |
-| 1 | InvalidArgument | Bad input, validation failed |
-| 2 | SpawnFailed | Failed to spawn a child process |
-| 3 | Timeout | Operation timed out |
-| 4 | PermissionDenied | Access not allowed |
-| 5 | NotFound | Resource doesn't exist |
-| 6 | NotSupported | Platform doesn't support feature |
-| 7 | GroupCreationFailed | Process group/job creation failed |
-| 8 | System | Unexpected system error (errno/GetLastError) |
-| 99 | Internal | Internal error (bug/unexpected state) |
+| Code | Name                | Meaning                                      |
+| ---- | ------------------- | -------------------------------------------- |
+| 0    | Success             | Operation completed                          |
+| 1    | InvalidArgument     | Bad input, validation failed                 |
+| 2    | SpawnFailed         | Failed to spawn a child process              |
+| 3    | Timeout             | Operation timed out                          |
+| 4    | PermissionDenied    | Access not allowed                           |
+| 5    | NotFound            | Resource doesn't exist                       |
+| 6    | NotSupported        | Platform doesn't support feature             |
+| 7    | GroupCreationFailed | Process group/job creation failed            |
+| 8    | System              | Unexpected system error (errno/GetLastError) |
+| 99   | Internal            | Internal error (bug/unexpected state)        |
 
 ## CLI Exit Codes
 
 Per GNU conventions (where applicable):
 
-| Condition | Exit Code |
-|-----------|-----------|
-| Success | 0 |
-| General error | 1 |
-| Timeout occurred | 124 |
-| Tool itself failed | 125 |
-| Command not executable | 126 |
-| Command not found | 127 |
-| Killed by signal N | 128+N |
+| Condition              | Exit Code |
+| ---------------------- | --------- |
+| Success                | 0         |
+| General error          | 1         |
+| Timeout occurred       | 124       |
+| Tool itself failed     | 125       |
+| Command not executable | 126       |
+| Command not found      | 127       |
+| Killed by signal N     | 128+N     |
 
 ## Schema Contracts
 
 All JSON outputs MUST include a `schema_id` field per ADR-0005.
 
 Schema ID format:
+
 ```
 https://schemas.3leaps.dev/sysprims/<module>/v<major>.<minor>.<patch>/<type>.schema.json
 ```
@@ -136,4 +137,4 @@ https://schemas.3leaps.dev/sysprims/<module>/v<major>.<minor>.<patch>/<type>.sch
 
 ---
 
-*Last updated: 2026-01-09*
+_Last updated: 2026-01-09_

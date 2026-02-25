@@ -20,18 +20,19 @@ libc::kill(-1, 15)  // u32::MAX wraps to -1 as signed i32!
 
 **POSIX defines special semantics for negative PIDs in `kill(2)`:**
 
-| PID Value | Semantics |
-|-----------|-----------|
-| `> 0` | Send signal to process with that PID |
-| `0` | Send signal to all processes in the caller's process group |
-| `-1` | Send signal to **ALL processes** the caller has permission to signal |
-| `< -1` | Send signal to all processes in process group `abs(pid)` |
+| PID Value | Semantics                                                            |
+| --------- | -------------------------------------------------------------------- |
+| `> 0`     | Send signal to process with that PID                                 |
+| `0`       | Send signal to all processes in the caller's process group           |
+| `-1`      | Send signal to **ALL processes** the caller has permission to signal |
+| `< -1`    | Send signal to all processes in process group `abs(pid)`             |
 
 The test inadvertently invoked `kill(-1, SIGTERM)`, which sent `SIGTERM` to every user-owned process including Finder, Terminal, and potentially hundreds of other processes.
 
 ### Why This Matters for sysprims
 
 sysprims is a process control library. Its users will:
+
 - Parse PIDs from external input (config files, CLI arguments, APIs)
 - Store PIDs in various integer types
 - Pass PIDs between languages via FFI
@@ -45,11 +46,13 @@ Any of these could result in an out-of-range value reaching `kill()`. The conseq
 ### Implementation
 
 1. **Define `MAX_SAFE_PID`** as `i32::MAX` (2,147,483,647):
+
    ```rust
    pub const MAX_SAFE_PID: u32 = i32::MAX as u32;
    ```
 
 2. **Validate in `kill()` and `killpg()`** before any system call:
+
    ```rust
    fn validate_pid(pid: u32, param_name: &str) -> SysprimsResult<()> {
        if pid == 0 {
@@ -78,15 +81,15 @@ Any of these could result in an out-of-range value reaching `kill()`. The conseq
 
 ### Rejected PIDs
 
-| Value | Rejection Reason |
-|-------|------------------|
-| `0` | Would signal caller's process group |
+| Value        | Rejection Reason                                               |
+| ------------ | -------------------------------------------------------------- |
+| `0`          | Would signal caller's process group                            |
 | `> i32::MAX` | Overflows to negative, triggering broadcast or group semantics |
 
 ### Accepted PIDs
 
-| Value | Result |
-|-------|--------|
+| Value             | Result                                                                          |
+| ----------------- | ------------------------------------------------------------------------------- |
 | `1` to `i32::MAX` | Passed to kernel, may return `ESRCH` (not found) or `EPERM` (permission denied) |
 
 ## Consequences
@@ -117,6 +120,7 @@ Any of these could result in an out-of-range value reaching `kill()`. The conseq
 Reject at compile time by making the PID parameter `i32` instead of `u32`.
 
 **Rejected because:**
+
 - FFI compatibility: C and other languages typically use unsigned types for PIDs
 - Rust stdlib uses `u32` for `std::process::id()`
 - Negative PIDs have valid but dangerous semantics; accepting them invites misuse
@@ -126,6 +130,7 @@ Reject at compile time by making the PID parameter `i32` instead of `u32`.
 Validate in `unix::kill_impl()` rather than `lib.rs::kill()`.
 
 **Rejected because:**
+
 - Duplicates validation across platforms
 - Platform code receives already-casted values, too late to give good errors
 - Public API should document and enforce its contract
@@ -135,6 +140,7 @@ Validate in `unix::kill_impl()` rather than `lib.rs::kill()`.
 Provide `kill_raw(pid: i32, sig)` for users who need broadcast semantics.
 
 **Rejected because:**
+
 - Adds API surface for a rare administrative use case
 - Users who truly need this can call libc directly
 - "Making dangerous things hard" is the design goal
@@ -144,6 +150,7 @@ Provide `kill_raw(pid: i32, sig)` for users who need broadcast semantics.
 Make sysprims use `libc::pid_t` directly in its public API.
 
 **Rejected because:**
+
 - `pid_t` is `i32` on all supported platforms, but this is an implementation detail
 - Would leak libc types into FFI boundary
 - Doesn't solve the negative-value problem; just changes where it surfaces
@@ -158,6 +165,7 @@ make test-diabolical
 ```
 
 This would:
+
 1. Spin up a disposable Linux container (Docker/Podman)
 2. Run tests that intentionally trigger broadcast signals, orphan processes, etc.
 3. Verify expected behavior without risking the host system
