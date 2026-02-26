@@ -108,12 +108,6 @@ unknown-git = "deny"
 # List of allowed registries
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
-# List of allowed git hosts
-allow-git = [
-    "https://github.com/3leaps",
-    "https://github.com/fulmenhq",
-]
-
-# Allow specific crates from org repos (future fast-follow deps)
-[sources.allow-org]
-github = ["3leaps", "fulmenhq"]
+# Keep git source allowlists empty until we actually add git dependencies.
+# If/when we add first-party git crates, re-introduce explicit allow-git
+# and allow-org entries for the exact org/repo scope.
