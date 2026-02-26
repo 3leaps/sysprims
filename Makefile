@@ -267,7 +267,7 @@ check-windows-msvc: ## cargo check for x86_64-pc-windows-msvc (no SDK)
 		exit 1; \
 	fi
 	@rustup target add x86_64-pc-windows-msvc >/dev/null
-	@$(CARGO) check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-msvc
+	@RUSTFLAGS="-Dwarnings" $(CARGO) check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-msvc
 	@echo "[ok] Windows MSVC target check passed"
 
 check-windows-gnu: ## cargo check for x86_64-pc-windows-gnu (no SDK)
@@ -277,7 +277,7 @@ check-windows-gnu: ## cargo check for x86_64-pc-windows-gnu (no SDK)
 		exit 1; \
 	fi
 	@rustup target add x86_64-pc-windows-gnu >/dev/null
-	@$(CARGO) check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-gnu
+	@RUSTFLAGS="-Dwarnings" $(CARGO) check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-gnu
 	@echo "[ok] Windows GNU target check passed"
 
 test: ## Run test suite
