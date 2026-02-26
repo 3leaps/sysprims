@@ -25,7 +25,7 @@
 # -----------------------------------------------------------------------------
 
 # Version from Cargo.toml (SSOT) - extracted via cargo metadata
-VERSION := $(shell cargo metadata --format-version 1 2>/dev/null | \
+VERSION := $(shell cargo metadata --no-deps --format-version 1 2>/dev/null | \
 	grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "dev")
 
 # Tool installation directory
