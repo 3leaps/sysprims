@@ -30,7 +30,7 @@ sysprims-session = { path = "crates/sysprims-session" }
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental
 # API changes before sysprims v0.1.0 ships.
 # See .plans/active/v0.1.0/release-checklist.md
-rsfulmen = { version = "=0.1.2", default-features = false, features = ["foundry-core"] }
+rsfulmen = { version = "=0.1.4", default-features = false, features = ["foundry-core"] }
 
 # Core Platform Abstractions
 libc = "0.2"
