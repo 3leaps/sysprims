@@ -30,6 +30,9 @@ actively spinning zombie processes.
   suggesting the more accurate measurement mode. Suppress with `SYSPRIMS_NO_HINTS=1` or `--json`.
 - **CLI help system**: `sysprims help <topic>` subcommand (`cpu-mode`, `signals`, `safety`) plus
   `after_help` examples on high-complexity subcommands.
+- **Release hardening**: Makefile quality gates now run goneat across non-Rust files, repository
+  formatting was normalized for non-markdown assets, `rsfulmen` was updated to `0.1.4`, and stale
+  `cargo-deny` source allowlists were removed to eliminate false-medium security findings.
 
 ### `proc_ext`: Environment Variables and Thread Count
 
@@ -114,6 +117,18 @@ sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --
 Root cause: the `--pid` code path short-circuited to direct `ProcessInfo` serialization instead of
 routing through the `SnapshotResult` envelope used by the list path. CLI-only fix, no library
 changes.
+
+### Release Hardening (Post-Feature Complete)
+
+- **Quality-gate parity**: `make fmt`, `make fmt-check`, and `make lint` now execute goneat for
+  non-Rust file types while retaining strict Rust checks (`cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`).
+- **Formatting normalization**: Non-markdown files (workflows, schemas, role config, TS config,
+  and goneat config) were normalized in a single sweep to stabilize formatter/linter output.
+- **Dependency refresh**: `rsfulmen` pin advanced from `0.1.2` to `0.1.4` and lockfile refreshed.
+- **Security policy cleanup**: Removed stale `deny.toml` `allow-git` / `[sources.allow-org]`
+  entries that were generating `unmatched-source` and `unmatched-organization` medium findings in
+  `goneat assess --categories security`.
 
 ### Upgrade Notes
 
