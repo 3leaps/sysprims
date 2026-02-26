@@ -1,31 +1,24 @@
 name: TypeScript N-API Prebuilds
-
 on:
   workflow_dispatch:
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   build-linux:
     name: Build Linux prebuilds
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.12.0
-
       - name: Install Rust targets
         shell: bash
         run: |
@@ -34,11 +27,9 @@ jobs:
           rustup target add \
             x86_64-unknown-linux-musl \
             aarch64-unknown-linux-musl
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Build .node files (zig)
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -61,31 +52,25 @@ jobs:
           npx napi build --cargo-cwd native --release --platform --js false --strip \
             --target aarch64-unknown-linux-musl --zig
           mv sysprims.linux-arm64-musl.node prebuilds/
-
       - name: Upload prebuilds
         uses: actions/upload-artifact@v4
         with:
           name: ts-prebuilds-linux
           path: bindings/typescript/sysprims/prebuilds/*.node
-
   build-linux-arm64:
     name: Build Linux arm64 prebuild (native)
     runs-on: ubuntu-latest-arm64-s
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -95,31 +80,25 @@ jobs:
           mkdir -p prebuilds
           npx napi build --cargo-cwd native --release --platform --js false --strip
           mv sysprims.linux-arm64-gnu.node prebuilds/
-
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
           name: ts-prebuilds-linux-arm64-gnu-native
           path: bindings/typescript/sysprims/prebuilds/*.node
-
   build-macos-arm64:
     name: Build macOS arm64 prebuild
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -129,31 +108,25 @@ jobs:
           mkdir -p prebuilds
           npx napi build --cargo-cwd native --release --platform --js false --strip
           mv sysprims.darwin-arm64.node prebuilds/
-
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
           name: ts-prebuilds-darwin-arm64
           path: bindings/typescript/sysprims/prebuilds/*.node
-
   build-windows:
     name: Build Windows x64 prebuild
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: pwsh
@@ -163,31 +136,25 @@ jobs:
           New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
           npx napi build --cargo-cwd native --release --platform --js false --strip
           Move-Item sysprims.win32-x64-msvc.node prebuilds/
-
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
           name: ts-prebuilds-win32-x64-msvc
           path: bindings/typescript/sysprims/prebuilds/*.node
-
   build-windows-arm64:
     name: Build Windows arm64 prebuild
     runs-on: windows-latest-arm64-s
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: pwsh
@@ -197,46 +164,38 @@ jobs:
           New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
           npx napi build --cargo-cwd native --release --platform --js false --strip
           Move-Item sysprims.win32-arm64-msvc.node prebuilds/
-
       - name: Upload prebuild
         uses: actions/upload-artifact@v4
         with:
           name: ts-prebuilds-win32-arm64-msvc
           path: bindings/typescript/sysprims/prebuilds/*.node
-
   package:
     name: Package (npm dir)
     runs-on: ubuntu-latest
     needs: [build-linux, build-linux-arm64, build-macos-arm64, build-windows, build-windows-arm64]
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Build JS dist (root package)
         working-directory: bindings/typescript/sysprims
         run: npm run clean && npm run build && npm run build:native
-
       - name: Remove local .node from root dist
         working-directory: bindings/typescript/sysprims
         shell: bash
         run: |
           set -euo pipefail
           rm -f dist/native/sysprims.*.node || true
-
       - name: Download prebuilds
         uses: actions/download-artifact@v4
         with:
           pattern: ts-prebuilds-*
           path: downloaded-prebuilds
-
       - name: Create npm package templates
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -244,7 +203,6 @@ jobs:
           set -euo pipefail
           rm -rf npm
           npx napi create-npm-dir -t .
-
       - name: Remove unsupported platform packages
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -254,7 +212,6 @@ jobs:
           # See docs/standards/platform-support.md
           rm -rf npm/darwin-x64
           echo "Removed unsupported platform: darwin-x64"
-
       - name: Stage .node files into npm packages
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -269,7 +226,6 @@ jobs:
             mkdir -p "$(dirname "$dest")"
             cp "$f" "$dest"
           done
-
       - name: Upload npm dir
         uses: actions/upload-artifact@v4
         with:

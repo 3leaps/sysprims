@@ -17,25 +17,37 @@
       "type": "string",
       "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json"
     },
-    "timestamp": { "type": "string" },
-    "platform": { "type": "string" },
+    "timestamp": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
     "pid": {
       "type": "integer",
       "minimum": 1,
       "maximum": 4294967295
     },
     "pgid": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 1,
       "maximum": 4294967295
     },
     "tree_kill_reliability": {
       "type": "string",
-      "enum": ["guaranteed", "best_effort"]
+      "enum": [
+        "guaranteed",
+        "best_effort"
+      ]
     },
     "warnings": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

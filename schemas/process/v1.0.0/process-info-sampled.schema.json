@@ -4,7 +4,11 @@
   "title": "sysprims process snapshot (sampled CPU)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "timestamp", "processes"],
+  "required": [
+    "schema_id",
+    "timestamp",
+    "processes"
+  ],
   "properties": {
     "schema_id": {
       "type": "string",
@@ -15,7 +19,9 @@
     },
     "processes": {
       "type": "array",
-      "items": { "$ref": "#/definitions/process_info" }
+      "items": {
+        "$ref": "#/definitions/process_info"
+      }
     }
   },
   "definitions": {
@@ -47,7 +53,10 @@
           "type": "string"
         },
         "user": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "cpu_percent": {
           "type": "number",
@@ -62,19 +71,33 @@
           "minimum": 0
         },
         "start_time_unix_ms": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "exe_path": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "state": {
           "type": "string",
-          "enum": ["running", "sleeping", "stopped", "zombie", "unknown"]
+          "enum": [
+            "running",
+            "sleeping",
+            "stopped",
+            "zombie",
+            "unknown"
+          ]
         },
         "cmdline": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

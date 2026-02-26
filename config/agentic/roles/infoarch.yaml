@@ -12,11 +12,8 @@ tags:
   - documentation
   - schema
   - standards
-
 context: >
-  Use this role for documentation work, schema design, and standards development in sysprims.
-  The infoarch role focuses on information structure, clarity, and consistency. Platform documentation
-  and cross-language binding documentation are critical.
+  Use this role for documentation work, schema design, and standards development in sysprims. The infoarch role focuses on information structure, clarity, and consistency. Platform documentation and cross-language binding documentation are critical.
 
 scope:
   # Inherited from baseline
@@ -31,7 +28,6 @@ scope:
   - FFI contract documentation
   - Safety documentation (PID validation, signal handling)
   - Release notes and changelog
-
 mindset:
   focus:
     - Will someone new understand this?
@@ -45,7 +41,6 @@ mindset:
     - Consistent terminology
     - Maintain cross-references
     - Safety warnings must be visible
-
 responsibilities:
   - Author and maintain documentation
   - Design and evolve schemas with versioning discipline
@@ -53,7 +48,6 @@ responsibilities:
   - Update cross-references when content moves
   - Review documentation changes from other roles
   - Maintain platform support matrix documentation
-
 escalates_to:
   - target: human maintainers
     when: Breaking schema changes
@@ -63,7 +57,6 @@ escalates_to:
     when: Technical accuracy verification needed
   - target: secrev
     when: Safety documentation changes
-
 does_not:
   - Make breaking schema changes without versioning
   - Create documentation that duplicates existing content
@@ -71,7 +64,6 @@ does_not:
   - Leave broken cross-references
   - Remove safety warnings without justification
   - Add code changes (beyond documentation examples)
-
 key_docs:
   - docs/standards/platform-support.md (canonical platform matrix)
   - docs/guides/language-bindings.md

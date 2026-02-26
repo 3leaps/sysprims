@@ -1,11 +1,8 @@
 name: TypeScript Bindings
-
 on:
   workflow_dispatch:
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   test:
     name: Test (${{ matrix.os }})
@@ -19,26 +16,20 @@ jobs:
           - os: macos-14
           - os: windows-latest
           - os: windows-latest-arm64-s
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Test
         working-directory: bindings/typescript/sysprims
         run: npm run test:ci
-
   test-musl:
     name: Test (linux-musl, alpine)
     runs-on: ubuntu-latest
@@ -46,13 +37,11 @@ jobs:
       image: node:20-alpine
     steps:
       - uses: actions/checkout@v4
-
       - name: Install build dependencies
         shell: sh
         run: |
           set -eu
           apk add --no-cache bash curl build-base python3 git
-
       - name: Install Rust (rustup)
         shell: bash
         run: |
@@ -61,7 +50,6 @@ jobs:
           . "$HOME/.cargo/env"
           rustc -V
           cargo -V
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -69,7 +57,6 @@ jobs:
           set -euo pipefail
           . "$HOME/.cargo/env"
           npm install
-
       - name: Test
         working-directory: bindings/typescript/sysprims
         shell: bash

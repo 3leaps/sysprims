@@ -3,9 +3,7 @@
 #
 # This policy enforces license compliance and supply chain security.
 # See ADR-0001 (license-policy.md) for approved licenses.
-
 version: v1
-
 # License compliance policy
 # Aligned with deny.toml and ADR-0001
 licenses:
@@ -27,7 +25,6 @@ licenses:
     - BSL-1.0
     - Unicode-3.0
     - Unicode-DFS-2016
-
 # Supply chain security (cooling policy)
 cooling:
   enabled: true
@@ -40,11 +37,9 @@ cooling:
       reason: "Internal packages"
     - pattern: "github.com/fulmenhq/*"
       reason: "Fulmen ecosystem packages"
-
 # Policy engine configuration
 policy_engine:
   type: embedded
-
 # Language-specific settings
 languages:
   - language: go

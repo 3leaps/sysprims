@@ -1,5 +1,4 @@
 name: TypeScript npm Publish
-
 # Publishes TypeScript bindings to npm using OIDC trusted publishing.
 # See docs/ops/npm-publishing.md for setup instructions.
 #
@@ -7,7 +6,6 @@ name: TypeScript npm Publish
 # - Package must already exist on npm (first publish is manual)
 # - Trusted publisher configured on npmjs.com for this workflow
 # - Prebuilds workflow must have completed successfully
-
 on:
   workflow_dispatch:
     inputs:
@@ -24,12 +22,10 @@ on:
         required: false
         type: boolean
         default: false
-
 permissions:
-  id-token: write   # Required for OIDC trusted publishing
+  id-token: write  # Required for OIDC trusted publishing
   contents: read
-  actions: read     # Required to download artifacts from other runs
-
+  actions: read  # Required to download artifacts from other runs
 jobs:
   publish:
     name: Publish to npm
@@ -39,13 +35,11 @@ jobs:
       # Note: Do NOT use fetch-tags here. When running from a tag ref,
       # it causes a git fetch conflict. The tag is already checked out.
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
-
       - name: Ensure npm CLI supports OIDC
         run: |
           set -euo pipefail
@@ -53,7 +47,6 @@ jobs:
           # Trusted publishing requires npm >= 11.5.1
           npm install -g npm@11.5.1
           echo "npm (after): $(npm --version)"
-
       - name: Validate running from a tag ref
         run: |
           set -euo pipefail
@@ -62,7 +55,6 @@ jobs:
             echo "Re-run it selecting the release tag in the GitHub UI, or trigger it by pushing a v* tag."
             exit 1
           fi
-
       - name: Validate release tag and versions
         run: |
           set -euo pipefail
@@ -97,7 +89,6 @@ jobs:
             echo "head_sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_ENV"
           echo "Validated tag/version: ${TAG}"
-
       - name: Find prebuilds run
         id: find-run
         env:
@@ -138,7 +129,6 @@ jobs:
           fi
 
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-
       - name: Download npm directory artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -165,7 +155,6 @@ jobs:
 
           echo "Downloaded packages:"
           ls -la npm-packages/
-
       - name: Verify packages
         run: |
           set -euo pipefail
@@ -208,7 +197,6 @@ jobs:
           done
 
           echo "All platform packages verified"
-
       - name: Build root package
         working-directory: bindings/typescript/sysprims
         run: |
@@ -219,7 +207,6 @@ jobs:
           # 3. We only need devDependencies for TypeScript compilation
           npm install --omit=optional
           npm run build
-
       - name: Publish (dry run)
         if: ${{ inputs.dry_run }}
         working-directory: bindings/typescript/sysprims
@@ -239,7 +226,6 @@ jobs:
 
           echo "Root package:"
           npm publish --access public --dry-run
-
       - name: Publish platform packages
         if: ${{ !inputs.dry_run }}
         run: |
@@ -256,7 +242,6 @@ jobs:
             echo "Publishing @3leaps/sysprims-${pkg}..."
             (cd "$dir" && npm publish --access public)
           done
-
       - name: Publish root package
         if: ${{ !inputs.dry_run }}
         working-directory: bindings/typescript/sysprims
@@ -267,7 +252,6 @@ jobs:
           printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
           echo "Publishing @3leaps/sysprims..."
           npm publish --access public
-
       - name: Verify publication
         if: ${{ !inputs.dry_run }}
         run: |

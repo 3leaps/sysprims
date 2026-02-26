@@ -4,13 +4,20 @@
   "title": "sysprims batch kill result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "signal_sent", "succeeded", "failed"],
+  "required": [
+    "schema_id",
+    "signal_sent",
+    "succeeded",
+    "failed"
+  ],
   "properties": {
     "schema_id": {
       "type": "string",
       "const": "https://schemas.3leaps.dev/sysprims/signal/v1.0.0/batch-kill-result.schema.json"
     },
-    "signal_sent": { "type": "integer" },
+    "signal_sent": {
+      "type": "integer"
+    },
     "succeeded": {
       "type": "array",
       "items": {
@@ -24,14 +31,19 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["pid", "error"],
+        "required": [
+          "pid",
+          "error"
+        ],
         "properties": {
           "pid": {
             "type": "integer",
             "minimum": 1,
             "maximum": 4294967295
           },
-          "error": { "type": "string" }
+          "error": {
+            "type": "string"
+          }
         }
       }
     }

@@ -1,15 +1,12 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
-
 jobs:
   format:
     name: Format Check
@@ -18,7 +15,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check formatting
         run: cargo fmt --all -- --check
-
   lint:
     name: Clippy
     runs-on: ubuntu-latest
@@ -26,28 +22,22 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
   windows-cross-check:
     name: Windows Cross-Target Check (no SDK)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc,x86_64-pc-windows-gnu,aarch64-pc-windows-msvc
-
       # cargo check does type checking only (no linking), so this works without the Windows SDK.
       # This is a fast guardrail for Windows-only compile errors.
       - name: cargo check (windows msvc x64)
         run: cargo check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-msvc
-
       - name: cargo check (windows gnu x64)
         run: cargo check --workspace --exclude sysprims-ts-napi --target x86_64-pc-windows-gnu
-
       - name: cargo check (windows msvc arm64)
         run: cargo check --workspace --exclude sysprims-ts-napi --target aarch64-pc-windows-msvc
-
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -63,21 +53,16 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: windows-latest-arm64-s
             target: aarch64-pc-windows-msvc
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Rust toolchain
         run: |
           rustup show
           rustup target add ${{ matrix.target }}
-
       - name: Run tests
         run: cargo test --workspace --all-features
-
       - name: Run FFI smoke tests
         run: cargo test -p sysprims-ffi
-
   # Port bindings invariant tests (self-listener discoverable)
   # Windows runs GNU toolchain (MinGW) to match our Go/FFI build target.
   test-proc-ports:
@@ -93,11 +78,9 @@ jobs:
             target: x86_64-pc-windows-gnu
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
       - name: Install MinGW (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -106,35 +89,27 @@ jobs:
           update: true
           install: mingw-w64-x86_64-gcc
           path-type: inherit
-
       - name: Run sysprims-proc tests (Linux)
         if: runner.os != 'Windows'
         run: cargo test -p sysprims-proc
-
       - name: Run sysprims-proc tests (Windows GNU)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: cargo test -p sysprims-proc --target x86_64-pc-windows-gnu
-
   # Musl build test (Linux only)
   test-musl:
     name: Test (Linux musl)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
-
       - name: Add musl target
         run: rustup target add x86_64-unknown-linux-musl
-
       - name: Build with musl
         run: cargo build --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
-
       - name: Test with musl
         run: cargo test --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
-
   # Go bindings tests
   # Windows x64 uses MinGW (GNU target) for CGo compatibility.
   # Windows arm64 is NOT supported: MinGW does not support arm64 target.
@@ -157,17 +132,13 @@ jobs:
             lib_name: libsysprims_ffi.a
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-
       - uses: dtolnay/rust-toolchain@stable
-
       - name: Add Rust target (Windows GNU)
         if: runner.os == 'Windows'
         run: rustup target add x86_64-pc-windows-gnu
-
       # Windows: Install MinGW for GNU target build
       - name: Install MinGW (Windows)
         if: runner.os == 'Windows'
@@ -177,33 +148,26 @@ jobs:
           update: true
           install: mingw-w64-x86_64-gcc
           path-type: inherit
-
       - name: Install cbindgen
         run: cargo install cbindgen --locked
-
       - name: Build FFI library (Unix)
         if: runner.os != 'Windows'
         run: cargo build --release -p sysprims-ffi
-
       - name: Regenerate Go header
         if: runner.os != 'Windows'
         run: make header-go
-
       - name: Build FFI library (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-ffi
-
       - name: Regenerate Go header
         if: runner.os == 'Windows'
         run: make header-go
-
       - name: Copy FFI to local lib (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
           cp target/release/${{ matrix.lib_name }} bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
-
       - name: Copy FFI to local lib (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -211,13 +175,11 @@ jobs:
           mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
           cp target/x86_64-pc-windows-gnu/release/${{ matrix.lib_name }} \
             bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
-
       - name: Run Go tests
         if: runner.os != 'Windows'
         run: |
           cd bindings/go/sysprims
           go test -v ./...
-
       - name: Run Go tests (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -227,7 +189,6 @@ jobs:
         run: |
           cd bindings/go/sysprims
           go test -v ./...
-
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-latest
@@ -236,28 +197,21 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@v4
-
       - name: License check
         run: cargo deny check licenses
-
       - name: Advisory check
         run: cargo deny check advisories
-
       - name: Dependency assessment
         run: goneat assess --categories dependencies --fail-on high
-
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
-
       - name: Security audit
         run: cargo audit
-
   # Container-based privileged tests
   # These tests require isolation because they verify dangerous signal behaviors
   # See: ADR-0011, .plans/active/v0.1.1/03-container-test-fixture.md
@@ -267,14 +221,11 @@ jobs:
     needs: [format, lint, test]  # Only run after basic checks pass
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Build test container
         run: |
           docker build -t sysprims-test-fixture -f Dockerfile.container .
-
       - name: Run container tests
         run: |
           docker run --rm \

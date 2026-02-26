@@ -1,13 +1,10 @@
 name: Release
-
 on:
   push:
     tags: ['v*']
-
 env:
   CARGO_TERM_COLOR: always
   MACOSX_DEPLOYMENT_TARGET: "11.0"
-
 jobs:
   # Validate tag matches VERSION file
   #
@@ -22,7 +19,6 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Validate VERSION matches tag
         id: version
         run: |
@@ -34,14 +30,12 @@ jobs:
           fi
           echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
           echo "Version validated: $FILE_VERSION"
-
   verify-go-bindings-assets:
     name: Verify Go Binding Assets
     runs-on: ubuntu-latest
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
       - name: Verify Go module contains prebuilt libs
         run: |
           set -euo pipefail
@@ -102,7 +96,6 @@ jobs:
             artifact_suffix: linux-arm64-musl
     steps:
       - uses: actions/checkout@v4
-
       - name: Build CLI
         run: |
           if [ -n "${{ matrix.glibc }}" ]; then
@@ -110,7 +103,6 @@ jobs:
           else
             cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-cli
           fi
-
       - name: Build FFI
         run: |
           if [ -n "${{ matrix.glibc }}" ]; then
@@ -118,7 +110,6 @@ jobs:
           else
             cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-ffi
           fi
-
       - name: Package CLI
         shell: bash
         run: |
@@ -148,7 +139,6 @@ jobs:
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
           VERSION=${{ needs.validate-version.outputs.version }}
           tar -czf sysprims-${VERSION}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
-
       - name: Package FFI
         shell: bash
         run: |
@@ -175,7 +165,6 @@ jobs:
 
           mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
           cp "target/${TARGET_DIR}/release/libsysprims_ffi.a" dist/ffi/${{ matrix.artifact_suffix }}/
-
       - name: Package FFI (shared)
         if: ${{ matrix.glibc != '' }}
         shell: bash
@@ -203,26 +192,22 @@ jobs:
 
           mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
           cp "target/${TARGET_DIR}/release/libsysprims_ffi.so" dist/ffi-shared/${{ matrix.artifact_suffix }}/
-
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.artifact_suffix }}
           path: sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
-
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffi-${{ matrix.artifact_suffix }}
           path: dist/ffi/${{ matrix.artifact_suffix }}
-
       - name: Upload FFI artifact (shared)
         if: ${{ matrix.glibc != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: ffi-shared-${{ matrix.artifact_suffix }}
           path: dist/ffi-shared/${{ matrix.artifact_suffix }}
-
   # Build macOS targets (cross-compile both from arm64 runner)
   build-macos:
     name: Build macOS
@@ -232,83 +217,69 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
-
       - name: Build CLI (both targets)
         run: |
           cargo build --release --target x86_64-apple-darwin -p sysprims-cli
           cargo build --release --target aarch64-apple-darwin -p sysprims-cli
-
       - name: Build FFI (both targets)
         run: |
           cargo build --release --target x86_64-apple-darwin -p sysprims-ffi
           cargo build --release --target aarch64-apple-darwin -p sysprims-ffi
-
       - name: Package CLI (darwin-amd64)
         run: |
           mkdir -p dist/cli-amd64
           cp target/x86_64-apple-darwin/release/sysprims dist/cli-amd64/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli-amd64/
           tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-amd64.tar.gz -C dist/cli-amd64 .
-
       - name: Package CLI (darwin-arm64)
         run: |
           mkdir -p dist/cli-arm64
           cp target/aarch64-apple-darwin/release/sysprims dist/cli-arm64/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli-arm64/
           tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz -C dist/cli-arm64 .
-
       - name: Package FFI
         run: |
           mkdir -p dist/ffi/darwin-amd64 dist/ffi/darwin-arm64
           cp target/x86_64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-amd64/
           cp target/aarch64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-arm64/
-
       - name: Package FFI (shared)
         run: |
           mkdir -p dist/ffi-shared/darwin-amd64 dist/ffi-shared/darwin-arm64
           cp target/x86_64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-amd64/
           cp target/aarch64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-arm64/
-
       - name: Upload CLI artifact (darwin-amd64)
         uses: actions/upload-artifact@v4
         with:
           name: cli-darwin-amd64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-amd64.tar.gz
-
       - name: Upload CLI artifact (darwin-arm64)
         uses: actions/upload-artifact@v4
         with:
           name: cli-darwin-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz
-
       - name: Upload FFI artifact (darwin-amd64)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-darwin-amd64
           path: dist/ffi/darwin-amd64
-
       - name: Upload FFI artifact (shared, darwin-amd64)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-shared-darwin-amd64
           path: dist/ffi-shared/darwin-amd64
-
       - name: Upload FFI artifact (darwin-arm64)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-darwin-arm64
           path: dist/ffi/darwin-arm64
-
       - name: Upload FFI artifact (shared, darwin-arm64)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-shared-darwin-arm64
           path: dist/ffi-shared/darwin-arm64
-
   # Build Windows targets using GNU toolchain for CGo compatibility
   # CGo requires MinGW, so we build with x86_64-pc-windows-gnu target
   build-windows:
@@ -317,11 +288,9 @@ jobs:
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
-
       - name: Install MinGW
         uses: msys2/setup-msys2@v2
         with:
@@ -329,15 +298,12 @@ jobs:
           update: true
           install: mingw-w64-x86_64-gcc
           path-type: inherit
-
       - name: Build CLI (GNU target)
         shell: msys2 {0}
         run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-cli
-
       - name: Build FFI (GNU target)
         shell: msys2 {0}
         run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-ffi
-
       - name: Package CLI
         shell: bash
         run: |
@@ -345,25 +311,21 @@ jobs:
           cp target/x86_64-pc-windows-gnu/release/sysprims.exe dist/cli/sysprims.exe
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
           cd dist/cli && 7z a -tzip ../../sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip .
-
       - name: Package FFI
         shell: bash
         run: |
           mkdir -p dist/ffi/windows-amd64
           cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
-
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: cli-windows-amd64
           path: sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip
-
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4
         with:
           name: ffi-windows-amd64
           path: dist/ffi/windows-amd64
-
   # Build Windows arm64 using native arm64 runner
   # Go bindings NOT supported on Windows arm64 (MinGW doesn't support arm64)
   # See docs/standards/platform-support.md
@@ -373,19 +335,15 @@ jobs:
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-pc-windows-msvc
-
       - name: Build CLI
         shell: pwsh
         run: cargo build --release --target aarch64-pc-windows-msvc -p sysprims-cli
-
       - name: Build FFI
         shell: pwsh
         run: cargo build --release --target aarch64-pc-windows-msvc -p sysprims-ffi
-
       - name: Package CLI
         shell: pwsh
         run: |
@@ -395,14 +353,12 @@ jobs:
           Copy-Item LICENSE-MIT, LICENSE-APACHE dist/cli/
           $version = "${{ needs.validate-version.outputs.version }}"
           Compress-Archive -Path dist/cli/* -DestinationPath "sysprims-${version}-windows-arm64.zip"
-
       - name: Package FFI (static)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist/ffi/windows-arm64 | Out-Null
           Copy-Item target/aarch64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi/windows-arm64/
-
       - name: Package FFI (shared)
         shell: pwsh
         run: |
@@ -415,25 +371,21 @@ jobs:
           if (Test-Path target/aarch64-pc-windows-msvc/release/sysprims_ffi.lib) {
             Copy-Item target/aarch64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi-shared/windows-arm64/
           }
-
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: cli-windows-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-windows-arm64.zip
-
       - name: Upload FFI artifact (static)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-windows-arm64
           path: dist/ffi/windows-arm64
-
       - name: Upload FFI artifact (shared)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-shared-windows-arm64
           path: dist/ffi-shared/windows-arm64
-
   # Build Windows x64 shared library using MSVC toolchain
   # This lane is intended for non-cgo shared-lib consumers.
   build-windows-msvc:
@@ -442,15 +394,12 @@ jobs:
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-
       - name: Build FFI (MSVC target)
         shell: pwsh
         run: cargo build --release --target x86_64-pc-windows-msvc -p sysprims-ffi
-
       - name: Package FFI (shared)
         shell: pwsh
         run: |
@@ -465,13 +414,11 @@ jobs:
           if (Test-Path target/x86_64-pc-windows-msvc/release/sysprims_ffi.lib) {
             Copy-Item target/x86_64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi-shared/windows-amd64/
           }
-
       - name: Upload FFI artifact (shared)
         uses: actions/upload-artifact@v4
         with:
           name: ffi-shared-windows-amd64
           path: dist/ffi-shared/windows-amd64
-
   # Generate C header via cbindgen
   cbindgen:
     name: Generate C Header
@@ -482,17 +429,14 @@ jobs:
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
       - name: Generate C header
         run: |
           cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
-
       - name: Upload header
         uses: actions/upload-artifact@v4
         with:
           name: c-header
           path: sysprims.h
-
   # Generate SBOM for compliance (CycloneDX format via Syft)
   sbom:
     name: Generate SBOM
@@ -503,17 +447,14 @@ jobs:
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
-
       - name: Generate SBOM (CycloneDX)
         run: |
           syft dir:. -o cyclonedx-json > sbom-${{ needs.validate-version.outputs.version }}.cdx.json
-
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
         with:
           name: sbom
           path: sbom-${{ needs.validate-version.outputs.version }}.cdx.json
-
   # Package all FFI libs into single bundle
   verify-ffi-shared-assets:
     name: Verify FFI Shared Artifacts
@@ -525,7 +466,6 @@ jobs:
         with:
           pattern: ffi-shared-*
           path: ffi-shared-libs
-
       - name: Verify expected shared libs present
         shell: bash
         run: |
@@ -560,7 +500,6 @@ jobs:
           fi
 
           echo "[ok] Shared-lib artifacts verified"
-
   package-ffi-bundle:
     name: Package FFI Bundle
     runs-on: ubuntu-latest
@@ -575,19 +514,16 @@ jobs:
       - verify-ffi-shared-assets
     steps:
       - uses: actions/checkout@v4
-
       - name: Download all FFI artifacts
         uses: actions/download-artifact@v4.1.3
         with:
           pattern: ffi-*
           path: ffi-libs
-
       - name: Download C header
         uses: actions/download-artifact@v4.1.3
         with:
           name: c-header
           path: ffi-libs
-
       - name: Package FFI bundle
         run: |
           set -euo pipefail
@@ -700,13 +636,11 @@ jobs:
           EOF
 
           tar -czf sysprims-ffi-${VERSION}-libs.tar.gz -C bundle .
-
       - name: Upload FFI bundle
         uses: actions/upload-artifact@v4
         with:
           name: ffi-bundle
           path: sysprims-ffi-${{ needs.validate-version.outputs.version }}-libs.tar.gz
-
   # Create GitHub release with all artifacts (unsigned - signing is manual)
   publish:
     name: Publish Release
@@ -727,31 +661,26 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
       - name: Download all CLI artifacts
         uses: actions/download-artifact@v4.1.3
         with:
           pattern: cli-*
           path: release-cli
-
       - name: Download FFI bundle
         uses: actions/download-artifact@v4.1.3
         with:
           name: ffi-bundle
           path: release-ffi
-
       - name: Download C header
         uses: actions/download-artifact@v4.1.3
         with:
           name: c-header
           path: release-header
-
       - name: Download SBOM
         uses: actions/download-artifact@v4.1.3
         with:
           name: sbom
           path: release-sbom
-
       - name: Organize release files
         run: |
           mkdir -p release
@@ -772,7 +701,6 @@ jobs:
           cp LICENSE-MIT LICENSE-APACHE release/
 
           ls -la release/
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -816,10 +744,10 @@ jobs:
 
             **Note:** Windows arm64 Go bindings are not supported because MinGW does not support the arm64 target.
 
-  # NOTE: Go bindings require committed prebuilt libs under
-  # bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a so `go get` works.
-  # We prepare those libs via a separate workflow (`go-bindings.yml`) BEFORE tagging.
-  #
-  # The `verify-go-bindings-assets` job gates this release so we never publish
-  # a version where Go can fetch the module but cannot link.
-  # (intentionally no job here)
+# NOTE: Go bindings require committed prebuilt libs under
+# bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a so `go get` works.
+# We prepare those libs via a separate workflow (`go-bindings.yml`) BEFORE tagging.
+#
+# The `verify-go-bindings-assets` job gates this release so we never publish
+# a version where Go can fetch the module but cannot link.
+# (intentionally no job here)

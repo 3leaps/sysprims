@@ -1,13 +1,11 @@
 # Schema definition for a structured log event.
 # Adheres to JSON Schema Draft 2020-12.
 $schema: "https://json-schema.org/draft/2020-12/schema"
-
 # Unique identifier for this version of the schema.
 # The 'v0' identifier signifies that this schema is for the alpha/MVP release
 # and is explicitly decoupled from the repository's SemVer. It is subject to change.
 # See ADR-0010 for the full versioning strategy.
 $id: "https://schemas.sysprims.dev/observability/log-event/v0"
-
 title: "Sysprims Log Event"
 description: "Schema for a single structured log event emitted by sysprims components."
 type: "object"

@@ -7,7 +7,12 @@
   "properties": {
     "kind": {
       "type": "string",
-      "enum": ["file", "socket", "pipe", "unknown"]
+      "enum": [
+        "file",
+        "socket",
+        "pipe",
+        "unknown"
+      ]
     }
   }
 }

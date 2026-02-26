@@ -4,14 +4,25 @@
   "title": "sysprims fd snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "timestamp", "platform", "pid", "fds", "warnings"],
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "pid",
+    "fds",
+    "warnings"
+  ],
   "properties": {
     "schema_id": {
       "type": "string",
       "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json"
     },
-    "timestamp": { "type": "string" },
-    "platform": { "type": "string" },
+    "timestamp": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
     "pid": {
       "type": "integer",
       "minimum": 1,
@@ -19,18 +30,25 @@
     },
     "fds": {
       "type": "array",
-      "items": { "$ref": "#/definitions/fd_info" }
+      "items": {
+        "$ref": "#/definitions/fd_info"
+      }
     },
     "warnings": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   },
   "definitions": {
     "fd_info": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["fd", "kind"],
+      "required": [
+        "fd",
+        "kind"
+      ],
       "properties": {
         "fd": {
           "type": "integer",
@@ -39,10 +57,18 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["file", "socket", "pipe", "unknown"]
+          "enum": [
+            "file",
+            "socket",
+            "pipe",
+            "unknown"
+          ]
         },
         "path": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

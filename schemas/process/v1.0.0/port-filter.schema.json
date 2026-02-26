@@ -7,7 +7,10 @@
   "properties": {
     "protocol": {
       "type": "string",
-      "enum": ["tcp", "udp"]
+      "enum": [
+        "tcp",
+        "udp"
+      ]
     },
     "local_port": {
       "type": "integer",

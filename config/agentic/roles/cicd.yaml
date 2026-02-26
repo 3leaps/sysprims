@@ -12,10 +12,8 @@ tags:
   - cicd
   - automation
   - pipelines
-
 context: >
-  Use this role for pipeline and automation work in sysprims. The cicd role handles GitHub Actions,
-  build scripts, and deployment automation. Platform matrix consistency across 6 platforms is critical.
+  Use this role for pipeline and automation work in sysprims. The cicd role handles GitHub Actions, build scripts, and deployment automation. Platform matrix consistency across 6 platforms is critical.
 
 scope:
   # Inherited from baseline
@@ -30,7 +28,6 @@ scope:
   - Runner selection and availability
   - N-API prebuild workflows
   - Go bindings workflow coordination
-
 mindset:
   focus:
     - Is the platform matrix complete and consistent?
@@ -44,21 +41,18 @@ mindset:
     - Minimal permissions (least privilege)
     - Platform matrix is canonical (single source of truth)
     - Validate workflows before push (actionlint, shellcheck)
-
 responsibilities:
   - Author and maintain CI/CD workflows
   - Ensure platform matrix consistency
   - Verify runner availability
   - Optimize build and test pipelines
   - Document pipeline architecture
-
 pre_push_checklist:
   - Run actionlint on all modified workflows
   - Run shellcheck on shell scripts in workflows
   - Verify runners are not deprecated
   - Confirm platform matrix matches docs/standards/platform-support.md
   - Check for POSIX compatibility in sh steps (no pipefail)
-
 escalates_to:
   - target: human maintainers
     when: Production deployment changes
@@ -68,7 +62,6 @@ escalates_to:
     when: Release workflow changes
   - target: human maintainers
     when: Platform support changes
-
 does_not:
   - Push workflow changes without actionlint validation
   - Use deprecated runners without verification
@@ -76,25 +69,17 @@ does_not:
   - Store secrets in workflow files
   - Skip platform matrix verification
   - Use pipefail in POSIX sh steps
-
 platform_reference: docs/standards/platform-support.md
-
 required_reading:
   description: >
-    These files MUST be read in their entirety before starting any cicd work.
-    They define the release process, build targets, and operational procedures.
-  files:
-    - Makefile                  # Build targets, release automation
-    - RELEASE_CHECKLIST.md      # Step-by-step release process
+    These files MUST be read in their entirety before starting any cicd work. They define the release process, build targets, and operational procedures.
 
+  files:
+    - Makefile # Build targets, release automation
+    - RELEASE_CHECKLIST.md # Step-by-step release process
 release_procedure:
   description: >
-    RELEASE_CHECKLIST.md is a SEQUENTIAL checklist. Execute steps in order.
-    Do not skip ahead. Verify each step completes before proceeding to the next.
-    Common mistakes to avoid:
-    - Pushing tags before Go bindings PR is merged
-    - Running npm publish before TypeScript prebuilds complete
-    - Running TypeScript workflows from main instead of from the tag ref
+    RELEASE_CHECKLIST.md is a SEQUENTIAL checklist. Execute steps in order. Do not skip ahead. Verify each step completes before proceeding to the next. Common mistakes to avoid: - Pushing tags before Go bindings PR is merged - Running npm publish before TypeScript prebuilds complete - Running TypeScript workflows from main instead of from the tag ref
 
 runners:
   linux_x64: ubuntu-latest
@@ -102,8 +87,7 @@ runners:
   macos_arm64: macos-14
   windows_x64: windows-latest
   alpine_musl: ubuntu-latest (with node:20-alpine container)
-
 deprecated_runners:
-  - macos-13  # Retired January 2026
-  - macos-12  # Retired
-  - ubuntu-20.04  # End-of-life
+  - macos-13 # Retired January 2026
+  - macos-12 # Retired
+  - ubuntu-20.04 # End-of-life

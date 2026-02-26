@@ -4,7 +4,10 @@
   "title": "sysprims spawn in group config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "argv"],
+  "required": [
+    "schema_id",
+    "argv"
+  ],
   "properties": {
     "schema_id": {
       "type": "string",
@@ -13,14 +16,24 @@
     "argv": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "cwd": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "env": {
-      "type": ["object", "null"],
-      "additionalProperties": { "type": "string" }
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
     }
   }
 }

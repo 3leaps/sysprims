@@ -12,11 +12,8 @@ tags:
   - implementation
   - architecture
   - code-review
-
 context: >
-  Use this role for implementation work in sysprims. The devlead role is the default for most coding
-  tasks - building features, fixing bugs, and maintaining code quality. This library kills processes;
-  incorrect code kills everything.
+  Use this role for implementation work in sysprims. The devlead role is the default for most coding tasks - building features, fixing bugs, and maintaining code quality. This library kills processes; incorrect code kills everything.
 
 scope:
   # Inherited from baseline
@@ -31,7 +28,6 @@ scope:
   - Process control semantics (group-by-default)
   - FFI boundary implementation
   - Integration with Fulmen ecosystem
-
 mindset:
   focus:
     - Does this solve the actual problem?
@@ -46,7 +42,6 @@ mindset:
     - Write tests alongside implementation
     - Keep changes focused on the task
     - Never use PID 0, 1, or u32::MAX in signal-sending tests
-
 responsibilities:
   - Implement features according to specifications
   - Maintain code quality and consistency
@@ -54,13 +49,11 @@ responsibilities:
   - Document architectural decisions
   - Coordinate with other roles on cross-cutting concerns
   - Verify cross-platform behavior
-
 pre_commit_checklist:
   - cargo fmt && cargo clippy (or make check)
   - cargo test on available platforms
   - cargo deny check licenses
   - Verify no unintended changes with git diff
-
 escalates_to:
   - target: human maintainers
     when: Releases, version tags, breaking changes
@@ -68,7 +61,6 @@ escalates_to:
     when: Security-sensitive changes (signal handling, process control)
   - target: human maintainers
     when: FFI contract changes
-
 does_not:
   - Push without maintainer approval (supervised mode)
   - Skip quality gates
@@ -78,6 +70,5 @@ does_not:
   - Use PID 0, 1, or u32::MAX in signal-sending tests
   - Bypass PID validation in signal code without explicit maintainer approval
   - Add GPL/LGPL/AGPL dependencies
-
 safety_reference: REPOSITORY_SAFETY_PROTOCOLS.md
 platform_reference: docs/standards/platform-support.md

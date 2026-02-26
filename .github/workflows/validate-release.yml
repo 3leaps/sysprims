@@ -1,5 +1,4 @@
 name: Validate Release
-
 on:
   workflow_dispatch:
     inputs:
@@ -7,10 +6,8 @@ on:
         description: "Release tag to validate (e.g. v0.1.4)"
         required: true
         type: string
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   validate-go:
     name: Validate Go Bindings
@@ -20,7 +17,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-
       - name: Test Go module is fetchable
         run: |
           set -euo pipefail
@@ -36,7 +32,6 @@ jobs:
           go get "${GO_MODULE}@${GO_VERSION}"
 
           echo "Go binding fetch: OK"
-
   validate-typescript:
     name: Validate TypeScript (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -51,28 +46,22 @@ jobs:
           - os: macos-14
           - os: windows-latest
           - os: windows-latest-arm64-s
-
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
-
       - name: Test
         working-directory: bindings/typescript/sysprims
         run: npm run test:ci
-
   validate-typescript-musl:
     name: Validate TypeScript (linux-musl, alpine)
     runs-on: ubuntu-latest
@@ -82,13 +71,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-
       - name: Install build dependencies
         shell: sh
         run: |
           set -eu
           apk add --no-cache bash curl build-base python3 git
-
       - name: Install Rust (rustup)
         shell: bash
         run: |
@@ -97,7 +84,6 @@ jobs:
           . "$HOME/.cargo/env"
           rustc -V
           cargo -V
-
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -105,7 +91,6 @@ jobs:
           set -euo pipefail
           . "$HOME/.cargo/env"
           npm install
-
       - name: Test
         working-directory: bindings/typescript/sysprims
         shell: bash

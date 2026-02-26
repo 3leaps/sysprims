@@ -12,11 +12,8 @@ tags:
   - testing
   - quality
   - validation
-
 context: >
-  Use this role for testing and quality assurance work in sysprims. The qa role focuses on test
-  coverage, edge cases, and quality gate enforcement. Cross-platform testing is critical - all
-  6 supported platforms must be covered.
+  Use this role for testing and quality assurance work in sysprims. The qa role focuses on test coverage, edge cases, and quality gate enforcement. Cross-platform testing is critical - all 6 supported platforms must be covered.
 
 scope:
   # Inherited from baseline
@@ -31,7 +28,6 @@ scope:
   - FFI conformance tests (C, Go, Python, TypeScript)
   - Schema validation golden tests
   - Signal handling edge case testing
-
 mindset:
   focus:
     - What could go wrong here?
@@ -45,7 +41,6 @@ mindset:
     - Make tests deterministic
     - Keep tests fast and focused
     - Use safe PIDs only (99999, std::process::id(), spawned children)
-
 responsibilities:
   - Design comprehensive test cases
   - Identify edge cases and boundary conditions
@@ -53,7 +48,6 @@ responsibilities:
   - Ensure cross-platform test coverage
   - Review test code for effectiveness
   - Verify tests use safe PIDs
-
 escalates_to:
   - target: devlead
     when: Implementation questions during test design
@@ -63,10 +57,8 @@ escalates_to:
     when: Security-related test requirements
   - target: cicd
     when: Release workflow execution or CI/CD pipeline tasks
-
 cross_role_note: >
-  QA agents may be asked to perform CI/CD tasks (e.g., release verification, workflow execution).
-  For such tasks, reference the cicd role and follow RELEASE_CHECKLIST.md as a sequential procedure.
+  QA agents may be asked to perform CI/CD tasks (e.g., release verification, workflow execution). For such tasks, reference the cicd role and follow RELEASE_CHECKLIST.md as a sequential procedure.
 
 does_not:
   - Approve code with failing tests
@@ -75,7 +67,6 @@ does_not:
   - Ignore flaky tests
   - Reduce coverage without justification
   - Skip platform-specific test verification
-
 checklists:
   safe_test_pids:
     - PID 99999 (unlikely to exist)
@@ -85,14 +76,12 @@ checklists:
     - PID 0 (signals caller's process group)
     - PID 1 (signals init/launchd)
     - u32::MAX (becomes -1, signals ALL processes)
-
 platform_reference: docs/standards/platform-support.md
 safety_reference: REPOSITORY_SAFETY_PROTOCOLS.md
-
 required_reading:
   description: >
-    These files MUST be read in their entirety before starting any qa work
-    involving release validation, CI verification, or test infrastructure changes.
+    These files MUST be read in their entirety before starting any qa work involving release validation, CI verification, or test infrastructure changes.
+
   files:
-    - Makefile                  # Build and test targets
-    - RELEASE_CHECKLIST.md      # Release verification steps
+    - Makefile # Build and test targets
+    - RELEASE_CHECKLIST.md # Release verification steps

@@ -5,23 +5,53 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "name_contains": { "type": "string" },
-    "name_equals": { "type": "string" },
-    "user_equals": { "type": "string" },
+    "name_contains": {
+      "type": "string"
+    },
+    "name_equals": {
+      "type": "string"
+    },
+    "user_equals": {
+      "type": "string"
+    },
     "pid_in": {
       "type": "array",
-      "items": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4294967295
+      }
     },
-    "ppid": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "ppid": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
     "state_in": {
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["running", "sleeping", "stopped", "zombie", "unknown"]
+        "enum": [
+          "running",
+          "sleeping",
+          "stopped",
+          "zombie",
+          "unknown"
+        ]
       }
     },
-    "cpu_above": { "type": "number", "minimum": 0, "maximum": 100 },
-    "memory_above_kb": { "type": "integer", "minimum": 0 },
-    "running_for_at_least_secs": { "type": "integer", "minimum": 0 }
+    "cpu_above": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "memory_above_kb": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "running_for_at_least_secs": {
+      "type": "integer",
+      "minimum": 0
+    }
   }
 }
