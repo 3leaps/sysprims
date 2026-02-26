@@ -206,7 +206,7 @@ export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
 // Descendants
 // -----------------------------------------------------------------------------
 
-const MAX_LEVELS_ALL = 0xFFFFFFFF; // u32::MAX
+const MAX_LEVELS_ALL = 0xffffffff; // u32::MAX
 
 /**
  * Get descendants of a process.
@@ -234,9 +234,10 @@ const MAX_LEVELS_ALL = 0xFFFFFFFF; // u32::MAX
  */
 export function descendants(pid: number, options?: DescendantsOptions): DescendantsResult {
   const lib = loadSysprims();
-  const maxLevels = options?.maxLevels != null && isFinite(options.maxLevels)
-    ? options.maxLevels >>> 0
-    : MAX_LEVELS_ALL;
+  const maxLevels =
+    options?.maxLevels != null && Number.isFinite(options.maxLevels)
+      ? options.maxLevels >>> 0
+      : MAX_LEVELS_ALL;
   const configJson = serializeDescendantsConfig(options);
   return callJsonReturn(() =>
     lib.sysprimsProcDescendants(pid >>> 0, maxLevels, configJson),
@@ -273,9 +274,10 @@ export function killDescendants(
   options?: KillDescendantsOptions,
 ): KillDescendantsResult {
   const lib = loadSysprims();
-  const maxLevels = options?.maxLevels != null && isFinite(options.maxLevels)
-    ? options.maxLevels >>> 0
-    : MAX_LEVELS_ALL;
+  const maxLevels =
+    options?.maxLevels != null && Number.isFinite(options.maxLevels)
+      ? options.maxLevels >>> 0
+      : MAX_LEVELS_ALL;
   const configJson = serializeDescendantsConfig(options);
   return callJsonReturn(() =>
     lib.sysprimsProcKillDescendants(pid >>> 0, maxLevels, signal | 0, configJson),

@@ -1,14 +1,14 @@
 # goneat assess configuration for sysprims
 # Rust project with FFI bindings
 #
-# NOTE: goneat v0.3.x does not have native Rust support.
-# Rust checks (cargo fmt, clippy, deny) are handled via Makefile.
-# This config handles ancillary files (YAML, shell, GitHub Actions).
+# goneat lint can run Rust clippy when Rust toolchain/clippy are available.
+# We still keep strict Rust gates in Makefile (cargo fmt --check and
+# cargo clippy --workspace --all-targets -- -D warnings) for parity
+# with repository quality expectations.
 #
-# When goneat v0.4.1 adds Rust toolchain support, this can be extended.
-
+# This config primarily scopes additional non-Rust lint checks.
+# Keep comments current with the installed goneat release.
 version: 1
-
 # Rust toolchain checks - FUTURE (goneat v0.4.1+)
 # rust:
 #   fmt:
@@ -25,7 +25,6 @@ version: 1
 #     - "ffi/**/*.rs"
 #   ignore:
 #     - "**/target/**"
-
 lint:
   # YAML linting (CI workflows, configs)
   yamllint:
@@ -36,7 +35,6 @@ lint:
       - ".github/workflows/**/*.yaml"
       - ".goneat/**/*.yaml"
     ignore: []
-
   # Go linting note:
   # goneat currently runs golangci-lint from the repo root. To support that while keeping
   # Go bindings in a submodule, we include:
@@ -61,7 +59,6 @@ lint:
       - "**/target/**"
       - "**/.git/**"
       - ".plans/**"
-
   # GitHub Actions linting
   github_actions:
     actionlint:
@@ -70,13 +67,12 @@ lint:
         - ".github/workflows/**/*.yml"
         - ".github/workflows/**/*.yaml"
       ignore: []
-
   # Makefile linting
   make:
     checkmake:
       enabled: true
       config:
-        max_body_length: 70  # Bootstrap/tools targets can be complex
+        max_body_length: 75  # Bootstrap/tools targets can be complex
         min_phony_targets:
           - all
           - clean

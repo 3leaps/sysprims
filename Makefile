@@ -7,10 +7,10 @@
 #   make help       - Show all available targets
 #   make bootstrap  - Install tools (sfetch -> goneat)
 #   make check      - Run all quality checks (fmt, lint, test, deny)
-#   make fmt        - Format code (cargo fmt)
+#   make fmt        - Format code (cargo fmt + goneat format)
 #   make build      - Build all crates and FFI
 
-.PHONY: all help bootstrap bootstrap-force tools check test fmt lint build clean version install
+.PHONY: all help bootstrap bootstrap-force tools check test fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen
@@ -35,6 +35,7 @@ BIN_DIR := $(CURDIR)/bin
 # Pinned tool versions for reproducibility
 SFETCH_VERSION := latest
 GONEAT_VERSION ?= v0.5.1
+GONEAT_FORMAT_FAIL_ON ?= medium
 
 # Tool paths
 # sfetch: repo-local (trust anchor) or PATH
@@ -77,8 +78,8 @@ help: ## Show available targets
 	@echo "  check-windows-msvc  cargo check for x86_64-pc-windows-msvc"
 	@echo "  check-windows-gnu   cargo check for x86_64-pc-windows-gnu"
 	@echo "  test            Run test suite"
-	@echo "  fmt             Format code (cargo fmt)"
-	@echo "  lint            Run linting (cargo clippy)"
+	@echo "  fmt             Format code (cargo fmt + goneat format)"
+	@echo "  lint            Run linting (cargo clippy + goneat lint)"
 	@echo "  precommit       Pre-commit checks (fast: fmt, clippy)"
 	@echo "  prepush         Pre-push checks (thorough: fmt, clippy, test, deny)"
 	@echo "  deny            Run cargo-deny license and advisory checks"
@@ -284,19 +285,42 @@ test: ## Run test suite
 	$(CARGO) test --workspace
 	@echo "[ok] Tests passed"
 
-fmt: ## Format code (cargo fmt)
-	@echo "Formatting..."
+fmt: ## Format code (cargo fmt + goneat format)
+	@echo "Formatting Rust..."
 	$(CARGO) fmt --all
+	@if command -v goneat >/dev/null 2>&1; then \
+		echo "Formatting markdown, YAML, JSON..."; \
+		goneat format --quiet; \
+	else \
+		echo "[!!] goneat not found — skipping non-Rust formatting (run 'make bootstrap')"; \
+	fi
 	@echo "[ok] Formatting complete"
 
 fmt-check: ## Check formatting without modifying
-	@echo "Checking formatting..."
+	@echo "Checking Rust formatting..."
 	$(CARGO) fmt --all -- --check
+	@if command -v goneat >/dev/null 2>&1; then \
+		echo "Checking markdown, YAML, JSON formatting (goneat assess format)..."; \
+		if goneat assess --categories format --check --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null; then \
+			true; \
+		else \
+			echo "[--] goneat assess format failed or unavailable; falling back to goneat format --check"; \
+			goneat format --check --quiet; \
+		fi; \
+	else \
+		echo "[!!] goneat not found — skipping non-Rust format check (run 'make bootstrap')"; \
+	fi
 	@echo "[ok] Formatting check passed"
 
-lint: ## Run linting (cargo clippy)
-	@echo "Linting..."
+lint: ## Run linting (cargo clippy + goneat lint)
+	@echo "Linting Rust..."
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	@if command -v goneat >/dev/null 2>&1; then \
+		echo "Linting YAML, shell, workflows..."; \
+		goneat assess --categories lint --fail-on medium --ci-summary --log-level warn --output /dev/null; \
+	else \
+		echo "[!!] goneat not found — skipping non-Rust linting (run 'make bootstrap')"; \
+	fi
 	@echo "[ok] Linting passed"
 
 typecheck: ## Run TypeScript type checking
@@ -539,9 +563,11 @@ install: build-release ## Install sysprims binary to INSTALL_BINDIR
 #
 # Install hooks: goneat hooks init && goneat hooks generate && goneat hooks install
 
+precommit: GONEAT_FORMAT_FAIL_ON=high
 precommit: fmt-check lint ## Run pre-commit checks (fast)
 	@echo "[ok] Pre-commit checks passed"
 
+prepush: GONEAT_FORMAT_FAIL_ON=medium
 prepush: check ## Run pre-push checks (thorough)
 	@echo "[ok] Pre-push checks passed"
 
