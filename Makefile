@@ -700,7 +700,8 @@ release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
 		echo "[!!] VERSION file not found"; \
 		exit 1; \
 	fi; \
-	cargo_version=$$(grep '^\[workspace\.package\]' Cargo.toml -A 2 | grep '^version' | head -1 | sed 's/version = "\(.*\)"/\1/' | tr -d '"'); \
+	cargo_version=$$(cargo metadata --no-deps --format-version 1 2>/dev/null | \
+		grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4); \
 	if [ "$$version_file" != "$$cargo_version" ]; then \
 		echo "[!!] Version mismatch: VERSION=$$version_file, Cargo.toml=$$cargo_version"; \
 		echo "    Run: make version-sync"; \
