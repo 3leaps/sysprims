@@ -705,17 +705,15 @@ release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
 		echo "[!!] Version mismatch: VERSION=$$version_file, Cargo.toml=$$cargo_version"; \
 		echo "    Run: make version-sync"; \
 		exit 1; \
-	fi
-	@echo "[ok] Version synced: $$version_file"
-	@# Check 4: Release notes exist
-	@release_notes="docs/releases/$$version_file.md"; \
+	fi; \
+	echo "[ok] Version synced: $$version_file"; \
+	release_notes="docs/releases/v$$version_file.md"; \
 	if [ ! -f "$$release_notes" ]; then \
 		echo "[!!] Release notes not found at $$release_notes"; \
 		exit 1; \
-	fi
-	@echo "[ok] Release notes exist: $$release_notes"
-	@# Check 5: Local/remote sync
-	@echo "[..] Verifying local/remote sync..."; \
+	fi; \
+	echo "[ok] Release notes exist: $$release_notes"; \
+	echo "[..] Verifying local/remote sync..."; \
 	git fetch origin >/dev/null 2>&1; \
 	local_only=$$(git log --oneline origin/main..HEAD 2>/dev/null | wc -l | tr -d ' '); \
 	remote_only=$$(git log --oneline HEAD..origin/main 2>/dev/null | wc -l | tr -d ' '); \
@@ -728,11 +726,11 @@ release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
 			echo "    $$remote_only remote commit(s) not pulled"; \
 		fi; \
 		exit 1; \
-	fi
-	@echo "[ok] Local and remote are in sync"
-	@echo ""
-	@echo "[ok] All preflight checks passed - ready to tag"
-	@echo "    Next: git tag \"v$$version_file\" -m \"Release $$version_file\""
+	fi; \
+	echo "[ok] Local and remote are in sync"; \
+	echo ""; \
+	echo "[ok] All preflight checks passed - ready to tag"; \
+	echo "    Next: git tag \"v$$version_file\" -m \"Release $$version_file\""
 
 release: release-clean release-download release-checksums release-sign release-export-keys release-upload ## Full release workflow (after CI build)
 	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) complete"
