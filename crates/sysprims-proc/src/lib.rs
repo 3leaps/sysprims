@@ -281,13 +281,13 @@ impl ProcessOptions {
 }
 
 /// Safety caps for environment collection when proc_ext is enabled.
-#[cfg(feature = "proc_ext")]
+#[cfg(all(feature = "proc_ext", unix))]
 pub(crate) const MAX_ENV_ENTRIES: usize = 1024;
-#[cfg(feature = "proc_ext")]
+#[cfg(all(feature = "proc_ext", unix))]
 pub(crate) const MAX_ENV_KEY_BYTES: usize = 1024;
-#[cfg(feature = "proc_ext")]
+#[cfg(all(feature = "proc_ext", unix))]
 pub(crate) const MAX_ENV_VALUE_BYTES: usize = 4096;
-#[cfg(feature = "proc_ext")]
+#[cfg(all(feature = "proc_ext", unix))]
 pub(crate) const MAX_ENV_TOTAL_BYTES: usize = 1_048_576;
 
 /// Information about a single process.
