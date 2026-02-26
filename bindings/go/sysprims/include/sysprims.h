@@ -557,6 +557,12 @@ SysprimsErrorCode sysprims_proc_kill_descendants(uint32_t root_pid,
  * ```json
  * {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000}
  * ```
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * `config_json` must be NULL or a valid UTF-8 C string
+ * * The result string must be freed with `sysprims_free_string()`
  */
 SysprimsErrorCode sysprims_proc_kill_descendants_ex(uint32_t root_pid,
                                                     uint32_t max_levels,
