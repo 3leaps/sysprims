@@ -826,7 +826,10 @@ fn nohup_nonexistent_command() {
     let result = run_nohup(
         "this_command_definitely_does_not_exist_xyz_123",
         &[],
-        NohupConfig::default(),
+        NohupConfig {
+            output_file: Some("/dev/null".to_string()),
+            ..Default::default()
+        },
     );
 
     assert!(result.is_err(), "nohup should fail for nonexistent command");
