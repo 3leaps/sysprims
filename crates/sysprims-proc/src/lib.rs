@@ -1555,7 +1555,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "proc_ext")]
+    #[cfg(all(feature = "proc_ext", unix))]
     fn test_get_process_with_env_populates_env_map() {
         let pid = std::process::id();
         let info = get_process_with_options(pid, ProcessOptions::default().with_env()).unwrap();
