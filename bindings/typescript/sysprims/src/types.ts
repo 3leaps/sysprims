@@ -246,6 +246,8 @@ export interface KillDescendantsOptions {
   cpuMode?: CpuMode;
   /** Sampling interval in milliseconds (used with monitor mode). */
   sampleDurationMs?: number;
+  /** Expand each matched PID to include its descendant subtree. */
+  cascade?: boolean;
 }
 
 /**
@@ -266,4 +268,57 @@ export interface KillDescendantsResult {
   succeeded: number[];
   failed: KillDescendantsFailure[];
   skipped_safety: number;
+}
+
+/**
+ * Rule config for one guard evaluation cycle.
+ */
+export interface GuardRule {
+  root_pid: number;
+  max_levels?: number;
+  name_contains?: string;
+  name_equals?: string;
+  user_equals?: string;
+  pid_in?: number[];
+  ppid?: number;
+  state_in?: ProcessState[];
+  cpu_above?: number;
+  memory_above_kb?: number;
+  running_for_at_least_secs?: number;
+  cpu_mode?: CpuMode;
+  sample_duration_ms?: number;
+}
+
+/**
+ * Action config for one guard cycle.
+ */
+export interface GuardAction {
+  kind?: "kill_descendants";
+  signal?: number;
+  cascade?: boolean;
+}
+
+/**
+ * One-shot guard step input.
+ */
+export interface GuardConfig {
+  rule: GuardRule;
+  action?: GuardAction;
+  action_enabled?: boolean;
+  max_targets?: number;
+}
+
+/**
+ * Structured output from one guard step.
+ */
+export interface GuardEvent {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  matched: number;
+  targeted: number;
+  killed: number;
+  failed: number;
+  skipped_safety: number;
+  warnings: string[];
 }

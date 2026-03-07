@@ -364,6 +364,53 @@ type KillDescendantsFail struct {
 	Error string `json:"error"`
 }
 
+// GuardRule configures one guard evaluation cycle.
+type GuardRule struct {
+	RootPID uint32
+	// MaxLevels controls traversal depth. Nil means all levels.
+	MaxLevels *uint32
+	// Filter applied to descendants before action selection.
+	Filter *ProcessFilter
+	// CpuMode controls CPU measurement semantics.
+	CpuMode CpuMode
+	// SampleDuration is used when CpuMode is monitor. 0 means default sample.
+	SampleDuration time.Duration
+}
+
+// GuardAction configures the action for one guard cycle.
+type GuardAction struct {
+	// Kind currently supports: "kill_descendants" (default).
+	Kind string
+	// Signal to send for kill_descendants. Zero defaults to SIGTERM (15).
+	Signal int
+	// Cascade expands each matched PID to include its descendant subtree.
+	Cascade bool
+}
+
+// GuardConfig is the one-shot guard input.
+type GuardConfig struct {
+	Rule GuardRule
+	// Action defaults to kill_descendants + SIGTERM when omitted.
+	Action GuardAction
+	// ActionEnabled gates remediation. Must be true to send signals.
+	ActionEnabled bool
+	// MaxTargets hard-caps the number of signaled targets (default: 64).
+	MaxTargets uint32
+}
+
+// GuardEvent is the structured output from one guard cycle.
+type GuardEvent struct {
+	SchemaID      string   `json:"schema_id"`
+	Timestamp     string   `json:"timestamp"`
+	Platform      string   `json:"platform"`
+	Matched       uint32   `json:"matched"`
+	Targeted      uint32   `json:"targeted"`
+	Killed        uint32   `json:"killed"`
+	Failed        uint32   `json:"failed"`
+	SkippedSafety uint32   `json:"skipped_safety"`
+	Warnings      []string `json:"warnings"`
+}
+
 type DescendantsOptions struct {
 	// MaxLevels controls traversal depth. Nil means all levels.
 	MaxLevels *uint32
@@ -386,6 +433,8 @@ type KillDescendantsOptions struct {
 	CpuMode CpuMode
 	// SampleDuration is used when CpuMode is monitor. 0 means default sample.
 	SampleDuration time.Duration
+	// Cascade expands each matched PID to include its descendant subtree.
+	Cascade bool
 }
 
 // Descendants returns the process subtree rooted at pid.
@@ -412,7 +461,7 @@ func normalizeCpuMode(mode CpuMode) (CpuMode, error) {
 	}
 }
 
-func buildDescendantsConfigJSON(filter *ProcessFilter, mode CpuMode, sample time.Duration) (string, error) {
+func buildDescendantsConfigJSON(filter *ProcessFilter, mode CpuMode, sample time.Duration, cascade bool) (string, error) {
 	config := make(map[string]interface{})
 	if filter != nil {
 		filterJSON, err := json.Marshal(filter)
@@ -439,6 +488,10 @@ func buildDescendantsConfigJSON(filter *ProcessFilter, mode CpuMode, sample time
 		config["sample_duration_ms"] = uint64(sample / time.Millisecond)
 	}
 
+	if cascade {
+		config["cascade"] = true
+	}
+
 	if len(config) == 0 {
 		return "", nil
 	}
@@ -447,6 +500,85 @@ func buildDescendantsConfigJSON(filter *ProcessFilter, mode CpuMode, sample time
 	if err != nil {
 		return "", &Error{Code: ErrInvalidArgument, Message: "failed to marshal descendants config: " + err.Error()}
 	}
+	return string(configJSON), nil
+}
+
+func buildGuardConfigJSON(cfg *GuardConfig) (string, error) {
+	if cfg == nil {
+		return "", &Error{Code: ErrInvalidArgument, Message: "guard config is required"}
+	}
+
+	if cfg.Rule.RootPID == 0 {
+		return "", &Error{Code: ErrInvalidArgument, Message: "root_pid must be > 0"}
+	}
+
+	rule := map[string]interface{}{
+		"root_pid": cfg.Rule.RootPID,
+	}
+
+	maxLevels := uint32(^uint32(0))
+	if cfg.Rule.MaxLevels != nil {
+		maxLevels = *cfg.Rule.MaxLevels
+	}
+	rule["max_levels"] = maxLevels
+
+	if cfg.Rule.Filter != nil {
+		filterJSON, err := json.Marshal(cfg.Rule.Filter)
+		if err != nil {
+			return "", &Error{Code: ErrInvalidArgument, Message: "failed to marshal filter: " + err.Error()}
+		}
+		if err := json.Unmarshal(filterJSON, &rule); err != nil {
+			return "", &Error{Code: ErrInvalidArgument, Message: "failed to decode filter JSON: " + err.Error()}
+		}
+	}
+
+	mode, err := normalizeCpuMode(cfg.Rule.CpuMode)
+	if err != nil {
+		return "", err
+	}
+	if mode != CpuModeLifetime {
+		rule["cpu_mode"] = string(mode)
+	}
+
+	if cfg.Rule.SampleDuration < 0 {
+		return "", &Error{Code: ErrInvalidArgument, Message: "sample duration must be >= 0"}
+	}
+	if cfg.Rule.SampleDuration > 0 {
+		rule["sample_duration_ms"] = uint64(cfg.Rule.SampleDuration / time.Millisecond)
+	}
+
+	kind := cfg.Action.Kind
+	if kind == "" {
+		kind = "kill_descendants"
+	}
+	signal := cfg.Action.Signal
+	if signal == 0 {
+		signal = 15
+	}
+
+	action := map[string]interface{}{
+		"kind":    kind,
+		"signal":  signal,
+		"cascade": cfg.Action.Cascade,
+	}
+
+	maxTargets := cfg.MaxTargets
+	if maxTargets == 0 {
+		maxTargets = 64
+	}
+
+	wire := map[string]interface{}{
+		"rule":           rule,
+		"action":         action,
+		"action_enabled": cfg.ActionEnabled,
+		"max_targets":    maxTargets,
+	}
+
+	configJSON, err := json.Marshal(wire)
+	if err != nil {
+		return "", &Error{Code: ErrInvalidArgument, Message: "failed to marshal guard config: " + err.Error()}
+	}
+
 	return string(configJSON), nil
 }
 
@@ -466,7 +598,7 @@ func DescendantsWithOptions(pid uint32, opts *DescendantsOptions) (*DescendantsR
 		sampleDuration = opts.SampleDuration
 	}
 
-	configJSON, err := buildDescendantsConfigJSON(filter, cpuMode, sampleDuration)
+	configJSON, err := buildDescendantsConfigJSON(filter, cpuMode, sampleDuration, false)
 	if err != nil {
 		return nil, err
 	}
@@ -525,6 +657,7 @@ func KillDescendantsWithOptions(pid uint32, opts *KillDescendantsOptions) (*Kill
 	var filter *ProcessFilter
 	cpuMode := CpuModeLifetime
 	sampleDuration := time.Duration(0)
+	cascade := false
 
 	if opts != nil {
 		if opts.Signal != 0 {
@@ -536,9 +669,10 @@ func KillDescendantsWithOptions(pid uint32, opts *KillDescendantsOptions) (*Kill
 		filter = opts.Filter
 		cpuMode = opts.CpuMode
 		sampleDuration = opts.SampleDuration
+		cascade = opts.Cascade
 	}
 
-	configJSON, err := buildDescendantsConfigJSON(filter, cpuMode, sampleDuration)
+	configJSON, err := buildDescendantsConfigJSON(filter, cpuMode, sampleDuration, cascade)
 	if err != nil {
 		return nil, err
 	}
@@ -569,6 +703,32 @@ func KillDescendantsWithOptions(pid uint32, opts *KillDescendantsOptions) (*Kill
 	}
 
 	return &result, nil
+}
+
+// GuardStep executes one guard evaluation/remediation cycle.
+func GuardStep(cfg *GuardConfig) (*GuardEvent, error) {
+	configJSON, err := buildGuardConfigJSON(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	configCStr := C.CString(configJSON)
+	defer C.free(unsafe.Pointer(configCStr))
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_guard_step(configCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var event GuardEvent
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &event); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &event, nil
 }
 
 // ListeningPorts returns a snapshot of listening ports, optionally filtered.

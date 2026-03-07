@@ -10,8 +10,9 @@ use std::time::Duration;
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
 use sysprims_proc::{
-    descendants_with_config_and_options, CpuMode, DescendantsConfig, FdFilter, PortFilter,
-    ProcessFilter, ProcessOptions,
+    descendants_with_config_and_options, guard_step, select_descendant_targets, CpuMode,
+    DescendantsConfig, FdFilter, GuardAction, GuardConfig, GuardRule, PortFilter, ProcessFilter,
+    ProcessOptions,
 };
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -36,6 +37,7 @@ struct DescendantsConfigWire {
     filter: ProcessFilter,
     cpu_mode: CpuModeWire,
     sample_duration_ms: Option<u64>,
+    cascade: bool,
 }
 
 #[derive(Debug, Default)]
@@ -43,6 +45,64 @@ struct ParsedDescendantsConfig {
     filter: Option<ProcessFilter>,
     cpu_mode: CpuMode,
     sample_duration: Option<Duration>,
+    cascade: bool,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+enum GuardActionKindWire {
+    #[default]
+    KillDescendants,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardRuleWire {
+    root_pid: u32,
+    max_levels: u32,
+    #[serde(flatten)]
+    filter: ProcessFilter,
+    cpu_mode: CpuModeWire,
+    sample_duration_ms: Option<u64>,
+}
+
+impl Default for GuardRuleWire {
+    fn default() -> Self {
+        Self {
+            root_pid: 0,
+            max_levels: u32::MAX,
+            filter: ProcessFilter::default(),
+            cpu_mode: CpuModeWire::Lifetime,
+            sample_duration_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardActionWire {
+    kind: GuardActionKindWire,
+    signal: i32,
+    cascade: bool,
+}
+
+impl Default for GuardActionWire {
+    fn default() -> Self {
+        Self {
+            kind: GuardActionKindWire::KillDescendants,
+            signal: 15,
+            cascade: false,
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardConfigWire {
+    rule: GuardRuleWire,
+    action: GuardActionWire,
+    action_enabled: bool,
+    max_targets: u32,
 }
 
 unsafe fn parse_process_options(
@@ -116,7 +176,139 @@ unsafe fn parse_descendants_config(
         filter,
         cpu_mode: wire_cpu_mode_to_proc(wire.cpu_mode),
         sample_duration: wire.sample_duration_ms.map(Duration::from_millis),
+        cascade: wire.cascade,
     })
+}
+
+unsafe fn parse_guard_config(config_json: *const c_char) -> Result<GuardConfig, SysprimsError> {
+    if config_json.is_null() {
+        return Err(SysprimsError::invalid_argument(
+            "config_json cannot be null",
+        ));
+    }
+
+    let config_str = CStr::from_ptr(config_json)
+        .to_str()
+        .map_err(|_| SysprimsError::invalid_argument("config_json is not valid UTF-8"))?;
+
+    if config_str.is_empty() || config_str == "{}" {
+        return Err(SysprimsError::invalid_argument(
+            "guard config JSON cannot be empty",
+        ));
+    }
+
+    let wire: GuardConfigWire = serde_json::from_str(config_str).map_err(|e| {
+        SysprimsError::invalid_argument(format!("invalid guard config JSON: {}", e))
+    })?;
+
+    let filter = if process_filter_has_criteria(&wire.rule.filter) {
+        Some(wire.rule.filter)
+    } else {
+        None
+    };
+
+    let action = match wire.action.kind {
+        GuardActionKindWire::KillDescendants => GuardAction::KillDescendants {
+            signal: wire.action.signal,
+            cascade: wire.action.cascade,
+        },
+    };
+
+    Ok(GuardConfig {
+        rule: GuardRule {
+            root_pid: wire.rule.root_pid,
+            max_levels: wire.rule.max_levels,
+            filter,
+            cpu_mode: wire_cpu_mode_to_proc(wire.rule.cpu_mode),
+            sample_duration: wire.rule.sample_duration_ms.map(Duration::from_millis),
+        },
+        action,
+        action_enabled: wire.action_enabled,
+        max_targets: if wire.max_targets == 0 {
+            64
+        } else {
+            wire.max_targets
+        },
+    })
+}
+
+/// Execute one guard evaluation/remediation cycle.
+///
+/// `config_json` uses a nested shape:
+///
+/// ```json
+/// {
+///   "rule": {
+///     "root_pid": 1234,
+///     "max_levels": 3,
+///     "name_contains": "worker",
+///     "cpu_mode": "monitor",
+///     "sample_duration_ms": 1000
+///   },
+///   "action": {
+///     "kind": "kill_descendants",
+///     "signal": 9,
+///     "cascade": true
+///   },
+///   "action_enabled": false,
+///   "max_targets": 64
+/// }
+/// ```
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to a `char*`
+/// * `config_json` must be a valid UTF-8 C string
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_guard_step(
+    config_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    let config = match parse_guard_config(config_json) {
+        Ok(c) => c,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let event = match guard_step(config) {
+        Ok(e) => e,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&event) {
+        Ok(j) => j,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("failed to serialize guard event: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
 }
 
 /// List open file descriptors for a PID, optionally filtered.
@@ -812,7 +1004,7 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants(
 /// `config_json` may include `ProcessFilter` fields plus:
 ///
 /// ```json
-/// {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000}
+/// {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000, "cascade": false}
 /// ```
 ///
 /// # Safety
@@ -847,7 +1039,7 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants_ex(
     let config = DescendantsConfig {
         root_pid,
         max_levels: Some(max_levels),
-        filter: parsed.filter,
+        filter: None,
         cpu_mode: parsed.cpu_mode,
         sample_duration: parsed.sample_duration,
     };
@@ -861,17 +1053,9 @@ pub unsafe extern "C" fn sysprims_proc_kill_descendants_ex(
         }
     };
 
-    // Collect all descendant PIDs.
-    let mut target_pids: Vec<u32> = desc_result
-        .levels
-        .iter()
-        .flat_map(|l| l.processes.iter().map(|p| p.pid))
-        .collect();
-    target_pids.sort_unstable();
-    target_pids.dedup();
-
-    // Safety: exclude root PID (descendants-only).
-    target_pids.retain(|&pid| pid != root_pid);
+    // Select matched targets (optionally expanded to matched subtrees).
+    let mut target_pids =
+        select_descendant_targets(&desc_result, parsed.filter.as_ref(), parsed.cascade);
 
     // Safety: exclude self, PID 1, parent.
     let self_pid = std::process::id();
@@ -1390,5 +1574,58 @@ mod tests {
 
         assert_eq!(code, SysprimsErrorCode::InvalidArgument);
         assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_kill_descendants_accepts_cascade_config() {
+        let pid = std::process::id();
+        let config = CString::new(r#"{"cascade":true}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            sysprims_proc_kill_descendants(pid, u32::MAX, 15, config.as_ptr(), &mut result)
+        };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_proc_guard_step_null_output() {
+        let config = CString::new(r#"{"rule":{"root_pid":1}}"#).unwrap();
+        let code = unsafe { sysprims_proc_guard_step(config.as_ptr(), std::ptr::null_mut()) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn test_proc_guard_step_invalid_config() {
+        let config = CString::new(r#"{}"#).unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_guard_step(config.as_ptr(), &mut result) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_proc_guard_step_action_disabled_self() {
+        let pid = std::process::id();
+        let config = CString::new(format!(
+            r#"{{"rule":{{"root_pid":{},"max_levels":1}},"action_enabled":false,"max_targets":8}}"#,
+            pid
+        ))
+        .unwrap();
+        let mut result: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_guard_step(config.as_ptr(), &mut result) };
+
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!result.is_null());
+
+        let json = unsafe { CStr::from_ptr(result).to_str().unwrap() };
+        assert!(json.contains("guard-event"));
+        assert!(json.contains("\"targeted\":0"));
+
+        unsafe { sysprims_free_string(result) };
     }
 }

@@ -4,8 +4,8 @@ use napi_derive::napi;
 use sysprims_core::schema::{SPAWN_IN_GROUP_CONFIG_V1, TERMINATE_TREE_CONFIG_V1};
 use sysprims_core::SysprimsError;
 use sysprims_proc::{
-    descendants_with_config_and_options, CpuMode, DescendantsConfig, FdFilter, PortFilter,
-    ProcessFilter, ProcessOptions,
+    descendants_with_config_and_options, guard_step, CpuMode, DescendantsConfig, FdFilter,
+    GuardAction, GuardConfig, GuardRule, PortFilter, ProcessFilter, ProcessOptions,
 };
 use sysprims_timeout::{spawn_in_group, terminate_tree, SpawnInGroupConfig, TerminateTreeConfig};
 
@@ -152,6 +152,7 @@ struct DescendantsConfigWire {
     filter: ProcessFilter,
     cpu_mode: CpuModeWire,
     sample_duration_ms: Option<u64>,
+    cascade: bool,
 }
 
 #[derive(Debug, Default)]
@@ -159,6 +160,64 @@ struct ParsedDescendantsConfig {
     filter: Option<ProcessFilter>,
     cpu_mode: CpuMode,
     sample_duration: Option<Duration>,
+    cascade: bool,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+enum GuardActionKindWire {
+    #[default]
+    KillDescendants,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardRuleWire {
+    root_pid: u32,
+    max_levels: u32,
+    #[serde(flatten)]
+    filter: ProcessFilter,
+    cpu_mode: CpuModeWire,
+    sample_duration_ms: Option<u64>,
+}
+
+impl Default for GuardRuleWire {
+    fn default() -> Self {
+        Self {
+            root_pid: 0,
+            max_levels: u32::MAX,
+            filter: ProcessFilter::default(),
+            cpu_mode: CpuModeWire::Lifetime,
+            sample_duration_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardActionWire {
+    kind: GuardActionKindWire,
+    signal: i32,
+    cascade: bool,
+}
+
+impl Default for GuardActionWire {
+    fn default() -> Self {
+        Self {
+            kind: GuardActionKindWire::KillDescendants,
+            signal: 15,
+            cascade: false,
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardConfigWire {
+    rule: GuardRuleWire,
+    action: GuardActionWire,
+    action_enabled: bool,
+    max_targets: u32,
 }
 
 fn process_filter_has_criteria(filter: &ProcessFilter) -> bool {
@@ -198,6 +257,49 @@ fn parse_descendants_config(config_json: &str) -> Result<ParsedDescendantsConfig
         filter,
         cpu_mode: wire_cpu_mode_to_proc(wire.cpu_mode),
         sample_duration: wire.sample_duration_ms.map(Duration::from_millis),
+        cascade: wire.cascade,
+    })
+}
+
+fn parse_guard_config(config_json: &str) -> Result<GuardConfig, SysprimsError> {
+    if config_json.is_empty() || config_json == "{}" {
+        return Err(SysprimsError::invalid_argument(
+            "guard config JSON cannot be empty",
+        ));
+    }
+
+    let wire: GuardConfigWire = serde_json::from_str(config_json).map_err(|e| {
+        SysprimsError::invalid_argument(format!("invalid guard config JSON: {}", e))
+    })?;
+
+    let filter = if process_filter_has_criteria(&wire.rule.filter) {
+        Some(wire.rule.filter)
+    } else {
+        None
+    };
+
+    let action = match wire.action.kind {
+        GuardActionKindWire::KillDescendants => GuardAction::KillDescendants {
+            signal: wire.action.signal,
+            cascade: wire.action.cascade,
+        },
+    };
+
+    Ok(GuardConfig {
+        rule: GuardRule {
+            root_pid: wire.rule.root_pid,
+            max_levels: wire.rule.max_levels,
+            filter,
+            cpu_mode: wire_cpu_mode_to_proc(wire.rule.cpu_mode),
+            sample_duration: wire.rule.sample_duration_ms.map(Duration::from_millis),
+        },
+        action,
+        action_enabled: wire.action_enabled,
+        max_targets: if wire.max_targets == 0 {
+            64
+        } else {
+            wire.max_targets
+        },
     })
 }
 
@@ -395,7 +497,7 @@ pub fn sysprims_proc_kill_descendants(
     let config = DescendantsConfig {
         root_pid,
         max_levels: Some(max_levels),
-        filter: parsed.filter,
+        filter: None,
         cpu_mode: parsed.cpu_mode,
         sample_duration: parsed.sample_duration,
     };
@@ -406,17 +508,12 @@ pub fn sysprims_proc_kill_descendants(
         Err(e) => return err_json(e),
     };
 
-    // Collect all descendant PIDs
-    let mut target_pids: Vec<u32> = desc_result
-        .levels
-        .iter()
-        .flat_map(|l| l.processes.iter().map(|p| p.pid))
-        .collect();
-    target_pids.sort_unstable();
-    target_pids.dedup();
-
-    // Safety: exclude root PID (descendants-only)
-    target_pids.retain(|&pid| pid != root_pid);
+    // Select matched targets (optionally expanded to matched subtrees).
+    let mut target_pids = sysprims_proc::select_descendant_targets(
+        &desc_result,
+        parsed.filter.as_ref(),
+        parsed.cascade,
+    );
 
     // Safety: exclude self, PID 1, parent
     let self_pid = std::process::id();
@@ -464,6 +561,25 @@ pub fn sysprims_proc_kill_descendants(
             "failed to serialize kill-descendants result: {}",
             e
         ))),
+    }
+}
+
+#[napi]
+pub fn sysprims_proc_guard_step(config_json: String) -> SysprimsCallJsonResult {
+    let config = match parse_guard_config(&config_json) {
+        Ok(c) => c,
+        Err(e) => return err_json(e),
+    };
+
+    match guard_step(config) {
+        Ok(event) => match serde_json::to_string(&event) {
+            Ok(json) => ok_json(json),
+            Err(e) => err_json(SysprimsError::internal(format!(
+                "failed to serialize guard event: {}",
+                e
+            ))),
+        },
+        Err(e) => err_json(e),
     }
 }
 

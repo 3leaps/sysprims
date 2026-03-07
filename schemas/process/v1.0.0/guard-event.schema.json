@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/guard-event.schema.json",
+  "title": "sysprims guard event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "matched",
+    "targeted",
+    "killed",
+    "failed",
+    "skipped_safety",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/guard-event.schema.json"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "matched": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "targeted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "killed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "skipped_safety": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

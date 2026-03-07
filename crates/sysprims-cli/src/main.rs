@@ -7,9 +7,9 @@ use sysprims_core::{
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
 use sysprims_proc::{
-    cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports, snapshot,
-    snapshot_filtered, CpuMode as ProcCpuMode, DescendantsConfig, FdFilter, FdKind, PortFilter,
-    ProcessFilter, Protocol,
+    cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports,
+    select_descendant_targets, snapshot, snapshot_filtered, CpuMode as ProcCpuMode,
+    DescendantsConfig, FdFilter, FdKind, PortFilter, ProcessFilter, Protocol,
 };
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
@@ -33,6 +33,7 @@ const DESCENDANTS_AFTER_HELP: &str = r#"Examples:
 const KILL_DESCENDANTS_AFTER_HELP: &str = r#"Examples:
   sysprims kill-descendants 14796 --dry-run
   sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --dry-run
+  sysprims kill-descendants 14796 --cpu-above 80 --cascade --dry-run
   sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --signal KILL --yes
   sysprims kill-descendants 14796 --name worker --signal TERM --yes
 "#;
@@ -427,6 +428,10 @@ struct KillDescendantsArgs {
     /// Proceed with kill (default is preview mode).
     #[arg(long)]
     yes: bool,
+
+    /// Expand each matched PID to include its descendant subtree.
+    #[arg(long)]
+    cascade: bool,
 
     /// Proceed even if CLI safety checks would normally refuse.
     #[arg(long)]
@@ -1579,24 +1584,15 @@ fn run_kill_descendants(args: KillDescendantsArgs) -> Result<i32, SysprimsError>
     let config = DescendantsConfig {
         root_pid: args.pid,
         max_levels: Some(max_levels),
-        filter,
+        filter: None,
         cpu_mode: to_proc_cpu_mode(args.cpu_mode),
         sample_duration,
     };
 
     let result = descendants_with_config(config)?;
 
-    // Collect all PIDs from all levels.
-    let mut target_pids: Vec<u32> = result
-        .levels
-        .iter()
-        .flat_map(|l| l.processes.iter().map(|p| p.pid))
-        .collect();
-    target_pids.sort_unstable();
-    target_pids.dedup();
-
-    // Never kill the root PID itself — descendants-only.
-    target_pids.retain(|&pid| pid != args.pid);
+    // Select matched targets (optionally expanded to matched subtrees).
+    let mut target_pids = select_descendant_targets(&result, filter.as_ref(), args.cascade);
 
     if target_pids.is_empty() {
         if args.json {
@@ -1638,7 +1634,7 @@ fn run_kill_descendants(args: KillDescendantsArgs) -> Result<i32, SysprimsError>
         if args.json {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&result).expect("serialize json")
+                serde_json::to_string_pretty(&target_pids).expect("serialize json")
             );
         } else {
             for pid in &target_pids {

@@ -42,12 +42,12 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 use std::time::Duration;
 use sysprims_core::schema::{
-    DESCENDANTS_RESULT_SAMPLED_V1, DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1, PORT_BINDINGS_V1,
-    PORT_FILTER_V1, PROCESS_INFO_SAMPLED_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
+    DESCENDANTS_RESULT_SAMPLED_V1, DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1, GUARD_EVENT_V1,
+    PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_SAMPLED_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
 };
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
@@ -1013,6 +1013,245 @@ pub fn descendants_with_config(config: DescendantsConfig) -> SysprimsResult<Desc
     descendants_with_config_and_options(config, ProcessOptions::default())
 }
 
+/// Select descendant target PIDs from a traversal result.
+///
+/// This helper is intended for remediation workflows (for example,
+/// `kill-descendants` and `guard_step`) that need to compute a deterministic
+/// target set from one traversal snapshot.
+///
+/// When `cascade` is `false`, the result contains only matched descendant PIDs.
+/// When `cascade` is `true`, each matched PID is expanded to include its
+/// descendants within the already traversed tree.
+///
+/// Returned PIDs are sorted, deduplicated, and never include `root_pid`.
+pub fn select_descendant_targets(
+    result: &DescendantsResult,
+    filter: Option<&ProcessFilter>,
+    cascade: bool,
+) -> Vec<u32> {
+    let all_procs: Vec<&ProcessInfo> = result
+        .levels
+        .iter()
+        .flat_map(|l| l.processes.iter())
+        .collect();
+
+    let matched_roots: Vec<u32> = all_procs
+        .iter()
+        .filter(|p| filter.map(|f| f.matches(p)).unwrap_or(true))
+        .map(|p| p.pid)
+        .collect();
+
+    if !cascade {
+        let mut out = matched_roots;
+        out.sort_unstable();
+        out.dedup();
+        out.retain(|&pid| pid != result.root_pid);
+        return out;
+    }
+
+    let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+    for proc in all_procs {
+        children_map.entry(proc.ppid).or_default().push(proc.pid);
+    }
+
+    let mut expanded: HashSet<u32> = HashSet::new();
+    for root in matched_roots {
+        let mut stack = vec![root];
+        while let Some(pid) = stack.pop() {
+            if !expanded.insert(pid) {
+                continue;
+            }
+            if let Some(children) = children_map.get(&pid) {
+                stack.extend(children.iter().copied());
+            }
+        }
+    }
+
+    let mut out: Vec<u32> = expanded.into_iter().collect();
+    out.sort_unstable();
+    out.retain(|&pid| pid != result.root_pid);
+    out
+}
+
+/// Rule configuration for one guard evaluation cycle.
+#[derive(Debug, Clone)]
+pub struct GuardRule {
+    /// Root PID used for descendants traversal.
+    pub root_pid: u32,
+
+    /// Maximum descendants traversal depth.
+    pub max_levels: u32,
+
+    /// Optional descendants filter.
+    pub filter: Option<ProcessFilter>,
+
+    /// CPU measurement mode used for `cpu_above` filtering.
+    pub cpu_mode: CpuMode,
+
+    /// Optional sampling interval used when `cpu_mode = Monitor`.
+    pub sample_duration: Option<Duration>,
+}
+
+/// Action configuration for one guard evaluation cycle.
+#[derive(Debug, Clone)]
+pub enum GuardAction {
+    /// Kill descendant processes matching the rule.
+    KillDescendants {
+        /// Signal number to send.
+        signal: i32,
+        /// Expand each matched PID to include its descendant subtree.
+        cascade: bool,
+    },
+}
+
+/// Configuration for one guard evaluation cycle.
+#[derive(Debug, Clone)]
+pub struct GuardConfig {
+    /// Rule used to evaluate descendants.
+    pub rule: GuardRule,
+    /// Action to run after evaluation.
+    pub action: GuardAction,
+    /// Explicit action gate. Defaults should be false at call sites.
+    pub action_enabled: bool,
+    /// Hard cap on number of signaled targets when action is enabled.
+    pub max_targets: u32,
+}
+
+/// Structured output for one guard evaluation cycle.
+#[derive(Debug, Clone, Serialize)]
+pub struct GuardEvent {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+    /// Event timestamp (ISO 8601).
+    pub timestamp: String,
+    /// Platform identifier.
+    pub platform: &'static str,
+    /// Number of descendants matching the rule filter.
+    pub matched: u32,
+    /// Number of targets selected for action after safety/cap checks.
+    pub targeted: u32,
+    /// Number of successful kills in this cycle.
+    pub killed: u32,
+    /// Number of failed kills in this cycle.
+    pub failed: u32,
+    /// Number of targets skipped by safety exclusions.
+    pub skipped_safety: u32,
+    /// Non-fatal warnings.
+    pub warnings: Vec<String>,
+}
+
+/// Execute one guard evaluation cycle.
+///
+/// This function performs descendants evaluation and optional remediation behind
+/// an explicit action gate (`action_enabled`).
+pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if config.rule.root_pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if config.rule.root_pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            config.rule.root_pid, MAX_SAFE_PID
+        )));
+    }
+    if config.max_targets == 0 {
+        return Err(SysprimsError::invalid_argument("max_targets must be >= 1"));
+    }
+    if let Some(f) = config.rule.filter.as_ref() {
+        f.validate()?;
+    }
+
+    let desc = descendants_with_config_and_options(
+        DescendantsConfig {
+            root_pid: config.rule.root_pid,
+            max_levels: Some(config.rule.max_levels),
+            filter: None,
+            cpu_mode: config.rule.cpu_mode,
+            sample_duration: config.rule.sample_duration,
+        },
+        ProcessOptions::default(),
+    )?;
+
+    let matched_pids = select_descendant_targets(&desc, config.rule.filter.as_ref(), false);
+    let matched = matched_pids.len() as u32;
+
+    let (signal, cascade) = match config.action {
+        GuardAction::KillDescendants { signal, cascade } => (signal, cascade),
+    };
+
+    let mut warnings = Vec::new();
+    if !config.action_enabled {
+        warnings.push("action disabled; no signals sent".to_string());
+        return Ok(GuardEvent {
+            schema_id: GUARD_EVENT_V1,
+            timestamp: current_timestamp(),
+            platform: get_platform(),
+            matched,
+            targeted: 0,
+            killed: 0,
+            failed: 0,
+            skipped_safety: 0,
+            warnings,
+        });
+    }
+
+    let mut target_pids = select_descendant_targets(&desc, config.rule.filter.as_ref(), cascade);
+
+    if target_pids.len() > config.max_targets as usize {
+        target_pids.truncate(config.max_targets as usize);
+        warnings.push(format!(
+            "target count capped at max_targets={} for this cycle",
+            config.max_targets
+        ));
+    }
+
+    let self_pid = std::process::id();
+    let parent_pid = get_process(self_pid).ok().map(|p| p.ppid);
+
+    let before = target_pids.len();
+    target_pids.retain(|&pid| pid != self_pid && pid != 1 && pid != config.rule.root_pid);
+    if let Some(ppid) = parent_pid {
+        target_pids.retain(|&pid| pid != ppid);
+    }
+    let skipped_safety = before.saturating_sub(target_pids.len()) as u32;
+    if skipped_safety > 0 {
+        warnings.push(format!(
+            "skipped {} unsafe target(s) (self/PID1/parent/root)",
+            skipped_safety
+        ));
+    }
+
+    if target_pids.is_empty() {
+        return Ok(GuardEvent {
+            schema_id: GUARD_EVENT_V1,
+            timestamp: current_timestamp(),
+            platform: get_platform(),
+            matched,
+            targeted: 0,
+            killed: 0,
+            failed: 0,
+            skipped_safety,
+            warnings,
+        });
+    }
+
+    let batch = sysprims_signal::kill_many(&target_pids, signal)?;
+
+    Ok(GuardEvent {
+        schema_id: GUARD_EVENT_V1,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+        matched,
+        targeted: target_pids.len() as u32,
+        killed: batch.succeeded.len() as u32,
+        failed: batch.failed.len() as u32,
+        skipped_safety,
+        warnings,
+    })
+}
+
 /// Get descendants using explicit traversal configuration and optional extended fields.
 ///
 /// # Examples
@@ -1284,6 +1523,8 @@ fn make_wait_pid_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Child, Command, Stdio};
+    use std::thread;
 
     #[test]
     fn test_snapshot_not_empty() {
@@ -1641,5 +1882,280 @@ mod tests {
         assert!(json.contains("\"timestamp\""));
         assert!(json.contains("\"processes\""));
         assert!(json.contains(PROCESS_INFO_V1));
+    }
+
+    fn test_process(pid: u32, ppid: u32, name: &str) -> ProcessInfo {
+        ProcessInfo {
+            pid,
+            ppid,
+            name: name.to_string(),
+            user: None,
+            cpu_percent: 0.0,
+            memory_kb: 0,
+            elapsed_seconds: 0,
+            start_time_unix_ms: None,
+            exe_path: None,
+            state: ProcessState::Running,
+            cmdline: vec![],
+            env: None,
+            thread_count: None,
+        }
+    }
+
+    fn test_descendants_tree() -> DescendantsResult {
+        DescendantsResult {
+            schema_id: DESCENDANTS_RESULT_V1,
+            root_pid: 10,
+            max_levels: 10,
+            levels: vec![
+                DescendantsLevel {
+                    level: 1,
+                    processes: vec![test_process(11, 10, "helper"), test_process(12, 10, "db")],
+                },
+                DescendantsLevel {
+                    level: 2,
+                    processes: vec![
+                        test_process(13, 11, "child-a"),
+                        test_process(14, 12, "child-b"),
+                    ],
+                },
+            ],
+            total_found: 4,
+            matched_by_filter: 4,
+            timestamp: "1970-01-01T00:00:00Z".to_string(),
+            platform: get_platform(),
+        }
+    }
+
+    fn spawn_sleep_child() -> Child {
+        #[cfg(unix)]
+        {
+            Command::new("sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn sleep child")
+        }
+
+        #[cfg(windows)]
+        {
+            Command::new("cmd")
+                .args(["/C", "timeout", "/T", "30", "/NOBREAK"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn timeout child")
+        }
+    }
+
+    #[test]
+    fn test_select_descendant_targets_non_cascade() {
+        let result = test_descendants_tree();
+        let filter = ProcessFilter {
+            name_contains: Some("helper".to_string()),
+            ..Default::default()
+        };
+
+        let targets = select_descendant_targets(&result, Some(&filter), false);
+        assert_eq!(targets, vec![11]);
+    }
+
+    #[test]
+    fn test_select_descendant_targets_cascade() {
+        let result = test_descendants_tree();
+        let filter = ProcessFilter {
+            name_contains: Some("helper".to_string()),
+            ..Default::default()
+        };
+
+        let targets = select_descendant_targets(&result, Some(&filter), true);
+        assert_eq!(targets, vec![11, 13]);
+    }
+
+    #[test]
+    fn test_guard_step_action_disabled_emits_event() {
+        let cfg = GuardConfig {
+            rule: GuardRule {
+                root_pid: std::process::id(),
+                max_levels: 1,
+                filter: None,
+                cpu_mode: CpuMode::Lifetime,
+                sample_duration: None,
+            },
+            action: GuardAction::KillDescendants {
+                signal: 15,
+                cascade: false,
+            },
+            action_enabled: false,
+            max_targets: 32,
+        };
+
+        let event = guard_step(cfg).unwrap();
+        assert_eq!(event.schema_id, GUARD_EVENT_V1);
+        assert_eq!(event.targeted, 0);
+        assert_eq!(event.killed, 0);
+        assert_eq!(event.failed, 0);
+        assert!(event.warnings.iter().any(|w| w.contains("action disabled")));
+    }
+
+    #[test]
+    fn test_guard_step_rejects_zero_max_targets() {
+        let cfg = GuardConfig {
+            rule: GuardRule {
+                root_pid: std::process::id(),
+                max_levels: 1,
+                filter: None,
+                cpu_mode: CpuMode::Lifetime,
+                sample_duration: None,
+            },
+            action: GuardAction::KillDescendants {
+                signal: 15,
+                cascade: false,
+            },
+            action_enabled: false,
+            max_targets: 0,
+        };
+
+        let err = guard_step(cfg).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn test_guard_step_action_enabled_kills_targeted_child() {
+        let mut child = spawn_sleep_child();
+        let child_pid = child.id();
+
+        // Give the child a moment to become visible in process snapshots.
+        thread::sleep(Duration::from_millis(50));
+
+        let cfg = GuardConfig {
+            rule: GuardRule {
+                root_pid: std::process::id(),
+                max_levels: 1,
+                filter: Some(ProcessFilter {
+                    pid_in: Some(vec![child_pid]),
+                    ..Default::default()
+                }),
+                cpu_mode: CpuMode::Lifetime,
+                sample_duration: None,
+            },
+            action: GuardAction::KillDescendants {
+                signal: 15,
+                cascade: false,
+            },
+            action_enabled: true,
+            max_targets: 8,
+        };
+
+        let event = guard_step(cfg).unwrap();
+        assert_eq!(event.targeted, 1);
+        assert_eq!(event.killed, 1);
+        assert_eq!(event.failed, 0);
+
+        let mut exited = false;
+        for _ in 0..20 {
+            if let Some(_status) = child.try_wait().expect("poll child exit") {
+                exited = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        if !exited {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(exited, "guard_step should terminate targeted child");
+    }
+
+    #[test]
+    fn test_guard_step_action_enabled_applies_max_targets_cap() {
+        let mut child_a = spawn_sleep_child();
+        let mut child_b = spawn_sleep_child();
+        let pids = vec![child_a.id(), child_b.id()];
+
+        // Wait until both children are discoverable as direct descendants.
+        let mut both_visible = false;
+        for _ in 0..20 {
+            let desc = descendants_with_config(DescendantsConfig {
+                root_pid: std::process::id(),
+                max_levels: Some(1),
+                filter: Some(ProcessFilter {
+                    pid_in: Some(pids.clone()),
+                    ..Default::default()
+                }),
+                cpu_mode: CpuMode::Lifetime,
+                sample_duration: None,
+            })
+            .unwrap();
+            if desc.matched_by_filter >= 2 {
+                both_visible = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(both_visible, "expected both spawned children to be visible");
+
+        let event = guard_step(GuardConfig {
+            rule: GuardRule {
+                root_pid: std::process::id(),
+                max_levels: 1,
+                filter: Some(ProcessFilter {
+                    pid_in: Some(pids.clone()),
+                    ..Default::default()
+                }),
+                cpu_mode: CpuMode::Lifetime,
+                sample_duration: None,
+            },
+            action: GuardAction::KillDescendants {
+                signal: 15,
+                cascade: false,
+            },
+            action_enabled: true,
+            max_targets: 1,
+        })
+        .unwrap();
+
+        assert_eq!(event.matched, 2);
+        assert_eq!(event.targeted, 1);
+        assert_eq!(event.killed, 1);
+        assert_eq!(event.failed, 0);
+        assert!(
+            event
+                .warnings
+                .iter()
+                .any(|w| w.contains("target count capped at max_targets=1")),
+            "expected max_targets cap warning, got: {:?}",
+            event.warnings
+        );
+
+        // Exactly one process should exit quickly; the other remains until cleanup.
+        let mut exited_count = 0;
+        for _ in 0..20 {
+            exited_count = 0;
+            if child_a.try_wait().expect("poll child A").is_some() {
+                exited_count += 1;
+            }
+            if child_b.try_wait().expect("poll child B").is_some() {
+                exited_count += 1;
+            }
+            if exited_count >= 1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        assert!(
+            exited_count >= 1,
+            "expected at least one child to exit after capped guard_step kill"
+        );
+
+        for child in [&mut child_a, &mut child_b] {
+            if child.try_wait().expect("final poll").is_none() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
     }
 }

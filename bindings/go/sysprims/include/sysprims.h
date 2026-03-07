@@ -513,6 +513,19 @@ SysprimsErrorCode sysprims_proc_descendants_ex(uint32_t root_pid,
                                                char **result_json_out);
 
 /**
+ * Execute one guard evaluation/remediation cycle.
+ *
+ * `config_json` uses nested `rule` and `action` objects.
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * `config_json` must be a valid UTF-8 C string
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_guard_step(const char *config_json, char **result_json_out);
+
+/**
  * Kill descendants of a process.
  *
  * Traverses the process tree from `root_pid`, collects descendant PIDs, and
@@ -555,7 +568,7 @@ SysprimsErrorCode sysprims_proc_kill_descendants(uint32_t root_pid,
  * `config_json` may include `ProcessFilter` fields plus:
  *
  * ```json
- * {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000}
+ * {"cpu_mode": "lifetime|monitor", "sample_duration_ms": 3000, "cascade": false}
  * ```
  *
  * # Safety

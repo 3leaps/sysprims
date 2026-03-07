@@ -171,6 +171,14 @@ pub const DESCENDANTS_RESULT_V1: &str =
 pub const DESCENDANTS_RESULT_SAMPLED_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.1.0/descendants-result-sampled.schema.json";
 
+/// Schema ID for guard step event JSON output (v1.0.0).
+///
+/// This schema defines the structure of one-shot `guard_step()` events.
+///
+/// Schema location: `schemas/process/v1.0.0/guard-event.schema.json`
+pub const GUARD_EVENT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/process/v1.0.0/guard-event.schema.json";
+
 // ============================================================================
 // Schema Host Constants
 // ============================================================================
@@ -204,6 +212,7 @@ mod tests {
         assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with("https://"));
         assert!(DESCENDANTS_RESULT_V1.starts_with("https://"));
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with("https://"));
+        assert!(GUARD_EVENT_V1.starts_with("https://"));
     }
 
     #[test]
@@ -275,6 +284,10 @@ mod tests {
             DESCENDANTS_RESULT_SAMPLED_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
+        assert!(
+            GUARD_EVENT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
     }
 
     #[test]
@@ -298,6 +311,7 @@ mod tests {
         assert!(SPAWN_IN_GROUP_RESULT_V1.ends_with(".schema.json"));
         assert!(DESCENDANTS_RESULT_V1.ends_with(".schema.json"));
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.ends_with(".schema.json"));
+        assert!(GUARD_EVENT_V1.ends_with(".schema.json"));
 
         // Process snapshot schemas are v1.1.0 (additive ProcessInfo fields).
         assert!(PROCESS_INFO_V1.contains("/v1.1.0/"));
@@ -318,6 +332,7 @@ mod tests {
         assert!(SPAWN_IN_GROUP_CONFIG_V1.contains("/v1.0.0/"));
         assert!(SPAWN_IN_GROUP_RESULT_V1.contains("/v1.0.0/"));
         assert!(DESCENDANTS_RESULT_V1.contains("/v1.0.0/"));
+        assert!(GUARD_EVENT_V1.contains("/v1.0.0/"));
     }
 
     #[test]
@@ -387,6 +402,10 @@ mod tests {
             DESCENDANTS_RESULT_SAMPLED_V1.contains("/process/"),
             "descendants-result-sampled schema should have process topic"
         );
+        assert!(
+            GUARD_EVENT_V1.contains("/process/"),
+            "guard-event schema should have process topic"
+        );
     }
 
     #[test]
@@ -408,6 +427,7 @@ mod tests {
             SPAWN_IN_GROUP_RESULT_V1,
             DESCENDANTS_RESULT_V1,
             DESCENDANTS_RESULT_SAMPLED_V1,
+            GUARD_EVENT_V1,
         ];
 
         // Check all pairs are different
@@ -443,5 +463,6 @@ mod tests {
         assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with(&prefix));
         assert!(DESCENDANTS_RESULT_V1.starts_with(&prefix));
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with(&prefix));
+        assert!(GUARD_EVENT_V1.starts_with(&prefix));
     }
 }

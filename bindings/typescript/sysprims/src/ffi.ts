@@ -56,6 +56,7 @@ export type SysprimsLib = {
     signal: number,
     configJson: string,
   ) => SysprimsCallJsonResult;
+  sysprimsProcGuardStep: (configJson: string) => SysprimsCallJsonResult;
 
   // Self introspection
   sysprimsSelfGetpgid: () => SysprimsCallU32Result;

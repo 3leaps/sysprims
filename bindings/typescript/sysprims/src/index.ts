@@ -8,6 +8,8 @@ import type {
   DescendantsResult,
   FdFilter,
   FdSnapshot,
+  GuardConfig,
+  GuardEvent,
   KillDescendantsOptions,
   KillDescendantsResult,
   PortBindingsSnapshot,
@@ -33,6 +35,10 @@ export type {
   DescendantsResult,
   FdFilter,
   FdSnapshot,
+  GuardAction,
+  GuardConfig,
+  GuardEvent,
+  GuardRule,
   KillDescendantsFailure,
   KillDescendantsOptions,
   KillDescendantsResult,
@@ -80,6 +86,7 @@ function serializeDescendantsConfig(options?: {
   filter?: ProcessFilter;
   cpuMode?: CpuMode;
   sampleDurationMs?: number;
+  cascade?: boolean;
 }): string {
   if (!options) {
     return "";
@@ -110,6 +117,10 @@ function serializeDescendantsConfig(options?: {
       );
     }
     wire.sample_duration_ms = Math.trunc(sample);
+  }
+
+  if (options.cascade === true) {
+    wire.cascade = true;
   }
 
   if (Object.keys(wire).length === 0) {
@@ -282,6 +293,17 @@ export function killDescendants(
   return callJsonReturn(() =>
     lib.sysprimsProcKillDescendants(pid >>> 0, maxLevels, signal | 0, configJson),
   ) as KillDescendantsResult;
+}
+
+/**
+ * Execute one guard evaluation/remediation cycle.
+ *
+ * Actions are gated by `action_enabled`; when false, this is evaluate-only.
+ */
+export function guardStep(config: GuardConfig): GuardEvent {
+  const lib = loadSysprims();
+  const configJson = JSON.stringify(config);
+  return callJsonReturn(() => lib.sysprimsProcGuardStep(configJson)) as GuardEvent;
 }
 
 // -----------------------------------------------------------------------------

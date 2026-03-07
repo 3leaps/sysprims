@@ -143,6 +143,30 @@ func TestProcessListWithOptions(t *testing.T) {
 	}
 }
 
+func TestGuardStepActionDisabled(t *testing.T) {
+	event, err := sysprims.GuardStep(&sysprims.GuardConfig{
+		Rule: sysprims.GuardRule{
+			RootPID: uint32(os.Getpid()),
+			MaxLevels: func() *uint32 {
+				v := uint32(1)
+				return &v
+			}(),
+		},
+		ActionEnabled: false,
+		MaxTargets:    8,
+	})
+	if err != nil {
+		t.Fatalf("GuardStep failed: %v", err)
+	}
+
+	if event.SchemaID == "" {
+		t.Fatal("GuardStep returned empty schema_id")
+	}
+	if event.Targeted != 0 || event.Killed != 0 || event.Failed != 0 {
+		t.Fatalf("GuardStep action-disabled event had unexpected action counts: %+v", event)
+	}
+}
+
 // TestProcessGetSelf verifies that ProcessGet works for the current process.
 func TestProcessGetSelf(t *testing.T) {
 	pid := uint32(os.Getpid())

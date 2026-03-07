@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   forceKill,
+  guardStep,
   listeningPorts,
   listFds,
   processList,
@@ -89,6 +90,22 @@ test("processList({ name_contains }) filters correctly", () => {
   assert.ok(snapshot.processes.length >= 1, "should find at least current process");
   const found = snapshot.processes.find((p) => p.pid === process.pid);
   assert.ok(found, "current process should match its own name filter");
+});
+
+test("guardStep action-disabled returns structured event", () => {
+  const event = guardStep({
+    rule: {
+      root_pid: process.pid,
+      max_levels: 1,
+    },
+    action_enabled: false,
+    max_targets: 8,
+  });
+
+  assert.ok(event.schema_id.includes("guard-event"));
+  assert.equal(event.targeted, 0);
+  assert.equal(event.killed, 0);
+  assert.equal(event.failed, 0);
 });
 
 test("listFds(process.pid) returns a snapshot", () => {
