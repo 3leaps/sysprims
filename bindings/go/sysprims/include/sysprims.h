@@ -526,6 +526,21 @@ SysprimsErrorCode sysprims_proc_descendants_ex(uint32_t root_pid,
 SysprimsErrorCode sysprims_proc_guard_step(const char *config_json, char **result_json_out);
 
 /**
+ * Walk the ancestor chain of a PID upward.
+ *
+ * Returns a JSON object matching `ancestors-result.schema.json`.
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_ancestors(uint32_t pid,
+                                          uint32_t max_depth,
+                                          const char *options_json,
+                                          char **result_json_out);
+
+/**
  * Kill descendants of a process.
  *
  * Traverses the process tree from `root_pid`, collects descendant PIDs, and

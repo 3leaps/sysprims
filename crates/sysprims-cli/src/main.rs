@@ -7,9 +7,9 @@ use sysprims_core::{
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
 use sysprims_proc::{
-    cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports,
+    ancestors, cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports,
     select_descendant_targets, snapshot, snapshot_filtered, CpuMode as ProcCpuMode,
-    DescendantsConfig, FdFilter, FdKind, PortFilter, ProcessFilter, Protocol,
+    DescendantsConfig, FdFilter, FdKind, PortFilter, ProcessFilter, ProcessOptions, Protocol,
 };
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
@@ -105,6 +105,12 @@ enum Command {
     /// Traverses the process tree from a root PID and sends signals to
     /// matching descendants. Defaults to preview mode unless --yes is provided.
     KillDescendants(KillDescendantsArgs),
+
+    /// Walk the ancestor chain of a process.
+    ///
+    /// Shows the parent chain from a given PID up to init/launchd,
+    /// useful for attribution and provenance ("what spawned this?").
+    Ancestors(AncestorsArgs),
 
     /// List open file descriptors for a process.
     Fds(FdsArgs),
@@ -508,6 +514,21 @@ struct TerminateTreeArgs {
 }
 
 #[derive(Parser, Debug)]
+struct AncestorsArgs {
+    /// Starting process ID.
+    #[arg(value_name = "PID")]
+    pid: u32,
+
+    /// Maximum depth to walk (default: 64).
+    #[arg(long, default_value_t = 64)]
+    max_depth: u32,
+
+    /// Output as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Parser, Debug)]
 struct FdsArgs {
     /// Target process ID.
     #[arg(long, value_name = "PID")]
@@ -656,6 +677,7 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
         }
         Command::Descendants(args) => run_descendants(args),
         Command::KillDescendants(args) => run_kill_descendants(args),
+        Command::Ancestors(args) => run_ancestors(args),
         Command::Fds(args) => run_fds(args),
         Command::Ports(args) => run_ports(args),
         Command::Help(args) => Ok(run_help(args)),
@@ -1899,6 +1921,39 @@ fn fd_kind_str(kind: FdKind) -> &'static str {
         FdKind::Pipe => "pipe",
         FdKind::Unknown => "unknown",
     }
+}
+
+fn run_ancestors(args: AncestorsArgs) -> Result<i32, SysprimsError> {
+    let result = ancestors(args.pid, args.max_depth, ProcessOptions::default())?;
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).map_err(|e| SysprimsError::internal(format!(
+                "JSON serialization failed: {}",
+                e
+            )))?
+        );
+    } else {
+        if result.chain.is_empty() {
+            println!("No ancestors found for PID {}", args.pid);
+        } else {
+            for (i, proc) in result.chain.iter().enumerate() {
+                let indent = "  ".repeat(i);
+                let cmdline_str = if proc.cmdline.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", proc.cmdline.join(" "))
+                };
+                println!("{}{} (PID {}){}", indent, proc.name, proc.pid, cmdline_str);
+            }
+        }
+        for w in &result.warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
+
+    Ok(0)
 }
 
 fn run_fds(args: FdsArgs) -> Result<i32, SysprimsError> {

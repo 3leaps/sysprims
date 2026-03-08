@@ -46,8 +46,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 use std::time::Duration;
 use sysprims_core::schema::{
-    DESCENDANTS_RESULT_SAMPLED_V1, DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1, GUARD_EVENT_V1,
-    PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_SAMPLED_V1, PROCESS_INFO_V1, WAIT_PID_RESULT_V1,
+    ANCESTORS_RESULT_V1, DESCENDANTS_RESULT_SAMPLED_V1, DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1,
+    GUARD_EVENT_V1, PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_SAMPLED_V1, PROCESS_INFO_V1,
+    WAIT_PID_RESULT_V1,
 };
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
@@ -1252,6 +1253,134 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
     })
 }
 
+// ============================================================================
+// Ancestors API
+// ============================================================================
+
+/// Result of an ancestors traversal.
+#[derive(Debug, Clone, Serialize)]
+pub struct AncestorsResult {
+    /// Schema identifier for version detection.
+    pub schema_id: &'static str,
+
+    /// ISO 8601 timestamp.
+    pub timestamp: String,
+
+    /// Platform identifier.
+    pub platform: &'static str,
+
+    /// Starting PID that was queried.
+    pub pid: u32,
+
+    /// Ancestor chain from the starting PID upward (pid -> parent -> grandparent -> ...).
+    pub chain: Vec<ProcessInfo>,
+
+    /// Non-fatal warnings (loop detected, permission denied, etc.).
+    pub warnings: Vec<String>,
+}
+
+/// Walk the parent chain from `pid` upward, collecting process info at each step.
+///
+/// Stops when:
+/// - PID becomes 0 or 1 (init/launchd)
+/// - `max_depth` is reached
+/// - A process is not found or permission is denied (recorded as warning)
+/// - A loop is detected (PID repeats)
+///
+/// The starting PID itself is included as the first element of the chain.
+///
+/// # Errors
+///
+/// - `InvalidArgument` if `pid` is 0 or exceeds `i32::MAX`
+/// - `NotFound` if the starting PID does not exist
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sysprims_proc::{ancestors, ProcessOptions};
+///
+/// let result = sysprims_proc::ancestors(std::process::id(), 10, ProcessOptions::default()).unwrap();
+/// for p in &result.chain {
+///     println!("PID {} ({})", p.pid, p.name);
+/// }
+/// ```
+pub fn ancestors(
+    pid: u32,
+    max_depth: u32,
+    options: ProcessOptions,
+) -> SysprimsResult<AncestorsResult> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
+    validate_process_options(&options)?;
+
+    let mut chain = Vec::new();
+    let mut warnings = Vec::new();
+    let mut seen = HashSet::new();
+    let mut current_pid = pid;
+
+    for depth in 0..=max_depth {
+        if !seen.insert(current_pid) {
+            warnings.push(format!(
+                "loop detected: PID {} already visited at depth {}",
+                current_pid, depth
+            ));
+            break;
+        }
+
+        match get_process_with_options(current_pid, options) {
+            Ok(info) => {
+                let next_pid = info.ppid;
+                chain.push(info);
+
+                // Stop at init/launchd (PID 0 or 1) or if ppid == self (root process)
+                if next_pid == 0 || next_pid == 1 || next_pid == current_pid {
+                    // Include PID 1 in chain if we can read it
+                    if next_pid == 1 && current_pid != 1 {
+                        match get_process_with_options(1, options) {
+                            Ok(init_info) => chain.push(init_info),
+                            Err(_) => {
+                                warnings.push("could not read init/launchd (PID 1)".to_string());
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                current_pid = next_pid;
+            }
+            Err(e) => {
+                if depth == 0 {
+                    // Starting PID must exist
+                    return Err(e);
+                }
+                warnings.push(format!(
+                    "ancestor walk stopped at PID {}: {}",
+                    current_pid, e
+                ));
+                break;
+            }
+        }
+    }
+
+    Ok(AncestorsResult {
+        schema_id: ANCESTORS_RESULT_V1,
+        timestamp: current_timestamp(),
+        platform: get_platform(),
+        pid,
+        chain,
+        warnings,
+    })
+}
+
 /// Get descendants using explicit traversal configuration and optional extended fields.
 ///
 /// # Examples
@@ -2157,5 +2286,51 @@ mod tests {
                 let _ = child.wait();
             }
         }
+    }
+
+    #[test]
+    fn test_ancestors_self() {
+        let pid = std::process::id();
+        let result = ancestors(pid, 64, ProcessOptions::default()).unwrap();
+
+        assert_eq!(result.schema_id, ANCESTORS_RESULT_V1);
+        assert_eq!(result.pid, pid);
+        assert!(
+            !result.chain.is_empty(),
+            "chain should include at least self"
+        );
+        assert_eq!(
+            result.chain[0].pid, pid,
+            "first element should be starting PID"
+        );
+
+        // Chain should have at least 2 elements (self + parent)
+        assert!(
+            result.chain.len() >= 2,
+            "chain should include at least self and parent, got {}",
+            result.chain.len()
+        );
+    }
+
+    #[test]
+    fn test_ancestors_rejects_pid_zero() {
+        let err = ancestors(0, 10, ProcessOptions::default()).unwrap_err();
+        assert!(matches!(err, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn test_ancestors_nonexistent_pid() {
+        let err = ancestors(99999999, 10, ProcessOptions::default()).unwrap_err();
+        assert!(matches!(err, SysprimsError::NotFound { .. }));
+    }
+
+    #[test]
+    fn test_ancestors_max_depth_zero() {
+        let pid = std::process::id();
+        let result = ancestors(pid, 0, ProcessOptions::default()).unwrap();
+
+        // max_depth=0 means just the starting PID
+        assert_eq!(result.chain.len(), 1);
+        assert_eq!(result.chain[0].pid, pid);
     }
 }

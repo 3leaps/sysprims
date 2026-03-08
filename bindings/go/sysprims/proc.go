@@ -731,6 +731,53 @@ func GuardStep(cfg *GuardConfig) (*GuardEvent, error) {
 	return &event, nil
 }
 
+// AncestorsResult is the result of an ancestors traversal.
+type AncestorsResult struct {
+	SchemaID  string        `json:"schema_id"`
+	Timestamp string        `json:"timestamp"`
+	Platform  string        `json:"platform"`
+	PID       uint32        `json:"pid"`
+	Chain     []ProcessInfo `json:"chain"`
+	Warnings  []string      `json:"warnings"`
+}
+
+// Ancestors walks the parent chain from pid upward, returning process info
+// at each step up to maxDepth levels.
+//
+// The starting PID is included as the first element of the chain.
+// Stops at init/launchd (PID 1), permission boundaries, or loops.
+//
+// # Errors
+//
+//   - [ErrInvalidArgument]: pid is 0
+//   - [ErrNotFound]: starting process doesn't exist
+func Ancestors(pid uint32, maxDepth uint32, opts *ProcessOptions) (*AncestorsResult, error) {
+	var optionsCStr *C.char
+	if opts != nil {
+		optionsJSON, err := json.Marshal(opts)
+		if err != nil {
+			return nil, &Error{Code: ErrInvalidArgument, Message: "failed to marshal options: " + err.Error()}
+		}
+		optionsCStr = C.CString(string(optionsJSON))
+		defer C.free(unsafe.Pointer(optionsCStr))
+	}
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_ancestors(C.uint32_t(pid), C.uint32_t(maxDepth), optionsCStr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var result AncestorsResult
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &result); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &result, nil
+}
+
 // ListeningPorts returns a snapshot of listening ports, optionally filtered.
 //
 // Best-effort behavior:

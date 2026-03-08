@@ -270,6 +270,32 @@ export interface KillDescendantsResult {
   skipped_safety: number;
 }
 
+// Ancestors types
+
+/**
+ * Result of an ancestors traversal.
+ * Matches schema: ancestors-result.schema.json
+ */
+export interface AncestorsResult {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  pid: number;
+  chain: ProcessInfo[];
+  warnings: string[];
+}
+
+/**
+ * Options for ancestors traversal.
+ */
+export interface AncestorsOptions {
+  /** Maximum depth to walk (default: 64). */
+  maxDepth?: number;
+  /** Optional extended process fields. */
+  includeEnv?: boolean;
+  includeThreads?: boolean;
+}
+
 /**
  * Rule config for one guard evaluation cycle.
  */

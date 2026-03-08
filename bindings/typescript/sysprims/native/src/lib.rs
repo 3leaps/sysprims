@@ -4,8 +4,8 @@ use napi_derive::napi;
 use sysprims_core::schema::{SPAWN_IN_GROUP_CONFIG_V1, TERMINATE_TREE_CONFIG_V1};
 use sysprims_core::SysprimsError;
 use sysprims_proc::{
-    descendants_with_config_and_options, guard_step, CpuMode, DescendantsConfig, FdFilter,
-    GuardAction, GuardConfig, GuardRule, PortFilter, ProcessFilter, ProcessOptions,
+    ancestors, descendants_with_config_and_options, guard_step, CpuMode, DescendantsConfig,
+    FdFilter, GuardAction, GuardConfig, GuardRule, PortFilter, ProcessFilter, ProcessOptions,
 };
 use sysprims_timeout::{spawn_in_group, terminate_tree, SpawnInGroupConfig, TerminateTreeConfig};
 
@@ -576,6 +576,47 @@ pub fn sysprims_proc_guard_step(config_json: String) -> SysprimsCallJsonResult {
             Ok(json) => ok_json(json),
             Err(e) => err_json(SysprimsError::internal(format!(
                 "failed to serialize guard event: {}",
+                e
+            ))),
+        },
+        Err(e) => err_json(e),
+    }
+}
+
+#[napi]
+pub fn sysprims_proc_ancestors(
+    pid: u32,
+    max_depth: u32,
+    options_json: String,
+) -> SysprimsCallJsonResult {
+    let options = if options_json.is_empty() {
+        ProcessOptions::default()
+    } else {
+        match serde_json::from_str::<ProcessOptionsWire>(&options_json) {
+            Ok(w) => {
+                let mut opts = ProcessOptions::default();
+                if w.include_env {
+                    opts = opts.with_env();
+                }
+                if w.include_threads {
+                    opts = opts.with_threads();
+                }
+                opts
+            }
+            Err(e) => {
+                return err_json(SysprimsError::invalid_argument(format!(
+                    "invalid options JSON: {}",
+                    e
+                )))
+            }
+        }
+    };
+
+    match ancestors(pid, max_depth, options) {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => ok_json(json),
+            Err(e) => err_json(SysprimsError::internal(format!(
+                "failed to serialize ancestors result: {}",
                 e
             ))),
         },

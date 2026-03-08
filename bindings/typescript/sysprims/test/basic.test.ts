@@ -4,6 +4,7 @@ import { once } from "node:events";
 import test from "node:test";
 
 import {
+  ancestors,
   forceKill,
   guardStep,
   listeningPorts,
@@ -106,6 +107,14 @@ test("guardStep action-disabled returns structured event", () => {
   assert.equal(event.targeted, 0);
   assert.equal(event.killed, 0);
   assert.equal(event.failed, 0);
+});
+
+test("ancestors(process.pid) returns chain starting with self", () => {
+  const result = ancestors(process.pid);
+  assert.ok(result.schema_id.includes("ancestors-result"));
+  assert.equal(result.pid, process.pid);
+  assert.ok(result.chain.length >= 1, "chain should include at least the starting process");
+  assert.equal(result.chain[0].pid, process.pid, "first chain element should be starting PID");
 });
 
 test("listFds(process.pid) returns a snapshot", () => {

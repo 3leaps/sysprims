@@ -10,7 +10,7 @@ use std::time::Duration;
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
 use sysprims_proc::{
-    descendants_with_config_and_options, guard_step, select_descendant_targets, CpuMode,
+    ancestors, descendants_with_config_and_options, guard_step, select_descendant_targets, CpuMode,
     DescendantsConfig, FdFilter, GuardAction, GuardConfig, GuardRule, PortFilter, ProcessFilter,
     ProcessOptions,
 };
@@ -293,6 +293,102 @@ pub unsafe extern "C" fn sysprims_proc_guard_step(
         Ok(j) => j,
         Err(e) => {
             let err = SysprimsError::internal(format!("failed to serialize guard event: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *result_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
+
+/// Walk the ancestor chain of a PID upward.
+///
+/// Returns a JSON object matching `ancestors-result.schema.json`.
+///
+/// # Arguments
+///
+/// * `pid` - Starting PID
+/// * `max_depth` - Maximum depth to walk (0 means just the starting PID)
+/// * `options_json` - Optional JSON for ProcessOptions (may be NULL)
+/// * `result_json_out` - Output pointer for result JSON string
+///
+/// # Safety
+///
+/// * `result_json_out` must be a valid pointer to `*mut c_char`
+/// * The result string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_ancestors(
+    pid: u32,
+    max_depth: u32,
+    options_json: *const c_char,
+    result_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if result_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("result_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    let options = if options_json.is_null() {
+        ProcessOptions::default()
+    } else {
+        let c_str = match CStr::from_ptr(options_json).to_str() {
+            Ok(s) => s,
+            Err(e) => {
+                let err = SysprimsError::invalid_argument(format!("invalid UTF-8: {}", e));
+                set_error(&err);
+                return SysprimsErrorCode::InvalidArgument;
+            }
+        };
+        if c_str.is_empty() {
+            ProcessOptions::default()
+        } else {
+            match serde_json::from_str::<ProcessOptionsWire>(c_str) {
+                Ok(w) => {
+                    let mut opts = ProcessOptions::default();
+                    if w.include_env {
+                        opts = opts.with_env();
+                    }
+                    if w.include_threads {
+                        opts = opts.with_threads();
+                    }
+                    opts
+                }
+                Err(e) => {
+                    let err =
+                        SysprimsError::invalid_argument(format!("invalid options JSON: {}", e));
+                    set_error(&err);
+                    return SysprimsErrorCode::InvalidArgument;
+                }
+            }
+        }
+    };
+
+    let result = match ancestors(pid, max_depth, options) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&result) {
+        Ok(j) => j,
+        Err(e) => {
+            let err =
+                SysprimsError::internal(format!("failed to serialize ancestors result: {}", e));
             set_error(&err);
             return SysprimsErrorCode::Internal;
         }

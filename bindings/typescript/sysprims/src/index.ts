@@ -1,6 +1,8 @@
 import { SysprimsError, SysprimsErrorCode } from "./errors";
 import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
 import type {
+  AncestorsOptions,
+  AncestorsResult,
   BatchKillFailure,
   BatchKillResult,
   CpuMode,
@@ -27,6 +29,8 @@ import type {
 
 export { SysprimsError, SysprimsErrorCode };
 export type {
+  AncestorsOptions,
+  AncestorsResult,
   BatchKillFailure,
   BatchKillResult,
   CpuMode,
@@ -304,6 +308,35 @@ export function guardStep(config: GuardConfig): GuardEvent {
   const lib = loadSysprims();
   const configJson = JSON.stringify(config);
   return callJsonReturn(() => lib.sysprimsProcGuardStep(configJson)) as GuardEvent;
+}
+
+// -----------------------------------------------------------------------------
+// Ancestors
+// -----------------------------------------------------------------------------
+
+/**
+ * Walk the ancestor chain of a process.
+ *
+ * Returns the parent chain from `pid` upward to init/launchd.
+ * The starting PID is included as the first element of the chain.
+ *
+ * @param pid - Starting process ID
+ * @param options - Optional traversal configuration
+ * @returns Ancestor chain with metadata
+ * @throws {SysprimsError} NotFound if starting process does not exist
+ * @throws {SysprimsError} InvalidArgument if pid is 0
+ */
+export function ancestors(pid: number, options?: AncestorsOptions): AncestorsResult {
+  const lib = loadSysprims();
+  const maxDepth = options?.maxDepth ?? 64;
+  const optionsJson = serializeProcessOptions(
+    options?.includeEnv || options?.includeThreads
+      ? { includeEnv: options?.includeEnv, includeThreads: options?.includeThreads }
+      : undefined,
+  );
+  return callJsonReturn(() =>
+    lib.sysprimsProcAncestors(pid >>> 0, maxDepth >>> 0, optionsJson),
+  ) as AncestorsResult;
 }
 
 // -----------------------------------------------------------------------------

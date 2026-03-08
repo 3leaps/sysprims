@@ -167,6 +167,28 @@ func TestGuardStepActionDisabled(t *testing.T) {
 	}
 }
 
+func TestAncestorsSelf(t *testing.T) {
+	pid := uint32(os.Getpid())
+	result, err := sysprims.Ancestors(pid, 10, nil)
+	if err != nil {
+		t.Fatalf("Ancestors(%d) failed: %v", pid, err)
+	}
+
+	if result.SchemaID == "" {
+		t.Fatal("Ancestors returned empty schema_id")
+	}
+	if result.PID != pid {
+		t.Fatalf("Ancestors returned wrong pid: got %d, expected %d", result.PID, pid)
+	}
+	if len(result.Chain) == 0 {
+		t.Fatal("Ancestors returned empty chain")
+	}
+	if result.Chain[0].PID != pid {
+		t.Fatalf("first element in chain should be starting PID: got %d, expected %d", result.Chain[0].PID, pid)
+	}
+	t.Logf("Ancestors chain length: %d, warnings: %v", len(result.Chain), result.Warnings)
+}
+
 // TestProcessGetSelf verifies that ProcessGet works for the current process.
 func TestProcessGetSelf(t *testing.T) {
 	pid := uint32(os.Getpid())

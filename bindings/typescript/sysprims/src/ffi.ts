@@ -57,6 +57,11 @@ export type SysprimsLib = {
     configJson: string,
   ) => SysprimsCallJsonResult;
   sysprimsProcGuardStep: (configJson: string) => SysprimsCallJsonResult;
+  sysprimsProcAncestors: (
+    pid: number,
+    maxDepth: number,
+    optionsJson: string,
+  ) => SysprimsCallJsonResult;
 
   // Self introspection
   sysprimsSelfGetpgid: () => SysprimsCallU32Result;
