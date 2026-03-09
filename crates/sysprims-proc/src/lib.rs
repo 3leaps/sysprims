@@ -50,6 +50,7 @@ use sysprims_core::schema::{
     GUARD_EVENT_V1, PORT_BINDINGS_V1, PORT_FILTER_V1, PROCESS_INFO_SAMPLED_V1, PROCESS_INFO_V1,
     WAIT_PID_RESULT_V1,
 };
+use sysprims_core::time::now_rfc3339;
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
 // Platform-specific implementations
@@ -1187,7 +1188,7 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
         warnings.push("action disabled; no signals sent".to_string());
         return Ok(GuardEvent {
             schema_id: GUARD_EVENT_V1,
-            timestamp: current_timestamp(),
+            timestamp: now_rfc3339(),
             platform: get_platform(),
             matched,
             targeted: 0,
@@ -1227,7 +1228,7 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
     if target_pids.is_empty() {
         return Ok(GuardEvent {
             schema_id: GUARD_EVENT_V1,
-            timestamp: current_timestamp(),
+            timestamp: now_rfc3339(),
             platform: get_platform(),
             matched,
             targeted: 0,
@@ -1242,7 +1243,7 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
 
     Ok(GuardEvent {
         schema_id: GUARD_EVENT_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
         matched,
         targeted: target_pids.len() as u32,
@@ -1373,7 +1374,7 @@ pub fn ancestors(
 
     Ok(AncestorsResult {
         schema_id: ANCESTORS_RESULT_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
         pid,
         chain,
@@ -1488,7 +1489,7 @@ pub fn descendants_with_config_and_options(
         levels,
         total_found,
         matched_by_filter,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
     })
 }
@@ -1589,7 +1590,7 @@ fn make_port_snapshot(bindings: Vec<PortBinding>, warnings: Vec<String>) -> Port
 
     PortBindingsSnapshot {
         schema_id: PORT_BINDINGS_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
         bindings,
         warnings,
@@ -1599,7 +1600,7 @@ fn make_port_snapshot(bindings: Vec<PortBinding>, warnings: Vec<String>) -> Port
 fn make_fd_snapshot(pid: u32, fds: Vec<FdInfo>, warnings: Vec<String>) -> FdSnapshot {
     FdSnapshot {
         schema_id: FD_SNAPSHOT_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
         pid,
         fds,
@@ -1607,21 +1608,13 @@ fn make_fd_snapshot(pid: u32, fds: Vec<FdInfo>, warnings: Vec<String>) -> FdSnap
     }
 }
 
-/// Get current timestamp in ISO 8601 format.
-fn current_timestamp() -> String {
-    use time::format_description::well_known::Rfc3339;
-    use time::OffsetDateTime;
-
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
+// Timestamp generation consolidated in sysprims_core::time::now_rfc3339()
 
 /// Create a ProcessSnapshot with the standard schema ID.
 fn make_snapshot(processes: Vec<ProcessInfo>) -> ProcessSnapshot {
     ProcessSnapshot {
         schema_id: PROCESS_INFO_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         processes,
     }
 }
@@ -1635,7 +1628,7 @@ fn make_wait_pid_result(
 ) -> WaitPidResult {
     WaitPidResult {
         schema_id: WAIT_PID_RESULT_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
         pid,
         exited,

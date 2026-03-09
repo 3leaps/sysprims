@@ -25,6 +25,7 @@ use std::env::consts::OS;
 
 pub mod error;
 pub mod schema;
+pub mod time;
 
 // Re-export canonical error type at crate root
 pub use error::{SysprimsError, SysprimsResult};

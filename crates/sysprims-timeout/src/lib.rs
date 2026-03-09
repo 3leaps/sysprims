@@ -44,10 +44,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sysprims_core::schema::TERMINATE_TREE_RESULT_V1;
+use sysprims_core::time::now_rfc3339;
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 use sysprims_proc::wait_pid;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 #[cfg(unix)]
 mod unix;
@@ -270,11 +269,7 @@ pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroup
     return windows::spawn_in_group_impl(config);
 }
 
-pub(crate) fn current_timestamp() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
+// Timestamp generation consolidated in sysprims_core::time::now_rfc3339()
 
 /// Terminate a process (and best-effort tree) with escalation.
 ///
@@ -352,7 +347,7 @@ pub fn terminate_tree(
             let grace_wait = wait_pid(pid, Duration::from_millis(config.grace_timeout_ms))?;
             return Ok(TerminateTreeResult {
                 schema_id: TERMINATE_TREE_RESULT_V1,
-                timestamp: current_timestamp(),
+                timestamp: now_rfc3339(),
                 platform: get_platform(),
                 pid,
                 pgid: None,
@@ -394,7 +389,7 @@ pub fn terminate_tree(
     if grace_wait.exited {
         return Ok(TerminateTreeResult {
             schema_id: TERMINATE_TREE_RESULT_V1,
-            timestamp: current_timestamp(),
+            timestamp: now_rfc3339(),
             platform: get_platform(),
             pid,
             pgid,
@@ -458,7 +453,7 @@ pub fn terminate_tree(
 
     Ok(TerminateTreeResult {
         schema_id: TERMINATE_TREE_RESULT_V1,
-        timestamp: current_timestamp(),
+        timestamp: now_rfc3339(),
         platform: get_platform(),
         pid,
         pgid,

@@ -697,6 +697,7 @@ version = "0.1.15"
 dependencies = [
  "rsfulmen",
  "thiserror",
+ "time",
 ]
 
 [[package]]
@@ -721,7 +722,6 @@ dependencies = [
  "serde_json",
  "sysprims-core",
  "sysprims-signal",
- "time",
  "windows-sys 0.52.0",
 ]
 
@@ -754,7 +754,6 @@ dependencies = [
  "sysprims-proc",
  "sysprims-session",
  "sysprims-signal",
- "time",
  "windows-sys 0.52.0",
 ]
 

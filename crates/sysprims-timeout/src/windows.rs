@@ -266,7 +266,7 @@ pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnIn
 
     Ok(SpawnInGroupResult {
         schema_id: SPAWN_IN_GROUP_RESULT_V1,
-        timestamp: crate::current_timestamp(),
+        timestamp: sysprims_core::time::now_rfc3339(),
         platform: get_platform(),
         pid,
         pgid: None,
