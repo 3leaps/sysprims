@@ -24,6 +24,7 @@
 use std::env::consts::OS;
 
 pub mod error;
+pub mod guard_signals;
 pub mod schema;
 pub mod time;
 
