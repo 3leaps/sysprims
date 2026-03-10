@@ -1,15 +1,18 @@
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use sysprims_core::guard_signals::GuardSignals;
+use sysprims_core::time::Tick;
 use sysprims_core::SysprimsError;
 use sysprims_core::{
     get_platform,
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
 use sysprims_proc::{
-    ancestors, cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports,
-    select_descendant_targets, snapshot, snapshot_filtered, CpuMode as ProcCpuMode,
-    DescendantsConfig, FdFilter, FdKind, PortFilter, ProcessFilter, ProcessOptions, Protocol,
+    ancestors, cpu_total_time_ns, descendants_with_config, get_process, guard_step, list_fds,
+    listening_ports, select_descendant_targets, snapshot, snapshot_filtered,
+    CpuMode as ProcCpuMode, DescendantsConfig, FdFilter, FdKind, GuardAction, GuardConfig,
+    GuardRule, PortFilter, ProcessFilter, ProcessOptions, Protocol,
 };
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
@@ -36,6 +39,13 @@ const KILL_DESCENDANTS_AFTER_HELP: &str = r#"Examples:
   sysprims kill-descendants 14796 --cpu-above 80 --cascade --dry-run
   sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --signal KILL --yes
   sysprims kill-descendants 14796 --name worker --signal TERM --yes
+"#;
+
+const GUARD_AFTER_HELP: &str = r#"Examples:
+  sysprims guard 14796 --interval 5s --dry-run
+  sysprims guard 14796 --interval 10s --cpu-above 80 --cpu-mode monitor --sample 3s --json
+  sysprims guard 14796 --interval 5s --name worker --signal KILL --yes
+  sysprims guard 14796 --interval 5s --cpu-above 90 --cascade --max-kills 4 --yes
 "#;
 
 const HELP_AFTER_HELP: &str = r#"Topics:
@@ -105,6 +115,14 @@ enum Command {
     /// Traverses the process tree from a root PID and sends signals to
     /// matching descendants. Defaults to preview mode unless --yes is provided.
     KillDescendants(KillDescendantsArgs),
+
+    /// Continuously guard a process tree.
+    ///
+    /// Runs guard_step() on a repeating interval, evaluating descendants
+    /// of a root PID and optionally killing matches. Responds to SIGINT
+    /// and SIGTERM for clean shutdown. Defaults to dry-run mode.
+    #[command(after_help = GUARD_AFTER_HELP)]
+    Guard(GuardArgs),
 
     /// Walk the ancestor chain of a process.
     ///
@@ -448,6 +466,78 @@ struct KillDescendantsArgs {
     json: bool,
 }
 
+#[derive(Parser, Debug)]
+struct GuardArgs {
+    /// Root process ID to guard.
+    #[arg(value_name = "PID")]
+    pid: u32,
+
+    /// Evaluation interval (e.g., "5s", "1m").
+    #[arg(long, value_name = "DURATION", default_value = "5s")]
+    interval: String,
+
+    /// Maximum traversal depth (1 = children only, "all" = full subtree).
+    #[arg(long, value_name = "N", default_value = "1")]
+    max_levels: String,
+
+    /// Signal name or number (default: TERM).
+    #[arg(
+        short = 's',
+        long = "signal",
+        value_name = "SIGNAL",
+        default_value = "TERM"
+    )]
+    signal: String,
+
+    /// Filter by process name (substring match, case-insensitive).
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+
+    /// Filter by username.
+    #[arg(long, value_name = "USER")]
+    user: Option<String>,
+
+    /// Filter by minimum CPU usage (0-100).
+    #[arg(long, value_name = "PERCENT")]
+    cpu_above: Option<f64>,
+
+    /// CPU measurement mode.
+    #[arg(long, value_enum, value_name = "MODE", default_value = "lifetime")]
+    cpu_mode: CpuMode,
+
+    /// Sample CPU usage over an interval (e.g., "250ms").
+    #[arg(long, value_name = "DURATION")]
+    sample: Option<String>,
+
+    /// Filter by minimum memory usage in KB.
+    #[arg(long, value_name = "KB")]
+    memory_above: Option<u64>,
+
+    /// Filter by minimum process age (e.g., "5s", "1m", "2h").
+    #[arg(long, value_name = "DURATION")]
+    running_for: Option<String>,
+
+    /// Expand each matched PID to include its descendant subtree.
+    #[arg(long)]
+    cascade: bool,
+
+    /// Maximum number of processes to signal per tick (must be >= 1).
+    #[arg(long, value_name = "N", default_value = "8", value_parser = clap::value_parser!(u32).range(1..))]
+    max_kills: u32,
+
+    /// Enable remediation (send signals). Without this, guard only observes.
+    #[arg(long)]
+    yes: bool,
+
+    /// Alias for observation-only mode (no signals sent).
+    #[arg(long, conflicts_with = "yes")]
+    dry_run: bool,
+
+    /// Output JSON events (one per line per tick).
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
 enum CpuMode {
     /// Lifetime-average CPU usage (best-effort), normalized 0-100.
@@ -677,6 +767,7 @@ fn run_command(command: Command) -> Result<i32, SysprimsError> {
         }
         Command::Descendants(args) => run_descendants(args),
         Command::KillDescendants(args) => run_kill_descendants(args),
+        Command::Guard(args) => run_guard(args),
         Command::Ancestors(args) => run_ancestors(args),
         Command::Fds(args) => run_fds(args),
         Command::Ports(args) => run_ports(args),
@@ -1923,6 +2014,118 @@ fn fd_kind_str(kind: FdKind) -> &'static str {
     }
 }
 
+// ============================================================================
+// Guard command
+// ============================================================================
+
+fn run_guard(args: GuardArgs) -> Result<i32, SysprimsError> {
+    let interval = parse_duration(&args.interval)?;
+    let max_levels = parse_max_levels(&args.max_levels)?;
+    let signal_num = resolve_signal(&args.signal)?;
+    let sample_duration = args.sample.as_deref().map(parse_duration).transpose()?;
+    let filter = build_descendants_filter(
+        &args.name,
+        &args.user,
+        args.cpu_above,
+        args.memory_above,
+        &args.running_for,
+    )?;
+
+    // Preflight: validate static config that would fail every tick.
+    // PID 0 and > i32::MAX are rejected by guard_step; fail fast here.
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+    if args.pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if args.pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            args.pid, MAX_SAFE_PID
+        )));
+    }
+    if let Some(f) = filter.as_ref() {
+        f.validate()?;
+    }
+
+    // --yes required for remediation; default is dry-run
+    let action_enabled = args.yes && !args.dry_run;
+
+    if !action_enabled && !args.json {
+        eprintln!("guard: observation mode (no signals will be sent; use --yes to enable)");
+    }
+
+    let signals = GuardSignals::start()?;
+    let mut tick = Tick::new(interval)?;
+    let mut tick_count: u64 = 0;
+
+    while !signals.should_stop() {
+        let config = GuardConfig {
+            rule: GuardRule {
+                root_pid: args.pid,
+                max_levels,
+                filter: filter.clone(),
+                cpu_mode: to_proc_cpu_mode(args.cpu_mode.clone()),
+                sample_duration,
+            },
+            action: GuardAction::KillDescendants {
+                signal: signal_num,
+                cascade: args.cascade,
+            },
+            action_enabled,
+            max_targets: args.max_kills,
+        };
+
+        match guard_step(config) {
+            Ok(event) => {
+                tick_count += 1;
+                if args.json {
+                    if let Ok(json) = serde_json::to_string(&event) {
+                        println!("{json}");
+                    }
+                } else {
+                    let action_str = if action_enabled { "armed" } else { "observe" };
+                    print!(
+                        "[tick {tick_count}] matched={} targeted={} killed={} failed={} mode={action_str}",
+                        event.matched, event.targeted, event.killed, event.failed
+                    );
+                    if event.skipped_safety > 0 {
+                        print!(" skipped_safety={}", event.skipped_safety);
+                    }
+                    println!();
+                    for w in &event.warnings {
+                        eprintln!("  warning: {w}");
+                    }
+                }
+            }
+            Err(e) => {
+                if args.json {
+                    let err_obj = serde_json::json!({
+                        "error": e.to_string(),
+                        "tick": tick_count + 1,
+                    });
+                    eprintln!("{}", err_obj);
+                } else {
+                    eprintln!("guard: tick {} error: {}", tick_count + 1, e);
+                }
+                // Non-fatal: root PID may have exited temporarily
+                tick_count += 1;
+            }
+        }
+
+        // Check stop flag before sleeping (signal may have arrived during tick)
+        if signals.should_stop() {
+            break;
+        }
+        tick.sleep_until_next();
+    }
+
+    if !args.json {
+        eprintln!("guard: stopped after {tick_count} ticks");
+    }
+
+    Ok(0)
+}
+
 fn run_ancestors(args: AncestorsArgs) -> Result<i32, SysprimsError> {
     let result = ancestors(args.pid, args.max_depth, ProcessOptions::default())?;
 
@@ -2500,5 +2703,87 @@ mod tests {
         };
         assert_eq!(args.name.as_deref(), Some("chrome"));
         assert_eq!(args.running_for.as_deref(), Some("30s"));
+    }
+
+    #[test]
+    fn guard_parses_minimal() {
+        let cli = Cli::try_parse_from(["sysprims", "guard", "1234"]).unwrap();
+        let Command::Guard(args) = cli.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert_eq!(args.pid, 1234);
+        assert_eq!(args.interval, "5s");
+        assert_eq!(args.max_levels, "1");
+        assert_eq!(args.signal, "TERM");
+        assert_eq!(args.max_kills, 8);
+        assert!(!args.yes);
+        assert!(!args.dry_run);
+        assert!(!args.json);
+        assert!(!args.cascade);
+    }
+
+    #[test]
+    fn guard_parses_full_flags() {
+        let cli = Cli::try_parse_from([
+            "sysprims",
+            "guard",
+            "7825",
+            "--interval",
+            "10s",
+            "--max-levels",
+            "all",
+            "--signal",
+            "KILL",
+            "--name",
+            "worker",
+            "--cpu-above",
+            "80",
+            "--cpu-mode",
+            "monitor",
+            "--sample",
+            "3s",
+            "--memory-above",
+            "500000",
+            "--running-for",
+            "1m",
+            "--cascade",
+            "--max-kills",
+            "4",
+            "--yes",
+            "--json",
+        ])
+        .unwrap();
+        let Command::Guard(args) = cli.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert_eq!(args.pid, 7825);
+        assert_eq!(args.interval, "10s");
+        assert_eq!(args.max_levels, "all");
+        assert_eq!(args.signal, "KILL");
+        assert_eq!(args.name.as_deref(), Some("worker"));
+        assert_eq!(args.cpu_above, Some(80.0));
+        assert_eq!(args.cpu_mode, CpuMode::Monitor);
+        assert_eq!(args.sample.as_deref(), Some("3s"));
+        assert_eq!(args.memory_above, Some(500000));
+        assert_eq!(args.running_for.as_deref(), Some("1m"));
+        assert!(args.cascade);
+        assert_eq!(args.max_kills, 4);
+        assert!(args.yes);
+        assert!(args.json);
+    }
+
+    #[test]
+    fn guard_dry_run_conflicts_with_yes() {
+        assert!(Cli::try_parse_from(["sysprims", "guard", "1234", "--yes", "--dry-run"]).is_err());
+    }
+
+    #[test]
+    fn guard_requires_pid() {
+        assert!(Cli::try_parse_from(["sysprims", "guard"]).is_err());
+    }
+
+    #[test]
+    fn guard_rejects_max_kills_zero() {
+        assert!(Cli::try_parse_from(["sysprims", "guard", "1234", "--max-kills", "0"]).is_err());
     }
 }
