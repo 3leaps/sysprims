@@ -563,12 +563,12 @@ install: build-release ## Install sysprims binary to INSTALL_BINDIR
 #
 # Install hooks: goneat hooks init && goneat hooks generate && goneat hooks install
 
-precommit: GONEAT_FORMAT_FAIL_ON=high
-precommit: fmt-check lint ## Run pre-commit checks (fast)
+precommit: ## Run pre-commit checks (fast)
+	@$(MAKE) GONEAT_FORMAT_FAIL_ON=high fmt-check lint
 	@echo "[ok] Pre-commit checks passed"
 
-prepush: GONEAT_FORMAT_FAIL_ON=medium
-prepush: check ## Run pre-push checks (thorough)
+prepush: ## Run pre-push checks (thorough)
+	@$(MAKE) GONEAT_FORMAT_FAIL_ON=medium check
 	@echo "[ok] Pre-push checks passed"
 
 deps-check: ## Check dependencies for cooling violations

@@ -43,6 +43,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -1256,10 +1257,12 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
     })
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn is_sysprims_binary_name(name: &str) -> bool {
     name == "sysprims" || name.starts_with("sysprims-")
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn guard_discovery_name(cmdline: &[String], fallback_name: &str) -> Option<String> {
     let binary = cmdline.first()?.rsplit('/').next().unwrap_or(fallback_name);
     if !is_sysprims_binary_name(binary) {

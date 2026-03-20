@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
 
@@ -2208,6 +2209,7 @@ fn guard_pidfile_path(args: &GuardArgs) -> PathBuf {
         .unwrap_or_else(|| default_guard_pidfile(args.pid))
 }
 
+#[cfg(unix)]
 fn guard_interval_label_from_args(args: &GuardArgs) -> String {
     if let Some(interval) = args.interval.as_ref() {
         return interval.clone();
