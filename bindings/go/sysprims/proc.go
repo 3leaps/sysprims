@@ -7,6 +7,7 @@ package sysprims
 import "C"
 import (
 	"encoding/json"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -398,6 +399,52 @@ type GuardConfig struct {
 	MaxTargets uint32
 }
 
+type GuardPreset string
+
+const (
+	GuardPresetInteractive GuardPreset = "interactive"
+	GuardPresetBackground  GuardPreset = "background"
+	GuardPresetWatchdog    GuardPreset = "watchdog"
+)
+
+func (p GuardPreset) Interval() time.Duration {
+	switch p {
+	case GuardPresetInteractive:
+		return 3 * time.Second
+	case GuardPresetBackground:
+		return 3 * time.Minute
+	case GuardPresetWatchdog:
+		return 5 * time.Minute
+	default:
+		return 0
+	}
+}
+
+func (p GuardPreset) SampleDuration() time.Duration {
+	switch p {
+	case GuardPresetInteractive:
+		return 2 * time.Second
+	case GuardPresetBackground:
+		return 3 * time.Second
+	case GuardPresetWatchdog:
+		return 5 * time.Second
+	default:
+		return 0
+	}
+}
+
+type GuardRunnerConfig struct {
+	Guard         GuardConfig
+	Interval      time.Duration
+	MaxIterations *uint64
+}
+
+type GuardRunner struct {
+	mu     sync.Mutex
+	ptr    unsafe.Pointer
+	closed bool
+}
+
 // GuardEvent is the structured output from one guard cycle.
 type GuardEvent struct {
 	SchemaID      string   `json:"schema_id"`
@@ -582,6 +629,40 @@ func buildGuardConfigJSON(cfg *GuardConfig) (string, error) {
 	return string(configJSON), nil
 }
 
+func buildGuardRunnerConfigJSON(cfg *GuardRunnerConfig) (string, error) {
+	if cfg == nil {
+		return "", &Error{Code: ErrInvalidArgument, Message: "guard runner config is required"}
+	}
+	if cfg.Interval <= 0 {
+		return "", &Error{Code: ErrInvalidArgument, Message: "interval must be > 0"}
+	}
+
+	guardJSON, err := buildGuardConfigJSON(&cfg.Guard)
+	if err != nil {
+		return "", err
+	}
+
+	var guard map[string]interface{}
+	if err := json.Unmarshal([]byte(guardJSON), &guard); err != nil {
+		return "", &Error{Code: ErrInternal, Message: "failed to decode guard config JSON: " + err.Error()}
+	}
+
+	wire := map[string]interface{}{
+		"guard":       guard,
+		"interval_ms": uint64(cfg.Interval / time.Millisecond),
+	}
+	if cfg.MaxIterations != nil {
+		wire["max_iterations"] = *cfg.MaxIterations
+	}
+
+	configJSON, err := json.Marshal(wire)
+	if err != nil {
+		return "", &Error{Code: ErrInvalidArgument, Message: "failed to marshal guard runner config: " + err.Error()}
+	}
+
+	return string(configJSON), nil
+}
+
 // DescendantsWithOptions returns descendants using optional cpu mode/sample config.
 func DescendantsWithOptions(pid uint32, opts *DescendantsOptions) (*DescendantsResult, error) {
 	maxLevels := uint32(^uint32(0))
@@ -729,6 +810,82 @@ func GuardStep(cfg *GuardConfig) (*GuardEvent, error) {
 	}
 
 	return &event, nil
+}
+
+func NewGuardRunner(cfg *GuardRunnerConfig) (*GuardRunner, error) {
+	configJSON, err := buildGuardRunnerConfigJSON(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	configCStr := C.CString(configJSON)
+	defer C.free(unsafe.Pointer(configCStr))
+
+	var runner unsafe.Pointer
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_guard_runner_create(configCStr, &runner)
+	}); err != nil {
+		return nil, err
+	}
+
+	return &GuardRunner{ptr: runner}, nil
+}
+
+func (r *GuardRunner) Tick() (*GuardEvent, error) {
+	if r == nil {
+		return nil, &Error{Code: ErrInvalidArgument, Message: "guard runner is nil"}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.ptr == nil {
+		return nil, &Error{Code: ErrInvalidArgument, Message: "guard runner is closed"}
+	}
+
+	var resultCStr *C.char
+	if err := callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_proc_guard_runner_tick(r.ptr, &resultCStr)
+	}); err != nil {
+		return nil, err
+	}
+	if resultCStr == nil {
+		return nil, nil
+	}
+	defer C.sysprims_free_string(resultCStr)
+
+	var event GuardEvent
+	if err := json.Unmarshal([]byte(C.GoString(resultCStr)), &event); err != nil {
+		return nil, &Error{Code: ErrInternal, Message: "failed to parse response: " + err.Error()}
+	}
+
+	return &event, nil
+}
+
+func (r *GuardRunner) Stop() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.ptr == nil {
+		return
+	}
+	C.sysprims_proc_guard_runner_stop(r.ptr)
+}
+
+func (r *GuardRunner) Close() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.ptr == nil {
+		r.closed = true
+		return
+	}
+	C.sysprims_proc_guard_runner_free(r.ptr)
+	r.ptr = nil
+	r.closed = true
 }
 
 // AncestorsResult is the result of an ancestors traversal.

@@ -43,7 +43,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ffi::CString;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use sysprims_core::schema::{
     ANCESTORS_RESULT_V1, DESCENDANTS_RESULT_SAMPLED_V1, DESCENDANTS_RESULT_V1, FD_SNAPSHOT_V1,
@@ -51,7 +53,7 @@ use sysprims_core::schema::{
     WAIT_PID_RESULT_V1,
 };
 use sysprims_core::time::now_rfc3339;
-use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
+use sysprims_core::{get_platform, guard_signals, time, SysprimsError, SysprimsResult};
 
 // Platform-specific implementations
 #[cfg(target_os = "linux")]
@@ -1254,6 +1256,366 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
     })
 }
 
+fn is_sysprims_binary_name(name: &str) -> bool {
+    name == "sysprims" || name.starts_with("sysprims-")
+}
+
+fn guard_discovery_name(cmdline: &[String], fallback_name: &str) -> Option<String> {
+    let binary = cmdline.first()?.rsplit('/').next().unwrap_or(fallback_name);
+    if !is_sysprims_binary_name(binary) {
+        return None;
+    }
+
+    let guard_index = cmdline.iter().position(|arg| arg == "guard")?;
+    let root_pid = cmdline.get(guard_index + 1)?;
+    if root_pid.parse::<u32>().ok()? == 0 {
+        return None;
+    }
+
+    Some(format!("sysprims-guard:{root_pid}"))
+}
+
+#[cfg(target_os = "linux")]
+fn set_guard_process_title(root_pid: u32) {
+    let title = format!("sysprims-guard:{root_pid}");
+    let truncated = title.bytes().take(15).collect::<Vec<_>>();
+    if let Ok(c_title) = CString::new(truncated) {
+        unsafe {
+            libc::prctl(
+                libc::PR_SET_NAME,
+                c_title.as_ptr() as libc::c_ulong,
+                0,
+                0,
+                0,
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_guard_process_title(root_pid: u32) {
+    unsafe extern "C" {
+        fn pthread_setname_np(name: *const libc::c_char) -> libc::c_int;
+    }
+
+    let title = format!("sysprims-guard:{root_pid}");
+    let thread_title = CString::new(title.bytes().take(63).collect::<Vec<_>>()).ok();
+
+    unsafe {
+        if let Some(name) = thread_title.as_ref() {
+            let _ = pthread_setname_np(name.as_ptr());
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn set_guard_process_title(_root_pid: u32) {}
+
+// ============================================================================
+// GuardRunner: Managed Guard Loop
+// ============================================================================
+
+/// Preset configurations for common guard use cases.
+///
+/// Presets provide sensible defaults for interval and sample duration.
+/// Explicit values always override preset defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardPreset {
+    /// Short interval for interactive debugging (3s interval, 2s sample).
+    Interactive,
+    /// Moderate interval for background monitoring (3m interval, 3s sample).
+    Background,
+    /// Long interval for lightweight watchdog (5m interval, 5s sample).
+    Watchdog,
+}
+
+impl GuardPreset {
+    /// Default tick interval for this preset.
+    pub fn interval(&self) -> Duration {
+        match self {
+            Self::Interactive => Duration::from_secs(3),
+            Self::Background => Duration::from_secs(180),
+            Self::Watchdog => Duration::from_secs(300),
+        }
+    }
+
+    /// Default CPU sample duration for this preset.
+    pub fn sample_duration(&self) -> Duration {
+        match self {
+            Self::Interactive => Duration::from_secs(2),
+            Self::Background => Duration::from_secs(3),
+            Self::Watchdog => Duration::from_secs(5),
+        }
+    }
+}
+
+/// Configuration for a managed guard loop.
+#[derive(Debug, Clone)]
+pub struct GuardRunnerConfig {
+    /// Per-tick evaluation configuration.
+    pub guard: GuardConfig,
+    /// Tick interval between evaluations.
+    pub interval: Duration,
+    /// Maximum number of ticks before auto-stop (None = unlimited).
+    pub max_iterations: Option<u64>,
+}
+
+/// Summary returned after a guard loop completes.
+#[derive(Debug, Clone)]
+pub struct GuardRunnerSummary {
+    /// Total number of ticks executed.
+    pub ticks: u64,
+    /// Reason the loop stopped.
+    pub stop_reason: StopReason,
+}
+
+/// Why the guard loop stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopReason {
+    /// Received SIGINT or SIGTERM.
+    Signal,
+    /// Reached max_iterations limit.
+    MaxIterations,
+    /// Stopped via [`GuardStopHandle::stop()`].
+    Requested,
+}
+
+/// Cloneable, thread-safe handle for stopping a running guard loop.
+///
+/// Obtain via [`GuardRunner::stop_handle()`] before calling [`GuardRunner::run()`].
+/// Can be sent to another thread, stored in a signal handler, or used from
+/// an async runtime to request graceful shutdown.
+///
+/// # Example
+///
+/// ```no_run
+/// use std::time::Duration;
+/// use sysprims_proc::{
+///     GuardRunnerConfig, GuardRunner, GuardConfig, GuardRule, GuardAction,
+///     CpuMode,
+/// };
+///
+/// let config = GuardRunnerConfig {
+///     guard: GuardConfig {
+///         rule: GuardRule {
+///             root_pid: 12345,
+///             max_levels: u32::MAX,
+///             filter: None,
+///             cpu_mode: CpuMode::Lifetime,
+///             sample_duration: None,
+///         },
+///         action: GuardAction::KillDescendants { signal: 15, cascade: false },
+///         action_enabled: false,
+///         max_targets: 8,
+///     },
+///     interval: Duration::from_secs(5),
+///     max_iterations: None,
+/// };
+///
+/// let mut runner = GuardRunner::new(config).unwrap();
+/// let handle = runner.stop_handle();
+///
+/// // Stop from another thread after 30 seconds
+/// std::thread::spawn(move || {
+///     std::thread::sleep(Duration::from_secs(30));
+///     handle.stop();
+/// });
+///
+/// let summary = runner.run(|event| {
+///     println!("matched={}", event.matched);
+/// }, |_tick, err| {
+///     eprintln!("error: {err}");
+/// }).unwrap();
+/// // summary.stop_reason == StopReason::Requested
+/// ```
+#[derive(Clone)]
+pub struct GuardStopHandle {
+    /// Programmatic stop flag — set by stop(), distinct from signal flag.
+    requested: Arc<std::sync::atomic::AtomicBool>,
+    /// Write-only handle to GuardSignals' stop flag.
+    signals_flag: guard_signals::StopFlagHandle,
+    /// Clone of SignalManager — calling stop() unblocks listen().
+    manager: guard_signals::SignalManager,
+}
+
+impl GuardStopHandle {
+    /// Request the guard loop to stop gracefully.
+    ///
+    /// The loop will finish the current tick and then exit with
+    /// [`StopReason::Requested`].
+    pub fn stop(&self) {
+        self.requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // Set the GuardSignals stop flag so should_stop() returns true
+        self.signals_flag.set();
+        // Unblock the signal listener thread
+        self.manager.stop();
+    }
+}
+
+impl std::fmt::Debug for GuardStopHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuardStopHandle")
+            .field(
+                "requested",
+                &self.requested.load(std::sync::atomic::Ordering::SeqCst),
+            )
+            .finish()
+    }
+}
+
+/// Managed guard loop with signal handling and drift-free scheduling.
+///
+/// `GuardRunner` wraps `guard_step()` in a tick loop with `GuardSignals`
+/// for clean shutdown and `Tick` for drift-free scheduling.
+///
+/// # Usage
+///
+/// 1. Create with [`GuardRunner::new()`]
+/// 2. Obtain a [`GuardStopHandle`] via [`stop_handle()`](Self::stop_handle)
+///    (optional — only needed for programmatic stop from another thread)
+/// 3. Call [`run()`](Self::run) — blocks until signal, max_iterations, or stop handle
+///
+/// # Example
+///
+/// ```no_run
+/// use std::time::Duration;
+/// use sysprims_proc::{
+///     GuardRunnerConfig, GuardRunner, GuardConfig, GuardRule, GuardAction,
+///     CpuMode,
+/// };
+///
+/// let config = GuardRunnerConfig {
+///     guard: GuardConfig {
+///         rule: GuardRule {
+///             root_pid: 12345,
+///             max_levels: u32::MAX,
+///             filter: None,
+///             cpu_mode: CpuMode::Lifetime,
+///             sample_duration: None,
+///         },
+///         action: GuardAction::KillDescendants { signal: 15, cascade: false },
+///         action_enabled: false,
+///         max_targets: 8,
+///     },
+///     interval: Duration::from_secs(60),
+///     max_iterations: Some(10),
+/// };
+///
+/// let mut runner = GuardRunner::new(config).unwrap();
+/// let summary = runner.run(|event| {
+///     println!("matched={}", event.matched);
+/// }, |_tick, err| {
+///     eprintln!("error: {err}");
+/// }).unwrap();
+/// println!("stopped after {} ticks: {:?}", summary.ticks, summary.stop_reason);
+/// ```
+pub struct GuardRunner {
+    config: GuardRunnerConfig,
+    signals: guard_signals::GuardSignals,
+    tick: time::Tick,
+    /// Tracks whether stop was requested programmatically (vs signal).
+    stop_requested: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl GuardRunner {
+    /// Create a new runner. Sets up signal handlers and tick scheduler.
+    ///
+    /// Does not start the loop — call [`run()`](Self::run) to begin.
+    pub fn new(config: GuardRunnerConfig) -> SysprimsResult<Self> {
+        let signals = guard_signals::GuardSignals::start()?;
+        let tick = time::Tick::new(config.interval)?;
+        Ok(Self {
+            config,
+            signals,
+            tick,
+            stop_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        })
+    }
+
+    /// Get a cloneable stop handle for this runner.
+    ///
+    /// The handle can be sent to another thread and used to request
+    /// graceful shutdown while [`run()`](Self::run) is active.
+    pub fn stop_handle(&self) -> GuardStopHandle {
+        GuardStopHandle {
+            requested: Arc::clone(&self.stop_requested),
+            signals_flag: self.signals.stop_flag_handle(),
+            manager: self.signals.manager().clone(),
+        }
+    }
+
+    /// Run the guard loop, calling `on_event` after each tick.
+    ///
+    /// Blocks until a shutdown signal, `max_iterations`, or
+    /// [`GuardStopHandle::stop()`].
+    ///
+    /// Errors from individual `guard_step()` calls are passed to `on_error`;
+    /// the loop continues unless stopped.
+    pub fn run<F, E>(
+        &mut self,
+        mut on_event: F,
+        mut on_error: E,
+    ) -> SysprimsResult<GuardRunnerSummary>
+    where
+        F: FnMut(&GuardEvent),
+        E: FnMut(u64, &SysprimsError),
+    {
+        let mut tick_count: u64 = 0;
+
+        set_guard_process_title(self.config.guard.rule.root_pid);
+
+        while !self.signals.should_stop() {
+            match guard_step(self.config.guard.clone()) {
+                Ok(event) => {
+                    tick_count += 1;
+                    on_event(&event);
+                }
+                Err(e) => {
+                    tick_count += 1;
+                    on_error(tick_count, &e);
+                }
+            }
+
+            // Check max_iterations
+            if let Some(max) = self.config.max_iterations {
+                if tick_count >= max {
+                    return Ok(GuardRunnerSummary {
+                        ticks: tick_count,
+                        stop_reason: StopReason::MaxIterations,
+                    });
+                }
+            }
+
+            // Check stop flag before sleeping (signal may arrive during tick)
+            if self.signals.should_stop() {
+                break;
+            }
+
+            self.tick.sleep_until_next();
+        }
+
+        let reason = if self
+            .stop_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            StopReason::Requested
+        } else {
+            StopReason::Signal
+        };
+
+        Ok(GuardRunnerSummary {
+            ticks: tick_count,
+            stop_reason: reason,
+        })
+    }
+
+    /// Access the underlying signal controller (for testing).
+    pub fn signals(&self) -> &guard_signals::GuardSignals {
+        &self.signals
+    }
+}
+
 // ============================================================================
 // Ancestors API
 // ============================================================================
@@ -1774,6 +2136,44 @@ mod tests {
                 proc.name
             );
         }
+    }
+
+    #[test]
+    fn test_guard_discovery_name_matches_guard_cmdline() {
+        let cmdline = vec![
+            "/usr/local/bin/sysprims".to_string(),
+            "guard".to_string(),
+            "27776".to_string(),
+            "--preset".to_string(),
+            "watchdog".to_string(),
+        ];
+
+        assert_eq!(
+            guard_discovery_name(&cmdline, "sysprims"),
+            Some("sysprims-guard:27776".to_string())
+        );
+    }
+
+    #[test]
+    fn test_guard_discovery_name_ignores_non_guard_cmdline() {
+        let cmdline = vec![
+            "/usr/local/bin/sysprims".to_string(),
+            "pstat".to_string(),
+            "--json".to_string(),
+        ];
+
+        assert_eq!(guard_discovery_name(&cmdline, "sysprims"), None);
+    }
+
+    #[test]
+    fn test_guard_discovery_name_rejects_invalid_root_pid() {
+        let cmdline = vec![
+            "/usr/local/bin/sysprims".to_string(),
+            "guard".to_string(),
+            "not-a-pid".to_string(),
+        ];
+
+        assert_eq!(guard_discovery_name(&cmdline, "sysprims"), None);
     }
 
     #[test]

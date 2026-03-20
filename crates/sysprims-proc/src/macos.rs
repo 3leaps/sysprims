@@ -938,6 +938,8 @@ fn read_process_info(pid: u32, options: &ProcessOptions) -> SysprimsResult<Proce
     #[cfg(not(feature = "proc_ext"))]
     let thread_count = None;
 
+    let name = crate::guard_discovery_name(&cmdline, &name).unwrap_or(name);
+
     Ok(ProcessInfo {
         pid,
         ppid: bsd_info.pbi_ppid,

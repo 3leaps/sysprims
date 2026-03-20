@@ -3,9 +3,10 @@
 //! Provides JSON-based process listing and inspection via C-ABI.
 //! Uses JSON for complex data structures to avoid FFI struct marshaling complexity.
 
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
 use sysprims_core::SysprimsError;
@@ -103,6 +104,27 @@ struct GuardConfigWire {
     action: GuardActionWire,
     action_enabled: bool,
     max_targets: u32,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GuardRunnerConfigWire {
+    guard: GuardConfigWire,
+    interval_ms: u64,
+    max_iterations: Option<u64>,
+}
+
+struct FfiGuardRunnerState {
+    config: GuardConfig,
+    interval: Duration,
+    max_iterations: Option<u64>,
+    next_tick: Option<Instant>,
+    tick_count: u64,
+    stopped: bool,
+}
+
+struct FfiGuardRunner {
+    state: Mutex<FfiGuardRunnerState>,
 }
 
 unsafe fn parse_process_options(
@@ -214,7 +236,7 @@ unsafe fn parse_guard_config(config_json: *const c_char) -> Result<GuardConfig, 
         },
     };
 
-    Ok(GuardConfig {
+    let config = GuardConfig {
         rule: GuardRule {
             root_pid: wire.rule.root_pid,
             max_levels: wire.rule.max_levels,
@@ -229,7 +251,122 @@ unsafe fn parse_guard_config(config_json: *const c_char) -> Result<GuardConfig, 
         } else {
             wire.max_targets
         },
+    };
+
+    validate_guard_config_static(&config)?;
+    Ok(config)
+}
+
+fn validate_guard_config_static(config: &GuardConfig) -> Result<(), SysprimsError> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if config.rule.root_pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if config.rule.root_pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            config.rule.root_pid, MAX_SAFE_PID
+        )));
+    }
+    if config.max_targets == 0 {
+        return Err(SysprimsError::invalid_argument("max_targets must be >= 1"));
+    }
+    if let Some(filter) = config.rule.filter.as_ref() {
+        filter.validate()?;
+    }
+
+    Ok(())
+}
+
+unsafe fn parse_guard_runner_config(
+    config_json: *const c_char,
+) -> Result<FfiGuardRunner, SysprimsError> {
+    if config_json.is_null() {
+        return Err(SysprimsError::invalid_argument(
+            "config_json cannot be null",
+        ));
+    }
+
+    let config_str = CStr::from_ptr(config_json)
+        .to_str()
+        .map_err(|_| SysprimsError::invalid_argument("config_json is not valid UTF-8"))?;
+
+    if config_str.is_empty() || config_str == "{}" {
+        return Err(SysprimsError::invalid_argument(
+            "guard runner config JSON cannot be empty",
+        ));
+    }
+
+    let wire: GuardRunnerConfigWire = serde_json::from_str(config_str).map_err(|e| {
+        SysprimsError::invalid_argument(format!("invalid guard runner config JSON: {}", e))
+    })?;
+
+    if wire.interval_ms == 0 {
+        return Err(SysprimsError::invalid_argument("interval_ms must be >= 1"));
+    }
+    if matches!(wire.max_iterations, Some(0)) {
+        return Err(SysprimsError::invalid_argument(
+            "max_iterations must be >= 1 when provided",
+        ));
+    }
+
+    let guard = GuardConfig {
+        rule: GuardRule {
+            root_pid: wire.guard.rule.root_pid,
+            max_levels: wire.guard.rule.max_levels,
+            filter: if process_filter_has_criteria(&wire.guard.rule.filter) {
+                Some(wire.guard.rule.filter)
+            } else {
+                None
+            },
+            cpu_mode: wire_cpu_mode_to_proc(wire.guard.rule.cpu_mode),
+            sample_duration: wire
+                .guard
+                .rule
+                .sample_duration_ms
+                .map(Duration::from_millis),
+        },
+        action: match wire.guard.action.kind {
+            GuardActionKindWire::KillDescendants => GuardAction::KillDescendants {
+                signal: wire.guard.action.signal,
+                cascade: wire.guard.action.cascade,
+            },
+        },
+        action_enabled: wire.guard.action_enabled,
+        max_targets: if wire.guard.max_targets == 0 {
+            64
+        } else {
+            wire.guard.max_targets
+        },
+    };
+
+    validate_guard_config_static(&guard)?;
+
+    Ok(FfiGuardRunner {
+        state: Mutex::new(FfiGuardRunnerState {
+            config: guard,
+            interval: Duration::from_millis(wire.interval_ms),
+            max_iterations: wire.max_iterations,
+            next_tick: None,
+            tick_count: 0,
+            stopped: false,
+        }),
     })
+}
+
+fn schedule_next_tick(next_tick: &mut Option<Instant>, interval: Duration, now: Instant) {
+    if let Some(mut next) = *next_tick {
+        loop {
+            next += interval;
+            if next > now {
+                *next_tick = Some(next);
+                return;
+            }
+        }
+    }
+
+    *next_tick = Some(now + interval);
 }
 
 /// Execute one guard evaluation/remediation cycle.
@@ -309,6 +446,176 @@ pub unsafe extern "C" fn sysprims_proc_guard_step(
 
     *result_json_out = c_json.into_raw();
     SysprimsErrorCode::Ok
+}
+
+/// Create a polling-style guard runner handle.
+///
+/// `config_json` format:
+///
+/// ```json
+/// {
+///   "guard": { ... same shape as sysprims_proc_guard_step ... },
+///   "interval_ms": 5000,
+///   "max_iterations": 10
+/// }
+/// ```
+///
+/// The returned handle must be released with `sysprims_proc_guard_runner_free()`.
+///
+/// # Safety
+///
+/// * `config_json` must be a valid UTF-8 C string
+/// * `runner_out` must be a valid pointer to a `void*`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_guard_runner_create(
+    config_json: *const c_char,
+    runner_out: *mut *mut c_void,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if runner_out.is_null() {
+        let err = SysprimsError::invalid_argument("runner_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    *runner_out = std::ptr::null_mut();
+
+    let runner = match parse_guard_runner_config(config_json) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    *runner_out = Box::into_raw(Box::new(runner)) as *mut c_void;
+    SysprimsErrorCode::Ok
+}
+
+/// Execute at most one due guard tick on a polling-style runner.
+///
+/// Returns `Ok` with `*event_json_out = NULL` when no tick is due yet or the
+/// runner has already stopped.
+///
+/// # Safety
+///
+/// * `runner` must be a handle returned by `sysprims_proc_guard_runner_create`
+/// * `event_json_out` must be a valid pointer to a `char*`
+/// * Any non-null returned string must be freed with `sysprims_free_string()`
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_guard_runner_tick(
+    runner: *mut c_void,
+    event_json_out: *mut *mut c_char,
+) -> SysprimsErrorCode {
+    clear_error_state();
+
+    if runner.is_null() {
+        let err = SysprimsError::invalid_argument("runner cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+    if event_json_out.is_null() {
+        let err = SysprimsError::invalid_argument("event_json_out cannot be null");
+        set_error(&err);
+        return SysprimsErrorCode::InvalidArgument;
+    }
+
+    *event_json_out = std::ptr::null_mut();
+
+    let runner = &*(runner as *mut FfiGuardRunner);
+    let mut state = match runner.state.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("guard runner mutex poisoned: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    if state.stopped {
+        return SysprimsErrorCode::Ok;
+    }
+    if let Some(max) = state.max_iterations {
+        if state.tick_count >= max {
+            state.stopped = true;
+            return SysprimsErrorCode::Ok;
+        }
+    }
+
+    let now = Instant::now();
+    if let Some(next) = state.next_tick {
+        if now < next {
+            return SysprimsErrorCode::Ok;
+        }
+    }
+
+    let result = guard_step(state.config.clone());
+    state.tick_count += 1;
+    let interval = state.interval;
+    schedule_next_tick(&mut state.next_tick, interval, now);
+
+    if let Some(max) = state.max_iterations {
+        if state.tick_count >= max {
+            state.stopped = true;
+        }
+    }
+
+    let event = match result {
+        Ok(event) => event,
+        Err(e) => {
+            set_error(&e);
+            return SysprimsErrorCode::from(&e);
+        }
+    };
+
+    let json = match serde_json::to_string(&event) {
+        Ok(j) => j,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("failed to serialize guard event: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    let c_json = match CString::new(json) {
+        Ok(c) => c,
+        Err(e) => {
+            let err = SysprimsError::internal(format!("JSON contains null byte: {}", e));
+            set_error(&err);
+            return SysprimsErrorCode::Internal;
+        }
+    };
+
+    *event_json_out = c_json.into_raw();
+    SysprimsErrorCode::Ok
+}
+
+/// Request stop on a polling-style guard runner.
+///
+/// Safe to call with null; this becomes a no-op.
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_guard_runner_stop(runner: *mut c_void) {
+    if runner.is_null() {
+        return;
+    }
+
+    let runner = &*(runner as *mut FfiGuardRunner);
+    if let Ok(mut state) = runner.state.lock() {
+        state.stopped = true;
+    }
+}
+
+/// Free a polling-style guard runner created by `sysprims_proc_guard_runner_create`.
+///
+/// Safe to call with null; this becomes a no-op.
+#[no_mangle]
+pub unsafe extern "C" fn sysprims_proc_guard_runner_free(runner: *mut c_void) {
+    if runner.is_null() {
+        return;
+    }
+
+    let _ = Box::from_raw(runner as *mut FfiGuardRunner);
 }
 
 /// Walk the ancestor chain of a PID upward.
@@ -1723,5 +2030,88 @@ mod tests {
         assert!(json.contains("\"targeted\":0"));
 
         unsafe { sysprims_free_string(result) };
+    }
+
+    #[test]
+    fn test_proc_guard_runner_create_rejects_zero_interval() {
+        let config =
+            CString::new(r#"{"guard":{"rule":{"root_pid":1,"max_levels":1}},"interval_ms":0}"#)
+                .unwrap();
+        let mut runner: *mut c_void = std::ptr::null_mut();
+
+        let code = unsafe { sysprims_proc_guard_runner_create(config.as_ptr(), &mut runner) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(runner.is_null());
+    }
+
+    #[test]
+    fn test_proc_guard_runner_create_rejects_missing_guard_root_pid() {
+        let config = CString::new(r#"{"interval_ms":100}"#).unwrap();
+        let mut runner: *mut c_void = std::ptr::null_mut();
+
+        let code = unsafe { sysprims_proc_guard_runner_create(config.as_ptr(), &mut runner) };
+        assert_eq!(code, SysprimsErrorCode::InvalidArgument);
+        assert!(runner.is_null());
+    }
+
+    #[test]
+    fn test_proc_guard_runner_tick_returns_event_then_none_until_due() {
+        let pid = std::process::id();
+        let config = CString::new(format!(
+            r#"{{"guard":{{"rule":{{"root_pid":{},"max_levels":1}},"action_enabled":false,"max_targets":8}},"interval_ms":100}}"#,
+            pid
+        ))
+        .unwrap();
+        let mut runner: *mut c_void = std::ptr::null_mut();
+
+        let code = unsafe { sysprims_proc_guard_runner_create(config.as_ptr(), &mut runner) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!runner.is_null());
+
+        let mut event: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_guard_runner_tick(runner, &mut event) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!event.is_null());
+        let json = unsafe { CStr::from_ptr(event).to_str().unwrap() };
+        assert!(json.contains("guard-event"));
+        unsafe { sysprims_free_string(event) };
+
+        let mut not_due: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_guard_runner_tick(runner, &mut not_due) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(not_due.is_null());
+
+        unsafe {
+            sysprims_proc_guard_runner_stop(runner);
+            sysprims_proc_guard_runner_free(runner);
+        }
+    }
+
+    #[test]
+    fn test_proc_guard_runner_respects_max_iterations() {
+        let pid = std::process::id();
+        let config = CString::new(format!(
+            r#"{{"guard":{{"rule":{{"root_pid":{},"max_levels":1}},"action_enabled":false,"max_targets":8}},"interval_ms":1,"max_iterations":1}}"#,
+            pid
+        ))
+        .unwrap();
+        let mut runner: *mut c_void = std::ptr::null_mut();
+
+        let code = unsafe { sysprims_proc_guard_runner_create(config.as_ptr(), &mut runner) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!runner.is_null());
+
+        let mut first: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_guard_runner_tick(runner, &mut first) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(!first.is_null());
+        unsafe { sysprims_free_string(first) };
+
+        let mut second: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { sysprims_proc_guard_runner_tick(runner, &mut second) };
+        assert_eq!(code, SysprimsErrorCode::Ok);
+        assert!(second.is_null());
+
+        unsafe { sysprims_proc_guard_runner_free(runner) };
     }
 }

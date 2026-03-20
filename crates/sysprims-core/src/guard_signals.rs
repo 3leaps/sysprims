@@ -14,6 +14,20 @@ pub use rsfulmen::signals::{DoubleTapConfig, SignalManager, SignalManagerError};
 
 use crate::SysprimsResult;
 
+/// Write-only handle to a guard stop flag.
+///
+/// Can only set the flag to `true` (request stop). Cannot read or reset it.
+/// This prevents external callers from observing or clearing internal state.
+#[derive(Clone)]
+pub struct StopFlagHandle(Arc<AtomicBool>);
+
+impl StopFlagHandle {
+    /// Set the stop flag to `true`.
+    pub fn set(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Signal controller for guard-style tick loops.
 ///
 /// Sets up SIGINT/SIGTERM handling with double-tap support and exposes
@@ -126,6 +140,14 @@ impl GuardSignals {
     /// Access the underlying `SignalManager` (for shutdown hooks or test injection).
     pub fn manager(&self) -> &SignalManager {
         &self.manager
+    }
+
+    /// Get a write handle to the shared stop flag.
+    ///
+    /// Used by [`GuardStopHandle`](crate) to request stop from another thread
+    /// without holding a reference to `GuardSignals`.
+    pub fn stop_flag_handle(&self) -> StopFlagHandle {
+        StopFlagHandle(Arc::clone(&self.stop_flag))
     }
 }
 

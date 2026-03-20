@@ -316,6 +316,7 @@ fn read_process_info(pid: u32, options: &ProcessOptions) -> SysprimsResult<Proce
         let cmd = &cmdline[0];
         cmd.rsplit('/').next().unwrap_or(cmd).to_string()
     };
+    let name = crate::guard_discovery_name(&cmdline, &name).unwrap_or(name);
 
     Ok(ProcessInfo {
         pid,

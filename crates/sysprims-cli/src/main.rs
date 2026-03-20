@@ -1,23 +1,29 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use sysprims_core::guard_signals::GuardSignals;
-use sysprims_core::time::Tick;
 use sysprims_core::SysprimsError;
 use sysprims_core::{
     get_platform,
     schema::{BATCH_KILL_RESULT_V1, PROCESS_INFO_SAMPLED_V1},
 };
 use sysprims_proc::{
-    ancestors, cpu_total_time_ns, descendants_with_config, get_process, guard_step, list_fds,
-    listening_ports, select_descendant_targets, snapshot, snapshot_filtered,
-    CpuMode as ProcCpuMode, DescendantsConfig, FdFilter, FdKind, GuardAction, GuardConfig,
-    GuardRule, PortFilter, ProcessFilter, ProcessOptions, Protocol,
+    ancestors, cpu_total_time_ns, descendants_with_config, get_process, list_fds, listening_ports,
+    select_descendant_targets, snapshot, snapshot_filtered, CpuMode as ProcCpuMode,
+    DescendantsConfig, FdFilter, FdKind, GuardAction, GuardConfig, GuardPreset, GuardRule,
+    GuardRunner, GuardRunnerConfig, PortFilter, ProcessFilter, ProcessOptions, Protocol,
 };
 use sysprims_signal::match_signal_names;
 use sysprims_timeout::{run_with_timeout, GroupingMode, TimeoutConfig, TimeoutOutcome};
 use tracing::info;
 use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
+const GUARD_DAEMON_CHILD_ENV: &str = "SYSPRIMS_GUARD_DAEMON_CHILD";
 
 const PSTAT_AFTER_HELP: &str = r#"Examples:
   sysprims pstat --table
@@ -41,10 +47,19 @@ const KILL_DESCENDANTS_AFTER_HELP: &str = r#"Examples:
   sysprims kill-descendants 14796 --name worker --signal TERM --yes
 "#;
 
-const GUARD_AFTER_HELP: &str = r#"Examples:
-  sysprims guard 14796 --interval 5s --dry-run
+const GUARD_AFTER_HELP: &str = r#"Interval guidance:
+  Interactive debugging:  --preset interactive  (3s interval, 2s sample)
+  Background monitoring:  --preset background   (3m interval, 3s sample)
+  Light-touch watchdog:   --preset watchdog     (5m interval, 5s sample)
+
+  Resource cost is dominated by the sample duration, not the interval.
+  A 5m interval with 5s sample uses ~1.7% duty cycle (~8 MB RSS, ~0% idle CPU).
+  Explicit --interval and --sample flags override preset defaults.
+
+Examples:
+  sysprims guard 14796 --preset interactive --dry-run
+  sysprims guard 14796 --preset watchdog --cpu-above 90 --cpu-mode monitor --name worker --yes
   sysprims guard 14796 --interval 10s --cpu-above 80 --cpu-mode monitor --sample 3s --json
-  sysprims guard 14796 --interval 5s --name worker --signal KILL --yes
   sysprims guard 14796 --interval 5s --cpu-above 90 --cascade --max-kills 4 --yes
 "#;
 
@@ -472,9 +487,16 @@ struct GuardArgs {
     #[arg(value_name = "PID")]
     pid: u32,
 
-    /// Evaluation interval (e.g., "5s", "1m").
-    #[arg(long, value_name = "DURATION", default_value = "5s")]
-    interval: String,
+    /// Preset configuration (interactive, background, watchdog).
+    ///
+    /// Sets default interval and sample duration. Explicit --interval
+    /// and --sample flags override preset defaults.
+    #[arg(long, value_enum, value_name = "PRESET")]
+    preset: Option<CliGuardPreset>,
+
+    /// Evaluation interval (e.g., "5s", "3m"). Default: 5s (or preset value).
+    #[arg(long, value_name = "DURATION")]
+    interval: Option<String>,
 
     /// Maximum traversal depth (1 = children only, "all" = full subtree).
     #[arg(long, value_name = "N", default_value = "1")]
@@ -502,10 +524,10 @@ struct GuardArgs {
     cpu_above: Option<f64>,
 
     /// CPU measurement mode.
-    #[arg(long, value_enum, value_name = "MODE", default_value = "lifetime")]
-    cpu_mode: CpuMode,
+    #[arg(long, value_enum, value_name = "MODE")]
+    cpu_mode: Option<CpuMode>,
 
-    /// Sample CPU usage over an interval (e.g., "250ms").
+    /// Sample CPU usage over an interval (e.g., "250ms", "3s"). Overrides preset default.
     #[arg(long, value_name = "DURATION")]
     sample: Option<String>,
 
@@ -536,6 +558,32 @@ struct GuardArgs {
     /// Output JSON events (one per line per tick).
     #[arg(long)]
     json: bool,
+
+    /// Detach from terminal and run in background.
+    #[arg(long, conflicts_with_all = ["stop", "status"])]
+    daemon: bool,
+
+    /// Write PID to file (default: /tmp/sysprims-guard-<root-pid>.pid).
+    #[arg(long, value_name = "PATH")]
+    pidfile: Option<PathBuf>,
+
+    /// Stop a running guard by pidfile.
+    #[arg(long, conflicts_with = "status")]
+    stop: bool,
+
+    /// Check whether a guard is running by pidfile.
+    #[arg(long)]
+    status: bool,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+enum CliGuardPreset {
+    /// Short interval for interactive debugging (3s interval, 2s sample).
+    Interactive,
+    /// Moderate interval for background monitoring (3m interval, 3s sample).
+    Background,
+    /// Long interval for lightweight watchdog (5m interval, 5s sample).
+    Watchdog,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
@@ -2018,11 +2066,84 @@ fn fd_kind_str(kind: FdKind) -> &'static str {
 // Guard command
 // ============================================================================
 
-fn run_guard(args: GuardArgs) -> Result<i32, SysprimsError> {
-    let interval = parse_duration(&args.interval)?;
+fn cli_preset_to_lib(preset: &CliGuardPreset) -> GuardPreset {
+    match preset {
+        CliGuardPreset::Interactive => GuardPreset::Interactive,
+        CliGuardPreset::Background => GuardPreset::Background,
+        CliGuardPreset::Watchdog => GuardPreset::Watchdog,
+    }
+}
+
+fn resolve_guard_interval(
+    explicit_interval: Option<&str>,
+    preset: Option<GuardPreset>,
+) -> Result<Duration, SysprimsError> {
+    if let Some(s) = explicit_interval {
+        parse_duration(s)
+    } else if let Some(p) = preset {
+        Ok(p.interval())
+    } else {
+        Ok(Duration::from_secs(5))
+    }
+}
+
+fn resolve_guard_sample_duration(
+    explicit_sample: Option<&str>,
+    preset: Option<GuardPreset>,
+) -> Result<Option<Duration>, SysprimsError> {
+    if let Some(s) = explicit_sample {
+        Ok(Some(parse_duration(s)?))
+    } else {
+        Ok(preset.map(|p| p.sample_duration()))
+    }
+}
+
+fn resolve_guard_cpu_mode(
+    explicit_cpu_mode: Option<CpuMode>,
+    sample_duration: Option<Duration>,
+) -> ProcCpuMode {
+    if let Some(mode) = explicit_cpu_mode {
+        to_proc_cpu_mode(mode)
+    } else if sample_duration.is_some() {
+        ProcCpuMode::Monitor
+    } else {
+        ProcCpuMode::Lifetime
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GuardProcessStatus {
+    pid: u32,
+    root_pid: u32,
+    interval: String,
+}
+
+struct GuardPidfile {
+    path: PathBuf,
+    pid: u32,
+}
+
+impl Drop for GuardPidfile {
+    fn drop(&mut self) {
+        let Ok(contents) = fs::read_to_string(&self.path) else {
+            return;
+        };
+        let Ok(pid) = contents.trim().parse::<u32>() else {
+            return;
+        };
+        if pid == self.pid {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn build_guard_runner_config(args: &GuardArgs) -> Result<GuardRunnerConfig, SysprimsError> {
+    let preset = args.preset.as_ref().map(cli_preset_to_lib);
+    let interval = resolve_guard_interval(args.interval.as_deref(), preset)?;
+    let sample_duration = resolve_guard_sample_duration(args.sample.as_deref(), preset)?;
+
     let max_levels = parse_max_levels(&args.max_levels)?;
     let signal_num = resolve_signal(&args.signal)?;
-    let sample_duration = args.sample.as_deref().map(parse_duration).transpose()?;
     let filter = build_descendants_filter(
         &args.name,
         &args.user,
@@ -2031,8 +2152,6 @@ fn run_guard(args: GuardArgs) -> Result<i32, SysprimsError> {
         &args.running_for,
     )?;
 
-    // Preflight: validate static config that would fail every tick.
-    // PID 0 and > i32::MAX are rejected by guard_step; fail fast here.
     const MAX_SAFE_PID: u32 = i32::MAX as u32;
     if args.pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
@@ -2047,24 +2166,16 @@ fn run_guard(args: GuardArgs) -> Result<i32, SysprimsError> {
         f.validate()?;
     }
 
-    // --yes required for remediation; default is dry-run
     let action_enabled = args.yes && !args.dry_run;
+    let effective_cpu_mode = resolve_guard_cpu_mode(args.cpu_mode.clone(), sample_duration);
 
-    if !action_enabled && !args.json {
-        eprintln!("guard: observation mode (no signals will be sent; use --yes to enable)");
-    }
-
-    let signals = GuardSignals::start()?;
-    let mut tick = Tick::new(interval)?;
-    let mut tick_count: u64 = 0;
-
-    while !signals.should_stop() {
-        let config = GuardConfig {
+    Ok(GuardRunnerConfig {
+        guard: GuardConfig {
             rule: GuardRule {
                 root_pid: args.pid,
                 max_levels,
-                filter: filter.clone(),
-                cpu_mode: to_proc_cpu_mode(args.cpu_mode.clone()),
+                filter,
+                cpu_mode: effective_cpu_mode,
                 sample_duration,
             },
             action: GuardAction::KillDescendants {
@@ -2073,54 +2184,394 @@ fn run_guard(args: GuardArgs) -> Result<i32, SysprimsError> {
             },
             action_enabled,
             max_targets: args.max_kills,
-        };
+        },
+        interval,
+        max_iterations: None,
+    })
+}
 
-        match guard_step(config) {
-            Ok(event) => {
-                tick_count += 1;
-                if args.json {
-                    if let Ok(json) = serde_json::to_string(&event) {
-                        println!("{json}");
-                    }
-                } else {
-                    let action_str = if action_enabled { "armed" } else { "observe" };
-                    print!(
-                        "[tick {tick_count}] matched={} targeted={} killed={} failed={} mode={action_str}",
-                        event.matched, event.targeted, event.killed, event.failed
-                    );
-                    if event.skipped_safety > 0 {
-                        print!(" skipped_safety={}", event.skipped_safety);
-                    }
-                    println!();
-                    for w in &event.warnings {
-                        eprintln!("  warning: {w}");
-                    }
-                }
-            }
-            Err(e) => {
-                if args.json {
-                    let err_obj = serde_json::json!({
-                        "error": e.to_string(),
-                        "tick": tick_count + 1,
-                    });
-                    eprintln!("{}", err_obj);
-                } else {
-                    eprintln!("guard: tick {} error: {}", tick_count + 1, e);
-                }
-                // Non-fatal: root PID may have exited temporarily
-                tick_count += 1;
-            }
-        }
-
-        // Check stop flag before sleeping (signal may have arrived during tick)
-        if signals.should_stop() {
-            break;
-        }
-        tick.sleep_until_next();
+fn default_guard_pidfile(root_pid: u32) -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from(format!("/tmp/sysprims-guard-{root_pid}.pid"))
     }
 
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join(format!("sysprims-guard-{root_pid}.pid"))
+    }
+}
+
+fn guard_pidfile_path(args: &GuardArgs) -> PathBuf {
+    args.pidfile
+        .clone()
+        .unwrap_or_else(|| default_guard_pidfile(args.pid))
+}
+
+fn guard_interval_label_from_args(args: &GuardArgs) -> String {
+    if let Some(interval) = args.interval.as_ref() {
+        return interval.clone();
+    }
+
+    match args.preset {
+        Some(CliGuardPreset::Interactive) => "3s".to_string(),
+        Some(CliGuardPreset::Background) => "3m".to_string(),
+        Some(CliGuardPreset::Watchdog) => "5m".to_string(),
+        None => "5s".to_string(),
+    }
+}
+
+fn guard_interval_label_from_cmdline(cmdline: &[String]) -> String {
+    let mut i = 0usize;
+    while i < cmdline.len() {
+        if cmdline[i] == "--interval" {
+            if let Some(value) = cmdline.get(i + 1) {
+                return value.clone();
+            }
+        }
+        if cmdline[i] == "--preset" {
+            if let Some(value) = cmdline.get(i + 1) {
+                return match value.as_str() {
+                    "interactive" => "3s".to_string(),
+                    "background" => "3m".to_string(),
+                    "watchdog" => "5m".to_string(),
+                    _ => "5s".to_string(),
+                };
+            }
+        }
+        i += 1;
+    }
+
+    "5s".to_string()
+}
+
+fn is_sysprims_binary_name(name: &str) -> bool {
+    name == "sysprims" || name.starts_with("sysprims-")
+}
+
+fn inspect_guard_process(pid: u32) -> Option<GuardProcessStatus> {
+    let info = get_process(pid).ok()?;
+    let binary = info
+        .cmdline
+        .first()?
+        .rsplit('/')
+        .next()
+        .unwrap_or(&info.name);
+    if !is_sysprims_binary_name(binary) {
+        return None;
+    }
+
+    let guard_index = info.cmdline.iter().position(|arg| arg == "guard")?;
+    let root_pid = info.cmdline.get(guard_index + 1)?.parse::<u32>().ok()?;
+    Some(GuardProcessStatus {
+        pid,
+        root_pid,
+        interval: guard_interval_label_from_cmdline(&info.cmdline),
+    })
+}
+
+fn read_pidfile_pid(path: &Path) -> Result<Option<u32>, SysprimsError> {
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            let trimmed = contents.trim();
+            if trimmed.is_empty() {
+                let _ = fs::remove_file(path);
+                return Ok(None);
+            }
+            let Ok(pid) = trimmed.parse::<u32>() else {
+                let _ = fs::remove_file(path);
+                return Ok(None);
+            };
+            Ok(Some(pid))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(SysprimsError::system(
+            format!("failed to read pidfile {}: {}", path.display(), e),
+            e.raw_os_error().unwrap_or(0),
+        )),
+    }
+}
+
+fn load_guard_from_pidfile(
+    path: &Path,
+    expected_root_pid: u32,
+) -> Result<Option<GuardProcessStatus>, SysprimsError> {
+    let Some(pid) = read_pidfile_pid(path)? else {
+        return Ok(None);
+    };
+
+    let status = inspect_guard_process(pid);
+    if let Some(status) = status {
+        if status.root_pid == expected_root_pid {
+            return Ok(Some(status));
+        }
+    }
+
+    let _ = fs::remove_file(path);
+    Ok(None)
+}
+
+fn create_guard_pidfile(path: &Path) -> Result<GuardPidfile, SysprimsError> {
+    let pid = std::process::id();
+    fs::write(path, format!("{pid}\n")).map_err(|e| {
+        SysprimsError::system(
+            format!("failed to write pidfile {}: {}", path.display(), e),
+            e.raw_os_error().unwrap_or(0),
+        )
+    })?;
+    Ok(GuardPidfile {
+        path: path.to_path_buf(),
+        pid,
+    })
+}
+
+fn print_guard_status_json(path: &Path, status: Option<&GuardProcessStatus>) {
+    let value = if let Some(status) = status {
+        serde_json::json!({
+            "running": true,
+            "pidfile": path.display().to_string(),
+            "pid": status.pid,
+            "root_pid": status.root_pid,
+            "interval": status.interval,
+        })
+    } else {
+        serde_json::json!({
+            "running": false,
+            "pidfile": path.display().to_string(),
+        })
+    };
+    println!("{}", serde_json::to_string_pretty(&value).unwrap());
+}
+
+fn run_guard_status(args: &GuardArgs) -> Result<i32, SysprimsError> {
+    let pidfile = guard_pidfile_path(args);
+    let status = load_guard_from_pidfile(&pidfile, args.pid)?;
+
+    if args.json {
+        print_guard_status_json(&pidfile, status.as_ref());
+    } else if let Some(status) = status.as_ref() {
+        println!(
+            "guard running (PID {}, root {}, interval {})",
+            status.pid, status.root_pid, status.interval
+        );
+    } else {
+        println!("no guard running");
+    }
+
+    Ok(if status.is_some() { 0 } else { 1 })
+}
+
+fn run_guard_stop(args: &GuardArgs) -> Result<i32, SysprimsError> {
+    let pidfile = guard_pidfile_path(args);
+    let Some(status) = load_guard_from_pidfile(&pidfile, args.pid)? else {
+        if args.json {
+            print_guard_status_json(&pidfile, None);
+        } else {
+            eprintln!("guard: no running guard found");
+        }
+        return Ok(1);
+    };
+
+    sysprims_signal::terminate(status.pid)?;
     if !args.json {
-        eprintln!("guard: stopped after {tick_count} ticks");
+        eprintln!(
+            "guard: sent SIGTERM to PID {} (root {}, interval {})",
+            status.pid, status.root_pid, status.interval
+        );
+    }
+    Ok(0)
+}
+
+#[cfg(unix)]
+fn wait_for_guard_daemon_ready(
+    child: &mut std::process::Child,
+    pidfile: &Path,
+) -> Result<(), SysprimsError> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+
+    loop {
+        if read_pidfile_pid(pidfile)? == Some(child.id()) {
+            return Ok(());
+        }
+
+        if let Some(status) = child.try_wait().map_err(|e| {
+            SysprimsError::system(
+                format!("failed to poll detached guard status: {}", e),
+                e.raw_os_error().unwrap_or(0),
+            )
+        })? {
+            return Err(SysprimsError::spawn_failed(
+                "sysprims guard --daemon",
+                format!(
+                    "detached guard exited during startup with status {}",
+                    status
+                ),
+            ));
+        }
+
+        if std::time::Instant::now() >= deadline {
+            return Err(SysprimsError::spawn_failed(
+                "sysprims guard --daemon",
+                format!(
+                    "detached guard did not acknowledge startup via pidfile {}",
+                    pidfile.display()
+                ),
+            ));
+        }
+
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(unix)]
+fn spawn_guard_daemon(args: &GuardArgs) -> Result<i32, SysprimsError> {
+    let pidfile = guard_pidfile_path(args);
+    if let Some(status) = load_guard_from_pidfile(&pidfile, args.pid)? {
+        return Err(SysprimsError::invalid_argument(format!(
+            "guard already running for root {} (PID {})",
+            status.root_pid, status.pid
+        )));
+    }
+
+    let exe = std::env::current_exe().map_err(|e| {
+        SysprimsError::system(
+            format!("failed to locate current executable: {}", e),
+            e.raw_os_error().unwrap_or(0),
+        )
+    })?;
+    let mut cmd = ProcessCommand::new(exe);
+    for arg in std::env::args_os().skip(1) {
+        if arg == "--daemon" {
+            continue;
+        }
+        cmd.arg(arg);
+    }
+    cmd.env(GUARD_DAEMON_CHILD_ENV, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        SysprimsError::spawn_failed(
+            "sysprims guard --daemon",
+            format!("failed to detach guard daemon: {}", e),
+        )
+    })?;
+
+    wait_for_guard_daemon_ready(&mut child, &pidfile)?;
+
+    if args.json {
+        print_guard_status_json(
+            &pidfile,
+            Some(&GuardProcessStatus {
+                pid: child.id(),
+                root_pid: args.pid,
+                interval: guard_interval_label_from_args(args),
+            }),
+        );
+    } else {
+        eprintln!(
+            "guard: daemon started (PID {}) pidfile={}",
+            child.id(),
+            pidfile.display()
+        );
+    }
+
+    Ok(0)
+}
+
+#[cfg(not(unix))]
+fn spawn_guard_daemon(_args: &GuardArgs) -> Result<i32, SysprimsError> {
+    Err(SysprimsError::not_supported(
+        "daemon mode is not supported on Windows; use a service manager",
+        get_platform(),
+    ))
+}
+
+fn run_guard(args: GuardArgs) -> Result<i32, SysprimsError> {
+    if args.status {
+        return run_guard_status(&args);
+    }
+    if args.stop {
+        return run_guard_stop(&args);
+    }
+    if args.daemon && std::env::var_os(GUARD_DAEMON_CHILD_ENV).is_none() {
+        build_guard_runner_config(&args)?;
+        return spawn_guard_daemon(&args);
+    }
+
+    let runner_config = build_guard_runner_config(&args)?;
+    let action_enabled = runner_config.guard.action_enabled;
+    if !action_enabled && !args.json {
+        eprintln!("guard: observation mode (no signals will be sent; use --yes to enable)");
+    }
+
+    let json = args.json;
+    let mut runner = GuardRunner::new(runner_config)?;
+    let _pidfile = if args.stop || args.status {
+        None
+    } else {
+        let pidfile = guard_pidfile_path(&args);
+        if let Some(status) = load_guard_from_pidfile(&pidfile, args.pid)? {
+            return Err(SysprimsError::invalid_argument(format!(
+                "guard already running for root {} (PID {})",
+                status.root_pid, status.pid
+            )));
+        }
+        Some(create_guard_pidfile(&pidfile)?)
+    };
+
+    let mut tick_count: u64 = 0;
+
+    let summary = runner.run(
+        |event| {
+            tick_count += 1;
+            if json {
+                if let Ok(j) = serde_json::to_string(event) {
+                    println!("{j}");
+                }
+            } else {
+                let action_str = if action_enabled { "armed" } else { "observe" };
+                print!(
+                    "[tick {tick_count}] matched={} targeted={} killed={} failed={} mode={action_str}",
+                    event.matched, event.targeted, event.killed, event.failed
+                );
+                if event.skipped_safety > 0 {
+                    print!(" skipped_safety={}", event.skipped_safety);
+                }
+                println!();
+                for w in &event.warnings {
+                    eprintln!("  warning: {w}");
+                }
+            }
+        },
+        |tick, e| {
+            if json {
+                let err_obj = serde_json::json!({
+                    "error": e.to_string(),
+                    "tick": tick,
+                });
+                eprintln!("{}", err_obj);
+            } else {
+                eprintln!("guard: tick {} error: {}", tick, e);
+            }
+        },
+    )?;
+
+    if !args.json {
+        eprintln!(
+            "guard: stopped after {} ticks ({:?})",
+            summary.ticks, summary.stop_reason
+        );
     }
 
     Ok(0)
@@ -2712,13 +3163,22 @@ mod tests {
             panic!("expected guard command");
         };
         assert_eq!(args.pid, 1234);
-        assert_eq!(args.interval, "5s");
+        assert!(
+            args.interval.is_none(),
+            "no default interval without preset"
+        );
+        assert!(args.preset.is_none());
         assert_eq!(args.max_levels, "1");
         assert_eq!(args.signal, "TERM");
         assert_eq!(args.max_kills, 8);
+        assert!(args.cpu_mode.is_none());
         assert!(!args.yes);
         assert!(!args.dry_run);
         assert!(!args.json);
+        assert!(!args.daemon);
+        assert!(args.pidfile.is_none());
+        assert!(!args.stop);
+        assert!(!args.status);
         assert!(!args.cascade);
     }
 
@@ -2757,12 +3217,12 @@ mod tests {
             panic!("expected guard command");
         };
         assert_eq!(args.pid, 7825);
-        assert_eq!(args.interval, "10s");
+        assert_eq!(args.interval.as_deref(), Some("10s"));
         assert_eq!(args.max_levels, "all");
         assert_eq!(args.signal, "KILL");
         assert_eq!(args.name.as_deref(), Some("worker"));
+        assert_eq!(args.cpu_mode, Some(CpuMode::Monitor));
         assert_eq!(args.cpu_above, Some(80.0));
-        assert_eq!(args.cpu_mode, CpuMode::Monitor);
         assert_eq!(args.sample.as_deref(), Some("3s"));
         assert_eq!(args.memory_above, Some(500000));
         assert_eq!(args.running_for.as_deref(), Some("1m"));
@@ -2770,6 +3230,31 @@ mod tests {
         assert_eq!(args.max_kills, 4);
         assert!(args.yes);
         assert!(args.json);
+    }
+
+    #[test]
+    fn guard_parses_daemon_pidfile_and_status_flags() {
+        let cli = Cli::try_parse_from([
+            "sysprims",
+            "guard",
+            "7825",
+            "--daemon",
+            "--pidfile",
+            "/tmp/custom.pid",
+        ])
+        .unwrap();
+        let Command::Guard(args) = cli.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert!(args.daemon);
+        assert_eq!(args.pidfile.as_deref(), Some(Path::new("/tmp/custom.pid")));
+        assert!(!args.stop);
+        assert!(!args.status);
+    }
+
+    #[test]
+    fn guard_stop_conflicts_with_status() {
+        assert!(Cli::try_parse_from(["sysprims", "guard", "1234", "--stop", "--status"]).is_err());
     }
 
     #[test]
@@ -2785,5 +3270,99 @@ mod tests {
     #[test]
     fn guard_rejects_max_kills_zero() {
         assert!(Cli::try_parse_from(["sysprims", "guard", "1234", "--max-kills", "0"]).is_err());
+    }
+
+    #[test]
+    fn guard_preset_parses() {
+        let cli =
+            Cli::try_parse_from(["sysprims", "guard", "1234", "--preset", "watchdog"]).unwrap();
+        let Command::Guard(args) = cli.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert_eq!(args.preset, Some(CliGuardPreset::Watchdog));
+        assert!(
+            args.interval.is_none(),
+            "preset does not set interval field"
+        );
+        assert!(args.sample.is_none(), "preset does not set sample field");
+    }
+
+    #[test]
+    fn guard_preset_with_interval_override() {
+        let cli = Cli::try_parse_from([
+            "sysprims",
+            "guard",
+            "1234",
+            "--preset",
+            "watchdog",
+            "--interval",
+            "30s",
+        ])
+        .unwrap();
+        let Command::Guard(args) = cli.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert_eq!(args.preset, Some(CliGuardPreset::Watchdog));
+        assert_eq!(args.interval.as_deref(), Some("30s"));
+    }
+
+    #[test]
+    fn guard_preset_all_values() {
+        for (name, expected) in [
+            ("interactive", CliGuardPreset::Interactive),
+            ("background", CliGuardPreset::Background),
+            ("watchdog", CliGuardPreset::Watchdog),
+        ] {
+            let cli = Cli::try_parse_from(["sysprims", "guard", "1234", "--preset", name]).unwrap();
+            let Command::Guard(args) = cli.command.unwrap() else {
+                panic!("expected guard command");
+            };
+            assert_eq!(args.preset, Some(expected));
+        }
+    }
+
+    #[test]
+    fn guard_cpu_mode_defaults_to_lifetime_without_sample() {
+        assert_eq!(resolve_guard_cpu_mode(None, None), ProcCpuMode::Lifetime);
+    }
+
+    #[test]
+    fn guard_cpu_mode_promotes_to_monitor_when_sample_is_implicit() {
+        assert_eq!(
+            resolve_guard_cpu_mode(None, Some(Duration::from_secs(3))),
+            ProcCpuMode::Monitor
+        );
+    }
+
+    #[test]
+    fn guard_cpu_mode_explicit_lifetime_overrides_preset_sample() {
+        assert_eq!(
+            resolve_guard_cpu_mode(Some(CpuMode::Lifetime), Some(Duration::from_secs(5))),
+            ProcCpuMode::Lifetime
+        );
+    }
+
+    #[test]
+    fn guard_cpu_mode_explicit_monitor_is_preserved() {
+        assert_eq!(
+            resolve_guard_cpu_mode(Some(CpuMode::Monitor), None),
+            ProcCpuMode::Monitor
+        );
+    }
+
+    #[test]
+    fn guard_interval_label_defaults_and_presets() {
+        let interactive =
+            Cli::try_parse_from(["sysprims", "guard", "1234", "--preset", "interactive"]).unwrap();
+        let Command::Guard(interactive_args) = interactive.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert_eq!(guard_interval_label_from_args(&interactive_args), "3s");
+
+        let default = Cli::try_parse_from(["sysprims", "guard", "1234"]).unwrap();
+        let Command::Guard(default_args) = default.command.unwrap() else {
+            panic!("expected guard command");
+        };
+        assert_eq!(guard_interval_label_from_args(&default_args), "5s");
     }
 }

@@ -167,6 +167,75 @@ func TestGuardStepActionDisabled(t *testing.T) {
 	}
 }
 
+func TestGuardPresetDurations(t *testing.T) {
+	if got := sysprims.GuardPresetInteractive.Interval(); got != 3*time.Second {
+		t.Fatalf("interactive interval = %v, want 3s", got)
+	}
+	if got := sysprims.GuardPresetBackground.Interval(); got != 3*time.Minute {
+		t.Fatalf("background interval = %v, want 3m", got)
+	}
+	if got := sysprims.GuardPresetWatchdog.SampleDuration(); got != 5*time.Second {
+		t.Fatalf("watchdog sample = %v, want 5s", got)
+	}
+}
+
+func TestGuardRunnerTick(t *testing.T) {
+	maxIterations := uint64(1)
+	runner, err := sysprims.NewGuardRunner(&sysprims.GuardRunnerConfig{
+		Guard: sysprims.GuardConfig{
+			Rule: sysprims.GuardRule{
+				RootPID: uint32(os.Getpid()),
+				MaxLevels: func() *uint32 {
+					v := uint32(1)
+					return &v
+				}(),
+			},
+			ActionEnabled: false,
+			MaxTargets:    8,
+		},
+		Interval:      10 * time.Millisecond,
+		MaxIterations: &maxIterations,
+	})
+	if err != nil {
+		t.Fatalf("NewGuardRunner failed: %v", err)
+	}
+	defer runner.Close()
+
+	event, err := runner.Tick()
+	if err != nil {
+		t.Fatalf("GuardRunner.Tick failed: %v", err)
+	}
+	if event == nil {
+		t.Fatal("GuardRunner.Tick returned nil event on first due tick")
+	}
+
+	event, err = runner.Tick()
+	if err != nil {
+		t.Fatalf("GuardRunner.Tick second call failed: %v", err)
+	}
+	if event != nil {
+		t.Fatalf("GuardRunner.Tick second call = %+v, want nil after max_iterations", event)
+	}
+}
+
+func TestGuardRunnerTickAfterClose(t *testing.T) {
+	runner, err := sysprims.NewGuardRunner(&sysprims.GuardRunnerConfig{
+		Guard: sysprims.GuardConfig{
+			Rule:       sysprims.GuardRule{RootPID: uint32(os.Getpid())},
+			MaxTargets: 8,
+		},
+		Interval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewGuardRunner failed: %v", err)
+	}
+	runner.Close()
+
+	if _, err := runner.Tick(); err == nil {
+		t.Fatal("GuardRunner.Tick after Close should return error")
+	}
+}
+
 func TestAncestorsSelf(t *testing.T) {
 	pid := uint32(os.Getpid())
 	result, err := sysprims.Ancestors(pid, 10, nil)

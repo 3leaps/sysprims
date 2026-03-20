@@ -250,6 +250,110 @@ char *sysprims_last_error(void);
 void sysprims_clear_error(void);
 
 /**
+ * Execute one guard evaluation/remediation cycle.
+ *
+ * `config_json` uses a nested shape:
+ *
+ * ```json
+ * {
+ *   "rule": {
+ *     "root_pid": 1234,
+ *     "max_levels": 3,
+ *     "name_contains": "worker",
+ *     "cpu_mode": "monitor",
+ *     "sample_duration_ms": 1000
+ *   },
+ *   "action": {
+ *     "kind": "kill_descendants",
+ *     "signal": 9,
+ *     "cascade": true
+ *   },
+ *   "action_enabled": false,
+ *   "max_targets": 64
+ * }
+ * ```
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * `config_json` must be a valid UTF-8 C string
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_guard_step(const char *config_json, char **result_json_out);
+
+/**
+ * Create a polling-style guard runner handle.
+ *
+ * `config_json` format:
+ *
+ * ```json
+ * {
+ *   "guard": { ... same shape as sysprims_proc_guard_step ... },
+ *   "interval_ms": 5000,
+ *   "max_iterations": 10
+ * }
+ * ```
+ *
+ * The returned handle must be released with `sysprims_proc_guard_runner_free()`.
+ *
+ * # Safety
+ *
+ * * `config_json` must be a valid UTF-8 C string
+ * * `runner_out` must be a valid pointer to a `void*`
+ */
+SysprimsErrorCode sysprims_proc_guard_runner_create(const char *config_json, void **runner_out);
+
+/**
+ * Execute at most one due guard tick on a polling-style runner.
+ *
+ * Returns `Ok` with `*event_json_out = NULL` when no tick is due yet or the
+ * runner has already stopped.
+ *
+ * # Safety
+ *
+ * * `runner` must be a handle returned by `sysprims_proc_guard_runner_create`
+ * * `event_json_out` must be a valid pointer to a `char*`
+ * * Any non-null returned string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_guard_runner_tick(void *runner, char **event_json_out);
+
+/**
+ * Request stop on a polling-style guard runner.
+ *
+ * Safe to call with null; this becomes a no-op.
+ */
+void sysprims_proc_guard_runner_stop(void *runner);
+
+/**
+ * Free a polling-style guard runner created by `sysprims_proc_guard_runner_create`.
+ *
+ * Safe to call with null; this becomes a no-op.
+ */
+void sysprims_proc_guard_runner_free(void *runner);
+
+/**
+ * Walk the ancestor chain of a PID upward.
+ *
+ * Returns a JSON object matching `ancestors-result.schema.json`.
+ *
+ * # Arguments
+ *
+ * * `pid` - Starting PID
+ * * `max_depth` - Maximum depth to walk (0 means just the starting PID)
+ * * `options_json` - Optional JSON for ProcessOptions (may be NULL)
+ * * `result_json_out` - Output pointer for result JSON string
+ *
+ * # Safety
+ *
+ * * `result_json_out` must be a valid pointer to `*mut c_char`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_proc_ancestors(uint32_t pid,
+                                          uint32_t max_depth,
+                                          const char *options_json,
+                                          char **result_json_out);
+
+/**
  * List open file descriptors for a PID, optionally filtered.
  *
  * Returns a JSON object matching `fd-snapshot.schema.json`.
@@ -511,34 +615,6 @@ SysprimsErrorCode sysprims_proc_descendants_ex(uint32_t root_pid,
                                                const char *filter_json,
                                                const char *options_json,
                                                char **result_json_out);
-
-/**
- * Execute one guard evaluation/remediation cycle.
- *
- * `config_json` uses nested `rule` and `action` objects.
- *
- * # Safety
- *
- * * `result_json_out` must be a valid pointer to a `char*`
- * * `config_json` must be a valid UTF-8 C string
- * * The result string must be freed with `sysprims_free_string()`
- */
-SysprimsErrorCode sysprims_proc_guard_step(const char *config_json, char **result_json_out);
-
-/**
- * Walk the ancestor chain of a PID upward.
- *
- * Returns a JSON object matching `ancestors-result.schema.json`.
- *
- * # Safety
- *
- * * `result_json_out` must be a valid pointer to a `char*`
- * * The result string must be freed with `sysprims_free_string()`
- */
-SysprimsErrorCode sysprims_proc_ancestors(uint32_t pid,
-                                          uint32_t max_depth,
-                                          const char *options_json,
-                                          char **result_json_out);
 
 /**
  * Kill descendants of a process.
