@@ -10,6 +10,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Guard automation and provenance release work. This cycle turns the VSCodium runaway-plugin dogfood
+incident into a reusable workflow: detect hot descendants reliably, explain where they came from,
+and run sysprims as a long-lived watchdog instead of a foreground-only CLI loop.
+
+### Added
+
+- **GuardStep one-shot remediation primitive** (`sysprims-proc`, `sysprims-ffi`, `bindings/go`,
+  `bindings/typescript`): New structured guard evaluation API for one-shot monitoring and optional
+  remediation, with explicit action enablement and per-tick event output.
+- **Ancestors provenance API** (`sysprims-proc`, `sysprims-cli`, `sysprims-ffi`, `bindings/go`,
+  `bindings/typescript`): New ancestor-walk surface for answering "what spawned this?" across Rust,
+  CLI, and bindings.
+- **Managed guard loop** (`sysprims-proc`, `sysprims-cli`, `sysprims-ffi`, `bindings/go`):
+  `GuardRunner` extracts the long-running loop into a reusable library surface, with polling-style
+  FFI support and typed Go wrappers for watchdog consumers.
+- **Guard daemon management** (`sysprims-cli`): `sysprims guard` gains `--daemon`,
+  `--pidfile <PATH>`, `--status`, and `--stop` for background operation and pidfile-based process
+  management on Unix.
+- **Guard self-discovery convention** (`sysprims-proc`, `sysprims-cli`): Running guards expose a
+  best-effort guard title, and sysprims process inspection normalizes matching guard cmdlines to
+  `sysprims-guard:<root_pid>` for ergonomic lookup.
+- **Shared runtime primitives** (`sysprims-core`): Added `now_rfc3339()`, drift-resistant `Tick`,
+  and `GuardSignals` to standardize timestamps, scheduling, and signal-aware shutdown for
+  long-running loops.
+
+### Changed
+
+- **CLI: `sysprims guard`** (`sysprims-cli`): Now runs as a thin consumer of `GuardRunner`, keeps
+  observation mode as the default, and adds `--preset` guidance for `interactive`, `background`,
+  and `watchdog` guard profiles.
+- **Release process hardening**: v0.1.15 prep adds stronger release preflight guidance, TypeScript
+  binding validation, and explicit CI-only policy for prebuilt native binding artifacts.
+
+### Fixed
+
+- **Guard preset override semantics** (`sysprims-cli`): Explicit `--cpu-mode lifetime` now wins
+  over preset-provided sampling instead of being silently promoted to monitor mode.
+- **GuardRunner FFI safety** (`sysprims-ffi`, `bindings/go`): Polling runner state is now
+  synchronized in Rust and serialized in the Go wrapper, avoiding concurrent lifecycle races.
+- **GuardRunner create-time validation** (`sysprims-ffi`): Runner creation now rejects static guard
+  misconfiguration up front instead of creating handles that would fail forever at tick time.
+- **Daemon startup acknowledgment** (`sysprims-cli`): `--daemon` now waits until the detached child
+  finishes initialization before reporting success, and fails cleanly on early startup errors.
+
+### Notes
+
+- Unix daemon mode is implemented for v0.1.15; Windows currently returns a clear not-supported
+  error directing operators to a service manager.
+- Go local verification for the new FFI runner surface currently links against a freshly built
+  local `sysprims-ffi` from `target/debug` until prebuilt binding artifacts are refreshed by the
+  release workflow.
+
 ## [0.1.14] - 2026-02-24
 
 Process intelligence and Go team depth. Surfaces process environment variables and thread count

@@ -6,6 +6,168 @@
 
 ---
 
+## v0.1.15 - Draft
+
+**Status:** Guard Automation & Provenance Release
+
+This release turns the recurring VSCodium runaway-plugin incident into a first-class sysprims
+workflow. The release adds a reusable one-shot guard primitive, a managed guard loop for long-lived
+watchdogs, a new ancestors surface for provenance, and operational guard controls for background
+execution and discovery. The result is a cleaner path from "find the hot offender" to "explain it"
+to "run a watchdog that can keep the host healthy."
+
+### Highlights
+
+- **One-shot guard primitive**: `GuardStep` gives Rust, FFI, Go, and TypeScript consumers a shared
+  per-tick remediation kernel instead of forcing each ecosystem to reimplement detection and safety
+  logic.
+- **Managed watchdog loop**: `GuardRunner` extracts long-running guard behavior into a reusable
+  library surface and now powers the CLI.
+- **Provenance support**: New `ancestors` APIs make it easier to answer "what spawned this?" when
+  diagnosing runaway helpers and plugin children.
+- **Background guard operations**: `sysprims guard` now supports `--daemon`, `--pidfile`,
+  `--status`, and `--stop` for production-style watchdog management on Unix hosts.
+- **Self-discovery**: Running guards are discoverable through sysprims itself instead of requiring
+  `ps | grep` workflows.
+- **Shared runtime primitives**: `Tick`, `now_rfc3339()`, and `GuardSignals` standardize timing,
+  timestamps, and signal-aware shutdown for long-running loops.
+
+### GuardStep and `sysprims guard`
+
+The original dogfood need was straightforward but painful: reliably find actively hot descendants,
+preview the impact, then kill the offenders without taking down the parent editor process. This
+release turns that workflow into a reusable contract.
+
+`GuardStep` is the new one-shot primitive behind that workflow. It evaluates a guard rule, applies
+an optional action only when explicitly enabled, and emits a structured event suitable for logs and
+metrics.
+
+On top of that, `sysprims guard` now acts as a thin orchestrator rather than owning bespoke loop
+logic. It benefits from the shared guard surface while keeping the CLI behavior operators expect.
+
+### `GuardRunner`: Managed Guard Loop
+
+For long-running watchdog use cases, `GuardRunner` in `sysprims-proc` now provides the managed
+loop:
+
+- drift-free scheduling using `Tick`
+- clean shutdown via `GuardSignals`
+- cloneable programmatic stop handles
+- max-iteration stop support
+- stop-reason summaries (`Signal`, `Requested`, `MaxIterations`)
+- presets for `interactive`, `background`, and `watchdog` intervals/sample windows
+
+This lets Rust consumers reuse the same loop semantics as the CLI instead of rebuilding timers,
+stop conditions, and signal handling themselves.
+
+### FFI and Go Watchdog Support
+
+For bindings, the release adds a polling-style runner lifecycle rather than cross-language
+callbacks:
+
+```c
+sysprims_proc_guard_runner_create(...)
+sysprims_proc_guard_runner_tick(...)
+sysprims_proc_guard_runner_stop(...)
+sysprims_proc_guard_runner_free(...)
+```
+
+Go now layers typed support on top with `GuardPreset`, `GuardRunnerConfig`, `NewGuardRunner`,
+`Tick()`, `Stop()`, and `Close()`. The recommended path for most non-Rust consumers remains a
+native runtime loop around `GuardStep`, but the polling runner is available for teams that want the
+managed Rust-side contract.
+
+Devrev hardening for this surface included:
+
+- synchronized runner state in Rust so concurrent polling and stop requests do not race
+- serialized handle lifecycle in Go to avoid `Tick`/`Stop`/`Close` misuse
+- create-time validation of static guard config so bad inputs fail before a long-running handle is
+  returned
+
+### Provenance: `ancestors`
+
+This release also adds a new provenance surface across Rust, CLI, FFI, Go, and TypeScript:
+
+```bash
+sysprims ancestors <pid> --max-depth 10 --json
+```
+
+That fills the "what spawned this?" gap that shows up immediately once sysprims can identify a hot
+plugin helper or runaway descendant. Operators can now go from hot process discovery to a parent
+chain without leaving sysprims.
+
+### Daemon Mode + Pidfile Management
+
+For long-running hosts and edge agents, `sysprims guard` now supports background execution and
+pidfile management on Unix:
+
+```bash
+sysprims guard 27776 --daemon --preset watchdog --yes
+sysprims guard 27776 --status
+sysprims guard 27776 --stop
+```
+
+Key behaviors:
+
+- `--daemon` detaches with `setsid()` and redirects stdio to null
+- `--pidfile <PATH>` overrides the default `/tmp/sysprims-guard-<root-pid>.pid`
+- pidfiles are removed on clean shutdown via drop-based lifecycle cleanup
+- stale or invalid pidfiles are cleaned up instead of being trusted blindly
+- `--status` and `--stop` verify that the pidfile target is actually a live sysprims guard process
+- daemon startup now waits for initialization to complete before reporting success
+
+Windows intentionally remains out of scope for daemon mode in v0.1.15; the CLI returns a clear
+not-supported error and directs operators to a service manager.
+
+### Self-Discovery: Find Running Guards with sysprims
+
+This release also closes the observability gap around long-running guards. A running guard now sets
+a best-effort platform title where supported, and sysprims process inspection rewrites matching
+guard cmdlines to `sysprims-guard:<root_pid>` for ergonomic lookup. On Linux, the kernel-visible
+thread name remains truncated by `PR_SET_NAME`, so the full identity primarily comes from
+cmdline-backed discovery inside sysprims itself.
+
+That enables workflows like:
+
+```bash
+sysprims descendants 1 --name sysprims-guard --max-levels all
+sysprims pstat --name sysprims-guard:27776 --table
+```
+
+The implementation was hardened to account for real CLI invocation shape, including global flags
+appearing before the `guard` subcommand.
+
+### Shared Runtime Primitives
+
+Long-running loops also gained a shared runtime foundation in `sysprims-core`:
+
+- `now_rfc3339()` for consistent timestamp rendering
+- `Tick` for drift-resistant periodic scheduling
+- `GuardSignals` for signal-aware shutdown with consistent stop semantics
+
+These changes matter beyond `guard` itself because they give future long-running sysprims workflows
+a shared timing and shutdown contract instead of ad hoc per-command logic.
+
+### Release Hardening
+
+Release preparation for v0.1.15 also tightened the delivery path:
+
+- stronger release preflight guidance
+- explicit TypeScript binding validation in the release path
+- clearer repository policy that prebuilt native binding artifacts come from CI, not local builds
+
+### Upgrade Notes
+
+- `sysprims guard` gains additive new flags only; existing foreground guard invocations continue to
+  work.
+- Unix daemon mode is new; Windows remains intentionally unsupported in this release.
+- FFI consumers must rebuild shared/static libraries to pick up the new guard runner exports.
+- `ancestors` is additive across all supported surfaces.
+- Go verification for the new runner surface currently uses a freshly built local `sysprims-ffi`
+  artifact during development until release workflows refresh checked-in prebuilt libraries.
+
+---
+
 ## v0.1.14 - 2026-02-24
 
 **Status:** Process Intelligence & Go Team Depth Release
@@ -208,365 +370,3 @@ Safety enforcement happens in the FFI layer — bindings get PID 1 protection, s
 - macOS consumers will immediately see full `cmdline` data where previously truncated
 - Consumers filtering by `cmdline` may see more matches than before (this is correct behavior)
 - FFI shared library must be rebuilt for all platform targets to include new exports
-
----
-
-## v0.1.12 - 2026-02-06
-
-**Status:** Process Tree Operations & Enhanced Discovery Release
-
-This release adds process tree traversal capabilities, ASCII tree visualization, and enhanced filtering for surgical process management. Operators can now inspect process hierarchies, identify runaway descendants, and terminate specific subtrees without affecting parent processes or critical system processes.
-
-### Highlights
-
-- **Process Tree Visibility**: New `descendants` command with ASCII art visualization shows instant, human-readable process trees
-- **Targeted Cleanup**: `kill-descendants` enables surgical subtree termination with filter support (--cpu-above, --running-for, --name)
-- **Age-Based Filtering**: `--running-for` option on all process commands helps distinguish long-running spinners from recent spikes
-- **Parent PID Filtering**: `--ppid` option on `pstat` and `kill` for filtering by process parent
-- **Safety by Design**: Filter-based kills always preview unless `--yes` provided; never targets self, PID 1, parent, or root without `--force`
-- **Depth-Controlled Traversal**: `--max-levels N` limits tree depth (default 1 = direct children only, accepts "all" for full subtree)
-
-### CLI: `sysprims descendants` Command
-
-New subcommand to list child processes of a given root PID:
-
-```bash
-# Show direct children only (level 1)
-sysprims descendants 7825 --table
-
-# Show 2 levels deep (children + grandchildren)
-sysprims descendants 7825 --max-levels 2 --table
-
-# Show full subtree with ASCII art
-sysprims descendants 7825 --max-levels all --tree
-
-# Filter by CPU usage
-sysprims descendants 7825 --cpu-above 80 --tree
-
-# Filter by process age (long-running spinners)
-sysprims descendants 7825 --running-for "1h" --tree
-```
-
-**Options:**
-
-| Option                     | Description                                                         |
-| -------------------------- | ------------------------------------------------------------------- |
-| `--max-levels <N>`         | Maximum traversal depth (1 = direct children, "all" = full subtree) |
-| `--json`                   | Output as JSON (default)                                            |
-| `--table`                  | Human-readable table format (flat, grouped by level)                |
-| `--tree`                   | ASCII art tree with hierarchy visualization                         |
-| `--name <NAME>`            | Filter by process name (substring match)                            |
-| `--user <USER>`            | Filter by username                                                  |
-| `--cpu-above <PERCENT>`    | Filter by minimum CPU usage                                         |
-| `--memory-above <KB>`      | Filter by minimum memory usage                                      |
-| `--running-for <DURATION>` | Filter by minimum process age (e.g., "5s", "1m", "2h")              |
-
-### CLI: `sysprims kill-descendants` Command
-
-Send signals to descendants of a process without affecting parent or root:
-
-```bash
-# Preview what would be killed
-sysprims kill-descendants 7825 --cpu-above 80 --dry-run
-
-# Kill all high-CPU descendants (requires --yes for filter-based selection)
-sysprims kill-descendants 7825 --cpu-above 80 --yes
-
-# Kill direct children only (level 1)
-sysprims kill-descendants 7825 --max-levels 1 --yes
-
-# Use SIGKILL for hung processes
-sysprims kill-descendants 7825 --cpu-above 90 --signal KILL --yes
-
-# Kill full subtree (all descendants)
-sysprims kill-descendants 7825 --max-levels all --yes
-```
-
-**Safety behaviors:**
-
-- **Preview mode**: Filter-based selection defaults to `--dry-run` unless `--yes` is explicitly provided
-- **Self exclusion**: Never targets CLI's own process
-- **Parent protection**: Never targets parent process of selected descendants (unless `--force`)
-- **PID 1 protection**: Never targets init/launchd (unless `--force`)
-- **Root protection**: Never targets system root without `--force`
-
-**Options:**
-
-| Option                     | Description                                             |
-| -------------------------- | ------------------------------------------------------- |
-| `--max-levels <N>`         | Maximum traversal depth (same as `descendants`)         |
-| `-s, --signal <SIGNAL>`    | Signal name or number (default: TERM)                   |
-| `--name <NAME>`            | Filter by process name                                  |
-| `--user <USER>`            | Filter by username                                      |
-| `--cpu-above <PERCENT>`    | Filter by minimum CPU usage                             |
-| `--memory-above <KB>`      | Filter by minimum memory usage                          |
-| `--running-for <DURATION>` | Filter by minimum process age                           |
-| `--dry-run`                | Print matched targets but do not send signals           |
-| `--yes`                    | Proceed with kill (required for filter-based selection) |
-| `--force`                  | Proceed even if CLI safety checks would normally refuse |
-| `--json`                   | Output as JSON                                          |
-
-### CLI: Enhanced `sysprims pstat` Options
-
-New filter options for process discovery:
-
-```bash
-# Filter by parent PID
-sysprims pstat --ppid 7825 --table
-
-# Filter by process age (long-running processes only)
-sysprims pstat --cpu-above 80 --running-for "1h" --table
-
-# Combine multiple filters
-sysprims pstat --ppid 7825 --cpu-above 90 --running-for "10m" --table
-```
-
-**New filter options:**
-
-| Option                     | Available on                                       |
-| -------------------------- | -------------------------------------------------- |
-| `--ppid <PID>`             | `pstat`, `kill`                                    |
-| `--running-for <DURATION>` | `pstat`, `kill`, `descendants`, `kill-descendants` |
-
-### CLI: Enhanced `sysprims kill` Options
-
-The `kill` command now accepts all filter options in addition to explicit PIDs:
-
-```bash
-# Kill by parent PID filter
-sysprims kill --ppid 7825 --signal TERM
-
-# Kill by combined filters (requires --yes for filter-based selection)
-sysprims kill --ppid 7825 --cpu-above 80 --yes
-
-# Preview before killing (dry-run mode)
-sysprims kill --ppid 7825 --cpu-above 80 --dry-run
-
-# Force override for protected targets
-sysprims kill --ppid 7825 --yes --force
-```
-
-### Validation
-
-### Process Tree Operations
-
-Tested on macOS arm64 (Darwin 25.2.0):
-
-**Descendants command:**
-
-```bash
-$ sysprims descendants 7825 --max-levels 1 --table
---- Level 1 ---
-    PID    PPID   CPU%    MEM(KB)    STATE USER             NAME
---------------------------------------------------------------------------------
-   985    7825    0.0      62720        R davethompson     VSCodium Helper
-   986    7825    0.0      83408        R davethompson     VSCodium Helper (Plugin)
-   ... (40 total descendants)
-```
-
-**ASCII tree visualization:**
-
-```bash
-$ sysprims descendants 7825 --tree | head -15
-7825 Electron [0.1% CPU, 160M, 7d18h]
-├── 985 VSCodium Helper [0.0% CPU, 63M, 1d13h]
-├── 986 VSCodium Helper (Plugin) [0.0% CPU, 84M, 1d13h]
-├── 5495 VSCodium Helper (Renderer) [0.0% CPU, 119M, 16h47m]
-└── ...
-```
-
-**Kill-descendants safety:**
-
-```bash
-# Parent excluded by default
-$ sysprims kill-descendants 7825 --dry-run
-# Output: 40 descendants (no parent PID)
-
-# With --force, parent included
-$ sysprims kill-descendants 7825 --dry-run --force
-# Output: 41 processes (includes parent PID)
-```
-
-### Filter Validation
-
-**Parent PID filter:**
-
-```bash
-$ sysprims pstat --ppid 7825 --table
-# Shows 32 direct children of VSCodium Electron process
-```
-
-**Age-based filtering:**
-
-```bash
-# Find processes >90% CPU running >1 hour
-$ sysprims pstat --cpu-above 90 --running-for "1h" --table
-# Distinguishes long-running spinners from brief spikes
-```
-
-### Real-World Use Cases
-
-**Scenario: Identify and terminate runaway Electron helper processes**
-
-```bash
-# 1. Find high CPU processes in tree
-$ sysprims descendants 7825 --cpu-above 80 --tree
-
-# 2. Preview what would be killed
-$ sysprims kill-descendants 7825 --cpu-above 80 --dry-run --json
-
-# 3. Terminate runaway descendants (parent VSCodium survives)
-$ sysprims kill-descendants 7825 --cpu-above 80 --yes
-```
-
-**Scenario: Chrome renderer runaway**
-
-```bash
-# Chrome has many helper processes; find spinning one
-$ sysprims descendants 67566 --name "Helper (Renderer)" --cpu-above 100 --tree
-
-# Kill just the runaway renderer (not entire browser)
-$ sysprims kill-descendants 67566 --name "Helper (Renderer)" --cpu-above 100 --max-levels 2 --yes
-```
-
-## Platform Notes
-
-### macOS
-
-**Process tree traversal** works correctly with `libproc`:
-
-- Uses `proc_pidinfo(PROC_PIDTBSDINFO)` for parent-child relationships
-- BFS traversal respects `--max-levels` depth limit
-- Parent process exclusion enforced for `kill-descendants`
-
-**Age filtering availability:**
-
-- Process start time available via `proc_pidinfo()`
-- `start_time_unix_ms` field populated for all processes
-- `--running-for` filters work on macOS
-
-**ASCII tree visualization:**
-
-- Requires terminal supporting box-drawing characters (UTF-8)
-- Falls back gracefully on terminals without tree line support
-- Uses `├──`, `│   `, `└──` for tree structure
-
-### Linux
-
-**Full visibility**: `/proc/[pid]/stat` provides complete process tree without restrictions.
-All features work identically to macOS.
-
-### Windows
-
-**Process tree traversal**: Supported via `CreateToolhelp32Snapshot`.
-Depth limiting and filtering work as on Unix.
-
-**ASCII tree visualization**: Box-drawing characters may not render correctly on some terminals.
-Consider using `--table` or `--json` on Windows for reliability.
-
-## Schema Additions
-
-### `process-filter.schema.json`
-
-New filter fields:
-
-```json
-{
-  "properties": {
-    "ppid": {
-      "description": "Filter by parent process ID",
-      "type": "integer",
-      "minimum": 1
-    },
-    "running_for_at_least_secs": {
-      "description": "Filter by minimum process age in seconds",
-      "type": "number",
-      "minimum": 0
-    }
-  }
-}
-```
-
-### `descendants-result.schema.json` (NEW)
-
-New schema for `descendants` command output:
-
-```json
-{
-  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/descendants-result.schema.json",
-  "root_pid": "integer",
-  "max_levels": "integer",
-  "levels": [
-    {
-      "level": "integer",
-      "processes": [
-        {
-          /* Process objects */
-        }
-      ]
-    }
-  ],
-  "total_found": "integer",
-  "matched_by_filter": "integer"
-}
-```
-
-## Safety Considerations
-
-### PID Validation (ADR-0011)
-
-All tree traversal and kill operations enforce ADR-0011 PID safety:
-
-- **PID 0** never targeted (signals caller's process group)
-- **PID 1** never targeted (init/launchd)
-- **Parent processes** protected by default in `kill-descendants`
-- **Self-exclusion** enforced for all kill operations
-- **Root process** protection with `--force` override only
-
-### Filter-Based Kill Preview
-
-To prevent accidental bulk terminations:
-
-```bash
-# Without --yes, shows what would be killed (preview mode)
-$ sysprims kill-descendants 7825 --cpu-above 80
-# Output: Lists PIDs but does not send signals
-
-# Requires --yes to proceed
-$ sysprims kill-descendants 7825 --cpu-above 80 --yes
-# Output: Sends signals to matched PIDs
-```
-
-### Process Tree Best Practices
-
-**Depth control**: Always start with `--max-levels 1` (direct children) to avoid broad subtree operations. Use `--max-levels 2` or `--max-levels 3` only when necessary.
-
-**Age filtering**: Use `--running-for "10m"` or `--running-for "1h"` to identify processes that are genuinely stuck vs. momentary spikes from recent workloads.
-
-**Parent protection**: When using `kill-descendants`, remember that the parent process (e.g., Electron, Chrome main browser) is intentionally excluded. To restart the entire application, target the parent PID directly with `sysprims kill <PID>` or `sysprims terminate-tree <PID>`.
-
-## Upgrade Notes
-
-- **No breaking changes**
-- All new CLI commands are additions, not replacements
-- Existing `kill` and `pstat` commands remain fully backward compatible
-- JSON output formats extended, not modified
-- **Security Fix**: Updated `time` crate from 0.3.45 to 0.3.47 (fixes RUSTSEC-2026-0009 DoS via stack exhaustion in RFC 2822 parsing)
-
-- **Process tree visibility**: `descendants --tree` provides instant hierarchy view without external tools
-- **Targeted cleanup**: `kill-descendants` with filters enables surgical subtree termination
-- **Age awareness**: `--running-for` helps distinguish persistent problems from transient spikes
-
-## Files Changed
-
-- `crates/sysprims-proc/src/lib.rs` - Added `ppid` to ProcessFilter, `running_for_at_least_secs` filter, descendants() traversal function
-- `crates/sysprims-cli/src/main.rs` - Added `descendants` and `kill-descendants` commands, ASCII tree renderer, filter logic integration
-- `schemas/process/v1.0.0/process-filter.schema.json` - Added `ppid` and `running_for_at_least_secs` fields
-- `schemas/process/v1.0.0/descendants-result.schema.json` (NEW) - Schema for descendants output with level structure
-
-## References
-
-- **Feature brief**: `.plans/active/v0.1.12/feature-brief.md`
-- **ADR-0011**: PID Validation Safety
-- **Platform Support**: `docs/standards/platform-support.md`
-- **Schema contracts**: `docs/standards/schema-contracts.md`

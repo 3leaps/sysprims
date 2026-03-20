@@ -218,7 +218,7 @@ jobs:
   container-tests:
     name: Container Tests (Privileged)
     runs-on: ubuntu-latest
-    needs: [format, lint, test]  # Only run after basic checks pass
+    needs: [format, lint, test] # Only run after basic checks pass
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
