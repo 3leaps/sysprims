@@ -72,7 +72,7 @@ lint:
     checkmake:
       enabled: true
       config:
-        max_body_length: 75 # Bootstrap/tools targets can be complex
+        max_body_length: 75  # Bootstrap/tools targets can be complex
         min_phony_targets:
           - all
           - clean

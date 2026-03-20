@@ -594,6 +594,11 @@ pub unsafe extern "C" fn sysprims_proc_guard_runner_tick(
 /// Request stop on a polling-style guard runner.
 ///
 /// Safe to call with null; this becomes a no-op.
+///
+/// # Safety
+///
+/// * `runner` must either be null or a handle returned by
+///   `sysprims_proc_guard_runner_create`
 #[no_mangle]
 pub unsafe extern "C" fn sysprims_proc_guard_runner_stop(runner: *mut c_void) {
     if runner.is_null() {
@@ -609,6 +614,12 @@ pub unsafe extern "C" fn sysprims_proc_guard_runner_stop(runner: *mut c_void) {
 /// Free a polling-style guard runner created by `sysprims_proc_guard_runner_create`.
 ///
 /// Safe to call with null; this becomes a no-op.
+///
+/// # Safety
+///
+/// * `runner` must either be null or a handle returned by
+///   `sysprims_proc_guard_runner_create`
+/// * The handle must not be used again after this call returns
 #[no_mangle]
 pub unsafe extern "C" fn sysprims_proc_guard_runner_free(runner: *mut c_void) {
     if runner.is_null() {
