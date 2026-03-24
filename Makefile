@@ -7,7 +7,7 @@
 #   make help       - Show all available targets
 #   make bootstrap  - Install tools (sfetch -> goneat)
 #   make check      - Run all quality checks (fmt, lint, test, deny)
-#   make fmt        - Format code (cargo fmt + goneat format)
+#   make fmt        - Format code (cargo fmt + goneat assess format --fix)
 #   make build      - Build all crates and FFI
 
 .PHONY: all help bootstrap bootstrap-force tools check test fmt fmt-check lint typecheck build clean version install
@@ -78,7 +78,7 @@ help: ## Show available targets
 	@echo "  check-windows-msvc  cargo check for x86_64-pc-windows-msvc"
 	@echo "  check-windows-gnu   cargo check for x86_64-pc-windows-gnu"
 	@echo "  test            Run test suite"
-	@echo "  fmt             Format code (cargo fmt + goneat format)"
+	@echo "  fmt             Format code (cargo fmt + goneat assess format --fix)"
 	@echo "  lint            Run linting (cargo clippy + goneat lint)"
 	@echo "  precommit       Pre-commit checks (fast: fmt, clippy)"
 	@echo "  prepush         Pre-push checks (thorough: fmt, clippy, test, deny)"
@@ -285,12 +285,12 @@ test: ## Run test suite
 	$(CARGO) test --workspace
 	@echo "[ok] Tests passed"
 
-fmt: ## Format code (cargo fmt + goneat format)
+fmt: ## Format code (cargo fmt + goneat assess format --fix)
 	@echo "Formatting Rust..."
 	$(CARGO) fmt --all
 	@if command -v goneat >/dev/null 2>&1; then \
-		echo "Formatting markdown, YAML, JSON..."; \
-		goneat format --quiet; \
+		echo "Formatting markdown, YAML, JSON (goneat assess format --fix)..."; \
+		goneat assess --categories format --fix --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null; \
 	else \
 		echo "[!!] goneat not found — skipping non-Rust formatting (run 'make bootstrap')"; \
 	fi
