@@ -11,16 +11,19 @@
 **Status:** Guard Automation & Provenance Release
 
 This release turns the recurring VSCodium runaway-plugin incident into a first-class sysprims
-workflow. The release adds a reusable one-shot guard primitive, a managed guard loop for long-lived
-watchdogs, a new ancestors surface for provenance, and operational guard controls for background
-execution and discovery. The result is a cleaner path from "find the hot offender" to "explain it"
-to "run a watchdog that can keep the host healthy."
+workflow. The release adds a reusable one-shot guard primitive, subtree-aware remediation, a
+managed guard loop for long-lived watchdogs, a new ancestors surface for provenance, and
+operational guard controls for background execution and discovery. The result is a cleaner path
+from "find the hot offender" to "kill the whole offending subtree when needed" to "explain it" to
+"run a watchdog that can keep the host healthy."
 
 ### Highlights
 
 - **One-shot guard primitive**: `GuardStep` gives Rust, FFI, Go, and TypeScript consumers a shared
   per-tick remediation kernel instead of forcing each ecosystem to reimplement detection and safety
   logic.
+- **Cascade remediation**: `kill-descendants --cascade` and guard actions can expand each matched
+  offender to its subtree so cleanup does not leave child work running behind the hot process.
 - **Managed watchdog loop**: `GuardRunner` extracts long-running guard behavior into a reusable
   library surface and now powers the CLI.
 - **Provenance support**: New `ancestors` APIs make it easier to answer "what spawned this?" when
@@ -38,9 +41,9 @@ The original dogfood need was straightforward but painful: reliably find activel
 preview the impact, then kill the offenders without taking down the parent editor process. This
 release turns that workflow into a reusable contract.
 
-`GuardStep` is the new one-shot primitive behind that workflow. It evaluates a guard rule, applies
-an optional action only when explicitly enabled, and emits a structured event suitable for logs and
-metrics.
+`GuardStep` is the new one-shot primitive behind that workflow. It evaluates a guard rule, can
+expand a matched descendant to its subtree with cascade targeting, applies an optional action only
+when explicitly enabled, and emits a structured event suitable for logs and metrics.
 
 On top of that, `sysprims guard` now acts as a thin orchestrator rather than owning bespoke loop
 logic. It benefits from the shared guard surface while keeping the CLI behavior operators expect.
@@ -73,9 +76,10 @@ sysprims_proc_guard_runner_free(...)
 ```
 
 Go now layers typed support on top with `GuardPreset`, `GuardRunnerConfig`, `NewGuardRunner`,
-`Tick()`, `Stop()`, and `Close()`. The recommended path for most non-Rust consumers remains a
-native runtime loop around `GuardStep`, but the polling runner is available for teams that want the
-managed Rust-side contract.
+`Tick()`, `Stop()`, and `Close()`. TypeScript gets the one-shot `guardStep()` surface in this
+release; the managed runner remains Rust/FFI/Go for now. The recommended path for most non-Rust
+consumers remains a native runtime loop around `GuardStep`, but the polling runner is available for
+teams that want the managed Rust-side contract.
 
 Devrev hardening for this surface included:
 
@@ -154,12 +158,14 @@ Release preparation for v0.1.15 also tightened the delivery path:
 
 - stronger release preflight guidance
 - explicit TypeScript binding validation in the release path
+- clean prepush validation restored before release cut
 - clearer repository policy that prebuilt native binding artifacts come from CI, not local builds
 
 ### Upgrade Notes
 
 - `sysprims guard` gains additive new flags only; existing foreground guard invocations continue to
   work.
+- `kill-descendants --cascade` is additive; existing non-cascade behavior stays the default.
 - Unix daemon mode is new; Windows remains intentionally unsupported in this release.
 - FFI consumers must rebuild shared/static libraries to pick up the new guard runner exports.
 - `ancestors` is additive across all supported surfaces.

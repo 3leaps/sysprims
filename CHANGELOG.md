@@ -11,20 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Guard automation and provenance release work. This cycle turns the VSCodium runaway-plugin dogfood
-incident into a reusable workflow: detect hot descendants reliably, explain where they came from,
-and run sysprims as a long-lived watchdog instead of a foreground-only CLI loop.
+incident into a reusable workflow: detect hot descendants reliably, expand a matched offender to
+its subtree when needed, explain where it came from, and run sysprims as a long-lived watchdog
+instead of a foreground-only CLI loop.
 
 ### Added
 
 - **GuardStep one-shot remediation primitive** (`sysprims-proc`, `sysprims-ffi`, `bindings/go`,
   `bindings/typescript`): New structured guard evaluation API for one-shot monitoring and optional
   remediation, with explicit action enablement and per-tick event output.
+- **Cascade descendant remediation** (`sysprims-proc`, `sysprims-cli`, `sysprims-ffi`,
+  `bindings/go`, `bindings/typescript`): `kill-descendants --cascade` and guard actions can expand
+  each matched offender to its subtree so cleanup does not leave child work behind.
 - **Ancestors provenance API** (`sysprims-proc`, `sysprims-cli`, `sysprims-ffi`, `bindings/go`,
   `bindings/typescript`): New ancestor-walk surface for answering "what spawned this?" across Rust,
   CLI, and bindings.
 - **Managed guard loop** (`sysprims-proc`, `sysprims-cli`, `sysprims-ffi`, `bindings/go`):
-  `GuardRunner` extracts the long-running loop into a reusable library surface, with polling-style
-  FFI support and typed Go wrappers for watchdog consumers.
+  `GuardRunner` extracts the long-running loop into reusable Rust and polling-style FFI surfaces,
+  with typed Go wrappers for watchdog consumers.
 - **Guard daemon management** (`sysprims-cli`): `sysprims guard` gains `--daemon`,
   `--pidfile <PATH>`, `--status`, and `--stop` for background operation and pidfile-based process
   management on Unix.
@@ -41,7 +45,8 @@ and run sysprims as a long-lived watchdog instead of a foreground-only CLI loop.
   observation mode as the default, and adds `--preset` guidance for `interactive`, `background`,
   and `watchdog` guard profiles.
 - **Release process hardening**: v0.1.15 prep adds stronger release preflight guidance, TypeScript
-  binding validation, and explicit CI-only policy for prebuilt native binding artifacts.
+  binding validation, restored clean prepush checks, and explicit CI-only policy for prebuilt
+  native binding artifacts.
 
 ### Fixed
 
