@@ -1,16 +1,25 @@
+#[cfg(unix)]
 use assert_cmd::cargo::cargo_bin_cmd;
+#[cfg(unix)]
 use assert_cmd::Command;
+#[cfg(unix)]
 use serde_json::Value;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
 struct GuardPidfileCleanup {
     root_pid: u32,
     path: PathBuf,
 }
 
+#[cfg(unix)]
 impl Drop for GuardPidfileCleanup {
     fn drop(&mut self) {
         if !self.path.exists() {
@@ -37,6 +46,7 @@ impl Drop for GuardPidfileCleanup {
     }
 }
 
+#[cfg(unix)]
 fn unique_pidfile() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -48,6 +58,7 @@ fn unique_pidfile() -> PathBuf {
     ))
 }
 
+#[cfg(unix)]
 fn guard_cmd(root_pid: u32, pidfile: &Path) -> Command {
     let mut cmd = cargo_bin_cmd!("sysprims");
     cmd.arg("--log-level")

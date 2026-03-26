@@ -43,8 +43,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::ffi::CString;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1257,12 +1255,12 @@ pub fn guard_step(config: GuardConfig) -> SysprimsResult<GuardEvent> {
     })
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 fn is_sysprims_binary_name(name: &str) -> bool {
     name == "sysprims" || name.starts_with("sysprims-")
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 fn guard_discovery_name(cmdline: &[String], fallback_name: &str) -> Option<String> {
     let binary = cmdline.first()?.rsplit('/').next().unwrap_or(fallback_name);
     if !is_sysprims_binary_name(binary) {
@@ -1282,7 +1280,7 @@ fn guard_discovery_name(cmdline: &[String], fallback_name: &str) -> Option<Strin
 fn set_guard_process_title(root_pid: u32) {
     let title = format!("sysprims-guard:{root_pid}");
     let truncated = title.bytes().take(15).collect::<Vec<_>>();
-    if let Ok(c_title) = CString::new(truncated) {
+    if let Ok(c_title) = std::ffi::CString::new(truncated) {
         unsafe {
             libc::prctl(
                 libc::PR_SET_NAME,
@@ -1302,7 +1300,7 @@ fn set_guard_process_title(root_pid: u32) {
     }
 
     let title = format!("sysprims-guard:{root_pid}");
-    let thread_title = CString::new(title.bytes().take(63).collect::<Vec<_>>()).ok();
+    let thread_title = std::ffi::CString::new(title.bytes().take(63).collect::<Vec<_>>()).ok();
 
     unsafe {
         if let Some(name) = thread_title.as_ref() {
