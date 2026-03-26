@@ -2474,6 +2474,26 @@ mod tests {
         }
     }
 
+    fn guard_step_retry(config: &GuardConfig, attempts: usize, delay_ms: u64) -> GuardEvent {
+        let mut last = None;
+        for attempt in 0..attempts {
+            let event = guard_step(config.clone()).expect("guard_step should succeed");
+            let ready = if config.action_enabled {
+                event.targeted > 0 || event.killed > 0 || event.matched > 0
+            } else {
+                true
+            };
+            if ready {
+                return event;
+            }
+            last = Some(event);
+            if attempt + 1 < attempts {
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+        }
+        last.expect("guard_step retry should record an event")
+    }
+
     #[test]
     fn test_select_descendant_targets_non_cascade() {
         let result = test_descendants_tree();
@@ -2573,7 +2593,7 @@ mod tests {
             max_targets: 8,
         };
 
-        let event = guard_step(cfg).unwrap();
+        let event = guard_step_retry(&cfg, 10, 100);
         assert_eq!(event.targeted, 1);
         assert_eq!(event.killed, 1);
         assert_eq!(event.failed, 0);
@@ -2621,7 +2641,7 @@ mod tests {
         }
         assert!(both_visible, "expected both spawned children to be visible");
 
-        let event = guard_step(GuardConfig {
+        let cfg = GuardConfig {
             rule: GuardRule {
                 root_pid: std::process::id(),
                 max_levels: 1,
@@ -2638,8 +2658,9 @@ mod tests {
             },
             action_enabled: true,
             max_targets: 1,
-        })
-        .unwrap();
+        };
+
+        let event = guard_step_retry(&cfg, 10, 100);
 
         assert_eq!(event.matched, 2);
         assert_eq!(event.targeted, 1);

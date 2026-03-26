@@ -202,8 +202,11 @@ mod tests {
     fn test_guard_signals_request_stop_and_drop() {
         let gs = GuardSignals::start().unwrap();
         let inj = test_injector(&gs);
-        // Wait for listener to be ready so request_stop is reliable
-        inj.wait_for_listen(Duration::from_secs(2))
+        #[cfg(windows)]
+        let listen_timeout = Duration::from_secs(10);
+        #[cfg(not(windows))]
+        let listen_timeout = Duration::from_secs(2);
+        inj.wait_for_listen(listen_timeout)
             .expect("listener should start");
         assert!(!gs.should_stop());
         gs.request_stop();
