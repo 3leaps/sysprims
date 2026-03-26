@@ -83,5 +83,5 @@ required_reading:
     These files MUST be read in their entirety before starting any qa work involving release validation, CI verification, or test infrastructure changes.
 
   files:
-    - Makefile # Build and test targets
-    - RELEASE_CHECKLIST.md # Release verification steps
+    - Makefile  # Build and test targets
+    - RELEASE_CHECKLIST.md  # Release verification steps

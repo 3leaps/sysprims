@@ -193,7 +193,7 @@ jobs:
     name: License & Dependency Check
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.4
       options: --user root
     steps:
       - uses: actions/checkout@v4

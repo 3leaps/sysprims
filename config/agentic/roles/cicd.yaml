@@ -75,8 +75,8 @@ required_reading:
     These files MUST be read in their entirety before starting any cicd work. They define the release process, build targets, and operational procedures.
 
   files:
-    - Makefile # Build targets, release automation
-    - RELEASE_CHECKLIST.md # Step-by-step release process
+    - Makefile  # Build targets, release automation
+    - RELEASE_CHECKLIST.md  # Step-by-step release process
 release_procedure:
   description: >
     RELEASE_CHECKLIST.md is a SEQUENTIAL checklist. Execute steps in order. Do not skip ahead. Verify each step completes before proceeding to the next. Common mistakes to avoid: - Pushing tags before Go bindings PR is merged - Running npm publish before TypeScript prebuilds complete - Running TypeScript workflows from main instead of from the tag ref
@@ -88,6 +88,6 @@ runners:
   windows_x64: windows-latest
   alpine_musl: ubuntu-latest (with node:20-alpine container)
 deprecated_runners:
-  - macos-13 # Retired January 2026
-  - macos-12 # Retired
-  - ubuntu-20.04 # End-of-life
+  - macos-13  # Retired January 2026
+  - macos-12  # Retired
+  - ubuntu-20.04  # End-of-life

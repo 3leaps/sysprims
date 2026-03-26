@@ -35,7 +35,7 @@ jobs:
     name: Build FFI (Linux)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.4
       options: --user root
     needs: validate
     strategy:
@@ -246,7 +246,7 @@ jobs:
     name: Generate C Header
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.1
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.4
       options: --user root
     needs: validate
     steps:
