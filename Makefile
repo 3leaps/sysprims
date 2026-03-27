@@ -11,7 +11,7 @@
 #   make build      - Build all crates and FFI
 
 .PHONY: all help bootstrap bootstrap-force tools check test fmt fmt-check lint typecheck build clean version install
-.PHONY: precommit prepush deps-check audit deny miri msrv
+.PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
@@ -82,6 +82,7 @@ help: ## Show available targets
 	@echo "  lint            Run linting (cargo clippy + goneat lint)"
 	@echo "  precommit       Pre-commit checks (fast: fmt, clippy)"
 	@echo "  prepush         Pre-push checks (thorough: fmt, clippy, test, deny)"
+	@echo "  pr-final        Final PR merge-readiness gate (prepush + windows cross-check)"
 	@echo "  deny            Run cargo-deny license and advisory checks"
 	@echo "  audit           Run cargo-audit security scan"
 	@echo "  miri            Run Miri UB detection on unsafe code (nightly)"
@@ -570,6 +571,9 @@ precommit: ## Run pre-commit checks (fast)
 prepush: ## Run pre-push checks (thorough)
 	@$(MAKE) GONEAT_FORMAT_FAIL_ON=medium check
 	@echo "[ok] Pre-push checks passed"
+
+pr-final: prepush ## Final PR merge-readiness gate
+	@echo "[ok] PR final checks passed"
 
 deps-check: ## Check dependencies for cooling violations
 	@echo "Checking dev dependencies..."

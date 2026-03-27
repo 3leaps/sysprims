@@ -8,13 +8,20 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 - Signing keys configured (see `docs/security/signing-runbook.md`)
 - Environment variables set (see step 2 below)
 - `gh` CLI authenticated with push access
+- All feature PRs for this release are merged and branch is `main`
 
 ## 1. Pre-Release Preparation
+
+### PR Merge Gate
+
+- [ ] Confirm all in-scope PRs are merged: `gh pr list --state open`
+- [ ] Confirm you are on `main`: `git branch --show-current`
+- [ ] Pull latest: `git pull origin main`
 
 ### Code Quality Gates
 
 - [ ] Ensure `main` is clean: `git status` shows no uncommitted changes
-- [ ] Run pre-push checks: `make prepush` passes
+- [ ] Run PR final checks: `make pr-final` passes
 - [ ] Run full test suite: `cargo test --workspace`
 - [ ] Verify cargo-deny passes: `cargo deny check`
 - [ ] (Recommended) Run container tests locally:
