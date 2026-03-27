@@ -2465,12 +2465,12 @@ mod tests {
         #[cfg(windows)]
         {
             Command::new("cmd")
-                .args(["/C", "timeout", "/T", "30", "/NOBREAK"])
+                .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
-                .expect("spawn timeout child")
+                .expect("spawn ping child")
         }
     }
 
@@ -2479,7 +2479,7 @@ mod tests {
         for attempt in 0..attempts {
             let event = guard_step(config.clone()).expect("guard_step should succeed");
             let ready = if config.action_enabled {
-                event.targeted > 0 || event.killed > 0 || event.matched > 0
+                event.targeted > 0 && (event.killed > 0 || event.failed > 0)
             } else {
                 true
             };
@@ -2571,8 +2571,26 @@ mod tests {
         let mut child = spawn_sleep_child();
         let child_pid = child.id();
 
-        // Give the child a moment to become visible in process snapshots.
-        thread::sleep(Duration::from_millis(50));
+        let mut child_visible = false;
+        for _ in 0..20 {
+            let desc = descendants_with_config(DescendantsConfig {
+                root_pid: std::process::id(),
+                max_levels: Some(1),
+                filter: Some(ProcessFilter {
+                    pid_in: Some(vec![child_pid]),
+                    ..Default::default()
+                }),
+                cpu_mode: CpuMode::Lifetime,
+                sample_duration: None,
+            })
+            .unwrap();
+            if desc.matched_by_filter >= 1 {
+                child_visible = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(child_visible, "expected spawned child to be visible");
 
         let cfg = GuardConfig {
             rule: GuardRule {

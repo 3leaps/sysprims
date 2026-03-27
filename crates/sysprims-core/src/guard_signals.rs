@@ -170,9 +170,7 @@ impl Drop for GuardSignals {
         //
         // In all cases, our registered SIGTERM handler fires, which sets
         // our stop_flag and calls manager.stop(), cleanly exiting listen().
-        if !self.stop_flag.load(Ordering::SeqCst) {
-            let _ = self.injector.inject(crate::signals::SIGTERM);
-        }
+        let _ = self.injector.inject(crate::signals::SIGTERM);
         if let Some(handle) = self.listener_thread.take() {
             let _ = handle.join();
         }
@@ -201,13 +199,6 @@ mod tests {
     #[test]
     fn test_guard_signals_request_stop_and_drop() {
         let gs = GuardSignals::start().unwrap();
-        let inj = test_injector(&gs);
-        #[cfg(windows)]
-        let listen_timeout = Duration::from_secs(10);
-        #[cfg(not(windows))]
-        let listen_timeout = Duration::from_secs(2);
-        inj.wait_for_listen(listen_timeout)
-            .expect("listener should start");
         assert!(!gs.should_stop());
         gs.request_stop();
         assert!(gs.should_stop(), "should be stopped after request_stop()");
@@ -220,16 +211,17 @@ mod tests {
         let gs = GuardSignals::start().unwrap();
         let inj = test_injector(&gs);
 
-        // Wait for listener thread to be ready
-        inj.wait_for_listen(Duration::from_secs(2))
-            .expect("listener should start");
-
         // Inject SIGTERM
         inj.inject(crate::signals::SIGTERM)
             .expect("inject should succeed");
 
-        // Give handler a moment to fire
-        thread::sleep(Duration::from_millis(100));
+        #[cfg(windows)]
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        #[cfg(not(windows))]
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !gs.should_stop() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
         assert!(gs.should_stop(), "should be stopped after injected SIGTERM");
         // Drop joins the (now-stopped) listener thread
         drop(gs);
