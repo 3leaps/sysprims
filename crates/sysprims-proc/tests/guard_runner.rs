@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use sysprims_proc::{
@@ -33,8 +34,14 @@ fn observation_config(
     }
 }
 
+fn guard_runner_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
 #[test]
 fn test_guard_runner_max_iterations() {
+    let _lock = guard_runner_test_lock();
     let self_pid = std::process::id();
     let config = observation_config(self_pid, Duration::from_millis(50), Some(3));
 
@@ -58,6 +65,7 @@ fn test_guard_runner_max_iterations() {
 
 #[test]
 fn test_guard_runner_stop_handle_from_thread() {
+    let _lock = guard_runner_test_lock();
     let self_pid = std::process::id();
     // No max_iterations — will run forever unless stopped
     let config = observation_config(self_pid, Duration::from_millis(50), None);
@@ -84,6 +92,7 @@ fn test_guard_runner_stop_handle_from_thread() {
 
 #[test]
 fn test_guard_runner_stop_handle_is_cloneable() {
+    let _lock = guard_runner_test_lock();
     let self_pid = std::process::id();
     let config = observation_config(self_pid, Duration::from_millis(50), None);
 
@@ -106,6 +115,7 @@ fn test_guard_runner_stop_handle_is_cloneable() {
 
 #[test]
 fn test_guard_runner_tick_scheduling() {
+    let _lock = guard_runner_test_lock();
     let self_pid = std::process::id();
     let config = observation_config(self_pid, Duration::from_millis(100), Some(3));
 
@@ -131,6 +141,7 @@ fn test_guard_runner_tick_scheduling() {
 
 #[test]
 fn test_guard_runner_error_callback() {
+    let _lock = guard_runner_test_lock();
     // PID 99999 almost certainly doesn't exist — guard_step will error
     let config = observation_config(99999, Duration::from_millis(50), Some(2));
 
@@ -159,6 +170,7 @@ fn test_guard_runner_error_callback() {
 
 #[test]
 fn test_guard_runner_rejects_zero_interval() {
+    let _lock = guard_runner_test_lock();
     let config = observation_config(std::process::id(), Duration::ZERO, Some(1));
     let result = GuardRunner::new(config);
     assert!(result.is_err(), "zero interval should be rejected");
@@ -166,6 +178,7 @@ fn test_guard_runner_rejects_zero_interval() {
 
 #[test]
 fn test_guard_runner_single_tick() {
+    let _lock = guard_runner_test_lock();
     let self_pid = std::process::id();
     let config = observation_config(self_pid, Duration::from_millis(50), Some(1));
 
@@ -192,6 +205,7 @@ fn test_guard_runner_single_tick() {
 
 #[test]
 fn test_guard_preset_intervals() {
+    let _lock = guard_runner_test_lock();
     assert_eq!(GuardPreset::Interactive.interval(), Duration::from_secs(3));
     assert_eq!(GuardPreset::Background.interval(), Duration::from_secs(180));
     assert_eq!(GuardPreset::Watchdog.interval(), Duration::from_secs(300));
@@ -199,6 +213,7 @@ fn test_guard_preset_intervals() {
 
 #[test]
 fn test_guard_preset_sample_durations() {
+    let _lock = guard_runner_test_lock();
     assert_eq!(
         GuardPreset::Interactive.sample_duration(),
         Duration::from_secs(2)
@@ -215,6 +230,7 @@ fn test_guard_preset_sample_durations() {
 
 #[test]
 fn test_guard_runner_with_preset() {
+    let _lock = guard_runner_test_lock();
     let self_pid = std::process::id();
     let preset = GuardPreset::Interactive;
 
