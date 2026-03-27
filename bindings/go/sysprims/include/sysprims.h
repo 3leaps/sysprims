@@ -321,6 +321,11 @@ SysprimsErrorCode sysprims_proc_guard_runner_tick(void *runner, char **event_jso
  * Request stop on a polling-style guard runner.
  *
  * Safe to call with null; this becomes a no-op.
+ *
+ * # Safety
+ *
+ * * `runner` must either be null or a handle returned by
+ *   `sysprims_proc_guard_runner_create`
  */
 void sysprims_proc_guard_runner_stop(void *runner);
 
@@ -328,6 +333,12 @@ void sysprims_proc_guard_runner_stop(void *runner);
  * Free a polling-style guard runner created by `sysprims_proc_guard_runner_create`.
  *
  * Safe to call with null; this becomes a no-op.
+ *
+ * # Safety
+ *
+ * * `runner` must either be null or a handle returned by
+ *   `sysprims_proc_guard_runner_create`
+ * * The handle must not be used again after this call returns
  */
 void sysprims_proc_guard_runner_free(void *runner);
 
