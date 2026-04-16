@@ -24,7 +24,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest' -Headers @{ 'User-Agent' = 'sysprims-spike' }
+          $apiUrl = 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest'
+          $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'sysprims-spike' }
           Write-Host "llvm-mingw release: $($release.tag_name)"
           $asset = $release.assets | Where-Object { $_.name -like '*ucrt-aarch64.zip' } | Select-Object -First 1
           if (-not $asset) { throw "No ucrt-aarch64 asset found in llvm-mingw latest release" }
@@ -33,7 +34,8 @@ jobs:
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
           $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
           Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
-          $binDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1 | ForEach-Object { Join-Path $_.FullName 'bin' }
+          $topDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
+          $binDir = Join-Path $topDir.FullName 'bin'
           if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
           Write-Host "llvm-mingw bin: $binDir"
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
@@ -61,7 +63,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $outDir = 'target/aarch64-pc-windows-gnullvm/release'
           Write-Host "Contents of $outDir :"
-          Get-ChildItem $outDir | Where-Object { $_.Name -like 'sysprims_ffi*' -or $_.Name -like 'libsysprims_ffi*' } | Format-Table Name, Length
+          Get-ChildItem $outDir |
+            Where-Object { $_.Name -like 'sysprims_ffi*' -or $_.Name -like 'libsysprims_ffi*' } |
+            Format-Table Name, Length
           $staticLib = Join-Path $outDir 'libsysprims_ffi.a'
           if (-not (Test-Path $staticLib)) { throw "libsysprims_ffi.a not produced at $staticLib" }
           Write-Host "Static lib size: $((Get-Item $staticLib).Length) bytes"
