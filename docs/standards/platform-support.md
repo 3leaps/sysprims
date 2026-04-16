@@ -23,11 +23,13 @@ All CI/CD workflows, language bindings, and release assets MUST conform to this 
 | Linux arm64 (musl)  | `aarch64-unknown-linux-musl`                                   | `linux/arm64` (musl) | `linux-arm64-musl` | **Supported**                        |
 | macOS arm64         | `aarch64-apple-darwin`                                         | `darwin/arm64`       | `darwin-arm64`     | **Supported**                        |
 | Windows x64         | `x86_64-pc-windows-msvc` (CLI) / `x86_64-pc-windows-gnu` (FFI) | `windows/amd64`      | `win32-x64-msvc`   | **Supported**                        |
-| Windows arm64       | `aarch64-pc-windows-msvc`                                      | N/A                  | `win32-arm64-msvc` | **Supported** (CLI, TypeScript only) |
+| Windows arm64       | `aarch64-pc-windows-msvc` (CLI) / `aarch64-pc-windows-gnullvm` (FFI) | `windows/arm64`      | `win32-arm64-msvc` | **Supported**                        |
 
-**Note on Windows arm64 Go bindings**: Go bindings do not support Windows arm64 because Go's CGo on Windows
-requires MinGW, and MinGW does not support the arm64 target. A future release may address this via llvm-mingw
-or pure-Go implementations. See v0.1.8 brief for details.
+**Note on Windows arm64 Go bindings**: Go cgo requires a GNU-ABI C toolchain on Windows. For arm64 this is
+provided by [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (via the Rust `aarch64-pc-windows-gnullvm`
+target), since msys2/MinGW-w64 does not ship an aarch64 toolchain. Consumers building Go code against the
+arm64 prebuilt must have llvm-mingw installed and the `aarch64-w64-mingw32-gcc` driver on `PATH`. Available
+since v0.1.16.
 
 ## Explicitly Unsupported Platforms
 
@@ -62,10 +64,8 @@ Static libraries committed to `bindings/go/sysprims/lib/`:
 - `linux-amd64-musl/libsysprims_ffi.a`
 - `linux-arm64/libsysprims_ffi.a`
 - `linux-arm64-musl/libsysprims_ffi.a`
-- `windows-amd64/libsysprims_ffi.a` (GNU target for cgo compatibility)
-
-**Note**: Windows arm64 is NOT supported for Go bindings. MinGW (required by Go's CGo on Windows) does not
-support arm64. See the Windows arm64 note in the Supported Platforms table.
+- `windows-amd64/libsysprims_ffi.a` (msys2/MinGW-w64, `x86_64-pc-windows-gnu`)
+- `windows-arm64/libsysprims_ffi.a` (llvm-mingw, `aarch64-pc-windows-gnullvm`, since v0.1.16)
 
 ### TypeScript N-API Prebuilds
 
@@ -89,7 +89,7 @@ Platform packages published to npm (when enabled):
 | Linux arm64   | `ubuntu-latest-arm64-s`     | Native arm64 builds         |
 | macOS arm64   | `macos-14`                  | Apple Silicon               |
 | Windows x64   | `windows-latest`            | MSVC for CLI, MinGW for FFI |
-| Windows arm64 | `windows-latest-arm64-s`    | MSVC only (no Go bindings)  |
+| Windows arm64 | `windows-latest-arm64-s`    | MSVC for CLI/TS; llvm-mingw for Go FFI |
 | Alpine/musl   | `ubuntu-latest` + container | `node:20-alpine` or custom  |
 
 ### Cross-Compilation
@@ -106,7 +106,7 @@ Native arm64-gnu builds are done on `ubuntu-latest-arm64-s` for reliability.
 
 Before any release, verify:
 
-- [ ] All 7 supported platforms have artifacts (Go bindings: 6 platforms, no Windows arm64)
+- [ ] All 7 supported platforms have artifacts (Go bindings: 7 platforms including Windows arm64 via llvm-mingw)
 - [ ] No unsupported platform artifacts are included
 - [ ] CI workflows reference correct runners
 - [ ] Package configurations (napi, cgo) match this matrix

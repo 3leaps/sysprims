@@ -91,15 +91,15 @@ bindings/go/sysprims/lib/
 | Linux    | aarch64      | musl                     | ✅  |   ❌   |     ✅     |
 | macOS    | x86_64       | -                        | ❌  |   ❌   |     ❌     |
 | macOS    | aarch64      | -                        | ✅  |   ✅   |     ✅     |
-| Windows  | x86_64       | GNU (Go) / MSVC (shared) | ✅  |   ✅   |     ✅     |
-
-| Windows | arm64 | MSVC | ❌ | ❌ | ✅ |
+| Windows  | x86_64       | GNU (Go) / MSVC (shared)      | ✅  |   ✅   |     ✅     |
+| Windows  | arm64        | GNU (Go, via llvm-mingw) / MSVC (TS) | ✅  |   ❌   |     ✅     |
 
 **Notes**:
 
 - Linux musl is supported by Go and TypeScript (via Node-API addon); Python musl is deferred.
 - macOS x64 (Intel) is not supported as of v0.1.7.
-- Windows arm64 Go bindings are not supported (CGo requires MinGW; arm64 requires llvm-mingw).
+- Windows arm64 Go bindings are built from `aarch64-pc-windows-gnullvm` using llvm-mingw. Consumers must have
+  llvm-mingw installed locally (with `aarch64-w64-mingw32-gcc` on PATH) for cgo to link. Available since v0.1.16.
 - Windows arm64 Python bindings are not yet supported.
 
 ### 4. Library Naming Convention
@@ -109,7 +109,8 @@ sysprims supports multiple binding consumers with different toolchain needs.
 | Consumer                    | Platform    | Primary Artifact           | Notes                                     |
 | --------------------------- | ----------- | -------------------------- | ----------------------------------------- |
 | Go (cgo)                    | Linux/macOS | `libsysprims_ffi.a`        | Static linking                            |
-| Go (cgo)                    | Windows     | `libsysprims_ffi.a`        | Built for `x86_64-pc-windows-gnu` (MinGW) |
+| Go (cgo)                    | Windows x64 | `libsysprims_ffi.a`        | Built for `x86_64-pc-windows-gnu` (msys2/MinGW-w64) |
+| Go (cgo)                    | Windows arm64 | `libsysprims_ffi.a`      | Built for `aarch64-pc-windows-gnullvm` (llvm-mingw); since v0.1.16 |
 | Python (runtime load)       | Linux       | `libsysprims_ffi.so`       | Shared library                            |
 | Python (runtime load)       | macOS       | `libsysprims_ffi.dylib`    | Shared library                            |
 | Python (runtime load)       | Windows     | `sysprims_ffi.dll`         | Built for `x86_64-pc-windows-msvc`        |

@@ -137,7 +137,7 @@ Notes:
   gh workflow run "Validate Release" -f tag="v${VERSION}"
   ```
 - [ ] Check draft release has all expected artifacts:
-  - CLI binaries (darwin-amd64, darwin-arm64, linux-amd64, linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64)
+  - CLI binaries (darwin-arm64, linux-amd64, linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64, windows-arm64)
   - FFI library tarball
   - C header (sysprims.h)
   - SBOM (sysprims-X.Y.Z.cdx.json)
@@ -151,7 +151,9 @@ Notes:
     git ls-tree -r --name-only "v${VERSION}" bindings/go/sysprims/lib | sed -n '1,20p'
     ```
     If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
-  - Confirm Windows uses GNU target assets (`x86_64-pc-windows-gnu`) for cgo compatibility.
+  - Confirm Windows uses GNU-ABI FFI assets for cgo compatibility:
+    - windows-amd64 → `x86_64-pc-windows-gnu` (msys2/MinGW-w64)
+    - windows-arm64 → `aarch64-pc-windows-gnullvm` (llvm-mingw), since v0.1.16
 
   TypeScript bindings (run AFTER signing, from the tag ref):
   1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):

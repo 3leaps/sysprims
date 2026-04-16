@@ -1,7 +1,9 @@
 name: Go Bindings (Prep)
-# NOTE: Windows arm64 is NOT supported for Go bindings.
-# MinGW does not support the arm64 target, and Go's CGo requires MinGW on Windows.
-# See docs/standards/platform-support.md for details.
+# Windows support:
+# - windows-amd64 uses msys2/MinGW-w64 (x86_64-pc-windows-gnu)
+# - windows-arm64 uses llvm-mingw (aarch64-pc-windows-gnullvm)
+# Both produce GNU-ABI libsysprims_ffi.a suitable for Go cgo.
+# See docs/standards/platform-support.md and ADR-0012 for details.
 on:
   workflow_dispatch:
     inputs:
@@ -208,6 +210,59 @@ jobs:
         with:
           name: ffi-shared-windows-amd64
           path: dist/ffi-shared/windows-amd64
+  build-windows-arm64:
+    name: Build FFI (Windows arm64, llvm-mingw)
+    runs-on: windows-latest-arm64-s
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install llvm-mingw (aarch64 ucrt)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $apiUrl = 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest'
+          $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'sysprims-ci' }
+          Write-Host "llvm-mingw release: $($release.tag_name)"
+          $asset = $release.assets |
+            Where-Object { $_.name -like '*ucrt-aarch64.zip' } |
+            Select-Object -First 1
+          if (-not $asset) { throw "No ucrt-aarch64 asset in llvm-mingw latest release" }
+          $zipPath = Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip'
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+          $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
+          Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+          $topDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
+          $binDir = Join-Path $topDir.FullName 'bin'
+          if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
+          Add-Content -Path $env:GITHUB_PATH -Value $binDir
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-gnullvm
+      - name: Build FFI (gnullvm target)
+        shell: pwsh
+        run: cargo build --release --target aarch64-pc-windows-gnullvm -p sysprims-ffi
+      - name: Package FFI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = 'target/aarch64-pc-windows-gnullvm/release'
+          New-Item -ItemType Directory -Force -Path dist/ffi/windows-arm64 | Out-Null
+          Copy-Item "$out/libsysprims_ffi.a" dist/ffi/windows-arm64/
+          New-Item -ItemType Directory -Force -Path dist/ffi-shared/windows-arm64 | Out-Null
+          Copy-Item "$out/sysprims_ffi.dll" dist/ffi-shared/windows-arm64/
+          if (Test-Path "$out/libsysprims_ffi.dll.a") {
+            Copy-Item "$out/libsysprims_ffi.dll.a" dist/ffi-shared/windows-arm64/
+          }
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-windows-arm64
+          path: dist/ffi/windows-arm64
+      - name: Upload FFI shared artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-shared-windows-arm64
+          path: dist/ffi-shared/windows-arm64
   test-musl-shared-go:
     name: Test Go Shared Mode (linux-musl, alpine)
     runs-on: ubuntu-latest
@@ -264,7 +319,7 @@ jobs:
   update-go-bindings:
     name: Create Go Bindings PR
     runs-on: ubuntu-latest
-    needs: [validate, build-linux, build-macos, build-windows, cbindgen]
+    needs: [validate, build-linux, build-macos, build-windows, build-windows-arm64, cbindgen]
     permissions:
       contents: write
       pull-requests: write
@@ -336,7 +391,8 @@ jobs:
             - linux-arm64-musl
             - darwin-amd64
             - darwin-arm64
-            - windows-amd64
+            - windows-amd64 (GNU ABI via msys2/MinGW-w64)
+            - windows-arm64 (GNU ABI via llvm-mingw)
 
             ### Shared Libraries (opt-in)
             This PR also includes prebuilt shared libraries for the `sysprims_shared` build tag:
@@ -348,6 +404,7 @@ jobs:
             - darwin-amd64: libsysprims_ffi.dylib (install_name: @rpath/...)
             - darwin-arm64: libsysprims_ffi.dylib (install_name: @rpath/...)
             - windows-amd64: sysprims_ffi.dll + libsysprims_ffi.dll.a
+            - windows-arm64: sysprims_ffi.dll + libsysprims_ffi.dll.a
 
             ### Testing
             After merging:

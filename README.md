@@ -343,8 +343,13 @@ See [Platform Support Matrix](docs/standards/platform-support.md) for the canoni
 | Linux arm64 (musl)  | `aarch64-unknown-linux-musl` | Supported |
 | macOS arm64         | `aarch64-apple-darwin`       | Supported |
 | Windows x64         | `x86_64-pc-windows-msvc`     | Supported |
+| Windows arm64       | `aarch64-pc-windows-msvc`    | Supported |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware.
+
+**Windows arm64 Go bindings** are built for `aarch64-pc-windows-gnullvm` via llvm-mingw and ship from v0.1.16 onward.
+Consumers need [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) installed with `aarch64-w64-mingw32-gcc`
+on PATH so cgo can link. See [Language Bindings Guide](docs/guides/language-bindings.md#windows-go-cgo-toolchain).
 
 ### Feature Parity
 
