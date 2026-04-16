@@ -14,12 +14,6 @@ on:
   push:
     branches:
       - spike/windows-arm64-go-bindings
-    paths:
-      - .github/workflows/go-bindings-windows-arm64-spike.yml
-      - crates/**
-      - ffi/**
-      - Cargo.toml
-      - Cargo.lock
 
 env:
   CARGO_TERM_COLOR: always
@@ -96,3 +90,42 @@ jobs:
         with:
           name: ffi-windows-arm64-gnu-spike
           path: dist/ffi/windows-arm64
+
+      # --- cgo smoke test ------------------------------------------------
+      # Wires the freshly-built static lib into the Go binding's expected
+      # platform path and runs the existing test suite through cgo. This is
+      # the proof that llvm-mingw + aarch64-pc-windows-gnullvm actually
+      # produces a Go-consumable artifact, not just a valid archive.
+
+      - name: Stage .a into Go bindings lib/windows-arm64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = 'bindings/go/sysprims/lib/windows-arm64'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item target/aarch64-pc-windows-gnullvm/release/libsysprims_ffi.a $dest/
+          Get-ChildItem $dest
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Go toolchain sanity
+        shell: pwsh
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED
+          Write-Host "CC in PATH:"
+          Get-Command gcc -ErrorAction SilentlyContinue | Format-Table Source
+          Get-Command aarch64-w64-mingw32-gcc -ErrorAction SilentlyContinue | Format-Table Source
+
+      - name: Run Go tests
+        shell: pwsh
+        working-directory: bindings/go/sysprims
+        env:
+          CGO_ENABLED: "1"
+          CC: aarch64-w64-mingw32-gcc
+          CXX: aarch64-w64-mingw32-g++
+          AR: llvm-ar
+        run: |
+          go test -v ./...
