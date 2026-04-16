@@ -8,6 +8,18 @@ name: Go Bindings Windows ARM64 (Spike)
 
 on:
   workflow_dispatch: {}
+  # Push trigger scoped to the spike branch only so the workflow registers
+  # and runs on iteration without needing to land on main first. Will be
+  # removed when the spike is folded into go-bindings.yml.
+  push:
+    branches:
+      - spike/windows-arm64-go-bindings
+    paths:
+      - .github/workflows/go-bindings-windows-arm64-spike.yml
+      - crates/**
+      - ffi/**
+      - Cargo.toml
+      - Cargo.lock
 
 env:
   CARGO_TERM_COLOR: always
