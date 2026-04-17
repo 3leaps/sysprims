@@ -23,43 +23,45 @@ See [Platform Support Matrix](../standards/platform-support.md) for the canonica
 | Linux arm64 (musl)  | `aarch64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread`               |
 | macOS arm64         | `aarch64-apple-darwin`       | `libsysprims_ffi.a` | `-lm -lpthread`               |
 | Windows x64         | `x86_64-pc-windows-gnu`      | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
+| Windows arm64       | `aarch64-pc-windows-gnullvm` | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
 
-## Windows: MinGW Requirement (Go Bindings)
+## Windows: Go cgo toolchain
 
-**Important**: Go bindings on Windows use the GNU target (`x86_64-pc-windows-gnu`), not MSVC.
+**Important**: Go bindings on Windows use a GNU-ABI C toolchain, not MSVC. Which GNU toolchain depends on the architecture:
 
-### Why MinGW for Go?
+| Arch   | Rust target                   | Toolchain                                | Consumer install                                                      |
+| ------ | ----------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| x86_64 | `x86_64-pc-windows-gnu`       | msys2/MinGW-w64 (`mingw-w64-x86_64-gcc`) | `pacman -S mingw-w64-x86_64-gcc` in msys2                             |
+| arm64  | `aarch64-pc-windows-gnullvm`  | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-gcc`) | Download `*-ucrt-aarch64.zip` release, add `bin/` to PATH (since v0.1.16) |
 
-Go's CGo requires MinGW (GCC) on Windows. MSVC-produced `.lib` files are not compatible with MinGW's linker:
+### Why a GNU toolchain for Go?
 
-- CGo uses MinGW/GCC toolchain on Windows
-- MSVC `.lib` files use different ABI/format than GNU `.a` files
-- Mixing MSVC static libs with MinGW linker fails
+Go's cgo driver on Windows is GCC-compatible. MSVC-produced `.lib` files use a different ABI/format than GNU `.a` files and won't link with cgo. msys2/MinGW-w64 ships the x86_64 toolchain but does not provide an aarch64 target; llvm-mingw fills that gap with an LLVM-based GNU-ABI toolchain for both architectures.
 
-### What This Means for Go Users
+### What this means for Go users
 
-- The FFI library is `libsysprims_ffi.a` (not `.lib`) on Windows
-- Go binaries built with these bindings are **native Windows executables**
-- The Go binary does NOT require MinGW at runtime
-- The MinGW requirement only affects the build toolchain
+- The FFI library is `libsysprims_ffi.a` (not `.lib`) on Windows, for both architectures.
+- The Go binary you build is a native Windows executable; the GNU toolchain is only required at build time.
+- To build against sysprims on Windows, install the matching toolchain and ensure the GCC driver is on `PATH`.
 
 ### TypeScript on Windows
 
-TypeScript bindings use a Node-API native addon and do not require MinGW.
+TypeScript bindings use a Node-API native addon and do not require a GNU toolchain — they're built with MSVC on both x64 and arm64.
 
 ### Licensing
 
-MinGW-w64 runtime licensing is GPL-free:
+The GNU-ABI toolchains are GPL-free for our use:
 
-| Component             | License                   | Static Link Safe?           |
-| --------------------- | ------------------------- | --------------------------- |
-| MinGW-w64 runtime     | ZPL / Public Domain / BSD | ✅ Yes                      |
-| Wine-imported headers | LGPL                      | ✅ Headers only - no effect |
-| GCC compiler          | GPL                       | ✅ Output not covered       |
+| Component                 | License                   | Static Link Safe?           |
+| ------------------------- | ------------------------- | --------------------------- |
+| MinGW-w64 runtime         | ZPL / Public Domain / BSD | ✅ Yes                      |
+| llvm-mingw runtime (LLVM) | Apache 2.0 with exception | ✅ Yes                      |
+| Wine-imported headers     | LGPL                      | ✅ Headers only - no effect |
+| GCC / clang compiler      | GPL / Apache 2.0          | ✅ Output not covered       |
 
-No GPL license toxicity issues with static linking.
+No GPL license toxicity with static linking.
 
 ## Go Bindings
 
@@ -86,7 +88,8 @@ bindings/go/sysprims/lib/
 ├── linux-amd64-musl/libsysprims_ffi.a
 ├── linux-arm64/libsysprims_ffi.a
 ├── linux-arm64-musl/libsysprims_ffi.a
-└── windows-amd64/libsysprims_ffi.a
+├── windows-amd64/libsysprims_ffi.a
+└── windows-arm64/libsysprims_ffi.a
 ```
 
 **Note**: macOS x64 (darwin-amd64) is not supported as of v0.1.7.
@@ -355,7 +358,12 @@ Missing system libraries. Ensure linker flags include `-ldl` for glibc targets.
 
 ### Windows build fails with MSVC errors
 
-Ensure you're using the GNU target (`x86_64-pc-windows-gnu`) and MinGW toolchain.
+Ensure you're using the GNU-ABI target and matching toolchain:
+
+- Windows x64: `x86_64-pc-windows-gnu` + msys2/MinGW-w64 (`mingw-w64-x86_64-gcc`)
+- Windows arm64: `aarch64-pc-windows-gnullvm` + [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-gcc`)
+
+See the [Windows: Go cgo toolchain](#windows-go-cgo-toolchain) section above.
 
 ### CGo can't find library
 

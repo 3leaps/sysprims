@@ -326,24 +326,44 @@ jobs:
         with:
           name: ffi-windows-amd64
           path: dist/ffi/windows-amd64
-  # Build Windows arm64 using native arm64 runner
-  # Go bindings NOT supported on Windows arm64 (MinGW doesn't support arm64)
-  # See docs/standards/platform-support.md
+  # Build Windows arm64 using native arm64 runner.
+  # CLI is built for aarch64-pc-windows-msvc (native Windows ABI).
+  # FFI is built for aarch64-pc-windows-gnullvm using llvm-mingw so the static
+  # .a and import library .dll.a are Go-cgo compatible (same as windows-amd64
+  # which uses msys2/MinGW-w64). See ADR-0012 §4.
   build-windows-arm64:
     name: Build Windows arm64
     runs-on: windows-latest-arm64-s
     needs: validate-version
     steps:
       - uses: actions/checkout@v4
+      - name: Install llvm-mingw (aarch64 ucrt)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $apiUrl = 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest'
+          $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'sysprims-ci' }
+          $asset = $release.assets |
+            Where-Object { $_.name -like '*ucrt-aarch64.zip' } |
+            Select-Object -First 1
+          if (-not $asset) { throw "No ucrt-aarch64 asset in llvm-mingw latest release" }
+          $zipPath = Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip'
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+          $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
+          Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+          $topDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
+          $binDir = Join-Path $topDir.FullName 'bin'
+          if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
+          Add-Content -Path $env:GITHUB_PATH -Value $binDir
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-pc-windows-msvc
-      - name: Build CLI
+          targets: aarch64-pc-windows-msvc,aarch64-pc-windows-gnullvm
+      - name: Build CLI (MSVC)
         shell: pwsh
         run: cargo build --release --target aarch64-pc-windows-msvc -p sysprims-cli
-      - name: Build FFI
+      - name: Build FFI (gnullvm, for Go cgo)
         shell: pwsh
-        run: cargo build --release --target aarch64-pc-windows-msvc -p sysprims-ffi
+        run: cargo build --release --target aarch64-pc-windows-gnullvm -p sysprims-ffi
       - name: Package CLI
         shell: pwsh
         run: |
@@ -353,23 +373,21 @@ jobs:
           Copy-Item LICENSE-MIT, LICENSE-APACHE dist/cli/
           $version = "${{ needs.validate-version.outputs.version }}"
           Compress-Archive -Path dist/cli/* -DestinationPath "sysprims-${version}-windows-arm64.zip"
-      - name: Package FFI (static)
+      - name: Package FFI (static, GNU ABI for Go cgo)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist/ffi/windows-arm64 | Out-Null
-          Copy-Item target/aarch64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi/windows-arm64/
-      - name: Package FFI (shared)
+          Copy-Item target/aarch64-pc-windows-gnullvm/release/libsysprims_ffi.a dist/ffi/windows-arm64/
+      - name: Package FFI (shared, GNU ABI)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist/ffi-shared/windows-arm64 | Out-Null
-          Copy-Item target/aarch64-pc-windows-msvc/release/sysprims_ffi.dll dist/ffi-shared/windows-arm64/
-          if (Test-Path target/aarch64-pc-windows-msvc/release/sysprims_ffi.dll.lib) {
-            Copy-Item target/aarch64-pc-windows-msvc/release/sysprims_ffi.dll.lib dist/ffi-shared/windows-arm64/
-          }
-          if (Test-Path target/aarch64-pc-windows-msvc/release/sysprims_ffi.lib) {
-            Copy-Item target/aarch64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi-shared/windows-arm64/
+          $out = 'target/aarch64-pc-windows-gnullvm/release'
+          Copy-Item "$out/sysprims_ffi.dll" dist/ffi-shared/windows-arm64/
+          if (Test-Path "$out/libsysprims_ffi.dll.a") {
+            Copy-Item "$out/libsysprims_ffi.dll.a" dist/ffi-shared/windows-arm64/
           }
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
@@ -569,26 +587,19 @@ jobs:
             mkdir -p "bundle/lib/${platform}/shared"
             cp "$dll" "bundle/lib/${platform}/shared/"
 
-            # Optional MSVC import library (kept if present).
-            if [ -f "ffi-libs/ffi-shared-${platform}/sysprims_ffi.lib" ]; then
-              cp "ffi-libs/ffi-shared-${platform}/sysprims_ffi.lib" "bundle/lib/${platform}/shared/"
-            fi
-            if [ -f "ffi-libs/ffi-shared-${platform}/sysprims_ffi.dll.lib" ]; then
-              cp "ffi-libs/ffi-shared-${platform}/sysprims_ffi.dll.lib" "bundle/lib/${platform}/shared/"
-            fi
+            # Optional import libraries (kept if present).
+            # windows-amd64 ships MSVC-built .lib/.dll.lib from build-windows-msvc.
+            # windows-arm64 ships GNU-built .dll.a from build-windows-arm64.
+            for importlib in sysprims_ffi.lib sysprims_ffi.dll.lib libsysprims_ffi.dll.a; do
+              if [ -f "ffi-libs/ffi-shared-${platform}/${importlib}" ]; then
+                cp "ffi-libs/ffi-shared-${platform}/${importlib}" "bundle/lib/${platform}/shared/"
+              fi
+            done
           }
 
-          # Windows arm64 uses MSVC which produces .lib not .a
-          copy_static_windows_msvc() {
-            local platform="$1"
-            local src="ffi-libs/ffi-${platform}/sysprims_ffi.lib"
-            require_file "$src"
-            mkdir -p "bundle/lib/${platform}/static"
-            cp "$src" "bundle/lib/${platform}/static/"
-          }
-
-          # Static libs (Go/cgo + static consumers): all platforms including musl.
-          # Note: windows-arm64 uses MSVC (.lib), windows-amd64 uses MinGW (.a for cgo)
+          # Static libs (Go/cgo + static consumers): all platforms use GNU-ABI .a.
+          # Windows arm64 produced via llvm-mingw (aarch64-pc-windows-gnullvm);
+          # windows-amd64 via msys2/MinGW-w64. Both are Go-cgo compatible.
           copy_static linux-amd64
           copy_static linux-amd64-musl
           copy_static linux-arm64
@@ -596,9 +607,9 @@ jobs:
           copy_static darwin-amd64
           copy_static darwin-arm64
           copy_static windows-amd64
-          copy_static_windows_msvc windows-arm64
+          copy_static windows-arm64
 
-          # Shared libs (runtime loaders): glibc Linux, macOS, Windows MSVC.
+          # Shared libs (runtime loaders): glibc Linux, macOS, Windows.
           copy_shared_linux linux-amd64
           copy_shared_linux linux-arm64
           copy_shared_darwin darwin-amd64
@@ -630,7 +641,7 @@ jobs:
               "windows-arm64"
             ],
             "notes": {
-              "windows-arm64": "Go bindings not supported (MinGW lacks arm64 support)"
+              "windows-arm64": "Go bindings supported via llvm-mingw (aarch64-pc-windows-gnullvm) since v0.1.16"
             }
           }
           EOF
@@ -740,9 +751,11 @@ jobs:
             | macOS x64 | `sysprims-*-darwin-amd64.tar.gz` | In FFI bundle | Supported |
             | macOS arm64 | `sysprims-*-darwin-arm64.tar.gz` | In FFI bundle | Supported |
             | Windows x64 | `sysprims-*-windows-amd64.zip` | In FFI bundle | Supported |
-            | Windows arm64 | `sysprims-*-windows-arm64.zip` | In FFI bundle | **Not supported** |
+            | Windows arm64 | `sysprims-*-windows-arm64.zip` | In FFI bundle | Supported (via llvm-mingw) |
 
-            **Note:** Windows arm64 Go bindings are not supported because MinGW does not support the arm64 target.
+            **Note:** Windows arm64 Go bindings require [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
+            on the consumer's build host (with `aarch64-w64-mingw32-gcc` on PATH) so cgo can link.
+            Supported since v0.1.16.
 
 # NOTE: Go bindings require committed prebuilt libs under
 # bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a so `go get` works.

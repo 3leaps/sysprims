@@ -30,8 +30,9 @@ AGENTS.local.md
 *.local.json
 *.local.toml
 
-# Claude Code local settings
+# Claude Code local settings and transient runtime state
 .claude/settings.local.json
+.claude/*.lock
 
 # -----------------------------------------------------------------------------
 # Python (bindings/python/)
