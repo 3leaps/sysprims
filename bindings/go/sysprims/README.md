@@ -9,8 +9,17 @@ Go bindings for the `sysprims` Rust process primitives.
 ## Install
 
 ```bash
-go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.1.14
+go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.1.16
 ```
+
+### Windows toolchain
+
+Go cgo on Windows requires a GNU-ABI C compiler driver. Install the one for your architecture:
+
+- **Windows x64**: [msys2](https://www.msys2.org/) with `pacman -S mingw-w64-x86_64-gcc`
+- **Windows arm64**: [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`*-ucrt-aarch64.zip` release), with `aarch64-w64-mingw32-gcc` on `PATH`; available since v0.1.16
+
+Linux and macOS consumers need no extra toolchain beyond the platform default.
 
 ## Replacing shell-outs
 
