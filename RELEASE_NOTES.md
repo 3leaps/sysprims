@@ -6,7 +6,105 @@
 
 ---
 
-## v0.1.15 - Draft
+## v0.1.16 - 2026-04-18
+
+**Status:** Windows ARM64 Go Bindings Release
+
+This release closes the long-standing limitation that kept Go consumers off Windows arm64.
+sysprims now ships a prebuilt `libsysprims_ffi.a` for `aarch64-pc-windows-gnullvm` via
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw), alongside the existing windows-amd64
+binding built with msys2/MinGW-w64. Consumers installing llvm-mingw locally can `go get`
+sysprims and link cgo code on Windows arm64 the same way they already do on every other
+platform.
+
+### Highlights
+
+- **Windows arm64 Go bindings**: Prebuilt `libsysprims_ffi.a` for `aarch64-pc-windows-gnullvm`
+  via llvm-mingw. `go build` on Windows arm64 now links successfully against sysprims cgo.
+- **Shared-mode parity**: `cgo_windows_arm64_shared.go` + `cgo_windows_arm64_shared_local.go`
+  close the gap between shipped shared libraries and Go linker directives on arm64.
+- **CI regression coverage**: `test-go` matrix gains a native `windows-latest-arm64-s` leg so
+  arm64-specific cgo/linker regressions are caught on every PR.
+- **Release-pipeline consistency**: windows-arm64 FFI release artifacts now use the GNU ABI
+  path that matches Go cgo's expectations (previously shipped MSVC `.lib`, which Go can't
+  consume).
+- **Repository workflow**: Retires the guardian-hook commit gate in favor of a feature-branch
+  / PR workflow with squash-merge default. Adds `make pr-final` as the merge-readiness gate.
+
+### Windows ARM64 Go: Why Now
+
+The previous documentation said "Go cgo on Windows requires MinGW, and MinGW does not support
+arm64" — technically correct about msys2/MinGW-w64, but the ecosystem moved on. Two changes
+made this release possible:
+
+1. **`aarch64-pc-windows-gnullvm`** graduated to Rust Tier 2 with host tools. This is the
+   llvm-mingw-flavored Windows GNU-ABI target that produces `.a` and `.dll.a` artifacts
+   consumable by Go cgo.
+2. **GitHub Actions `windows-latest-arm64-s` runners** are already in active use across our
+   release pipelines for CLI and TypeScript. No new runner plumbing needed.
+
+Combining the two gives a clean path: install llvm-mingw on the arm64 runner, build
+sysprims-ffi for gnullvm, ship the resulting `.a` to consumers.
+
+### Consumer Requirement
+
+Building Go code against sysprims on Windows arm64 requires a local GNU-ABI C toolchain with
+`aarch64-w64-mingw32-gcc` on `PATH`. Install:
+
+```powershell
+# Download llvm-mingw latest release (pick the *-ucrt-aarch64.zip)
+# Extract and add <install>/bin to PATH
+$env:PATH = "C:\tools\llvm-mingw\bin;$env:PATH"
+$env:CC = "aarch64-w64-mingw32-gcc"
+go build ./...
+```
+
+Linux and macOS consumers need no extra toolchain — the platform default GCC/clang works as
+before.
+
+### What's Shipped
+
+| Artifact | Before v0.1.16 | In v0.1.16 |
+|---|---|---|
+| `bindings/go/sysprims/lib/windows-arm64/libsysprims_ffi.a` | Not shipped | GNU-ABI via llvm-mingw |
+| Release bundle `static/windows-arm64/libsysprims_ffi.a` | MSVC `.lib` (unusable for Go) | GNU-ABI `.a` |
+| Release bundle `shared/windows-arm64/*` | MSVC `.dll` + `.dll.lib` | GNU-ABI `.dll` + `.dll.a` |
+| CI coverage | No arm64 Go matrix leg | `windows-latest-arm64-s` runs `go test` per PR |
+
+CLI binaries on Windows arm64 continue to ship MSVC-built (`aarch64-pc-windows-msvc`) since
+CLI does not involve cgo.
+
+### Release Workflow Hardening
+
+Secondary but maintainer-facing: v0.1.16 also finalizes the shift to PR-based change control.
+
+- Repository now requires PRs to merge into `main` (squash default, rebase allowed, merge
+  commits disabled).
+- Guardian-hook browser-approval gate is retired — PR review plus protected-branch controls
+  provide equivalent change control without the browser-approval friction.
+- `make pr-final` wraps `prepush` as the merge-readiness gate and is referenced from
+  `RELEASE_CHECKLIST.md` as a prerequisite before starting any release.
+
+### Upgrade Notes
+
+- **Additive across the board** — no breaking changes. Existing binding consumers on other
+  platforms see no behavioral change.
+- Windows arm64 Go consumers need llvm-mingw installed locally (see the Consumer Requirement
+  section above). Without it, `go build` will fail at link time with missing GCC driver — an
+  expected failure mode, not a bug.
+- Windows amd64 Go consumers continue to use msys2/MinGW-w64 exactly as before.
+- Python bindings on Windows arm64 remain unsupported.
+
+### Follow-ups
+
+- **Pin llvm-mingw version**: All three workflows currently resolve llvm-mingw via GitHub's
+  `releases/latest` at CI time, which means two runs against the same sysprims commit can link
+  against different toolchains if mstorsjo publishes a new release between runs. Pinning to a
+  specific tag is tracked as reproducibility debt and will land as a follow-up PR.
+
+---
+
+## v0.1.15 - 2026-03-27
 
 **Status:** Guard Automation & Provenance Release
 
@@ -311,68 +409,4 @@ changes.
 
 ---
 
-## v0.1.13 - 2026-02-13
-
-**Status:** macOS Command-Line Fidelity Fix & Binding Coverage
-
-This release fixes a high-severity bug where `processList()` returned truncated `cmdline` on macOS (just the process name instead of the full argument vector), breaking downstream consumers that filter by command-line arguments. It also exports v0.1.12 process tree capabilities to the FFI layer and Go/TypeScript bindings.
-
-### Highlights
-
-- **macOS cmdline fix**: `cmdline` now returns the full argument vector (e.g. `["bun", "run", "scripts/dev.ts", "--root", "/path"]`) instead of `["bun"]`
-- **FFI coverage**: `descendants` and `kill-descendants` now available through C-ABI FFI
-- **Go binding**: `Descendants()` and `KillDescendants()` with option pattern
-- **TypeScript binding**: `descendants()` and `killDescendants()` via N-API
-
-### Bug Fix: macOS `cmdline` Truncation
-
-**Before (v0.1.12):**
-
-```json
-{ "pid": 12345, "name": "bun", "cmdline": ["bun"] }
-```
-
-**After (v0.1.13):**
-
-```json
-{
-  "pid": 12345,
-  "name": "bun",
-  "cmdline": ["bun", "run", "scripts/dev.ts", "--root", "/some/path"]
-}
-```
-
-**Root cause:** The macOS implementation used `proc_name()` as a placeholder for `cmdline`, which only returns the process name (16 chars max). The fix uses `sysctl(CTL_KERN, KERN_PROCARGS2)` — the same kernel API that `ps` uses — to read the actual argv.
-
-**Impact:** Any consumer filtering by `cmdline` arguments on macOS was affected. Known affected: kitfly `discoverOrphans()` which filters by `p.cmdline.some(arg => arg.includes("scripts/dev.ts"))`.
-
-**Safety hardening (devrev):**
-
-- PID 0 and overflow-range PIDs rejected before sysctl call
-- `argc` capped at 4096 to prevent pathological allocation from malformed kernel data
-- Empty argv entries filtered (consistent with Linux `/proc/[pid]/cmdline` behavior)
-
-### FFI & Binding Coverage (Wave 1)
-
-v0.1.12 added `descendants` and `kill-descendants` to the CLI and Rust crates. This release makes them available to language binding consumers:
-
-| Function            | FFI | Go  | TypeScript |
-| ------------------- | :-: | :-: | :--------: |
-| `descendants()`     | New | New |    New     |
-| `killDescendants()` | New | New |    New     |
-
-**FFI functions:**
-
-```c
-int32_t sysprims_proc_descendants(const char *config_json, char **result_json_out);
-int32_t sysprims_proc_kill_descendants(const char *config_json, char **result_json_out);
-```
-
-Safety enforcement happens in the FFI layer — bindings get PID 1 protection, self-exclusion, and parent protection for free.
-
-### Upgrade Notes
-
-- **No breaking changes** — all changes are additive
-- macOS consumers will immediately see full `cmdline` data where previously truncated
-- Consumers filtering by `cmdline` may see more matches than before (this is correct behavior)
-- FFI shared library must be rebuilt for all platform targets to include new exports
+_Older releases are archived in `docs/releases/`._
