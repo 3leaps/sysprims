@@ -10,6 +10,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-04-18
+
+Windows arm64 Go binding support lands. Closes a long-standing limitation where Go consumers on
+Windows arm64 had no path to link against sysprims. Also finalizes the feature-branch / PR workflow
+and retires the guardian-hook commit gate.
+
+### Added
+
+- **Windows arm64 Go bindings** (`bindings/go`, `bindings/go/sysprims/lib/windows-arm64`):
+  Prebuilt `libsysprims_ffi.a` for `aarch64-pc-windows-gnullvm` via llvm-mingw. Go cgo on Windows
+  arm64 now links successfully when consumers have llvm-mingw (`aarch64-w64-mingw32-gcc` on PATH).
+  Mirrors the existing windows-amd64 msys2/MinGW-w64 story with a different toolchain distribution.
+- **Windows arm64 shared-mode cgo directives** (`bindings/go`): New
+  `cgo_windows_arm64_shared.go` and `cgo_windows_arm64_shared_local.go` close the gap between
+  shipped shared artifacts and Go linker directives, enabling `go build -tags=sysprims_shared` on
+  windows/arm64.
+- **Windows arm64 Go CI coverage** (`.github/workflows/ci.yml`): `test-go` now includes a native
+  `windows-latest-arm64-s` matrix leg with llvm-mingw so arm64-specific cgo/linker regressions are
+  caught automatically on every PR.
+
+### Changed
+
+- **Release pipeline** (`.github/workflows/release.yml`): windows-arm64 FFI artifacts in the
+  tagged release bundle now use the GNU ABI path (`aarch64-pc-windows-gnullvm` via llvm-mingw)
+  matching what Go cgo consumes. CLI continues to ship MSVC-built.
+- **Release process** (`.github/workflows/`, `RELEASE_CHECKLIST.md`): Repository moves to a
+  feature-branch / PR workflow with squash-merge default. The guardian-hook commit gate is
+  retired in favor of PR review and protected-branch controls. Adds `make pr-final` as the
+  merge-readiness gate (wraps `prepush`).
+
+### Notes
+
+- Windows arm64 Go consumers must install [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
+  locally (pick the `*-ucrt-aarch64.zip` release) and ensure `aarch64-w64-mingw32-gcc` is on
+  `PATH` before `go build`. Linux and macOS consumers need no extra toolchain.
+- `aarch64-pc-windows-gnullvm` is Rust Tier 2 with host tools; the gnullvm target itself is stable.
+- llvm-mingw is downloaded via GitHub's `releases/latest` in all three workflows today. Pinning to
+  a specific llvm-mingw release tag is tracked as follow-up reproducibility debt.
+
+## [0.1.15] - 2026-03-27
+
 Guard automation and provenance release work. This cycle turns the VSCodium runaway-plugin dogfood
 incident into a reusable workflow: detect hot descendants reliably, expand a matched offender to
 its subtree when needed, explain where it came from, and run sysprims as a long-lived watchdog

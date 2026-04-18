@@ -21,7 +21,7 @@ You're building software that needs to spawn processes with timeouts, send signa
 
 - **GPL-free**: MIT/Apache-2.0 dual licensed. Link statically or dynamically without copyleft concerns.
 - **Group-by-default**: When you timeout a process, the entire tree dies. No orphans, no leaked resources.
-- **Cross-platform**: Linux (musl + glibc), macOS (x64 + arm64), Windows (x64) from a single API.
+- **Cross-platform**: Linux (musl + glibc), macOS (arm64), Windows (x64 + arm64) from a single API.
 - **Library-first**: Embed directly in Rust, Go, Python, or TypeScript. CLIs are thin wrappers.
 
 ### Group-by-Default: The Core Difference
@@ -485,7 +485,7 @@ const http = listeningPorts({ local_port: 8080 });
 terminate(pid);
 ```
 
-**Note:** TypeScript bindings support Linux (glibc and musl/Alpine), macOS (x64 or arm64), and Windows x64.
+**Note:** TypeScript bindings support Linux (glibc and musl/Alpine), macOS (arm64), and Windows (x64 and arm64).
 
 See [docs/guides/language-bindings.md](docs/guides/language-bindings.md) for build requirements and platform details.
 
