@@ -7,6 +7,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
+  # Pinned llvm-mingw release tag for Windows arm64 GNU toolchain. Bump here
+  # and in go-bindings.yml / release.yml together when advancing. See
+  # docs/standards/platform-support.md for toolchain policy.
+  LLVM_MINGW_VERSION: '20260407'
 jobs:
   format:
     name: Format Check
@@ -154,19 +158,17 @@ jobs:
           update: true
           install: mingw-w64-x86_64-gcc
           path-type: inherit
-      - name: Install llvm-mingw (Windows arm64)
+      - name: Install llvm-mingw (Windows arm64, pinned)
         if: matrix.win_toolchain == 'llvm-mingw'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $apiUrl = 'https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest'
-          $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'sysprims-ci' }
-          $asset = $release.assets |
-            Where-Object { $_.name -like '*ucrt-aarch64.zip' } |
-            Select-Object -First 1
-          if (-not $asset) { throw "No ucrt-aarch64 asset in llvm-mingw latest release" }
+          $tag = '${{ env.LLVM_MINGW_VERSION }}'
+          $zipName = "llvm-mingw-$tag-ucrt-aarch64.zip"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$tag/$zipName"
+          Write-Host "Downloading pinned llvm-mingw $tag from: $url"
           $zipPath = Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip'
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+          Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
           $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
           Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
           $topDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
