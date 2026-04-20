@@ -55,6 +55,13 @@ Release assets include CLI binaries for all supported platforms:
 - `sysprims-<version>-windows-amd64.zip`
 - `sysprims-<version>-windows-arm64.zip`
 
+In addition, the release pipeline still produces a legacy artifact that is **not an officially
+supported platform**:
+
+- `sysprims-<version>-darwin-amd64.tar.gz` — retained for backward compat only; scheduled for
+  removal. Intel Mac consumers should plan migration to Apple Silicon. No guarantees of bug
+  fixes or new feature coverage.
+
 ### FFI Libraries (Go Bindings)
 
 Static libraries committed to `bindings/go/sysprims/lib/`:
@@ -66,6 +73,7 @@ Static libraries committed to `bindings/go/sysprims/lib/`:
 - `linux-arm64-musl/libsysprims_ffi.a`
 - `windows-amd64/libsysprims_ffi.a` (msys2/MinGW-w64, `x86_64-pc-windows-gnu`)
 - `windows-arm64/libsysprims_ffi.a` (llvm-mingw, `aarch64-pc-windows-gnullvm`, since v0.1.16)
+- `darwin-amd64/libsysprims_ffi.a` — legacy, not officially supported (see CLI section above)
 
 ### TypeScript N-API Prebuilds
 

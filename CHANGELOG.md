@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Carryover cleanup opening the v0.1.17 cycle. Pins the Windows arm64 GNU toolchain for
+reproducibility and reconciles `platform-support.md` with what actually ships.
+
+### Changed
+
+- **Pin llvm-mingw to `20260407`** across CI, release, and Go bindings prep workflows
+  (`.github/workflows/ci.yml`, `.github/workflows/release.yml`,
+  `.github/workflows/go-bindings.yml`). A top-level `LLVM_MINGW_VERSION` env variable replaces
+  the previous `/releases/latest` API query; same sysprims commit now links against the same
+  llvm-mingw toolchain on every build. Bumps require one-line edits in the three workflows.
+- **Platform support docs** (`docs/standards/platform-support.md`): reconcile the shipped-
+  artifact lists with release reality. `darwin-amd64` CLI tarball and `libsysprims_ffi.a` are
+  now documented as legacy artifacts retained for backward compatibility, scheduled for
+  removal. The "Explicitly Unsupported" section continues to document the v0.1.7 deprecation
+  decision.
+
 ## [0.1.16] - 2026-04-18
 
 Windows arm64 Go binding support lands. Closes a long-standing limitation where Go consumers on
