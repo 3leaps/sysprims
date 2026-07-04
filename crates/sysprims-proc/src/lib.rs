@@ -371,6 +371,21 @@ pub enum ProcessState {
     Unknown,
 }
 
+/// Liveness classification of a PID.
+///
+/// Internal to the crate; the public surface is the [`is_live`] / [`is_fully_gone`]
+/// predicates. Kept as a three-state enum so a zombie is distinguishable from a
+/// fully-reaped process on platforms where that distinction is observable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Liveness {
+    /// The process exists and is in a live (non-zombie) state.
+    Live,
+    /// The process has exited but has not yet been reaped (Unix zombie).
+    Zombie,
+    /// No process record exists for the PID (never existed, or fully reaped).
+    Gone,
+}
+
 /// Filter for process queries.
 ///
 /// All fields are optional. Processes must match ALL specified criteria (AND logic).
@@ -812,6 +827,21 @@ pub fn snapshot_filtered_with_options(
 ///
 /// Returns `NotFound` if the process does not exist.
 /// Returns `PermissionDenied` if the process cannot be read.
+///
+/// # Liveness and zombies (cross-platform note)
+///
+/// This function reports a process's *record*, not a normalized liveness answer,
+/// and the two platforms diverge for an exited-but-unreaped child. On Linux the
+/// kernel keeps the PID in the process table with state
+/// [`ProcessState::Zombie`] until the parent reaps it, so `get_process` returns
+/// `Ok(_)` with `state == Zombie`. On macOS the same PID typically becomes
+/// unreadable almost immediately, so `get_process` returns `Err(NotFound)`.
+///
+/// Treating `Ok(_)` as "alive" is therefore not portable. When you need "is this
+/// process actually still running?" use [`is_live`] (returns `false` for zombies
+/// on every platform); for "is every trace of it gone?" use [`is_fully_gone`]; to
+/// block until exit, use [`wait_pid`]. If you keep using `get_process`, inspect
+/// [`ProcessInfo::state`] and treat [`ProcessState::Zombie`] as not-running.
 ///
 /// # Examples
 ///
@@ -1939,6 +1969,95 @@ pub fn wait_pid(pid: u32, timeout: Duration) -> SysprimsResult<WaitPidResult> {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
     }
     platform::wait_pid_impl(pid, timeout)
+}
+
+/// Report whether a PID refers to a live (non-zombie) process.
+///
+/// This is the portable answer to "did the process I just signalled actually
+/// stop running?". It normalizes a divergence that [`get_process`] exposes: an
+/// exited-but-unreaped child is a *zombie* still present in the process table on
+/// Linux but is typically already unreadable on macOS. `is_live` returns `false`
+/// for a zombie on every platform. Windows has no Unix-style zombie, so a PID is
+/// simply live or gone.
+///
+/// To keep that answer portable, this predicate treats a present-but-unreadable
+/// PID (the state a killed-but-unreaped child reaches on macOS) as *not live*.
+/// That is a deliberate liveness bias for the kill-then-check pattern, not a
+/// diagnostic: when you need a process's full record, use [`get_process`] and
+/// inspect [`ProcessInfo::state`] directly.
+///
+/// This is a single-shot probe (no waiting). To block until exit, use
+/// [`wait_pid`]; for "is every trace of the process gone?" use [`is_fully_gone`].
+///
+/// This answers liveness at a PID *slot*, not process *identity*: PIDs are
+/// reused, so this is not a security or identity boundary. It is safe for the
+/// "did the child I just signalled stop?" pattern because the parent holds the
+/// unreaped slot until it reaps, so the PID cannot recycle underneath the check.
+///
+/// # Errors
+///
+/// - `InvalidArgument` for PID 0 or a PID above `i32::MAX` (rejected before any
+///   platform probe, per the PID-safety rule in ADR-0011).
+/// - `PermissionDenied` if the platform forbids querying the PID. This is rare
+///   for caller-owned children (the primary use case), which are always
+///   queryable by their parent.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -0 <pid> plus a zombie-state check
+/// assert!(sysprims_proc::is_live(std::process::id()).unwrap());
+/// ```
+pub fn is_live(pid: u32) -> SysprimsResult<bool> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
+    Ok(platform::liveness_impl(pid)? == Liveness::Live)
+}
+
+/// Report whether a PID has no observable process record (fully gone).
+///
+/// Unlike [`is_live`], this distinguishes a *zombie* (exited but not yet reaped)
+/// from a *fully reaped* process: a zombie is neither live nor fully gone, so
+/// `is_fully_gone` returns `false` for it. Use this when a test or supervisor
+/// needs to assert that cleanup has completed and the PID slot is free.
+///
+/// This is a single-shot probe (no waiting).
+///
+/// # Errors
+///
+/// - `InvalidArgument` for PID 0 or a PID above `i32::MAX` (rejected before any
+///   platform probe, per the PID-safety rule in ADR-0011).
+/// - `PermissionDenied` if the platform forbids querying the PID (the process
+///   exists but cannot be classified).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// let pid = std::process::id();
+/// assert!(!sysprims_proc::is_fully_gone(pid).unwrap());
+/// ```
+pub fn is_fully_gone(pid: u32) -> SysprimsResult<bool> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
+    Ok(platform::liveness_impl(pid)? == Liveness::Gone)
 }
 
 // ============================================================================
