@@ -13,7 +13,7 @@
 #   - this script names the patterns it guards.
 set -euo pipefail
 
-pattern='\.plans/|/planning/|brief-sysp|SYSP-TASK|SYSP-[0-9]'
+pattern='\.plans/|planning/|brief-sysp|SYSP-TASK|SYSP-[0-9]'
 
 if git grep -nE "$pattern" \
 	-- ':!.gitignore' ':!scripts/check-planning-hygiene.sh'; then

@@ -35,9 +35,11 @@ interactive desktop processes. A secondary variant of the same class — a signa
 aimed at PID `1` (the init/`launchd` process) — is less destructive but similarly
 illegitimate for a library test.
 
-The general hazard: **any unvalidated PID at or above `i32::MAX` becomes a
+The general hazard: **any unvalidated PID above `i32::MAX` becomes a
 negative `pid_t`**, and negative `pid_t` values carry POSIX broadcast /
-process-group semantics rather than "one specific process."
+process-group semantics rather than "one specific process." (`i32::MAX` itself
+is the last in-range value and stays positive; the safeguard rejects PIDs
+strictly greater than it.)
 
 ## Safeguard
 
