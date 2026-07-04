@@ -3,7 +3,7 @@
 > **Status**: Accepted
 > **Date**: 2026-01-08
 > **Authors**: Architecture Council, devlead
-> **Incident**: .plans/tasks/cargo-crash/incident-2026-01-08.md
+> **Incident**: [docs/safety/incident-2026-01-08-kill-broadcast.md](../safety/incident-2026-01-08-kill-broadcast.md)
 
 ## Context
 
@@ -177,6 +177,6 @@ Implementation deferred to v0.2.0 when we have the tree-escape integration tests
 
 - [POSIX kill(2)](https://pubs.opengroup.org/onlinepubs/9699919799/functions/kill.html) - Official semantics for negative PIDs
 - [Linux kill(2)](https://man7.org/linux/man-pages/man2/kill.2.html) - Linux-specific behavior
-- [Incident Report](.plans/tasks/cargo-crash/incident-2026-01-08.md) - The Finder crash that prompted this ADR
+- [Incident Report](../safety/incident-2026-01-08-kill-broadcast.md) - The desktop-session crash that prompted this ADR
 - ADR-0008: Error Handling Strategy - Error type taxonomy
 - ADR-0004: FFI Design - Why we use u32 for PIDs at the FFI boundary

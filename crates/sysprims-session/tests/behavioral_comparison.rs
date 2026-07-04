@@ -8,7 +8,8 @@
 //! - This is NOT code copying - it's black-box behavioral testing
 //! - The tests themselves are MIT/Apache-2.0 licensed
 //!
-//! This approach is explicitly permitted per `.plans/provenance/sysprims-session.md`:
+//! This approach is explicitly permitted per
+//! `docs/design/sysprims-session-behavioral-comparison.md`:
 //! > Behavioral comparison against GPL tools (via shell-out) is permitted for testing
 //!
 //! # Test Categories
