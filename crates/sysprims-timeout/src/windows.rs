@@ -37,7 +37,6 @@ static JOB_REGISTRY: std::sync::OnceLock<Mutex<HashMap<u32, HANDLE>>> = std::syn
 // Follow-on work (planned): replace this with an explicit, stable contract (e.g.
 // returning an opaque Job token from spawn and accepting it for termination), to
 // avoid hidden global state and PID reuse edge cases.
-// See: `.plans/active/v0.1.7/01-windows-job-handle-contract.md`
 
 fn registry() -> &'static Mutex<HashMap<u32, HANDLE>> {
     JOB_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))

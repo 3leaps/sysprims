@@ -58,7 +58,6 @@ lint:
     ignore:
       - "**/target/**"
       - "**/.git/**"
-      - ".plans/**"
   # GitHub Actions linting
   github_actions:
     actionlint:

@@ -11,8 +11,7 @@
 # Build: docker build -t sysprims-test-fixture -f Dockerfile.container .
 # Run:   docker run --rm -v $(pwd):/workspace:ro -v $(pwd)/target:/workspace/target sysprims-test-fixture
 #
-# See: .plans/active/v0.1.1/03-container-test-fixture.md
-# See: docs/architecture/adr/0011-pid-validation-safety.md
+# See: docs/decisions/ADR-0011-pid-validation-safety.md
 
 FROM alpine:3.19
 
