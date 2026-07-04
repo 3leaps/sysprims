@@ -632,6 +632,17 @@ pub fn snapshot_with_options(options: ProcessOptions) -> SysprimsResult<ProcessS
 /// println!("cpu total ns: {}", total_ns);
 /// ```
 pub fn cpu_total_time_ns(pid: u32) -> SysprimsResult<u64> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
     platform::cpu_total_time_ns_impl(pid)
 }
 
@@ -867,8 +878,16 @@ pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
 /// println!("threads: {:?}", proc.thread_count);
 /// ```
 pub fn get_process_with_options(pid: u32, options: ProcessOptions) -> SysprimsResult<ProcessInfo> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
     }
     validate_process_options(&options)?;
     platform::get_process_impl(pid, &options)
@@ -1965,8 +1984,16 @@ fn snapshot_with_sampled_cpu(
 /// println!("timed_out: {}", res.timed_out);
 /// ```
 pub fn wait_pid(pid: u32, timeout: Duration) -> SysprimsResult<WaitPidResult> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
     }
     platform::wait_pid_impl(pid, timeout)
 }
@@ -2238,6 +2265,34 @@ mod tests {
         assert_eq!(r.pid, pid);
         assert!(r.timed_out);
         assert!(!r.exited);
+    }
+
+    /// ADR-0011: every public pid-taking entrypoint must reject PID 0 and PIDs
+    /// above `i32::MAX` *before* any `pid as pid_t` cast could produce a
+    /// negative/broadcast PID. These inputs must never reach a syscall.
+    #[test]
+    fn pid_taking_entrypoints_reject_unsafe_pids() {
+        let over_max = (i32::MAX as u32) + 1;
+        for &pid in &[0u32, over_max, u32::MAX] {
+            assert!(
+                matches!(get_process(pid), Err(SysprimsError::InvalidArgument { .. })),
+                "get_process must reject unsafe PID {pid}"
+            );
+            assert!(
+                matches!(
+                    wait_pid(pid, Duration::from_millis(1)),
+                    Err(SysprimsError::InvalidArgument { .. })
+                ),
+                "wait_pid must reject unsafe PID {pid}"
+            );
+            assert!(
+                matches!(
+                    cpu_total_time_ns(pid),
+                    Err(SysprimsError::InvalidArgument { .. })
+                ),
+                "cpu_total_time_ns must reject unsafe PID {pid}"
+            );
+        }
     }
 
     #[test]

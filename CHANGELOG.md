@@ -33,6 +33,11 @@ portable process-liveness predicates that normalize zombie handling across platf
   child returns `Ok(_)` with `state == Zombie` on Linux but `Err(NotFound)` on macOS, so
   `Ok(_)` is not a portable liveness signal; points callers to the new predicates and
   `wait_pid`.
+- **Uniform PID-safety validation** (ADR-0011): `get_process` / `get_process_with_options`,
+  `wait_pid`, and `cpu_total_time_ns` now reject a PID above `i32::MAX` with `InvalidArgument`,
+  matching `list_fds` / `ancestors` / `descendants` / `guard`. Previously they gated only on
+  PID 0, so an out-of-range PID could reach a `pid as pid_t` cast (a negative/broadcast PID
+  under `kill(pid, 0)`). Such PIDs are invalid regardless; well-formed callers are unaffected.
 
 - **Pin llvm-mingw to `20260407`** across CI, release, and Go bindings prep workflows
   (`.github/workflows/ci.yml`, `.github/workflows/release.yml`,
