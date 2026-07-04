@@ -16,13 +16,14 @@ target/
 # Cargo.lock
 
 # -----------------------------------------------------------------------------
-# Planning and Local Configuration (NEVER COMMIT)
+# Planning and Local Configuration
 # -----------------------------------------------------------------------------
-# Session planning documents - always local, never committed
-.plans/
-
-# Local agent instructions - per-session tactical guidance
-AGENTS.local.md
+# Defense-in-depth only: a .gitignore entry is a convenience filter, not a
+# security boundary. Planning artifacts and local guidance live outside the repo
+# tree entirely; these entries just catch an accidental local recreation.
+# Root-anchored so they only match at the repo root.
+/.plans/
+/AGENTS.local.md
 
 # Local overrides
 *.local.yaml
