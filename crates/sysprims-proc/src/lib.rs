@@ -371,6 +371,26 @@ pub enum ProcessState {
     Unknown,
 }
 
+/// Liveness classification of a PID.
+///
+/// Internal to the crate; the public surface is the [`is_live`] / [`is_fully_gone`]
+/// predicates. Kept as a three-state enum so a zombie is distinguishable from a
+/// fully-reaped process on platforms where that distinction is observable.
+///
+/// `Zombie` has no analogue on Windows (a PID is either live or gone), so the
+/// Windows probe never constructs it; `allow(dead_code)` there keeps the shared
+/// enum intact without tripping `-D warnings`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) enum Liveness {
+    /// The process exists and is in a live (non-zombie) state.
+    Live,
+    /// The process has exited but has not yet been reaped (Unix zombie).
+    Zombie,
+    /// No process record exists for the PID (never existed, or fully reaped).
+    Gone,
+}
+
 /// Filter for process queries.
 ///
 /// All fields are optional. Processes must match ALL specified criteria (AND logic).
@@ -617,6 +637,17 @@ pub fn snapshot_with_options(options: ProcessOptions) -> SysprimsResult<ProcessS
 /// println!("cpu total ns: {}", total_ns);
 /// ```
 pub fn cpu_total_time_ns(pid: u32) -> SysprimsResult<u64> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
     platform::cpu_total_time_ns_impl(pid)
 }
 
@@ -813,6 +844,21 @@ pub fn snapshot_filtered_with_options(
 /// Returns `NotFound` if the process does not exist.
 /// Returns `PermissionDenied` if the process cannot be read.
 ///
+/// # Liveness and zombies (cross-platform note)
+///
+/// This function reports a process's *record*, not a normalized liveness answer,
+/// and the two platforms diverge for an exited-but-unreaped child. On Linux the
+/// kernel keeps the PID in the process table with state
+/// [`ProcessState::Zombie`] until the parent reaps it, so `get_process` returns
+/// `Ok(_)` with `state == Zombie`. On macOS the same PID typically becomes
+/// unreadable almost immediately, so `get_process` returns `Err(NotFound)`.
+///
+/// Treating `Ok(_)` as "alive" is therefore not portable. When you need "is this
+/// process actually still running?" use [`is_live`] (returns `false` for zombies
+/// on every platform); for "is every trace of it gone?" use [`is_fully_gone`]; to
+/// block until exit, use [`wait_pid`]. If you keep using `get_process`, inspect
+/// [`ProcessInfo::state`] and treat [`ProcessState::Zombie`] as not-running.
+///
 /// # Examples
 ///
 /// ```rust,no_run
@@ -837,8 +883,16 @@ pub fn get_process(pid: u32) -> SysprimsResult<ProcessInfo> {
 /// println!("threads: {:?}", proc.thread_count);
 /// ```
 pub fn get_process_with_options(pid: u32, options: ProcessOptions) -> SysprimsResult<ProcessInfo> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
     }
     validate_process_options(&options)?;
     platform::get_process_impl(pid, &options)
@@ -1935,10 +1989,107 @@ fn snapshot_with_sampled_cpu(
 /// println!("timed_out: {}", res.timed_out);
 /// ```
 pub fn wait_pid(pid: u32, timeout: Duration) -> SysprimsResult<WaitPidResult> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
     if pid == 0 {
         return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
     }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
     platform::wait_pid_impl(pid, timeout)
+}
+
+/// Report whether a PID refers to a live (non-zombie) process.
+///
+/// This is the portable answer to "did the process I just signalled actually
+/// stop running?". It normalizes a divergence that [`get_process`] exposes: an
+/// exited-but-unreaped child is a *zombie* still present in the process table on
+/// Linux but is typically already unreadable on macOS. `is_live` returns `false`
+/// for a zombie on every platform. Windows has no Unix-style zombie, so a PID is
+/// simply live or gone.
+///
+/// To keep that answer portable, this predicate treats a present-but-unreadable
+/// PID (the state a killed-but-unreaped child reaches on macOS) as *not live*.
+/// That is a deliberate liveness bias for the kill-then-check pattern, not a
+/// diagnostic: when you need a process's full record, use [`get_process`] and
+/// inspect [`ProcessInfo::state`] directly.
+///
+/// This is a single-shot probe (no waiting). To block until exit, use
+/// [`wait_pid`]; for "is every trace of the process gone?" use [`is_fully_gone`].
+///
+/// This answers liveness at a PID *slot*, not process *identity*: PIDs are
+/// reused, so this is not a security or identity boundary. It is safe for the
+/// "did the child I just signalled stop?" pattern because the parent holds the
+/// unreaped slot until it reaps, so the PID cannot recycle underneath the check.
+///
+/// # Errors
+///
+/// - `InvalidArgument` for PID 0 or a PID above `i32::MAX` (rejected before any
+///   platform probe, per the PID-safety rule in ADR-0011).
+/// - `PermissionDenied` if the platform forbids querying the PID. This is rare
+///   for caller-owned children (the primary use case), which are always
+///   queryable by their parent.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Replaces: kill -0 <pid> plus a zombie-state check
+/// assert!(sysprims_proc::is_live(std::process::id()).unwrap());
+/// ```
+pub fn is_live(pid: u32) -> SysprimsResult<bool> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
+    Ok(platform::liveness_impl(pid)? == Liveness::Live)
+}
+
+/// Report whether a PID has no observable process record (fully gone).
+///
+/// Unlike [`is_live`], this distinguishes a *zombie* (exited but not yet reaped)
+/// from a *fully reaped* process: a zombie is neither live nor fully gone, so
+/// `is_fully_gone` returns `false` for it. Use this when a test or supervisor
+/// needs to assert that cleanup has completed and the PID slot is free.
+///
+/// This is a single-shot probe (no waiting).
+///
+/// # Errors
+///
+/// - `InvalidArgument` for PID 0 or a PID above `i32::MAX` (rejected before any
+///   platform probe, per the PID-safety rule in ADR-0011).
+/// - `PermissionDenied` if the platform forbids querying the PID (the process
+///   exists but cannot be classified).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// let pid = std::process::id();
+/// assert!(!sysprims_proc::is_fully_gone(pid).unwrap());
+/// ```
+pub fn is_fully_gone(pid: u32) -> SysprimsResult<bool> {
+    const MAX_SAFE_PID: u32 = i32::MAX as u32;
+
+    if pid == 0 {
+        return Err(SysprimsError::invalid_argument("PID 0 is not valid"));
+    }
+    if pid > MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "PID {} exceeds maximum safe value {}",
+            pid, MAX_SAFE_PID
+        )));
+    }
+    Ok(platform::liveness_impl(pid)? == Liveness::Gone)
 }
 
 // ============================================================================
@@ -2119,6 +2270,34 @@ mod tests {
         assert_eq!(r.pid, pid);
         assert!(r.timed_out);
         assert!(!r.exited);
+    }
+
+    /// ADR-0011: every public pid-taking entrypoint must reject PID 0 and PIDs
+    /// above `i32::MAX` *before* any `pid as pid_t` cast could produce a
+    /// negative/broadcast PID. These inputs must never reach a syscall.
+    #[test]
+    fn pid_taking_entrypoints_reject_unsafe_pids() {
+        let over_max = (i32::MAX as u32) + 1;
+        for &pid in &[0u32, over_max, u32::MAX] {
+            assert!(
+                matches!(get_process(pid), Err(SysprimsError::InvalidArgument { .. })),
+                "get_process must reject unsafe PID {pid}"
+            );
+            assert!(
+                matches!(
+                    wait_pid(pid, Duration::from_millis(1)),
+                    Err(SysprimsError::InvalidArgument { .. })
+                ),
+                "wait_pid must reject unsafe PID {pid}"
+            );
+            assert!(
+                matches!(
+                    cpu_total_time_ns(pid),
+                    Err(SysprimsError::InvalidArgument { .. })
+                ),
+                "cpu_total_time_ns must reject unsafe PID {pid}"
+            );
+        }
     }
 
     #[test]

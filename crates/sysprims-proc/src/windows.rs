@@ -163,6 +163,34 @@ pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitP
     }
 }
 
+pub(crate) fn liveness_impl(pid: u32) -> SysprimsResult<crate::Liveness> {
+    // Windows has no Unix-style zombie: a PID is either running or gone.
+    unsafe {
+        let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            let err = GetLastError();
+            if err == ERROR_ACCESS_DENIED {
+                return Err(SysprimsError::permission_denied(pid, "liveness probe"));
+            }
+            return Ok(crate::Liveness::Gone);
+        }
+
+        // Zero-timeout wait: signaled => the process has exited; timeout => still running.
+        let wait = WaitForSingleObject(handle, 0);
+        CloseHandle(handle);
+
+        // WAIT_OBJECT_0 == 0, WAIT_TIMEOUT == 258
+        match wait {
+            0 => Ok(crate::Liveness::Gone),
+            258 => Ok(crate::Liveness::Live),
+            other => Err(SysprimsError::system(
+                "WaitForSingleObject failed",
+                other as i32,
+            )),
+        }
+    }
+}
+
 pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
     let mut warnings = Vec::new();
     let mut bindings = Vec::new();

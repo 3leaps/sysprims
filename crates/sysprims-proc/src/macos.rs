@@ -386,6 +386,28 @@ pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitP
     }
 }
 
+pub(crate) fn liveness_impl(pid: u32) -> SysprimsResult<crate::Liveness> {
+    // SAFETY: kill(pid, 0) does not send a signal; it performs an existence/permission check.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if rc == 0 {
+        // The PID is present. A zombie can still answer kill(pid, 0) while its
+        // record has already become unreadable, so a read failure here means
+        // exited-but-unreaped rather than gone.
+        return match read_process_info(pid, &ProcessOptions::default()) {
+            Ok(info) if info.state == crate::ProcessState::Zombie => Ok(crate::Liveness::Zombie),
+            Ok(_) => Ok(crate::Liveness::Live),
+            Err(_) => Ok(crate::Liveness::Zombie),
+        };
+    }
+
+    let errno = unsafe { *libc::__error() };
+    match errno {
+        libc::ESRCH => Ok(crate::Liveness::Gone),
+        libc::EPERM => Err(SysprimsError::permission_denied(pid, "liveness probe")),
+        _ => Err(SysprimsError::system("kill(pid, 0) failed", errno)),
+    }
+}
+
 pub fn listening_ports_impl() -> SysprimsResult<PortBindingsSnapshot> {
     let pids = list_all_pids()?;
     let mut bindings = Vec::new();

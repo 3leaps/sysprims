@@ -11,9 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Carryover cleanup opening the v0.1.17 cycle. Pins the Windows arm64 GNU toolchain for
-reproducibility and reconciles `platform-support.md` with what actually ships.
+reproducibility and reconciles `platform-support.md` with what actually ships. Adds
+portable process-liveness predicates that normalize zombie handling across platforms.
+
+### Added
+
+- **`sysprims_proc::is_live(pid)` and `sysprims_proc::is_fully_gone(pid)`** — single-shot
+  liveness predicates that give a portable answer to "did the process I just signalled
+  actually stop?". They normalize a cross-platform divergence: an exited-but-unreaped child
+  is a zombie still present in the process table on Linux but is typically already unreadable
+  on macOS. `is_live` returns `false` for a zombie on every platform; `is_fully_gone`
+  distinguishes an unreaped zombie (neither live nor fully gone) from a fully-reaped PID.
+  Windows has no zombie state, so a PID is simply live or gone. To stay portable, `is_live`
+  treats a present-but-unreadable PID (the macOS killed-but-unreaped case) as not live — a
+  deliberate liveness bias for the kill-then-check pattern, not a replacement for `get_process`
+  diagnostics. Both predicates reject PID 0 and PIDs above `i32::MAX` (ADR-0011).
 
 ### Changed
+
+- **`get_process` documentation**: added a cross-platform note that an exited-but-unreaped
+  child returns `Ok(_)` with `state == Zombie` on Linux but `Err(NotFound)` on macOS, so
+  `Ok(_)` is not a portable liveness signal; points callers to the new predicates and
+  `wait_pid`.
+- **Uniform PID-safety validation** (ADR-0011): `get_process` / `get_process_with_options`,
+  `wait_pid`, and `cpu_total_time_ns` now reject a PID above `i32::MAX` with `InvalidArgument`,
+  matching `list_fds` / `ancestors` / `descendants` / `guard`. Previously they gated only on
+  PID 0, so an out-of-range PID could reach a `pid as pid_t` cast (a negative/broadcast PID
+  under `kill(pid, 0)`). Such PIDs are invalid regardless; well-formed callers are unaffected.
 
 - **Pin llvm-mingw to `20260407`** across CI, release, and Go bindings prep workflows
   (`.github/workflows/ci.yml`, `.github/workflows/release.yml`,

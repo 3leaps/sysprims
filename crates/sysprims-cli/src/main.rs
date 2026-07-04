@@ -2735,13 +2735,13 @@ fn print_ports_table(bindings: &[sysprims_proc::PortBinding]) {
 fn sort_processes(processes: &mut [sysprims_proc::ProcessInfo], field: &str) {
     match field.to_lowercase().as_str() {
         "pid" => processes.sort_by_key(|p| p.pid),
-        "name" => processes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+        "name" => processes.sort_by_key(|p| p.name.to_lowercase()),
         "cpu" => processes.sort_by(|a, b| {
             b.cpu_percent
                 .partial_cmp(&a.cpu_percent)
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
-        "memory" | "mem" => processes.sort_by(|a, b| b.memory_kb.cmp(&a.memory_kb)),
+        "memory" | "mem" => processes.sort_by_key(|p| std::cmp::Reverse(p.memory_kb)),
         _ => processes.sort_by_key(|p| p.pid),
     }
 }
