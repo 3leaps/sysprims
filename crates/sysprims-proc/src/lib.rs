@@ -376,7 +376,12 @@ pub enum ProcessState {
 /// Internal to the crate; the public surface is the [`is_live`] / [`is_fully_gone`]
 /// predicates. Kept as a three-state enum so a zombie is distinguishable from a
 /// fully-reaped process on platforms where that distinction is observable.
+///
+/// `Zombie` has no analogue on Windows (a PID is either live or gone), so the
+/// Windows probe never constructs it; `allow(dead_code)` there keeps the shared
+/// enum intact without tripping `-D warnings`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) enum Liveness {
     /// The process exists and is in a live (non-zombie) state.
     Live,
