@@ -31,6 +31,8 @@ This directory contains architectural, design, and security decision records for
 | [ADR-0012](ADR-0012-language-bindings-distribution.md)            | Language Bindings Distribution            | Accepted |
 | [ADR-0013](ADR-0013-release-asset-publishing-and-verification.md) | Release Asset Publishing and Verification | Accepted |
 | [ADR-0014](ADR-0014-ffi-artifact-groups-and-binding-consumers.md) | FFI Artifact Groups and Binding Consumers | Accepted |
+| [ADR-0015](ADR-0015-typescript-npm-publishing.md)                 | TypeScript npm Publishing Standard        | Accepted |
+| [ADR-0016](ADR-0016-session-spawn-ffi-contract.md)                 | Session Spawn FFI Contract                | Accepted |
 
 ### Design Decision Records (DDR)
 
