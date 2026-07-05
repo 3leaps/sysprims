@@ -7,7 +7,8 @@
 //! # Provenance
 //!
 //! All implementations are derived from POSIX specifications and BSD/MIT-licensed
-//! references. See `.plans/provenance/sysprims-session.md` for full documentation.
+//! references. See `docs/design/sysprims-session-behavioral-comparison.md` for the
+//! full provenance record.
 //!
 //! # Features
 //!

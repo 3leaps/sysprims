@@ -107,7 +107,7 @@ Before writing or modifying code in `sysprims-signal` or `sysprims-timeout`:
 1. **Ask** - escalate to the maintainer before running dangerous tests
 2. **Use containers** - `make test-diabolical` runs tests safely
 3. **Review the ADR** - ADR-0011 explains the rationale in detail
-4. **Check the incident log** - `.plans/tasks/cargo-crash/` has historical context
+4. **Read the incident writeup** - [`docs/safety/incident-2026-01-08-kill-broadcast.md`](docs/safety/incident-2026-01-08-kill-broadcast.md) records the failure mode
 
 ---
 

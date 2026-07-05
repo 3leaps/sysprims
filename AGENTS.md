@@ -3,7 +3,7 @@
 ## Read First
 
 1. **READ [`REPOSITORY_SAFETY_PROTOCOLS.md`](REPOSITORY_SAFETY_PROTOCOLS.md) IMMEDIATELY** - this library kills processes; incorrect code kills everything
-2. Check `AGENTS.local.md` if it exists (gitignored, tactical session guidance)
+2. **Check for local guidance** if present (e.g. `AGENTS.local.md`) — machine-specific instructions and tactical session overrides. Local context is kept out of the working tree on purpose; a `.gitignore` entry is a convenience filter, not a security boundary.
 3. Read `MAINTAINERS.md` for contacts and governance
 4. Review this document for operational protocols
 5. Understand: this is a **Rust library with cross-language bindings** - correctness is paramount
@@ -163,8 +163,8 @@ Before writing or modifying any code that **sends signals** or **terminates proc
 - Change FFI contracts without ADR review
 - Use `unsafe` without clear justification and review
 - Assume platform behavior without testing
-- **EVER commit anything from `.plans/`** - this directory is gitignored and MUST stay local; planning docs are ephemeral working files, not repository artifacts
-- Commit `AGENTS.local.md` (gitignored - session-specific guidance)
+- **Add local planning paths, board names, or planning IDs to tracked content** — planning artifacts live in a private, maintainer-managed system kept outside the repository tree; a `.gitignore` entry is a convenience filter, not a security boundary
+- Commit `AGENTS.local.md` or other local guidance — it is kept out of the tree as defense-in-depth, not because a `.gitignore` entry makes it safe
 - **Use PID 0, 1, or u32::MAX in signal-sending tests** (see Safety Protocols above)
 - **Bypass PID validation in signal code without explicit maintainer approval**
 - **Run signal-sending tests without verifying target PIDs are safe**
@@ -445,6 +445,15 @@ Key architectural decisions:
 - **Local decisions**: `docs/decisions/` (ADR, DDR, SDR)
 - **Platform support**: [`docs/standards/platform-support.md`](docs/standards/platform-support.md)
 - **Release workflow**: [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)
+
+## Planning Artifacts
+
+- Feature briefs, task boards, and operational notes live in a private,
+  maintainer-managed planning system kept **outside** this repository tree —
+  not in-tree behind `.gitignore`, which is a convenience filter, not a security
+  boundary. This conforms to the [3 Leaps OSS Sensitive Local Data Policy](https://github.com/3leaps/oss-policies/blob/main/SENSITIVE-LOCAL-DATA.md).
+- Do not add local planning paths, board names, or planning IDs to tracked repo
+  content (code, docs, comments, commit messages, PR text).
 
 ## Contact
 

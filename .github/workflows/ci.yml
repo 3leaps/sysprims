@@ -26,6 +26,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+  planning-hygiene:
+    name: Planning Reference Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No private planning-plane references in tracked files
+        run: bash scripts/check-planning-hygiene.sh
   windows-cross-check:
     name: Windows Cross-Target Check (no SDK)
     runs-on: ubuntu-latest
@@ -255,7 +262,7 @@ jobs:
         run: cargo audit
   # Container-based privileged tests
   # These tests require isolation because they verify dangerous signal behaviors
-  # See: ADR-0011, .plans/active/v0.1.1/03-container-test-fixture.md
+  # See: ADR-0011
   container-tests:
     name: Container Tests (Privileged)
     runs-on: ubuntu-latest
