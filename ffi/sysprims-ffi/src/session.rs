@@ -527,9 +527,9 @@ fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::sysprims_free_string;
     use std::ptr;
-    use sysprims_core::schema::{RUN_NOHUP_CONFIG_V1, RUN_SETSID_CONFIG_V1};
 
     #[test]
     fn test_self_getpgid_null_out() {
