@@ -816,6 +816,7 @@ struct WireRunSetsidConfig {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[cfg_attr(not(unix), allow(dead_code))]
 #[serde(deny_unknown_fields)]
 struct WireRunNohupConfig {
     schema_id: String,
@@ -1027,6 +1028,7 @@ fn session_setsid_result_from_outcome(
     }
 }
 
+#[cfg(unix)]
 fn session_nohup_result_from_outcome(
     outcome: sysprims_session::NohupOutcome,
     caller_sid: u32,
