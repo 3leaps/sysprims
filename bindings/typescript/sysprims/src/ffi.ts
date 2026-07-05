@@ -67,6 +67,10 @@ export type SysprimsLib = {
   sysprimsSelfGetpgid: () => SysprimsCallU32Result;
   sysprimsSelfGetsid: () => SysprimsCallU32Result;
 
+  // Session spawn
+  sysprimsRunSetsid: (configJson: string) => SysprimsCallJsonResult;
+  sysprimsRunNohup: (configJson: string) => SysprimsCallJsonResult;
+
   // Signals
   sysprimsSignalSend: (pid: number, signal: number) => SysprimsCallVoidResult;
   sysprimsSignalSendGroup: (pgid: number, signal: number) => SysprimsCallVoidResult;

@@ -83,7 +83,7 @@ fn setsid_creates_new_session() {
 
     assert!(result.is_ok(), "run_setsid should succeed");
 
-    if let Ok(SetsidOutcome::Completed { exit_status }) = result {
+    if let Ok(SetsidOutcome::Completed { exit_status, .. }) = result {
         // The command should have succeeded
         assert!(
             exit_status.success(),
@@ -175,8 +175,12 @@ fn setsid_matches_system_behavior_linux() {
         .args(["sh", "-c", "exit 42"])
         .status();
 
-    if let (Ok(SetsidOutcome::Completed { exit_status: ours }), Ok(theirs)) =
-        (our_result, sys_result)
+    if let (
+        Ok(SetsidOutcome::Completed {
+            exit_status: ours, ..
+        }),
+        Ok(theirs),
+    ) = (our_result, sys_result)
     {
         assert_eq!(
             ours.code(),
@@ -199,8 +203,12 @@ fn setsid_matches_system_behavior_linux() {
 
     let sys_result = Command::new(SYSTEM_SETSID).args(["true"]).status();
 
-    if let (Ok(SetsidOutcome::Completed { exit_status: ours }), Ok(theirs)) =
-        (our_result, sys_result)
+    if let (
+        Ok(SetsidOutcome::Completed {
+            exit_status: ours, ..
+        }),
+        Ok(theirs),
+    ) = (our_result, sys_result)
     {
         assert_eq!(
             ours.code(),
@@ -308,12 +316,13 @@ fn nohup_ignores_sighup() {
         NohupConfig {
             wait: true,
             output_file: Some("/dev/null".to_string()),
+            ..Default::default()
         },
     );
 
     assert!(result.is_ok(), "run_nohup should succeed");
 
-    if let Ok(NohupOutcome::Completed { exit_status }) = result {
+    if let Ok(NohupOutcome::Completed { exit_status, .. }) = result {
         assert!(exit_status.success(), "nohup command should succeed");
     }
 
@@ -344,6 +353,7 @@ fn nohup_exit_code_propagation() {
         NohupConfig {
             wait: true,
             output_file: Some("/dev/null".to_string()),
+            ..Default::default()
         },
     );
 
@@ -353,8 +363,12 @@ fn nohup_exit_code_propagation() {
         .stderr(Stdio::null())
         .status();
 
-    if let (Ok(NohupOutcome::Completed { exit_status: ours }), Ok(theirs)) =
-        (our_result, sys_result)
+    if let (
+        Ok(NohupOutcome::Completed {
+            exit_status: ours, ..
+        }),
+        Ok(theirs),
+    ) = (our_result, sys_result)
     {
         assert_eq!(
             ours.code(),
@@ -378,12 +392,13 @@ fn nohup_success_case() {
         NohupConfig {
             wait: true,
             output_file: Some("/dev/null".to_string()),
+            ..Default::default()
         },
     );
 
     assert!(result.is_ok(), "run_nohup should succeed");
 
-    if let Ok(NohupOutcome::Completed { exit_status }) = result {
+    if let Ok(NohupOutcome::Completed { exit_status, .. }) = result {
         assert!(exit_status.success(), "Exit status should be success");
         assert_eq!(exit_status.code(), Some(0), "Exit code should be 0");
     }
@@ -674,7 +689,7 @@ fn setsid_child_is_session_leader() {
     );
 
     match result {
-        Ok(sysprims_session::SetsidOutcome::Completed { exit_status }) => {
+        Ok(sysprims_session::SetsidOutcome::Completed { exit_status, .. }) => {
             assert!(
                 exit_status.success(),
                 "Session leader verification should pass (exit code: {:?})",
@@ -730,7 +745,7 @@ fn setsid_child_is_session_leader() {
     );
 
     match result {
-        Ok(sysprims_session::SetsidOutcome::Completed { exit_status }) => {
+        Ok(sysprims_session::SetsidOutcome::Completed { exit_status, .. }) => {
             assert!(
                 exit_status.success(),
                 "Session leader verification should pass (exit code: {:?})",
@@ -769,7 +784,7 @@ fn setsid_works_on_macos() {
 
     assert!(result.is_ok(), "setsid should work on macOS");
 
-    if let Ok(SetsidOutcome::Completed { exit_status }) = result {
+    if let Ok(SetsidOutcome::Completed { exit_status, .. }) = result {
         assert!(exit_status.success(), "Command should succeed");
     }
 }
@@ -786,12 +801,13 @@ fn nohup_works_on_macos() {
         NohupConfig {
             wait: true,
             output_file: Some("/dev/null".to_string()),
+            ..Default::default()
         },
     );
 
     assert!(result.is_ok(), "nohup should work on macOS");
 
-    if let Ok(NohupOutcome::Completed { exit_status }) = result {
+    if let Ok(NohupOutcome::Completed { exit_status, .. }) = result {
         assert!(exit_status.success(), "Command should succeed");
     }
 }
@@ -872,6 +888,7 @@ fn nohup_background_mode() {
         NohupConfig {
             wait: false,
             output_file: Some("/dev/null".to_string()),
+            ..Default::default()
         },
     );
 

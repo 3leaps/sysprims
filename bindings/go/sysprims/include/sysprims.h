@@ -710,6 +710,32 @@ SysprimsErrorCode sysprims_self_getpgid(unsigned int *pgid_out);
 SysprimsErrorCode sysprims_self_getsid(unsigned int *sid_out);
 
 /**
+ * Run a command in a new session.
+ *
+ * Returns a JSON object matching `session-spawn-result.schema.json`.
+ *
+ * # Safety
+ *
+ * * `config_json` must point to a valid UTF-8 C string
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_run_setsid(const char *config_json, char **result_json_out);
+
+/**
+ * Run a command with SIGHUP ignored.
+ *
+ * Returns a JSON object matching `session-spawn-result.schema.json`.
+ *
+ * # Safety
+ *
+ * * `config_json` must point to a valid UTF-8 C string
+ * * `result_json_out` must be a valid pointer to a `char*`
+ * * The result string must be freed with `sysprims_free_string()`
+ */
+SysprimsErrorCode sysprims_run_nohup(const char *config_json, char **result_json_out);
+
+/**
  * Send a signal to a process.
  *
  * On Unix, this calls `kill(pid, signal)`.

@@ -1,13 +1,19 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use napi_derive::napi;
-use sysprims_core::schema::{SPAWN_IN_GROUP_CONFIG_V1, TERMINATE_TREE_CONFIG_V1};
+use sysprims_core::schema::{
+    RUN_NOHUP_CONFIG_V1, RUN_SETSID_CONFIG_V1, SESSION_SPAWN_RESULT_V1, SPAWN_IN_GROUP_CONFIG_V1,
+    TERMINATE_TREE_CONFIG_V1,
+};
 use sysprims_core::SysprimsError;
 use sysprims_proc::{
     ancestors, descendants_with_config_and_options, guard_step, CpuMode, DescendantsConfig,
     FdFilter, GuardAction, GuardConfig, GuardRule, PortFilter, ProcessFilter, ProcessOptions,
 };
 use sysprims_timeout::{spawn_in_group, terminate_tree, SpawnInGroupConfig, TerminateTreeConfig};
+
+const MAX_SAFE_PID: u32 = i32::MAX as u32;
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -790,6 +796,313 @@ pub fn sysprims_terminate_tree(pid: u32, config_json: String) -> SysprimsCallJso
         },
         Err(e) => err_json(e),
     }
+}
+
+// -----------------------------------------------------------------------------
+// Session Spawn
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireRunSetsidConfig {
+    schema_id: String,
+    argv: Vec<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    env: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default)]
+    wait: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireRunNohupConfig {
+    schema_id: String,
+    argv: Vec<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    env: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default)]
+    wait: bool,
+    #[serde(default)]
+    output_file: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct SessionSpawnResultWire {
+    schema_id: &'static str,
+    timestamp: String,
+    platform: &'static str,
+    verb: &'static str,
+    status: &'static str,
+    pid: Option<u32>,
+    sid: Option<u32>,
+    pgid: Option<u32>,
+    session_kind: &'static str,
+    identifier_provenance: &'static str,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    output_file: Option<String>,
+    warnings: Vec<String>,
+}
+
+#[napi]
+pub fn sysprims_run_setsid(config_json: String) -> SysprimsCallJsonResult {
+    if config_json.is_empty() {
+        return err_json(SysprimsError::invalid_argument(
+            "config_json cannot be empty",
+        ));
+    }
+
+    let wire = match serde_json::from_str::<WireRunSetsidConfig>(&config_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return err_json(SysprimsError::invalid_argument(format!(
+                "invalid config JSON: {}",
+                e
+            )))
+        }
+    };
+
+    if wire.schema_id != RUN_SETSID_CONFIG_V1 {
+        return err_json(SysprimsError::invalid_argument(format!(
+            "invalid schema_id (expected {})",
+            RUN_SETSID_CONFIG_V1
+        )));
+    }
+
+    let (command, args) = match split_argv(&wire.argv) {
+        Ok(v) => v,
+        Err(e) => return err_json(e),
+    };
+
+    let config = sysprims_session::SetsidConfig {
+        wait: wire.wait,
+        ctty: false,
+        cwd: wire.cwd.map(PathBuf::from),
+        env: wire.env,
+    };
+
+    match sysprims_session::run_setsid(command, &args, config)
+        .and_then(session_setsid_result_from_outcome)
+    {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => ok_json(json),
+            Err(e) => err_json(SysprimsError::internal(format!(
+                "failed to serialize session spawn result: {}",
+                e
+            ))),
+        },
+        Err(e) => err_json(e),
+    }
+}
+
+#[napi]
+pub fn sysprims_run_nohup(config_json: String) -> SysprimsCallJsonResult {
+    if config_json.is_empty() {
+        return err_json(SysprimsError::invalid_argument(
+            "config_json cannot be empty",
+        ));
+    }
+
+    let wire = match serde_json::from_str::<WireRunNohupConfig>(&config_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return err_json(SysprimsError::invalid_argument(format!(
+                "invalid config JSON: {}",
+                e
+            )))
+        }
+    };
+
+    if wire.schema_id != RUN_NOHUP_CONFIG_V1 {
+        return err_json(SysprimsError::invalid_argument(format!(
+            "invalid schema_id (expected {})",
+            RUN_NOHUP_CONFIG_V1
+        )));
+    }
+
+    let (command, args) = match split_argv(&wire.argv) {
+        Ok(v) => v,
+        Err(e) => return err_json(e),
+    };
+
+    #[cfg(not(unix))]
+    {
+        let _ = (command, args);
+        err_json(SysprimsError::not_supported("nohup", std::env::consts::OS))
+    }
+
+    #[cfg(unix)]
+    {
+        let caller_sid = match sysprims_session::getsid(0) {
+            Ok(sid) => sid,
+            Err(e) => return err_json(e),
+        };
+        let caller_pgid = match sysprims_session::getpgid(0) {
+            Ok(pgid) => pgid,
+            Err(e) => return err_json(e),
+        };
+
+        let config = sysprims_session::NohupConfig {
+            wait: wire.wait,
+            output_file: wire.output_file,
+            cwd: wire.cwd.map(PathBuf::from),
+            env: wire.env,
+        };
+
+        match sysprims_session::run_nohup(command, &args, config)
+            .and_then(|outcome| session_nohup_result_from_outcome(outcome, caller_sid, caller_pgid))
+        {
+            Ok(result) => match serde_json::to_string(&result) {
+                Ok(json) => ok_json(json),
+                Err(e) => err_json(SysprimsError::internal(format!(
+                    "failed to serialize session spawn result: {}",
+                    e
+                ))),
+            },
+            Err(e) => err_json(e),
+        }
+    }
+}
+
+fn split_argv(argv: &[String]) -> Result<(&str, Vec<&str>), SysprimsError> {
+    let command = argv
+        .first()
+        .ok_or_else(|| SysprimsError::invalid_argument("argv must not be empty"))?;
+    if command.is_empty() {
+        return Err(SysprimsError::invalid_argument("argv[0] must not be empty"));
+    }
+    let args = argv.iter().skip(1).map(String::as_str).collect();
+    Ok((command.as_str(), args))
+}
+
+fn session_setsid_result_from_outcome(
+    outcome: sysprims_session::SetsidOutcome,
+) -> Result<SessionSpawnResultWire, SysprimsError> {
+    match outcome {
+        sysprims_session::SetsidOutcome::Spawned { child_pid } => {
+            validate_output_pid(child_pid, "child_pid")?;
+            Ok(SessionSpawnResultWire {
+                schema_id: SESSION_SPAWN_RESULT_V1,
+                timestamp: sysprims_core::time::now_rfc3339(),
+                platform: sysprims_core::get_platform(),
+                verb: "setsid",
+                status: "spawned",
+                pid: Some(child_pid),
+                sid: Some(child_pid),
+                pgid: Some(child_pid),
+                session_kind: "new_session",
+                identifier_provenance: "setsid_structural_child_pid",
+                exit_code: None,
+                signal: None,
+                output_file: None,
+                warnings: Vec::new(),
+            })
+        }
+        sysprims_session::SetsidOutcome::Completed {
+            child_pid,
+            exit_status,
+        } => {
+            validate_output_pid(child_pid, "child_pid")?;
+            Ok(SessionSpawnResultWire {
+                schema_id: SESSION_SPAWN_RESULT_V1,
+                timestamp: sysprims_core::time::now_rfc3339(),
+                platform: sysprims_core::get_platform(),
+                verb: "setsid",
+                status: "completed",
+                pid: Some(child_pid),
+                sid: Some(child_pid),
+                pgid: Some(child_pid),
+                session_kind: "new_session",
+                identifier_provenance: "setsid_structural_child_pid",
+                exit_code: exit_status.code(),
+                signal: exit_signal(&exit_status),
+                output_file: None,
+                warnings: Vec::new(),
+            })
+        }
+    }
+}
+
+fn session_nohup_result_from_outcome(
+    outcome: sysprims_session::NohupOutcome,
+    caller_sid: u32,
+    caller_pgid: u32,
+) -> Result<SessionSpawnResultWire, SysprimsError> {
+    validate_output_pid(caller_sid, "caller_sid")?;
+    validate_output_pid(caller_pgid, "caller_pgid")?;
+
+    match outcome {
+        sysprims_session::NohupOutcome::Spawned {
+            child_pid,
+            output_file,
+        } => {
+            validate_output_pid(child_pid, "child_pid")?;
+            Ok(SessionSpawnResultWire {
+                schema_id: SESSION_SPAWN_RESULT_V1,
+                timestamp: sysprims_core::time::now_rfc3339(),
+                platform: sysprims_core::get_platform(),
+                verb: "nohup",
+                status: "spawned",
+                pid: Some(child_pid),
+                sid: Some(caller_sid),
+                pgid: Some(caller_pgid),
+                session_kind: "inherited_session",
+                identifier_provenance: "caller_context_before_spawn",
+                exit_code: None,
+                signal: None,
+                output_file,
+                warnings: Vec::new(),
+            })
+        }
+        sysprims_session::NohupOutcome::Completed {
+            child_pid,
+            exit_status,
+            output_file,
+        } => {
+            validate_output_pid(child_pid, "child_pid")?;
+            Ok(SessionSpawnResultWire {
+                schema_id: SESSION_SPAWN_RESULT_V1,
+                timestamp: sysprims_core::time::now_rfc3339(),
+                platform: sysprims_core::get_platform(),
+                verb: "nohup",
+                status: "completed",
+                pid: Some(child_pid),
+                sid: Some(caller_sid),
+                pgid: Some(caller_pgid),
+                session_kind: "inherited_session",
+                identifier_provenance: "caller_context_before_spawn",
+                exit_code: exit_status.code(),
+                signal: exit_signal(&exit_status),
+                output_file,
+                warnings: Vec::new(),
+            })
+        }
+    }
+}
+
+fn validate_output_pid(value: u32, name: &str) -> Result<(), SysprimsError> {
+    if value == 0 || value > MAX_SAFE_PID {
+        return Err(SysprimsError::spawn_failed(
+            "session spawn",
+            format!("{name} {value} is outside [1, {MAX_SAFE_PID}]"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
 }
 
 // -----------------------------------------------------------------------------

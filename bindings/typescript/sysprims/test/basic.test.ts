@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import test from "node:test";
@@ -11,6 +14,8 @@ import {
   listFds,
   processList,
   procGet,
+  runNohup,
+  runSetsid,
   SysprimsError,
   SysprimsErrorCode,
   selfPGID,
@@ -172,6 +177,72 @@ test("selfPGID/selfSID are > 0 on Unix or NotSupported on Windows", () => {
 
   assert.ok(selfPGID() > 0);
   assert.ok(selfSID() > 0);
+});
+
+// -----------------------------------------------------------------------------
+// Session Spawn Tests
+// -----------------------------------------------------------------------------
+
+test("runSetsid wait result returns structural identifiers", () => {
+  if (process.platform === "win32") {
+    assert.throws(
+      () => runSetsid({ argv: ["cmd", "/C", "exit 0"], wait: true }),
+      (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.NotSupported,
+    );
+    return;
+  }
+
+  const result = runSetsid({ argv: ["sh", "-c", "exit 0"], wait: true });
+  assert.equal(result.verb, "setsid");
+  assert.equal(result.status, "completed");
+  assert.equal(result.session_kind, "new_session");
+  assert.equal(result.identifier_provenance, "setsid_structural_child_pid");
+  assert.ok(result.pid != null && result.pid > 0);
+  assert.equal(result.sid, result.pid);
+  assert.equal(result.pgid, result.pid);
+  assert.equal(result.exit_code, 0);
+});
+
+test("runNohup spawned result returns inherited caller context", () => {
+  if (process.platform === "win32") {
+    assert.throws(
+      () => runNohup({ argv: ["cmd", "/C", "exit 0"], wait: true }),
+      (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.NotSupported,
+    );
+    return;
+  }
+
+  const callerSID = selfSID();
+  const callerPGID = selfPGID();
+  const result = runNohup({ argv: ["sleep", "0.1"], output_file: "/dev/null" });
+  assert.equal(result.verb, "nohup");
+  assert.equal(result.status, "spawned");
+  assert.equal(result.session_kind, "inherited_session");
+  assert.equal(result.identifier_provenance, "caller_context_before_spawn");
+  assert.ok(result.pid != null && result.pid > 0);
+  assert.equal(result.sid, callerSID);
+  assert.equal(result.pgid, callerPGID);
+});
+
+test("runNohup rejects symlink output_file", () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sysprims-nohup-"));
+  try {
+    const target = path.join(dir, "target.log");
+    const link = path.join(dir, "link.log");
+    fs.writeFileSync(target, "existing");
+    fs.symlinkSync(target, link);
+
+    assert.throws(
+      () => runNohup({ argv: ["sh", "-c", "exit 0"], wait: true, output_file: link }),
+      (e: unknown) => e instanceof SysprimsError && e.code === SysprimsErrorCode.PermissionDenied,
+    );
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true });
+  }
 });
 
 // -----------------------------------------------------------------------------

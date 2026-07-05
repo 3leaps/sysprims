@@ -6,6 +6,11 @@
 
 use std::os::unix::process::CommandExt;
 use std::process::Command;
+use std::{
+    fs::{File, OpenOptions},
+    os::unix::fs::OpenOptionsExt,
+    path::Path,
+};
 
 use sysprims_core::{SysprimsError, SysprimsResult};
 
@@ -22,6 +27,7 @@ pub fn run_setsid_impl(
 ) -> SysprimsResult<SetsidOutcome> {
     let mut cmd = Command::new(command);
     cmd.args(args);
+    apply_child_config(&mut cmd, config.cwd.as_deref(), config.env.as_ref());
 
     // Set up setsid in the child process after fork
     // SAFETY: setsid() is async-signal-safe per POSIX and safe to call after fork
@@ -58,6 +64,7 @@ pub fn run_setsid_impl(
         })?;
 
         Ok(SetsidOutcome::Completed {
+            child_pid,
             exit_status: status,
         })
     } else {
@@ -75,12 +82,12 @@ pub fn run_nohup_impl(
     args: &[&str],
     config: &NohupConfig,
 ) -> SysprimsResult<NohupOutcome> {
-    use std::fs::OpenOptions;
-
     let mut cmd = Command::new(command);
     cmd.args(args);
+    apply_child_config(&mut cmd, config.cwd.as_deref(), config.env.as_ref());
 
     // Determine output file for stdout redirection
+    let explicit_output_file = config.output_file.is_some();
     let output_file = determine_nohup_output(config)?;
 
     // Check if stdout is a terminal
@@ -88,25 +95,18 @@ pub fn run_nohup_impl(
     let stderr_is_tty = unsafe { libc::isatty(libc::STDERR_FILENO) == 1 };
 
     // Set up output redirection if needed
-    if stdout_is_tty {
+    if explicit_output_file || stdout_is_tty {
         if let Some(ref path) = output_file {
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| {
-                    SysprimsError::system(
-                        format!("cannot open {}: {}", path, e),
-                        e.raw_os_error().unwrap_or(0),
-                    )
-                })?;
+            let file = open_no_follow_append(Path::new(path))?;
             cmd.stdout(
                 file.try_clone()
                     .map_err(|e| SysprimsError::system(format!("cannot dup stdout: {}", e), 0))?,
             );
 
-            // If stderr is also a tty, redirect it to the same file
-            if stderr_is_tty {
+            // If the caller chose an explicit target, redirect stderr there too.
+            // Otherwise preserve the POSIX nohup behavior of redirecting tty
+            // stderr alongside tty stdout.
+            if explicit_output_file || stderr_is_tty {
                 cmd.stderr(file);
             }
         }
@@ -141,7 +141,9 @@ pub fn run_nohup_impl(
         })?;
 
         Ok(NohupOutcome::Completed {
+            child_pid,
             exit_status: status,
+            output_file,
         })
     } else {
         Ok(NohupOutcome::Spawned {
@@ -167,12 +169,7 @@ fn determine_nohup_output(config: &NohupConfig) -> SysprimsResult<Option<String>
 
     // Try current directory first
     let cwd_path = "nohup.out";
-    if std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(cwd_path)
-        .is_ok()
-    {
+    if open_no_follow_append(Path::new(cwd_path)).is_ok() {
         return Ok(Some(cwd_path.to_string()));
     }
 
@@ -184,6 +181,43 @@ fn determine_nohup_output(config: &NohupConfig) -> SysprimsResult<Option<String>
 
     // Can't determine output file
     Ok(Some(cwd_path.to_string()))
+}
+
+fn apply_child_config(
+    cmd: &mut Command,
+    cwd: Option<&Path>,
+    env: Option<&std::collections::BTreeMap<String, String>>,
+) {
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+    if let Some(env) = env {
+        cmd.envs(env);
+    }
+}
+
+fn open_no_follow_append(path: &Path) -> SysprimsResult<File> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|e| map_nohup_output_open_error(path, e))
+}
+
+fn map_nohup_output_open_error(path: &Path, err: std::io::Error) -> SysprimsError {
+    if err.kind() == std::io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(libc::ELOOP)
+    {
+        return SysprimsError::permission_denied_path(
+            path.display().to_string(),
+            "open nohup output_file",
+        );
+    }
+
+    SysprimsError::system(
+        format!("cannot open {}: {}", path.display(), err),
+        err.raw_os_error().unwrap_or(0),
+    )
 }
 
 // ============================================================================
@@ -280,8 +314,43 @@ mod tests {
             },
         );
         assert!(result.is_ok());
-        if let Ok(SetsidOutcome::Completed { exit_status }) = result {
+        if let Ok(SetsidOutcome::Completed {
+            child_pid,
+            exit_status,
+        }) = result
+        {
+            assert!(child_pid > 0);
             assert_eq!(exit_status.code(), Some(42));
+        }
+    }
+
+    #[test]
+    fn setsid_honors_cwd_and_env() {
+        let dir = unique_temp_dir("setsid-cwd-env");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("marker"), "ok").unwrap();
+
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("SYSPRIMS_SESSION_TEST".to_string(), "expected".to_string());
+
+        let result = run_setsid_impl(
+            "sh",
+            &[
+                "-c",
+                "test -f marker && test \"$SYSPRIMS_SESSION_TEST\" = expected",
+            ],
+            &SetsidConfig {
+                wait: true,
+                cwd: Some(dir.clone()),
+                env: Some(env),
+                ..Default::default()
+            },
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.is_ok());
+        if let Ok(SetsidOutcome::Completed { exit_status, .. }) = result {
+            assert_eq!(exit_status.code(), Some(0));
         }
     }
 
@@ -303,5 +372,69 @@ mod tests {
         let sid = getsid_impl(0);
         assert!(sid.is_ok());
         assert!(sid.unwrap() > 0);
+    }
+
+    #[test]
+    fn nohup_honors_cwd_and_env() {
+        let dir = unique_temp_dir("nohup-cwd-env");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("marker"), "ok").unwrap();
+
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("SYSPRIMS_SESSION_TEST".to_string(), "expected".to_string());
+
+        let result = run_nohup_impl(
+            "sh",
+            &[
+                "-c",
+                "test -f marker && test \"$SYSPRIMS_SESSION_TEST\" = expected",
+            ],
+            &NohupConfig {
+                wait: true,
+                cwd: Some(dir.clone()),
+                env: Some(env),
+                ..Default::default()
+            },
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.is_ok());
+        if let Ok(NohupOutcome::Completed { exit_status, .. }) = result {
+            assert_eq!(exit_status.code(), Some(0));
+        }
+    }
+
+    #[test]
+    fn nohup_rejects_symlink_output_file() {
+        let dir = unique_temp_dir("nohup-symlink");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target.log");
+        let link = dir.join("link.log");
+        std::fs::write(&target, "existing").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let result = run_nohup_impl(
+            "sh",
+            &["-c", "exit 0"],
+            &NohupConfig {
+                wait: true,
+                output_file: Some(link.display().to_string()),
+                ..Default::default()
+            },
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(matches!(
+            result,
+            Err(SysprimsError::PermissionDeniedPath { .. })
+        ));
+    }
+
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("sysprims-{label}-{}-{nanos}", std::process::id()))
     }
 }

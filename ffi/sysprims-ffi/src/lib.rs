@@ -48,7 +48,9 @@ pub use proc::{
     sysprims_proc_kill_descendants_ex, sysprims_proc_list, sysprims_proc_list_ex,
     sysprims_proc_list_fds, sysprims_proc_listening_ports, sysprims_proc_wait_pid,
 };
-pub use session::{sysprims_self_getpgid, sysprims_self_getsid};
+pub use session::{
+    sysprims_run_nohup, sysprims_run_setsid, sysprims_self_getpgid, sysprims_self_getsid,
+};
 pub use signal::{
     sysprims_force_kill, sysprims_signal_send, sysprims_signal_send_group, sysprims_terminate,
 };
