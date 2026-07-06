@@ -6,6 +6,45 @@
 
 ---
 
+## v0.1.17 - 2026-07-06
+
+**Status:** Session-Spawn Bindings + Portable Liveness
+
+This release makes sysprims' detached session-spawn primitives available beyond Rust. TypeScript
+and Bun consumers can now launch parent-outliving processes through `runSetsid()` and `runNohup()`
+and supervise them using the identifiers sysprims returns, with the same safety posture as the
+Rust implementation. v0.1.17 also adds portable process-liveness predicates so callers can answer
+"did the process I just signalled actually stop?" without depending on platform-specific zombie
+behavior.
+
+### Highlights
+
+- **Session-spawn FFI + TypeScript bindings**: JSON C-ABI exports `sysprims_run_setsid` and
+  `sysprims_run_nohup` now back TypeScript `runSetsid()` and `runNohup()`.
+- **Structural supervision model**: `runSetsid()` returns child `pid`/`sid`/`pgid` derived from
+  the spawned child PID, avoiding post-spawn child session/group lookups and PID-reuse races.
+- **Honest nohup identifiers**: `runNohup()` returns the caller's inherited session and process
+  group context, making the parent-outliving semantics explicit instead of pretending the child
+  owns a new group.
+- **Portable liveness checks**: `is_live(pid)` and `is_fully_gone(pid)` normalize zombie handling
+  across Linux, macOS, and Windows for kill-then-check workflows.
+- **Bun support**: Bun >=1.3 is now documented as supported for the Node-API TypeScript binding
+  surface, alongside Node.js >=18.
+- **Security hardening**: explicit nohup output files use append/create semantics with final-path
+  symlink rejection, ADR-0011 PID validation now covers more process APIs, and ADR-0016 documents
+  the session-spawn FFI contract.
+
+### Upgrade Notes
+
+- **Additive release**: existing signal, PID, timeout, and process-tree behavior is unchanged.
+- `runNohup()` returns the caller's own `pgid`; supervise the spawned child by `pid`, and never
+  `kill(-pgid, ...)` from that result because it would signal the caller and its siblings.
+- TypeScript consumers on Bun should use Bun >=1.3.
+- Go prebuilt libraries for v0.1.17 are produced by the Go-bindings prep workflow after this
+  release-doc/version package is merged to `main`; do not tag before that artifacts PR merges.
+
+---
+
 ## v0.1.16 - 2026-04-18
 
 **Status:** Windows ARM64 Go Bindings Release
@@ -269,144 +308,5 @@ Release preparation for v0.1.15 also tightened the delivery path:
 - `ancestors` is additive across all supported surfaces.
 - Go verification for the new runner surface currently uses a freshly built local `sysprims-ffi`
   artifact during development until release workflows refresh checked-in prebuilt libraries.
-
----
-
-## v0.1.14 - 2026-02-24
-
-**Status:** Process Intelligence & Go Team Depth Release
-
-This release closes the gap between what sysprims knows about a process and what it exposes to
-callers. The headline capability is `proc_ext` — environment variables and thread count surfaced
-through the Rust library, FFI, and Go/TypeScript bindings — enabling Go teams to replace `ps` and
-`lsof` shell-outs with typed, license-clean library calls. A secondary focus is CPU measurement
-parity on process-tree commands, fixing a dogfooding gap where lifetime averaging missed 2 of 4
-actively spinning zombie processes.
-
-### Highlights
-
-- **`proc_ext`**: `env` and `thread_count` on `ProcessInfo` — opt-in via `ProcessOptions`, zero
-  cost when not requested. Available in Rust, FFI, Go, and TypeScript.
-- **CPU mode on `descendants`/`kill-descendants`**: `--cpu-mode monitor --sample 3s` now applies
-  to all process-tree commands, not just `pstat`. Catches bursty/spinning processes that lifetime
-  averaging misses.
-- **Schema compliance fix**: `pstat --pid --json` now emits the `schema_id` envelope required by
-  ADR-0005. Previously returned a flat object — a contract violation, not just a style issue.
-- **Contextual hints**: `--cpu-above` without `--cpu-mode monitor` emits a one-line stderr hint
-  suggesting the more accurate measurement mode. Suppress with `SYSPRIMS_NO_HINTS=1` or `--json`.
-- **CLI help system**: `sysprims help <topic>` subcommand (`cpu-mode`, `signals`, `safety`) plus
-  `after_help` examples on high-complexity subcommands.
-- **Release hardening**: Makefile quality gates now run goneat across non-Rust files, repository
-  formatting was normalized for non-markdown assets, `rsfulmen` was updated to `0.1.4`, and stale
-  `cargo-deny` source allowlists were removed to eliminate false-medium security findings.
-
-### `proc_ext`: Environment Variables and Thread Count
-
-Activates the `proc_ext` extension defined in ADR-0002 (`# Extended info (env, threads, IO)`),
-designed into the architecture from the start and implemented in this release.
-
-New optional fields on `ProcessInfo` (default `null`/`None`):
-
-```rust
-pub env: Option<BTreeMap<String, String>>,  // opt-in: ProcessOptions::with_env()
-pub thread_count: Option<u32>,              // opt-in: ProcessOptions::with_threads()
-```
-
-**Go binding** — the primary consumer target:
-
-```go
-// Replace: ps eww -p <pid> + text parsing
-// Replace: ps -M -p <pid> + line count
-info, err := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
-    IncludeEnv:     true,
-    IncludeThreads: true,
-})
-fmt.Println(info.Env["NODE_ENV"])
-fmt.Println(info.ThreadCount)
-```
-
-**Platform coverage:**
-
-| Platform |               `env`                |         `thread_count`         |
-| -------- | :--------------------------------: | :----------------------------: |
-| Linux    |       `/proc/[pid]/environ`        | `/proc/[pid]/status` (Threads) |
-| macOS    | `sysctl(KERN_PROCARGS2)` env block | `proc_taskinfo.pti_threadnum`  |
-| Windows  |   Not supported v0.1.14 (`null`)   |           Toolhelp32           |
-
-macOS uses the same `KERN_PROCARGS2` kernel buffer introduced for cmdline in v0.1.13 — env is
-the next block after argv. Same syscall, second pass over the same data.
-
-**Security**: reads same-uid processes only. EPERM → `env: null`, no error propagation.
-
-### CPU Mode Parity on Tree Commands
-
-**The dogfooding gap** (2026-02-18): Four zombie VSCodium plugin processes were spinning at ~100%
-CPU. Lifetime mode found 2 of 4. Monitor mode with 3-second sampling found all 4. The
-`kill-descendants --cpu-above` workflow — the use case shown in the README — could not reliably
-target the offending processes with lifetime CPU averaging.
-
-```bash
-# v0.1.13 — missed 2 of 4 spinning zombie processes
-descendants 14796 --cpu-above 80
-→ 2 matched
-
-# v0.1.14 — finds all 4
-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80
-→ 4 matched (all showing 100–101% over the sample window)
-```
-
-Full surgical cleanup workflow:
-
-```bash
-sysprims descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --tree
-sysprims kill-descendants 14796 --cpu-mode monitor --sample 3s --cpu-above 80 --signal KILL --yes
-```
-
-### Schema Compliance Fix: `pstat --pid --json`
-
-**Before (v0.1.13):**
-
-```json
-{"pid": 1234, "name": "nginx", "cpu_percent": 0.5, ...}
-```
-
-**After (v0.1.14):**
-
-```json
-{
-  "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/process-info.schema.json",
-  "timestamp": "...",
-  "processes": [{"pid": 1234, "name": "nginx", "cpu_percent": 0.5, ...}]
-}
-```
-
-Root cause: the `--pid` code path short-circuited to direct `ProcessInfo` serialization instead of
-routing through the `SnapshotResult` envelope used by the list path. CLI-only fix, no library
-changes.
-
-### Release Hardening (Post-Feature Complete)
-
-- **Quality-gate parity**: `make fmt`, `make fmt-check`, and `make lint` now execute goneat for
-  non-Rust file types while retaining strict Rust checks (`cargo fmt --check`,
-  `cargo clippy --all-targets -- -D warnings`).
-- **Formatting normalization**: Non-markdown files (workflows, schemas, role config, TS config,
-  and goneat config) were normalized in a single sweep to stabilize formatter/linter output.
-- **Dependency refresh**: `rsfulmen` pin advanced from `0.1.2` to `0.1.4` and lockfile refreshed.
-- **Security policy cleanup**: Removed stale `deny.toml` `allow-git` / `[sources.allow-org]`
-  entries that were generating `unmatched-source` and `unmatched-organization` medium findings in
-  `goneat assess --categories security`.
-
-### Upgrade Notes
-
-- **Mostly additive** — `proc_ext` fields (`env`, `thread_count`) are `null` by default; existing
-  callers are unaffected unless they opt in via `ProcessOptions`.
-- **Breaking for `pstat --pid --json` consumers**: output gains `schema_id` wrapper and moves to
-  `processes: [...]` array. This fixes an ADR-0005 contract violation — the old flat output was
-  non-conformant.
-- `descendants` and `kill-descendants` CLI flags are strictly additive — no existing invocations
-  break.
-- Go binding option types are additive — no existing call sites break.
-
----
 
 _Older releases are archived in `docs/releases/`._
