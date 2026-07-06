@@ -17,11 +17,11 @@ jobs:
           - os: windows-latest
           - os: windows-latest-arm64-s
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
       - name: Install Node dependencies
@@ -36,7 +36,7 @@ jobs:
     container:
       image: node:20-alpine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install build dependencies
         shell: sh
         run: |
