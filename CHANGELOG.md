@@ -10,9 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Carryover cleanup opening the v0.1.17 cycle. Pins the Windows arm64 GNU toolchain for
-reproducibility and reconciles `platform-support.md` with what actually ships. Adds
-portable process-liveness predicates that normalize zombie handling across platforms.
+## [0.1.17] - 2026-07-06
+
+Session-spawn primitives cross the FFI boundary in v0.1.17: detached, parent-outliving
+`setsid` and `nohup` spawns are now reachable from TypeScript/Bun as well as Rust. The
+release also adds portable process-liveness predicates for the common "did the process I
+just signalled actually stop?" workflow. The through-line is safety: structurally derived
+`sid`/`pgid` for `setsid`, honest caller-context identifiers for `nohup`, `O_NOFOLLOW`
+on explicit nohup output targets, and wider ADR-0011 PID validation. All changes are
+additive; existing signal, PID, timeout, and process-tree behavior is unchanged, so
+v0.1.16 consumers can upgrade freely.
 
 ### Added
 
@@ -33,6 +40,8 @@ portable process-liveness predicates that normalize zombie handling across platf
   supervised by child `pid`.
 - **Session-spawn schemas**: added v1.0.0 config/result schemas for `runSetsid`,
   `runNohup`, and their shared session-spawn result envelope.
+- **Documentation**: added ADR-0016 for the session-spawn FFI contract and promoted the
+  session-safety incident writeup for easier discovery.
 
 ### Changed
 
@@ -530,7 +539,10 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/3leaps/sysprims/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/3leaps/sysprims/compare/v0.1.15...v0.1.16
+[0.1.15]: https://github.com/3leaps/sysprims/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/3leaps/sysprims/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/3leaps/sysprims/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/3leaps/sysprims/compare/v0.1.11...v0.1.12

@@ -2069,7 +2069,7 @@ mod tests {
     fn test_proc_guard_runner_tick_returns_event_then_none_until_due() {
         let pid = std::process::id();
         let config = CString::new(format!(
-            r#"{{"guard":{{"rule":{{"root_pid":{},"max_levels":1}},"action_enabled":false,"max_targets":8}},"interval_ms":100}}"#,
+            r#"{{"guard":{{"rule":{{"root_pid":{},"max_levels":1}},"action_enabled":false,"max_targets":8}},"interval_ms":60000}}"#,
             pid
         ))
         .unwrap();

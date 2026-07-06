@@ -38,6 +38,11 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 - [ ] Update `VERSION` file with new semver (e.g., `0.1.1`)
 - [ ] Sync version to Cargo.toml: `make version-sync`
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
+- [ ] **Advance CHANGELOG footer compare-links** (reference-style definitions at the bottom of
+  the file): set `[Unreleased]: .../compare/vX.Y.Z...HEAD` and add
+  `[X.Y.Z]: .../compare/vPREV...vX.Y.Z`. Then verify every `## [x.y.z]` heading has a matching
+  `[x.y.z]:` footer definition. A missing definition renders as an undefined link, and `goneat`
+  / `make` do not flag it. Backfill prior-release gaps while here.
 - [ ] Create release notes: `docs/releases/vX.Y.Z.md`
 
 ### Scope Control (Recommended)
@@ -79,6 +84,9 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   to diverge from your local state. See [Troubleshooting: Local/Remote Divergence](#troubleshooting-localremote-divergence).
 
 - [ ] Go bindings prep (required):
+  - [ ] **Order:** the version/changelog/release-notes commit must already be on `main` before
+    running this workflow. Prebuilt libs are built from `main` and must embed the release
+    version. This merge commit becomes the tag target.
   - Run the workflow `.github/workflows/go-bindings.yml` for this version (manual; do not run on every push).
     ```bash
     VERSION=$(cat VERSION)
