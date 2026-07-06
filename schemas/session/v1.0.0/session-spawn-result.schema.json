@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/session-spawn-result.schema.json",
+  "title": "sysprims session spawn result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "verb",
+    "status",
+    "pid",
+    "sid",
+    "pgid",
+    "session_kind",
+    "identifier_provenance",
+    "exit_code",
+    "signal",
+    "output_file",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/session-spawn-result.schema.json"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "verb": {
+      "type": "string",
+      "enum": [
+        "setsid",
+        "nohup"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "spawned",
+        "completed"
+      ]
+    },
+    "pid": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "sid": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "pgid": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "session_kind": {
+      "type": "string",
+      "enum": [
+        "new_session",
+        "inherited_session"
+      ]
+    },
+    "identifier_provenance": {
+      "type": "string",
+      "enum": [
+        "setsid_structural_child_pid",
+        "caller_context_before_spawn"
+      ]
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "signal": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "output_file": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "spawned"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "pid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      }
+    }
+  ]
+}

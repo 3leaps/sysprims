@@ -154,6 +154,24 @@ pub const SPAWN_IN_GROUP_CONFIG_V1: &str =
 pub const SPAWN_IN_GROUP_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json";
 
+/// Schema ID for run-setsid config JSON input (v1.0.0).
+///
+/// Schema location: `schemas/session/v1.0.0/run-setsid-config.schema.json`
+pub const RUN_SETSID_CONFIG_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json";
+
+/// Schema ID for run-nohup config JSON input (v1.0.0).
+///
+/// Schema location: `schemas/session/v1.0.0/run-nohup-config.schema.json`
+pub const RUN_NOHUP_CONFIG_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json";
+
+/// Schema ID for session spawn result JSON output (v1.0.0).
+///
+/// Schema location: `schemas/session/v1.0.0/session-spawn-result.schema.json`
+pub const SESSION_SPAWN_RESULT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/session/v1.0.0/session-spawn-result.schema.json";
+
 /// Schema ID for descendants result JSON output (v1.0.0).
 ///
 /// This schema defines the structure of `sysprims descendants --json` output.
@@ -218,6 +236,9 @@ mod tests {
         assert!(TERMINATE_TREE_RESULT_V1.starts_with("https://"));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with("https://"));
         assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with("https://"));
+        assert!(RUN_SETSID_CONFIG_V1.starts_with("https://"));
+        assert!(RUN_NOHUP_CONFIG_V1.starts_with("https://"));
+        assert!(SESSION_SPAWN_RESULT_V1.starts_with("https://"));
         assert!(DESCENDANTS_RESULT_V1.starts_with("https://"));
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with("https://"));
         assert!(GUARD_EVENT_V1.starts_with("https://"));
@@ -286,6 +307,18 @@ mod tests {
             "Expected 3leaps.dev host"
         );
         assert!(
+            RUN_SETSID_CONFIG_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            RUN_NOHUP_CONFIG_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
+            SESSION_SPAWN_RESULT_V1.starts_with(expected_prefix),
+            "Expected 3leaps.dev host"
+        );
+        assert!(
             DESCENDANTS_RESULT_V1.starts_with(expected_prefix),
             "Expected 3leaps.dev host"
         );
@@ -322,6 +355,9 @@ mod tests {
         assert!(TERMINATE_TREE_RESULT_V1.ends_with(".schema.json"));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.ends_with(".schema.json"));
         assert!(SPAWN_IN_GROUP_RESULT_V1.ends_with(".schema.json"));
+        assert!(RUN_SETSID_CONFIG_V1.ends_with(".schema.json"));
+        assert!(RUN_NOHUP_CONFIG_V1.ends_with(".schema.json"));
+        assert!(SESSION_SPAWN_RESULT_V1.ends_with(".schema.json"));
         assert!(DESCENDANTS_RESULT_V1.ends_with(".schema.json"));
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.ends_with(".schema.json"));
         assert!(GUARD_EVENT_V1.ends_with(".schema.json"));
@@ -345,6 +381,9 @@ mod tests {
         assert!(TERMINATE_TREE_RESULT_V1.contains("/v1.0.0/"));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.contains("/v1.0.0/"));
         assert!(SPAWN_IN_GROUP_RESULT_V1.contains("/v1.0.0/"));
+        assert!(RUN_SETSID_CONFIG_V1.contains("/v1.0.0/"));
+        assert!(RUN_NOHUP_CONFIG_V1.contains("/v1.0.0/"));
+        assert!(SESSION_SPAWN_RESULT_V1.contains("/v1.0.0/"));
         assert!(DESCENDANTS_RESULT_V1.contains("/v1.0.0/"));
         assert!(GUARD_EVENT_V1.contains("/v1.0.0/"));
         assert!(ANCESTORS_RESULT_V1.contains("/v1.0.0/"));
@@ -410,6 +449,18 @@ mod tests {
             "spawn-in-group-result schema should have process topic"
         );
         assert!(
+            RUN_SETSID_CONFIG_V1.contains("/session/"),
+            "run-setsid-config schema should have session topic"
+        );
+        assert!(
+            RUN_NOHUP_CONFIG_V1.contains("/session/"),
+            "run-nohup-config schema should have session topic"
+        );
+        assert!(
+            SESSION_SPAWN_RESULT_V1.contains("/session/"),
+            "session-spawn-result schema should have session topic"
+        );
+        assert!(
             DESCENDANTS_RESULT_V1.contains("/process/"),
             "descendants-result schema should have process topic"
         );
@@ -444,6 +495,9 @@ mod tests {
             TERMINATE_TREE_RESULT_V1,
             SPAWN_IN_GROUP_CONFIG_V1,
             SPAWN_IN_GROUP_RESULT_V1,
+            RUN_SETSID_CONFIG_V1,
+            RUN_NOHUP_CONFIG_V1,
+            SESSION_SPAWN_RESULT_V1,
             DESCENDANTS_RESULT_V1,
             DESCENDANTS_RESULT_SAMPLED_V1,
             GUARD_EVENT_V1,
@@ -481,6 +535,9 @@ mod tests {
         assert!(TERMINATE_TREE_RESULT_V1.starts_with(&prefix));
         assert!(SPAWN_IN_GROUP_CONFIG_V1.starts_with(&prefix));
         assert!(SPAWN_IN_GROUP_RESULT_V1.starts_with(&prefix));
+        assert!(RUN_SETSID_CONFIG_V1.starts_with(&prefix));
+        assert!(RUN_NOHUP_CONFIG_V1.starts_with(&prefix));
+        assert!(SESSION_SPAWN_RESULT_V1.starts_with(&prefix));
         assert!(DESCENDANTS_RESULT_V1.starts_with(&prefix));
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with(&prefix));
         assert!(GUARD_EVENT_V1.starts_with(&prefix));

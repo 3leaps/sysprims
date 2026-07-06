@@ -192,8 +192,13 @@ See [Platform Support Matrix](../standards/platform-support.md) for the canonica
 | Linux arm64 (musl)  | Supported |
 | macOS arm64         | Supported |
 | Windows x64         | Supported |
+| Windows arm64       | Supported |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
+
+Runtime support covers Node.js >= 18 and Bun >= 1.3. Bun uses the same Node-API
+binding surface as Node.js; prebuilt package availability still follows the
+platform matrix above.
 
 ### Installation
 
@@ -235,6 +240,8 @@ The TypeScript bindings provide parity with Go bindings:
 | `listeningPorts(filter?)`       | Map listening ports to processes                                    |
 | `selfPGID()`                    | Get current process group ID (Unix)                                 |
 | `selfSID()`                     | Get current session ID (Unix)                                       |
+| `runSetsid(config)`             | Spawn a command in a new POSIX session                              |
+| `runNohup(config)`              | Spawn a SIGHUP-ignoring command in the inherited session            |
 | `signalSend(pid, signal)`       | Send signal to process                                              |
 | `signalSendGroup(pgid, signal)` | Send signal to process group (Unix)                                 |
 | `terminate(pid)`                | Graceful termination                                                |

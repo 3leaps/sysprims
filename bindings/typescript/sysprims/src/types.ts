@@ -122,6 +122,49 @@ export interface SpawnInGroupResult {
   warnings: string[];
 }
 
+// Session spawn
+
+export interface RunSetsidConfig {
+  schema_id?: string;
+  argv: string[];
+  cwd?: string | null;
+  env?: Record<string, string> | null;
+  wait?: boolean;
+}
+
+export interface RunNohupConfig {
+  schema_id?: string;
+  argv: string[];
+  cwd?: string | null;
+  env?: Record<string, string> | null;
+  wait?: boolean;
+  output_file?: string | null;
+}
+
+export type SessionSpawnVerb = "setsid" | "nohup";
+export type SessionSpawnStatus = "spawned" | "completed";
+export type SessionKind = "new_session" | "inherited_session";
+export type SessionIdentifierProvenance =
+  | "setsid_structural_child_pid"
+  | "caller_context_before_spawn";
+
+export interface SessionSpawnResult {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  verb: SessionSpawnVerb;
+  status: SessionSpawnStatus;
+  pid: number | null;
+  sid: number | null;
+  pgid: number | null;
+  session_kind: SessionKind;
+  identifier_provenance: SessionIdentifierProvenance;
+  exit_code: number | null;
+  signal: number | null;
+  output_file: string | null;
+  warnings: string[];
+}
+
 // Port types
 
 export type Protocol = "tcp" | "udp";

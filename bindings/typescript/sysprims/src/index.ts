@@ -20,6 +20,9 @@ import type {
   ProcessInfo,
   ProcessOptions,
   ProcessSnapshot,
+  RunNohupConfig,
+  RunSetsidConfig,
+  SessionSpawnResult,
   SpawnInGroupConfig,
   SpawnInGroupResult,
   TerminateTreeConfig,
@@ -55,6 +58,13 @@ export type {
   ProcessSnapshot,
   ProcessState,
   Protocol,
+  RunNohupConfig,
+  RunSetsidConfig,
+  SessionIdentifierProvenance,
+  SessionKind,
+  SessionSpawnResult,
+  SessionSpawnStatus,
+  SessionSpawnVerb,
   SpawnInGroupConfig,
   SpawnInGroupResult,
   TerminateTreeConfig,
@@ -396,6 +406,49 @@ export function selfPGID(): number {
 export function selfSID(): number {
   const lib = loadSysprims();
   return callU32Out(() => lib.sysprimsSelfGetsid());
+}
+
+// -----------------------------------------------------------------------------
+// Session Spawn
+// -----------------------------------------------------------------------------
+
+const RUN_SETSID_CONFIG_SCHEMA_ID =
+  "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json";
+const RUN_NOHUP_CONFIG_SCHEMA_ID =
+  "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json";
+
+/**
+ * Run a command in a new POSIX session.
+ *
+ * `argv` is an argument vector, not a shell command string. With `wait: false`,
+ * the child can outlive the caller; returned `sid` and `pgid` are structurally
+ * derived from the child PID.
+ */
+export function runSetsid(config: RunSetsidConfig): SessionSpawnResult {
+  const lib = loadSysprims();
+  const cfg: RunSetsidConfig = {
+    schema_id: config.schema_id || RUN_SETSID_CONFIG_SCHEMA_ID,
+    ...config,
+  };
+  return callJsonReturn(() => lib.sysprimsRunSetsid(JSON.stringify(cfg))) as SessionSpawnResult;
+}
+
+/**
+ * Run a command with SIGHUP ignored.
+ *
+ * The child inherits the caller session and process group. Supervise the child
+ * by returned `pid`; do not process-group-signal the returned `pgid`.
+ * Environment overrides are merged into the inherited environment, and an
+ * explicit `output_file` is opened append/create without following a final
+ * symlink. `wait: true` blocks the calling thread.
+ */
+export function runNohup(config: RunNohupConfig): SessionSpawnResult {
+  const lib = loadSysprims();
+  const cfg: RunNohupConfig = {
+    schema_id: config.schema_id || RUN_NOHUP_CONFIG_SCHEMA_ID,
+    ...config,
+  };
+  return callJsonReturn(() => lib.sysprimsRunNohup(JSON.stringify(cfg))) as SessionSpawnResult;
 }
 
 // -----------------------------------------------------------------------------

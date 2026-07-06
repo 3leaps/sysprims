@@ -87,6 +87,10 @@ Platform packages published to npm (when enabled):
 - `@3leaps/sysprims-win32-x64-msvc`
 - `@3leaps/sysprims-win32-arm64-msvc`
 
+Runtime support for the TypeScript binding covers Node.js >= 18 and Bun >= 1.3.
+Bun support is verified against the same Node-API binding surface; platform
+coverage remains governed by the prebuild target list above.
+
 ## CI Runner Matrix
 
 ### GitHub Actions Runners

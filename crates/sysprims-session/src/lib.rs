@@ -25,6 +25,7 @@
 //! ```
 
 use std::process::ExitStatus;
+use std::{collections::BTreeMap, path::PathBuf};
 use sysprims_core::SysprimsResult;
 
 #[cfg(unix)]
@@ -48,6 +49,17 @@ pub struct SetsidConfig {
     /// This is a no-op placeholder for compatibility with util-linux setsid -c.
     /// Most use cases don't need this.
     pub ctty: bool,
+
+    /// Working directory for the child process.
+    ///
+    /// `None` means inherit the caller's current working directory.
+    pub cwd: Option<PathBuf>,
+
+    /// Environment overrides for the child process.
+    ///
+    /// Values are merged into the inherited environment. v1 does not provide a
+    /// replace-or-clear environment mode.
+    pub env: Option<BTreeMap<String, String>>,
 }
 
 /// Outcome of setsid execution.
@@ -63,6 +75,8 @@ pub enum SetsidOutcome {
 
     /// Child completed (when `wait: true`).
     Completed {
+        /// PID of the child process in the new session.
+        child_pid: u32,
         /// Exit status of the child.
         exit_status: ExitStatus,
     },
@@ -130,6 +144,17 @@ pub struct NohupConfig {
 
     /// Wait for the child process to exit.
     pub wait: bool,
+
+    /// Working directory for the child process.
+    ///
+    /// `None` means inherit the caller's current working directory.
+    pub cwd: Option<PathBuf>,
+
+    /// Environment overrides for the child process.
+    ///
+    /// Values are merged into the inherited environment. v1 does not provide a
+    /// replace-or-clear environment mode.
+    pub env: Option<BTreeMap<String, String>>,
 }
 
 /// Outcome of nohup execution.
@@ -145,8 +170,12 @@ pub enum NohupOutcome {
 
     /// Child completed (when `wait: true`).
     Completed {
+        /// PID of the child process.
+        child_pid: u32,
         /// Exit status of the child.
         exit_status: ExitStatus,
+        /// Output file if stdout/stderr was redirected.
+        output_file: Option<String>,
     },
 }
 

@@ -103,6 +103,17 @@ pub enum SysprimsError {
         command: String,
     },
 
+    /// Permission denied for a filesystem path.
+    ///
+    /// Used when opening caller-provided paths such as nohup output targets.
+    #[error("Permission denied for '{operation}' on path '{path}'")]
+    PermissionDeniedPath {
+        /// The path that could not be accessed.
+        path: String,
+        /// The operation that was denied.
+        operation: String,
+    },
+
     /// Operation not supported on the current platform.
     ///
     /// Some operations are platform-specific (e.g., `killpg` on Windows).
@@ -156,6 +167,7 @@ impl SysprimsError {
             SysprimsError::Timeout => 3,
             SysprimsError::PermissionDenied { .. } => 4,
             SysprimsError::PermissionDeniedCommand { .. } => 4,
+            SysprimsError::PermissionDeniedPath { .. } => 4,
             SysprimsError::NotFound { .. } => 5,
             SysprimsError::NotFoundCommand { .. } => 5,
             SysprimsError::NotSupported { .. } => 6,
@@ -207,6 +219,14 @@ impl SysprimsError {
     pub fn permission_denied_command(command: impl Into<String>) -> Self {
         SysprimsError::PermissionDeniedCommand {
             command: command.into(),
+        }
+    }
+
+    /// Create a path-oriented permission denied error.
+    pub fn permission_denied_path(path: impl Into<String>, operation: impl Into<String>) -> Self {
+        SysprimsError::PermissionDeniedPath {
+            path: path.into(),
+            operation: operation.into(),
         }
     }
 

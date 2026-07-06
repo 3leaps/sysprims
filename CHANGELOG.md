@@ -26,9 +26,20 @@ portable process-liveness predicates that normalize zombie handling across platf
   treats a present-but-unreadable PID (the macOS killed-but-unreaped case) as not live — a
   deliberate liveness bias for the kill-then-check pattern, not a replacement for `get_process`
   diagnostics. Both predicates reject PID 0 and PIDs above `i32::MAX` (ADR-0011).
+- **Session-spawn FFI and TypeScript bindings**: added JSON C-ABI exports
+  `sysprims_run_setsid` / `sysprims_run_nohup`, plus TypeScript `runSetsid` /
+  `runNohup`. `runSetsid` returns structurally derived child `pid`/`sid`/`pgid`
+  identifiers; `runNohup` returns the inherited caller session context and is
+  supervised by child `pid`.
+- **Session-spawn schemas**: added v1.0.0 config/result schemas for `runSetsid`,
+  `runNohup`, and their shared session-spawn result envelope.
 
 ### Changed
 
+- **`sysprims-session` configs**: `SetsidConfig` and `NohupConfig` now honor
+  per-spawn `cwd` and inherited-environment overrides. `NohupConfig` opens an
+  explicit output target with append/create semantics while rejecting a final
+  symlink.
 - **`get_process` documentation**: added a cross-platform note that an exited-but-unreaped
   child returns `Ok(_)` with `state == Zombie` on Linux but `Err(NotFound)` on macOS, so
   `Ok(_)` is not a portable liveness signal; points callers to the new predicates and
@@ -49,6 +60,8 @@ portable process-liveness predicates that normalize zombie handling across platf
   now documented as legacy artifacts retained for backward compatibility, scheduled for
   removal. The "Explicitly Unsupported" section continues to document the v0.1.7 deprecation
   decision.
+- **TypeScript runtime support docs**: Bun >=1.3 is documented as supported for
+  the Node-API binding surface, alongside Node.js >=18.
 
 ## [0.1.16] - 2026-04-18
 
