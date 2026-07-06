@@ -100,7 +100,8 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     ```
   - Confirm the PR actually adds the platform libs before merging:
     - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
-    - `bindings/go/sysprims/include/sysprims.h`
+  - Note: the workflow also regenerates `bindings/go/sysprims/include/sysprims.h`; it may not
+    appear in the PR diff when the regenerated header is byte-identical to `main`.
   - Merge the PR so the prebuilt libs are present on `main` before tagging.
   - After merge: ensure `main` is green again (this merge commit is what will be tagged).
 
@@ -159,6 +160,11 @@ Notes:
     git ls-tree -r --name-only "v${VERSION}" bindings/go/sysprims/lib | sed -n '1,20p'
     ```
     If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
+  - Confirm `bindings/go/sysprims/include/sysprims.h` is present in the tagged commit:
+    ```bash
+    VERSION=$(cat VERSION)
+    git cat-file -e "v${VERSION}:bindings/go/sysprims/include/sysprims.h"
+    ```
   - Confirm Windows uses GNU-ABI FFI assets for cgo compatibility:
     - windows-amd64 → `x86_64-pc-windows-gnu` (msys2/MinGW-w64)
     - windows-arm64 → `aarch64-pc-windows-gnullvm` (llvm-mingw), since v0.1.16

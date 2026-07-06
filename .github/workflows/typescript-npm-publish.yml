@@ -34,9 +34,9 @@ jobs:
     steps:
       # Note: Do NOT use fetch-tags here. When running from a tag ref,
       # it causes a git fetch conflict. The tag is already checked out.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
