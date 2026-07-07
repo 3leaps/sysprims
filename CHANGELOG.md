@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-07-07
+
+v0.1.18 is a small maintenance release. It refreshes compatible dependency locks,
+aligns the documented Rust baseline with the workspace's practical requirement,
+updates Windows FFI dependencies, and hardens the TypeScript npm publish path. No
+public API or process-control behavior changes are intended.
+
+### Changed
+
+- **Compatible dependency refresh**: refreshed Rust and TypeScript lockfiles,
+  including `@types/node` 22.20.0, without changing Node runtime support policy.
+- **Rust baseline**: set the workspace `rust-version` and public build guidance to
+  Rust 1.88.0, matching the resolved dependency baseline.
+- **Windows FFI dependencies**: updated `rsfulmen` to `=0.1.5` and workspace
+  `windows-sys` to `0.61`; the lockfile now resolves a single `windows-sys`
+  0.61.x graph, with Windows-only handle checks adjusted for pointer-typed
+  `HANDLE`s.
+- **TypeScript npm publishing**: the npm publish workflow now uses Node 24 and
+  validates the trusted-publishing runtime floor before publishing.
+
+### Notes
+
+- Go prebuilt libraries are still produced by the Go Bindings Prep workflow after
+  this release-prep commit is merged to `main`; do not tag v0.1.18 before that
+  artifact PR merges.
+
 ## [0.1.17] - 2026-07-06
 
 Session-spawn primitives cross the FFI boundary in v0.1.17: detached, parent-outliving
@@ -539,7 +565,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/3leaps/sysprims/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/3leaps/sysprims/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/3leaps/sysprims/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/3leaps/sysprims/compare/v0.1.14...v0.1.15
