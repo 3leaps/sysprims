@@ -6,6 +6,38 @@
 
 ---
 
+## v0.1.18 - 2026-07-07
+
+**Status:** Maintenance Release
+
+v0.1.18 is a small maintenance release. It refreshes compatible dependency locks, aligns the
+documented Rust baseline with the workspace's practical requirement, updates Windows FFI
+dependencies, and hardens the TypeScript npm publish path. No public API or process-control
+behavior changes are intended.
+
+### Highlights
+
+- **Compatible dependency refresh**: refreshed Rust and TypeScript lockfiles, including
+  `@types/node` 22.20.0, without changing Node runtime support policy.
+- **Rust baseline**: set the workspace `rust-version` and public build guidance to Rust 1.88.0,
+  matching the resolved dependency baseline.
+- **Windows FFI dependencies**: updated `rsfulmen` to `=0.1.5` and workspace `windows-sys` to
+  `0.61`; the lockfile now resolves a single `windows-sys` 0.61.x graph, with Windows-only
+  handle checks adjusted for pointer-typed `HANDLE`s.
+- **TypeScript npm publishing**: the npm publish workflow now uses Node 24 and validates the
+  trusted-publishing runtime floor before publishing.
+
+### Upgrade Notes
+
+- No public API changes are intended.
+- Rust builders should use Rust 1.88.0 or newer.
+- Go prebuilt libraries are produced by the Go Bindings Prep workflow after this release-prep
+  commit is merged to `main`; do not tag v0.1.18 before that artifact PR merges.
+- TypeScript release publishing should continue to run N-API prebuilds from the tag before npm
+  publish.
+
+---
+
 ## v0.1.17 - 2026-07-06
 
 **Status:** Session-Spawn Bindings + Portable Liveness
@@ -142,171 +174,5 @@ Secondary but maintainer-facing: v0.1.16 also finalizes the shift to PR-based ch
   specific tag is tracked as reproducibility debt and will land as a follow-up PR.
 
 ---
-
-## v0.1.15 - 2026-03-27
-
-**Status:** Guard Automation & Provenance Release
-
-This release turns the recurring VSCodium runaway-plugin incident into a first-class sysprims
-workflow. The release adds a reusable one-shot guard primitive, subtree-aware remediation, a
-managed guard loop for long-lived watchdogs, a new ancestors surface for provenance, and
-operational guard controls for background execution and discovery. The result is a cleaner path
-from "find the hot offender" to "kill the whole offending subtree when needed" to "explain it" to
-"run a watchdog that can keep the host healthy."
-
-### Highlights
-
-- **One-shot guard primitive**: `GuardStep` gives Rust, FFI, Go, and TypeScript consumers a shared
-  per-tick remediation kernel instead of forcing each ecosystem to reimplement detection and safety
-  logic.
-- **Cascade remediation**: `kill-descendants --cascade` and guard actions can expand each matched
-  offender to its subtree so cleanup does not leave child work running behind the hot process.
-- **Managed watchdog loop**: `GuardRunner` extracts long-running guard behavior into a reusable
-  library surface and now powers the CLI.
-- **Provenance support**: New `ancestors` APIs make it easier to answer "what spawned this?" when
-  diagnosing runaway helpers and plugin children.
-- **Background guard operations**: `sysprims guard` now supports `--daemon`, `--pidfile`,
-  `--status`, and `--stop` for production-style watchdog management on Unix hosts.
-- **Self-discovery**: Running guards are discoverable through sysprims itself instead of requiring
-  `ps | grep` workflows.
-- **Shared runtime primitives**: `Tick`, `now_rfc3339()`, and `GuardSignals` standardize timing,
-  timestamps, and signal-aware shutdown for long-running loops.
-
-### GuardStep and `sysprims guard`
-
-The original dogfood need was straightforward but painful: reliably find actively hot descendants,
-preview the impact, then kill the offenders without taking down the parent editor process. This
-release turns that workflow into a reusable contract.
-
-`GuardStep` is the new one-shot primitive behind that workflow. It evaluates a guard rule, can
-expand a matched descendant to its subtree with cascade targeting, applies an optional action only
-when explicitly enabled, and emits a structured event suitable for logs and metrics.
-
-On top of that, `sysprims guard` now acts as a thin orchestrator rather than owning bespoke loop
-logic. It benefits from the shared guard surface while keeping the CLI behavior operators expect.
-
-### `GuardRunner`: Managed Guard Loop
-
-For long-running watchdog use cases, `GuardRunner` in `sysprims-proc` now provides the managed
-loop:
-
-- drift-free scheduling using `Tick`
-- clean shutdown via `GuardSignals`
-- cloneable programmatic stop handles
-- max-iteration stop support
-- stop-reason summaries (`Signal`, `Requested`, `MaxIterations`)
-- presets for `interactive`, `background`, and `watchdog` intervals/sample windows
-
-This lets Rust consumers reuse the same loop semantics as the CLI instead of rebuilding timers,
-stop conditions, and signal handling themselves.
-
-### FFI and Go Watchdog Support
-
-For bindings, the release adds a polling-style runner lifecycle rather than cross-language
-callbacks:
-
-```c
-sysprims_proc_guard_runner_create(...)
-sysprims_proc_guard_runner_tick(...)
-sysprims_proc_guard_runner_stop(...)
-sysprims_proc_guard_runner_free(...)
-```
-
-Go now layers typed support on top with `GuardPreset`, `GuardRunnerConfig`, `NewGuardRunner`,
-`Tick()`, `Stop()`, and `Close()`. TypeScript gets the one-shot `guardStep()` surface in this
-release; the managed runner remains Rust/FFI/Go for now. The recommended path for most non-Rust
-consumers remains a native runtime loop around `GuardStep`, but the polling runner is available for
-teams that want the managed Rust-side contract.
-
-Devrev hardening for this surface included:
-
-- synchronized runner state in Rust so concurrent polling and stop requests do not race
-- serialized handle lifecycle in Go to avoid `Tick`/`Stop`/`Close` misuse
-- create-time validation of static guard config so bad inputs fail before a long-running handle is
-  returned
-
-### Provenance: `ancestors`
-
-This release also adds a new provenance surface across Rust, CLI, FFI, Go, and TypeScript:
-
-```bash
-sysprims ancestors <pid> --max-depth 10 --json
-```
-
-That fills the "what spawned this?" gap that shows up immediately once sysprims can identify a hot
-plugin helper or runaway descendant. Operators can now go from hot process discovery to a parent
-chain without leaving sysprims.
-
-### Daemon Mode + Pidfile Management
-
-For long-running hosts and edge agents, `sysprims guard` now supports background execution and
-pidfile management on Unix:
-
-```bash
-sysprims guard 27776 --daemon --preset watchdog --yes
-sysprims guard 27776 --status
-sysprims guard 27776 --stop
-```
-
-Key behaviors:
-
-- `--daemon` detaches with `setsid()` and redirects stdio to null
-- `--pidfile <PATH>` overrides the default `/tmp/sysprims-guard-<root-pid>.pid`
-- pidfiles are removed on clean shutdown via drop-based lifecycle cleanup
-- stale or invalid pidfiles are cleaned up instead of being trusted blindly
-- `--status` and `--stop` verify that the pidfile target is actually a live sysprims guard process
-- daemon startup now waits for initialization to complete before reporting success
-
-Windows intentionally remains out of scope for daemon mode in v0.1.15; the CLI returns a clear
-not-supported error and directs operators to a service manager.
-
-### Self-Discovery: Find Running Guards with sysprims
-
-This release also closes the observability gap around long-running guards. A running guard now sets
-a best-effort platform title where supported, and sysprims process inspection rewrites matching
-guard cmdlines to `sysprims-guard:<root_pid>` for ergonomic lookup. On Linux, the kernel-visible
-thread name remains truncated by `PR_SET_NAME`, so the full identity primarily comes from
-cmdline-backed discovery inside sysprims itself.
-
-That enables workflows like:
-
-```bash
-sysprims descendants 1 --name sysprims-guard --max-levels all
-sysprims pstat --name sysprims-guard:27776 --table
-```
-
-The implementation was hardened to account for real CLI invocation shape, including global flags
-appearing before the `guard` subcommand.
-
-### Shared Runtime Primitives
-
-Long-running loops also gained a shared runtime foundation in `sysprims-core`:
-
-- `now_rfc3339()` for consistent timestamp rendering
-- `Tick` for drift-resistant periodic scheduling
-- `GuardSignals` for signal-aware shutdown with consistent stop semantics
-
-These changes matter beyond `guard` itself because they give future long-running sysprims workflows
-a shared timing and shutdown contract instead of ad hoc per-command logic.
-
-### Release Hardening
-
-Release preparation for v0.1.15 also tightened the delivery path:
-
-- stronger release preflight guidance
-- explicit TypeScript binding validation in the release path
-- clean prepush validation restored before release cut
-- clearer repository policy that prebuilt native binding artifacts come from CI, not local builds
-
-### Upgrade Notes
-
-- `sysprims guard` gains additive new flags only; existing foreground guard invocations continue to
-  work.
-- `kill-descendants --cascade` is additive; existing non-cascade behavior stays the default.
-- Unix daemon mode is new; Windows remains intentionally unsupported in this release.
-- FFI consumers must rebuild shared/static libraries to pick up the new guard runner exports.
-- `ancestors` is additive across all supported surfaces.
-- Go verification for the new runner surface currently uses a freshly built local `sysprims-ffi`
-  artifact during development until release workflows refresh checked-in prebuilt libraries.
 
 _Older releases are archived in `docs/releases/`._
