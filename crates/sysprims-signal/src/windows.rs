@@ -12,7 +12,7 @@ pub fn kill_impl(pid: u32, signal: i32) -> SysprimsResult<()> {
     match signal {
         rsfulmen::foundry::signals::SIGTERM | rsfulmen::foundry::signals::SIGKILL => unsafe {
             let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-            if handle == 0 {
+            if handle.is_null() {
                 let error = GetLastError();
                 return match error {
                     ERROR_ACCESS_DENIED => Err(SysprimsError::permission_denied(pid, "terminate")),

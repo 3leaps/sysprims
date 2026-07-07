@@ -117,7 +117,7 @@ pub fn get_process_impl(pid: u32, options: &ProcessOptions) -> SysprimsResult<Pr
 pub fn wait_pid_impl(pid: u32, timeout: Duration) -> SysprimsResult<crate::WaitPidResult> {
     unsafe {
         let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle == 0 {
+        if handle.is_null() {
             let err = GetLastError();
             if err == ERROR_ACCESS_DENIED {
                 return Err(SysprimsError::permission_denied(pid, "wait pid"));
@@ -167,7 +167,7 @@ pub(crate) fn liveness_impl(pid: u32) -> SysprimsResult<crate::Liveness> {
     // Windows has no Unix-style zombie: a PID is either running or gone.
     unsafe {
         let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle == 0 {
+        if handle.is_null() {
             let err = GetLastError();
             if err == ERROR_ACCESS_DENIED {
                 return Err(SysprimsError::permission_denied(pid, "liveness probe"));
@@ -578,7 +578,7 @@ fn udp6_row_to_binding(row: &MIB_UDP6ROW_OWNER_PID) -> Option<PortBinding> {
 /// Get CPU and memory stats for a process.
 unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64, Option<u64>)> {
     let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
-    if handle == 0 {
+    if handle.is_null() {
         return None;
     }
 
@@ -657,7 +657,7 @@ unsafe fn get_process_stats(pid: u32) -> Option<(f64, u64, u64, Option<u64>)> {
 pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
-        if handle == 0 {
+        if handle.is_null() {
             // Map missing handle to not found vs permission denied is ambiguous.
             // Align with other best-effort functions by returning PermissionDenied.
             return Err(SysprimsError::permission_denied(pid, "cpu_total_time_ns"));
@@ -694,7 +694,7 @@ pub(crate) fn cpu_total_time_ns_impl(pid: u32) -> SysprimsResult<u64> {
 
 unsafe fn get_process_exe_path(pid: u32) -> Option<String> {
     let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
-    if handle == 0 {
+    if handle.is_null() {
         return None;
     }
 

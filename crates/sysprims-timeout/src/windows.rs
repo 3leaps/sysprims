@@ -29,7 +29,9 @@ use crate::{
 use sysprims_core::get_platform;
 use sysprims_core::schema::SPAWN_IN_GROUP_RESULT_V1;
 
-static JOB_REGISTRY: std::sync::OnceLock<Mutex<HashMap<u32, HANDLE>>> = std::sync::OnceLock::new();
+// windows-sys 0.61 models HANDLE as a raw pointer, which is not Send. Store the
+// opaque handle value in the registry and cast back at Win32 call boundaries.
+static JOB_REGISTRY: std::sync::OnceLock<Mutex<HashMap<u32, usize>>> = std::sync::OnceLock::new();
 
 // NOTE: This PID -> Job handle registry is an implementation detail used to improve
 // terminate-tree reliability on Windows for processes spawned via spawn_in_group.
@@ -38,18 +40,18 @@ static JOB_REGISTRY: std::sync::OnceLock<Mutex<HashMap<u32, HANDLE>>> = std::syn
 // returning an opaque Job token from spawn and accepting it for termination), to
 // avoid hidden global state and PID reuse edge cases.
 
-fn registry() -> &'static Mutex<HashMap<u32, HANDLE>> {
+fn registry() -> &'static Mutex<HashMap<u32, usize>> {
     JOB_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn register_job(pid: u32, job: HANDLE) {
     let mut map = registry().lock().unwrap();
-    map.insert(pid, job);
+    map.insert(pid, job as usize);
 }
 
 fn take_job(pid: u32) -> Option<HANDLE> {
     let mut map = registry().lock().unwrap();
-    map.remove(&pid)
+    map.remove(&pid).map(|job| job as HANDLE)
 }
 
 pub(crate) fn terminate_job_for_pid(pid: u32) -> Option<()> {
@@ -66,7 +68,7 @@ fn spawn_cleanup_thread(pid: u32) {
     std::thread::spawn(move || unsafe {
         // Best-effort: if we can open the process, wait for it.
         let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle != 0 {
+        if !handle.is_null() {
             let _ = WaitForSingleObject(handle, u32::MAX);
             CloseHandle(handle);
         }
@@ -170,7 +172,7 @@ pub fn run_with_timeout_impl(
 fn create_job_object() -> SysprimsResult<HANDLE> {
     unsafe {
         let job = CreateJobObjectW(ptr::null(), ptr::null());
-        if job == 0 || job == INVALID_HANDLE_VALUE {
+        if job.is_null() || job == INVALID_HANDLE_VALUE {
             return Err(SysprimsError::group_creation_failed(
                 "CreateJobObjectW failed",
             ));

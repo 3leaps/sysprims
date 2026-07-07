@@ -29,11 +29,11 @@ sysprims-session = { path = "crates/sysprims-session" }
 # Fulmen Ecosystem
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental
 # API changes.
-rsfulmen = { version = "=0.1.4", default-features = false, features = ["foundry-core"] }
+rsfulmen = { version = "=0.1.5", default-features = false, features = ["foundry-core"] }
 
 # Core Platform Abstractions
 libc = "0.2"
-windows-sys = { version = "0.52", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
