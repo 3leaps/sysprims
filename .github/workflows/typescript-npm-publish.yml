@@ -38,15 +38,51 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      - name: Ensure npm CLI supports OIDC
+      - name: Ensure npm trusted publishing runtime
+        env:
+          MIN_TRUSTED_PUBLISH_NODE: '22.14.0'
+          MIN_TRUSTED_PUBLISH_NPM: '11.5.1'
         run: |
           set -euo pipefail
+          echo "node: $(node --version)"
           echo "npm (before): $(npm --version)"
-          # Trusted publishing requires npm >= 11.5.1
-          npm install -g npm@11.5.1
+          # Trusted publishing requires Node >= 22.14.0 and npm >= 11.5.1.
+          npm install -g "npm@${MIN_TRUSTED_PUBLISH_NPM}"
           echo "npm (after): $(npm --version)"
+
+          # shellcheck disable=SC2016
+          node -e '
+            const min = process.env.MIN_TRUSTED_PUBLISH_NODE.split(".").map(Number);
+            const got = process.versions.node.split(".").map(Number);
+            const ok = got[0] > min[0] ||
+              (got[0] === min[0] && (got[1] > min[1] ||
+              (got[1] === min[1] && got[2] >= min[2])));
+            if (!ok) {
+              console.error(
+                `Node ${process.versions.node} is below trusted publishing minimum ` +
+                process.env.MIN_TRUSTED_PUBLISH_NODE
+              );
+              process.exit(1);
+            }
+          '
+
+          # shellcheck disable=SC2016
+          NPM_VERSION="$(npm --version)" node -e '
+            const min = process.env.MIN_TRUSTED_PUBLISH_NPM.split(".").map(Number);
+            const got = process.env.NPM_VERSION.split(".").map(Number);
+            const ok = got[0] > min[0] ||
+              (got[0] === min[0] && (got[1] > min[1] ||
+              (got[1] === min[1] && got[2] >= min[2])));
+            if (!ok) {
+              console.error(
+                `npm ${process.env.NPM_VERSION} is below trusted publishing minimum ` +
+                process.env.MIN_TRUSTED_PUBLISH_NPM
+              );
+              process.exit(1);
+            }
+          '
       - name: Validate running from a tag ref
         run: |
           set -euo pipefail
