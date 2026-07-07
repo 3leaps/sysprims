@@ -214,7 +214,7 @@ npm run build:native  # Builds the N-API addon
 
 **Requirements for building from source:**
 
-- Rust toolchain (1.81+)
+- Rust toolchain (1.88+)
 - C/C++ compiler
 - Node.js 18+
 
