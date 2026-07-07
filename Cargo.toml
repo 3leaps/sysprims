@@ -14,7 +14,7 @@ members = [
 [workspace.package]
 version = "0.1.17"
 edition = "2021"
-rust-version = "1.81.0"
+rust-version = "1.88.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/3leaps/sysprims"
 authors = ["3leaps Architecture Council"]

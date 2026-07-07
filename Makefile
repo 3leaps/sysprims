@@ -86,7 +86,7 @@ help: ## Show available targets
 	@echo "  deny            Run cargo-deny license and advisory checks"
 	@echo "  audit           Run cargo-audit security scan"
 	@echo "  miri            Run Miri UB detection on unsafe code (nightly)"
-	@echo "  msrv            Verify build with MSRV (Rust 1.81)"
+	@echo "  msrv            Verify build with MSRV (Rust 1.88.0)"
 	@echo ""
 	@echo "Release (manual signing workflow):"
 	@echo "  release-preflight     Verify all pre-tag requirements (REQUIRED before tagging)"
@@ -361,14 +361,14 @@ miri: ## Run Miri to detect undefined behavior in unsafe code (requires nightly)
 	fi
 	@echo "[ok] Miri passed"
 
-msrv: ## Verify build with Minimum Supported Rust Version (1.81)
-	@echo "Checking MSRV (1.81)..."
-	@if rustup run 1.81 cargo --version >/dev/null 2>&1; then \
-		rustup run 1.81 cargo build --workspace && \
-		rustup run 1.81 cargo test --workspace; \
+msrv: ## Verify build with Minimum Supported Rust Version (1.88.0)
+	@echo "Checking MSRV (1.88.0)..."
+	@if rustup run 1.88.0 cargo --version >/dev/null 2>&1; then \
+		rustup run 1.88.0 cargo build --workspace && \
+		rustup run 1.88.0 cargo test --workspace; \
 	else \
-		echo "[!!] Rust 1.81 not installed. Install with:"; \
-		echo "  rustup install 1.81"; \
+		echo "[!!] Rust 1.88.0 not installed. Install with:"; \
+		echo "  rustup install 1.88.0"; \
 		exit 1; \
 	fi
 	@echo "[ok] MSRV check passed"
