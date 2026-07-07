@@ -19,6 +19,7 @@ using short-lived, cryptographically-signed tokens that cannot be extracted or r
 
 ## Prerequisites
 
+- Node.js v22.14.0 or later for the publish workflow
 - npm CLI v11.5.1 or later
 - GitHub-hosted runners (self-hosted runners not yet supported)
 - Package must already exist on npm (first publish requires manual/token approach)
@@ -49,7 +50,7 @@ After the package exists:
    - **Organization or user**: `3leaps`
    - **Repository**: `sysprims`
    - **Workflow filename**: `typescript-npm-publish.yml`
-   - **Environment name**: (leave blank unless using GitHub environments)
+   - **Environment name**: `publish-npm`
 5. Click **Set up connection**
 
 Repeat for each platform package (`@3leaps/sysprims-linux-x64-gnu`, etc.).
@@ -78,6 +79,8 @@ Key points:
 
 - **Do NOT set NODE_AUTH_TOKEN** - must be completely unset for OIDC fallback
 - Use `registry-url: 'https://registry.npmjs.org'` in setup-node
+- Use Node.js 24 for the publish workflow. The workflow hard-fails if Node.js is
+  below 22.14.0 or npm is below 11.5.1.
 - Run on GitHub-hosted runners only (e.g., `ubuntu-latest`)
 
 ## Publishing Process

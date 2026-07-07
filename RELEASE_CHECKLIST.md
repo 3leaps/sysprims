@@ -186,11 +186,14 @@ Notes:
      ```
      The workflow validates:
      - Running from a `v*` tag ref (required for OIDC and environment protection)
+     - Node.js >= 22.14.0 and npm >= 11.5.1 for npm trusted publishing
      - VERSION file and package.json match the tag
      - Prebuilds were built from the same commit as the tag
 
   Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow must run
-  from a tag ref to satisfy the `publish-npm` environment protection rules.
+  from a tag ref to satisfy the `publish-npm` environment protection rules, and the
+  publish job intentionally uses Node.js 24 even though validation/prebuild jobs remain
+  on Node.js 20.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 

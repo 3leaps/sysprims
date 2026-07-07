@@ -316,6 +316,7 @@ fmt-check: ## Check formatting without modifying
 lint: ## Run linting (cargo clippy + goneat lint)
 	@echo "Linting Rust..."
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	@bash scripts/check-npm-trusted-publish-runtime.sh
 	@if command -v goneat >/dev/null 2>&1; then \
 		echo "Linting YAML, shell, workflows..."; \
 		goneat assess --categories lint --fail-on medium --ci-summary --log-level warn --output /dev/null; \

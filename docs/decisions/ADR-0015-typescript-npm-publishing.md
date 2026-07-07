@@ -15,6 +15,7 @@ sysprims provides TypeScript bindings via napi-rs, which compiles to native Node
 We initially attempted OIDC trusted publishing but encountered repeated failures due to:
 
 - npm CLI version requirements (>= 11.5.1)
+- Node.js runtime requirements (>= 22.14.0)
 - Token-based auth interfering with OIDC flow
 - Workflow file version resolution from tags
 - Incorrect release workflow ordering
@@ -33,18 +34,27 @@ We use npm OIDC trusted publishing exclusively. **No `NPM_TOKEN` or `NODE_AUTH_T
 
 Rationale: Any token present will override OIDC, causing authentication failures if the token is expired or revoked.
 
-### 2. npm CLI Version Upgrade
+### 2. Trusted Publishing Runtime
 
-The publish workflow must upgrade npm to >= 11.5.1 before publishing:
+The publish workflow must use Node.js >= 22.14.0 and upgrade npm to >= 11.5.1
+before publishing. The publish job uses Node.js 24; validation and prebuild
+workflows may remain on Node.js 20.
 
 ```yaml
-- name: Ensure npm CLI supports OIDC
+- uses: actions/setup-node@v6
+  with:
+    node-version: '24'
+
+- name: Ensure npm trusted publishing runtime
   run: |
+    echo "node: $(node --version)"
     npm install -g npm@11.5.1
-    echo "npm version: $(npm --version)"
+    echo "npm: $(npm --version)"
 ```
 
-Rationale: Ubuntu runners with Node 20 ship npm ~10.x, which lacks OIDC support.
+Rationale: npm trusted publishing requires both a modern Node.js runtime and npm
+CLI OIDC support. Ubuntu runners with Node 20 ship npm ~10.x, which lacks OIDC
+support, and Node 20 is below the trusted publishing runtime floor.
 
 ### 3. Force OIDC Mode in Publish Steps
 
