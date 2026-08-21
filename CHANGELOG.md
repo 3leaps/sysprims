@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-08-21
+
+v0.1.20 pins TypeScript N-API prebuild CI to Rust 1.88.0 and resumes TypeScript npm
+publication. No public API or process-control behavior changes are intended.
+
+### Changed
+
+- **TypeScript N-API prebuilds**: `dtolnay/rust-toolchain` in
+  `.github/workflows/typescript-napi-prebuilds.yml` is pinned to **1.88.0**.
+
+### Notes
+
+- **v0.1.19** remains the signed GitHub and Go module release. TypeScript npm
+  publication resumes on 0.1.20.
+- Go prebuilt libraries are produced by the Go Bindings Prep workflow after this
+  version commit is merged to `main`; do not tag v0.1.20 before that artifact PR
+  merges.
+
 ## [0.1.19] - 2026-08-21
 
 v0.1.19 is a small maintenance release. It refreshes the compatible Rust lockfile and
@@ -30,9 +48,8 @@ intended.
 
 ### Notes
 
-- Go prebuilt libraries are produced by the Go Bindings Prep workflow after this
-  release-notes commit is merged to `main`; do not tag v0.1.19 before that artifact PR
-  merges.
+- Signed GitHub release and Go module tags were published. TypeScript npm
+  publication resumes in v0.1.20.
 
 ## [0.1.18] - 2026-07-07
 
@@ -589,7 +606,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.20...HEAD
+[0.1.20]: https://github.com/3leaps/sysprims/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/3leaps/sysprims/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/3leaps/sysprims/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/3leaps/sysprims/compare/v0.1.16...v0.1.17
