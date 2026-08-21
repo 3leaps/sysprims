@@ -1121,7 +1121,7 @@ fn print_signal_table() {
 
     for signal in signals {
         if let Some(num) = sysprims_signal::get_signal_number(&signal.name) {
-            print!("{:>2}) {:<10}", num, &signal.name);
+            print!("{:>2}) {:<10}", num, signal.name);
             col += 1;
             if col % 4 == 0 {
                 println!();
