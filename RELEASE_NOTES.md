@@ -6,6 +6,30 @@
 
 ---
 
+## v0.1.19 - 2026-08-21
+
+**Status:** Maintenance Release
+
+v0.1.19 is a small maintenance release. It refreshes the compatible Rust lockfile and
+TypeScript `@types/node` 22.20.1. No public API or process-control behavior changes are
+intended.
+
+### Highlights
+
+- **Compatible Rust lockfile refresh**: crate versions updated within existing constraints.
+  `thiserror` remains 1.0.69. napi remains 2.16.x.
+- **TypeScript types**: `@types/node` 22.20.1. The `package.json` range stays `^22.10.0`.
+- **CLI Clippy**: dropped a redundant borrow in the signal table printer.
+
+### Upgrade Notes
+
+- No public API changes are intended.
+- Go prebuilt libraries are produced by the Go Bindings Prep workflow after this
+  release-notes commit is merged to `main`; do not tag v0.1.19 before that artifact PR
+  merges.
+
+---
+
 ## v0.1.18 - 2026-07-07
 
 **Status:** Maintenance Release

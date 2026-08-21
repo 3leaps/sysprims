@@ -10,6 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-08-21
+
+v0.1.19 is a small maintenance release. It refreshes the compatible Rust lockfile and
+TypeScript `@types/node` 22.20.1. No public API or process-control behavior changes are
+intended.
+
+### Changed
+
+- **Compatible Rust lockfile refresh**: updated crate versions within existing constraints.
+  `thiserror` remains 1.0.69. napi remains 2.16.x.
+- **TypeScript types**: `@types/node` 22.20.0 → 22.20.1. The `package.json` range stays
+  `^22.10.0`. Node runtime policy is unchanged.
+
+### Fixed
+
+- **CLI signal table print**: dropped a redundant borrow that newer Clippy rejected
+  (`useless_borrows_in_formatting`).
+
+### Notes
+
+- Go prebuilt libraries are produced by the Go Bindings Prep workflow after this
+  release-notes commit is merged to `main`; do not tag v0.1.19 before that artifact PR
+  merges.
+
 ## [0.1.18] - 2026-07-07
 
 v0.1.18 is a small maintenance release. It refreshes compatible dependency locks,
@@ -565,7 +589,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/3leaps/sysprims/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/3leaps/sysprims/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/3leaps/sysprims/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/3leaps/sysprims/compare/v0.1.15...v0.1.16
