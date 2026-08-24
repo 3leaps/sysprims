@@ -65,9 +65,9 @@ type TimeoutResult struct {
 	SignalSent *int `json:"signal_sent,omitempty"`
 	// Escalated indicates whether escalation to SIGKILL occurred (nil if completed).
 	Escalated *bool `json:"escalated,omitempty"`
-	// TreeKillReliability indicates tree-kill reliability: "guaranteed" or "best_effort".
-	// Only present if the command timed out. "best_effort" indicates that on Windows,
-	// Job Object creation may have failed and some child processes might have escaped.
+	// TreeKillReliability is "guaranteed", "unproven", or "best_effort" when timed out.
+	// "unproven" indicates a post-spawn containment window; "best_effort" indicates
+	// that group or Job Object creation failed and descendants might have escaped.
 	TreeKillReliability *string `json:"tree_kill_reliability,omitempty"`
 }
 

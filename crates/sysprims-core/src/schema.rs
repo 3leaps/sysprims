@@ -59,6 +59,10 @@
 pub const TIMEOUT_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/timeout-result.schema.json";
 
+/// Schema ID for timeout result JSON output with unproven reliability (v1.1.0).
+pub const TIMEOUT_RESULT_V1_1: &str =
+    "https://schemas.3leaps.dev/sysprims/timeout/v1.1.0/timeout-result.schema.json";
+
 /// Schema ID for process info JSON output (v1.1.0).
 ///
 /// This schema defines the structure of `sysprims pstat --json` output.
@@ -223,6 +227,7 @@ mod tests {
     fn test_schema_ids_are_valid_urls() {
         // All schema IDs should be valid HTTPS URLs
         assert!(TIMEOUT_RESULT_V1.starts_with("https://"));
+        assert!(TIMEOUT_RESULT_V1_1.starts_with("https://"));
         assert!(PROCESS_INFO_V1.starts_with("https://"));
         assert!(PROCESS_INFO_SAMPLED_V1.starts_with("https://"));
         assert!(PROC_FILTER_V1.starts_with("https://"));

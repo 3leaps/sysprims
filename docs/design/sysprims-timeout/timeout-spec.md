@@ -120,8 +120,10 @@ pub struct TimeoutConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeKillReliability {
-    /// Process group (Unix) or Job Object (Windows) established.
+    /// Containment was established before child execution could escape it.
     Guaranteed,
+    /// An owned containment capability was attached after spawn.
+    Unproven,
     /// Fallback: only direct child killed. Grandchildren may escape.
     BestEffort,
 }
@@ -158,11 +160,25 @@ pub fn run_with_timeout_default(
     timeout: Duration,
 ) -> SysprimsResult<TimeoutOutcome>;
 
-/// Spawn a process in a new process group/Job Object (v0.1.6+).
+/// Spawn a process in a new process group (v0.1.6+; Unix compatibility API).
 ///
 /// Creates a child process with reliable tree-kill capability.
 /// Does not wait for the process to exit.
 pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult>;
+
+/// Spawn a child with an owned process-group or Job Object guard.
+pub fn spawn_contained(command: Command)
+    -> Result<ContainmentGuard<Child>, ContainmentSpawnError>;
+
+/// Adopt an externally spawned child while retaining its reap capability.
+pub fn adopt_contained<C: ContainmentChild>(child: C)
+    -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>>;
+
+/// Observe normal leader exit without reaping, then clean descendants and reap.
+impl<C: ContainmentChild> ContainmentGuard<C> {
+    pub fn try_complete(&mut self, config: TerminateTreeConfig)
+        -> SysprimsResult<Option<ContainmentOutcome>>;
+}
 
 /// Terminate a process tree with graceful-then-kill escalation (v0.1.6+).
 ///
@@ -219,8 +235,8 @@ pub struct SpawnInGroupResult {
 **Platform notes:**
 
 - **Unix**: Creates new process group via `setpgid(0, 0)`. Returns `pgid`.
-- **Windows**: Uses Job Objects when possible; `pgid` is not applicable (null/None). v0.1.6 does not expose a stable Job handle/token yet (planned follow-on).
-- **Degradation**: If grouping fails (nested Job Objects, privilege limits), returns `tree_kill_reliability: BestEffort`.
+- **Windows**: The PID-returning compatibility API fails closed because it cannot return an owned Job capability. Use `adopt_contained` for explicitly `Unproven` post-spawn ownership. `spawn_contained` remains unsupported until it can assign a suspended child to the Job before execution.
+- **Degradation**: `Unproven` means an owned capability exists but post-spawn assignment left an escape window. `BestEffort` means no tree capability exists.
 
 ### 4.4 TerminateTree Types (v0.1.6+)
 
@@ -280,7 +296,7 @@ pub struct TerminateTreeResult {
     /// True if overall operation timed out.
     pub timed_out: bool,
 
-    /// Reliability of tree-kill operation ("guaranteed" or "best_effort").
+    /// Reliability of PID-based tree-kill ("guaranteed" or "best_effort").
     pub tree_kill_reliability: String,
 
     /// Platform-specific warnings.
@@ -291,7 +307,7 @@ pub struct TerminateTreeResult {
 **Platform notes:**
 
 - **Unix**: Sends signal to process group if pgid available, otherwise direct PID.
-- **Windows**: Terminates Job Object if available, otherwise direct TerminateProcess. v0.1.6 does not expose a stable Job token in the API surface yet; tree kill without a Job is best-effort.
+- **Windows**: PID-based termination uses direct `TerminateProcess` and is best-effort. Job termination requires the owned containment guard API.
 
 ### 4.5 Error Handling
 
@@ -312,16 +328,19 @@ Per ADR-0008:
 
 2. **Group-by-default invariant (ADR-0003):**
    - Unix: child runs in its own process group via `setpgid(0, 0)`
-   - Windows: child assigned to Job Object with `KILL_ON_JOB_CLOSE`
+   - Windows: owned adoption assigns the child to a Job Object with `KILL_ON_JOB_CLOSE`; guaranteed owned spawn requires create-suspended assignment
    - Termination targets the group/job, not just the direct child
 
-3. **Observable fallback invariant:** If guaranteed tree-kill cannot be established:
-   - `tree_kill_reliability = BestEffort`
+3. **Observable reliability invariant:** If guaranteed tree-kill cannot be established:
+   - owned post-spawn containment reports `Unproven`
+   - direct-child fallback reports `BestEffort`
    - JSON output reflects actual behavior
 
-4. **Signal escalation invariant:** If process doesn't exit after `signal_sent` within `kill_after`, escalate to SIGKILL.
+4. **Guard lifecycle invariant:** The owned guard observes normal leader exit without reaping. It cleans remaining descendants before reaping and releasing the child. Dropping an active guard kills the contained tree and makes a bounded reap attempt on every platform.
 
-5. **Preserve-status invariant:** `--preserve-status` affects only non-timeout completion.
+5. **Signal escalation invariant:** If process doesn't exit after `signal_sent` within `kill_after`, escalate to SIGKILL.
+
+6. **Preserve-status invariant:** `--preserve-status` affects only non-timeout completion.
 
 ## 5) CLI Contract
 

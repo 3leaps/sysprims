@@ -421,8 +421,13 @@ If rotating signing keys, update:
 
 ## Versioning Policy
 
-- **Patch** (0.1.1): Bug fixes, security patches
-- **Minor** (0.2.0): New features, backward-compatible
-- **Major** (1.0.0): Breaking changes, API changes
+Before `1.0.0`, minor releases may include breaking API or behavior changes.
+Those changes must be explicit in the release notes and upgrade guidance.
+
+- **Pre-1.0 patch** (0.1.1): Backward-compatible bug and security fixes
+- **Pre-1.0 minor** (0.2.0): Features and explicitly documented breaking changes
+- **Post-1.0 patch** (1.0.1): Backward-compatible bug and security fixes
+- **Post-1.0 minor** (1.1.0): Backward-compatible features
+- **Post-1.0 major** (2.0.0): Breaking behavior or API changes
 
 See `docs/decisions/` for versioning decisions.

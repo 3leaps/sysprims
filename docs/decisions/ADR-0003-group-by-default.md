@@ -2,6 +2,7 @@
 
 > **Status**: Accepted  
 > **Date**: 2025-12-31  
+> **Amended**: 2026-08-24
 > **Authors**: Architecture Council
 
 ## Context
@@ -59,20 +60,35 @@ unsafe {
     );
 }
 
-// Assign spawned process to job
+// Assign the owned process capability to the job. Post-spawn assignment is
+// explicitly unproven because descendants may escape before this call.
 unsafe {
     AssignProcessToJobObject(job, child_handle);
 }
 
-// On timeout: closing job handle terminates all processes
+// On timeout: terminate the owned job, then reap the retained child
 unsafe {
-    CloseHandle(job);
+    TerminateJobObject(job, 1);
 }
 ```
 
+An owned Windows spawn is guaranteed only when the child is created suspended,
+assigned to the Job, and then resumed. Until that seam exists, the owned spawn
+API fails before spawning. The post-spawn adoption API returns an owned guard
+with `tree_kill_reliability = "unproven"`. PID-returning spawn APIs cannot carry
+the Job capability and therefore fail closed on Windows.
+
+### Owned Guard Lifecycle
+
+The containment guard retains both the child reap capability and the bound
+process group or Job. Normal completion is observed without reaping the leader;
+the guard first cleans remaining descendants, then reaps and permits the child
+adapter to be released. Dropping an active guard kills the containment and makes
+a bounded attempt to reap the child on Unix and Windows.
+
 ### Fallback Behavior
 
-If group/job creation fails (e.g., nested Job Objects on Windows, permission issues):
+Legacy timeout operations may still degrade when group/job creation fails. They:
 
 1. Log warning
 2. Proceed with direct child process only
@@ -86,7 +102,7 @@ If group/job creation fails (e.g., nested Job Objects on Windows, permission iss
   "status": "timeout",
   "grouping_requested": "group_by_default",
   "grouping_effective": "group_by_default",
-  "tree_kill_reliability": "guaranteed" // or "best_effort"
+  "tree_kill_reliability": "guaranteed" // or "unproven" / "best_effort"
 }
 ```
 
@@ -160,7 +176,9 @@ Create unified abstraction hiding all platform differences.
 
 If Windows Job Object creation fails, fail the entire operation.
 
-**Considered for v0.2.1**: We'll add `--strict-tree-kill` flag for users who need guaranteed tree kill. For MVP, best-effort with observability is the pragmatic choice.
+**Partially adopted for owned guards**: APIs that promise an owned containment
+capability fail closed if they cannot establish one. Legacy timeout operations
+retain best-effort behavior with observable reliability.
 
 ## References
 

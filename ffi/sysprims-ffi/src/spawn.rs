@@ -127,6 +127,7 @@ pub unsafe extern "C" fn sysprims_spawn_in_group(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::sysprims_free_string;
     use std::ptr;
 
@@ -148,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_spawn_in_group_basic() {
+    fn test_spawn_in_group_platform_contract() {
         #[cfg(unix)]
         let argv = ["sleep", "0"];
         #[cfg(windows)]
@@ -166,9 +167,18 @@ mod tests {
 
         let mut result: *mut c_char = ptr::null_mut();
         let code = unsafe { sysprims_spawn_in_group(cfg.as_ptr(), &mut result) };
-        assert_eq!(code, SysprimsErrorCode::Ok);
-        assert!(!result.is_null());
 
-        unsafe { sysprims_free_string(result) };
+        #[cfg(unix)]
+        {
+            assert_eq!(code, SysprimsErrorCode::Ok);
+            assert!(!result.is_null());
+            unsafe { sysprims_free_string(result) };
+        }
+
+        #[cfg(windows)]
+        {
+            assert_eq!(code, SysprimsErrorCode::NotSupported);
+            assert!(result.is_null());
+        }
     }
 }

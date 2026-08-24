@@ -7,11 +7,10 @@ use std::os::raw::c_char;
 use std::time::Duration;
 
 use serde::Serialize;
-use sysprims_core::schema::{TERMINATE_TREE_CONFIG_V1, TIMEOUT_RESULT_V1};
+use sysprims_core::schema::{TERMINATE_TREE_CONFIG_V1, TIMEOUT_RESULT_V1_1};
 use sysprims_core::SysprimsError;
 use sysprims_timeout::{
     terminate_tree, GroupingMode, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
-    TreeKillReliability,
 };
 
 use crate::error::{clear_error_state, set_error, SysprimsErrorCode};
@@ -138,7 +137,7 @@ struct SysprimsTimeoutResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub escalated: Option<bool>,
 
-    /// Tree-kill reliability: "guaranteed" or "best_effort".
+    /// Tree-kill reliability: "guaranteed", "unproven", or "best_effort".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tree_kill_reliability: Option<String>,
 }
@@ -147,7 +146,7 @@ impl From<TimeoutOutcome> for SysprimsTimeoutResult {
     fn from(outcome: TimeoutOutcome) -> Self {
         match outcome {
             TimeoutOutcome::Completed { exit_status } => SysprimsTimeoutResult {
-                schema_id: TIMEOUT_RESULT_V1,
+                schema_id: TIMEOUT_RESULT_V1_1,
                 status: "completed".to_string(),
                 exit_code: exit_status.code(),
                 signal_sent: None,
@@ -159,15 +158,12 @@ impl From<TimeoutOutcome> for SysprimsTimeoutResult {
                 escalated,
                 tree_kill_reliability,
             } => SysprimsTimeoutResult {
-                schema_id: TIMEOUT_RESULT_V1,
+                schema_id: TIMEOUT_RESULT_V1_1,
                 status: "timed_out".to_string(),
                 exit_code: None,
                 signal_sent: Some(signal_sent),
                 escalated: Some(escalated),
-                tree_kill_reliability: Some(match tree_kill_reliability {
-                    TreeKillReliability::Guaranteed => "guaranteed".to_string(),
-                    TreeKillReliability::BestEffort => "best_effort".to_string(),
-                }),
+                tree_kill_reliability: Some(tree_kill_reliability.as_str().to_string()),
             },
         }
     }
@@ -600,9 +596,9 @@ mod tests {
         assert!(json.contains("\"status\":\"completed\""), "JSON: {}", json);
         // Verify schema_id matches expected constant (per ADR-0005)
         assert!(
-            json.contains(&format!("\"schema_id\":\"{}\"", TIMEOUT_RESULT_V1)),
+            json.contains(&format!("\"schema_id\":\"{}\"", TIMEOUT_RESULT_V1_1)),
             "Result JSON should contain schema_id={}: {}",
-            TIMEOUT_RESULT_V1,
+            TIMEOUT_RESULT_V1_1,
             json
         );
 

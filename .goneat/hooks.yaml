@@ -16,7 +16,7 @@ hooks:
         - "--"
         - "./bindings/go/sysprims/..."
       priority: 10
-      timeout: "90s"
+      timeout: "2m"
   pre-push:
     - command: "assess"
       args: ["--check", "--categories", "format,lint,typecheck,security,dependencies,repo-status", "--fail-on", "high"]

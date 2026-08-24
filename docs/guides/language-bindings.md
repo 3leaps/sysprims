@@ -247,7 +247,7 @@ The TypeScript bindings provide parity with Go bindings:
 | `terminate(pid)`                | Graceful termination                                                |
 | `forceKill(pid)`                | Immediate kill                                                      |
 | `waitPID(pid, timeoutMs)`       | Wait for process exit with timeout (v0.1.6+)                        |
-| `spawnInGroup(config)`          | Spawn process in new group/Job Object (v0.1.6+)                     |
+| `spawnInGroup(config)`          | Spawn in a new Unix process group; unsupported on Windows           |
 | `terminateTree(pid, config?)`   | Graceful-then-kill tree termination (v0.1.6+)                       |
 
 ### Filter Conventions
@@ -284,7 +284,7 @@ if (outcome.timed_out) {
 }
 ```
 
-**spawnInGroup** - Spawn process in new process group/Job Object:
+**spawnInGroup** - Spawn process in a new Unix process group:
 
 ```typescript
 import { spawnInGroup } from "@3leaps/sysprims";
@@ -296,8 +296,11 @@ const result = spawnInGroup({
 });
 
 console.log(`Spawned PID ${result.pid}`);
-// result.pgid is null on Windows
 ```
+
+`spawnInGroup` fails closed on Windows because the binding returns only a PID
+and cannot retain the Job handle required for later tree cleanup. Windows
+callers should not treat PID-only `terminateTree` as Job-backed containment.
 
 **terminateTree** - Graceful-then-kill tree termination:
 
