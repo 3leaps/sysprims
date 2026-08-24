@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn contained_job_completes_normally_before_releasing_child() {
         let child = Command::new("cmd")
-            .args(["/C", "exit 0"])
+            .args(["/C", "ping -n 2 127.0.0.1 >NUL"])
             .spawn()
             .expect("test child spawn failed");
         let mut guard = adopt_contained_impl(child).expect("contained adoption failed");
