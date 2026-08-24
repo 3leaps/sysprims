@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/timeout/v1.1.0/timeout-result.schema.json",
+  "title": "Timeout Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "status"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "https://schemas.3leaps.dev/sysprims/timeout/v1.1.0/timeout-result.schema.json"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "timed_out"
+      ]
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "signal_sent": {
+      "type": "integer"
+    },
+    "escalated": {
+      "type": "boolean"
+    },
+    "tree_kill_reliability": {
+      "type": "string",
+      "enum": [
+        "guaranteed",
+        "unproven",
+        "best_effort"
+      ]
+    }
+  }
+}

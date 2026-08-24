@@ -4,83 +4,196 @@
 //! all processes in the job are terminated when the job handle is closed.
 
 use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{FromRawHandle, OwnedHandle};
 use std::process::{Child, Command};
 use std::ptr;
 use std::time::{Duration, Instant};
-use std::{collections::HashMap, sync::Mutex};
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
     SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows_sys::Win32::System::Threading::{
-    OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
-};
+use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 use sysprims_core::{SysprimsError, SysprimsResult};
 
 use crate::{
-    GroupingMode, SpawnInGroupConfig, SpawnInGroupResult, TimeoutConfig, TimeoutOutcome,
-    TreeKillReliability,
+    capture_containment_identity, ContainmentAdoptionError, ContainmentChild, ContainmentGuard,
+    ContainmentOutcome, ContainmentSpawnError, GroupingMode, SpawnInGroupConfig,
+    SpawnInGroupResult, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome, TreeKillReliability,
 };
-use sysprims_core::get_platform;
-use sysprims_core::schema::SPAWN_IN_GROUP_RESULT_V1;
-
-// windows-sys 0.61 models HANDLE as a raw pointer, which is not Send. Store the
-// opaque handle value in the registry and cast back at Win32 call boundaries.
-static JOB_REGISTRY: std::sync::OnceLock<Mutex<HashMap<u32, usize>>> = std::sync::OnceLock::new();
-
-// NOTE: This PID -> Job handle registry is an implementation detail used to improve
-// terminate-tree reliability on Windows for processes spawned via spawn_in_group.
-//
-// Follow-on work (planned): replace this with an explicit, stable contract (e.g.
-// returning an opaque Job token from spawn and accepting it for termination), to
-// avoid hidden global state and PID reuse edge cases.
-
-fn registry() -> &'static Mutex<HashMap<u32, usize>> {
-    JOB_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn register_job(pid: u32, job: HANDLE) {
-    let mut map = registry().lock().unwrap();
-    map.insert(pid, job as usize);
-}
-
-fn take_job(pid: u32) -> Option<HANDLE> {
-    let mut map = registry().lock().unwrap();
-    map.remove(&pid).map(|job| job as HANDLE)
-}
-
-pub(crate) fn terminate_job_for_pid(pid: u32) -> Option<()> {
-    let job = take_job(pid)?;
-    unsafe {
-        // TerminateJobObject exit code is arbitrary
-        TerminateJobObject(job, 1);
-        CloseHandle(job);
-    }
-    Some(())
-}
-
-fn spawn_cleanup_thread(pid: u32) {
-    std::thread::spawn(move || unsafe {
-        // Best-effort: if we can open the process, wait for it.
-        let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if !handle.is_null() {
-            let _ = WaitForSingleObject(handle, u32::MAX);
-            CloseHandle(handle);
-        }
-        // Close the job handle if still registered.
-        if let Some(job) = take_job(pid) {
-            CloseHandle(job);
-        }
-    });
-}
 
 /// Polling interval for checking if child has exited.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+pub fn spawn_contained_impl(
+    command: Command,
+) -> Result<ContainmentGuard<Child>, ContainmentSpawnError> {
+    let _ = command;
+    Err(ContainmentSpawnError::Spawn(SysprimsError::not_supported(
+        "spawn_contained without create-suspended Job assignment",
+        "windows; use adopt_contained for explicitly unproven post-spawn adoption",
+    )))
+}
+
+pub fn adopt_contained_impl<C: ContainmentChild>(
+    child: C,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
+    let pid = match child.process_id() {
+        Some(pid) => pid,
+        None => {
+            return Err(ContainmentAdoptionError {
+                error: SysprimsError::invalid_argument("child process id is unavailable"),
+                child,
+            });
+        }
+    };
+    let identity = match capture_containment_identity(pid) {
+        Ok(identity) => identity,
+        Err(error) => return Err(ContainmentAdoptionError { error, child }),
+    };
+    let process = match child.raw_process_handle() {
+        Some(process) => process as HANDLE,
+        None => {
+            return Err(ContainmentAdoptionError {
+                error: SysprimsError::invalid_argument("child process handle is unavailable"),
+                child,
+            });
+        }
+    };
+    let job = match create_job_object() {
+        Ok(job) => unsafe { OwnedHandle::from_raw_handle(job) },
+        Err(error) => return Err(ContainmentAdoptionError { error, child }),
+    };
+    if unsafe { AssignProcessToJobObject(job.as_raw_handle() as HANDLE, process) } == 0 {
+        return Err(ContainmentAdoptionError {
+            error: SysprimsError::group_creation_failed("AssignProcessToJobObject failed"),
+            child,
+        });
+    }
+
+    Ok(ContainmentGuard {
+        child: Some(child),
+        identity,
+        reliability: TreeKillReliability::Unproven,
+        finalized: false,
+        job,
+    })
+}
+
+pub fn terminate_contained_impl<C: ContainmentChild>(
+    guard: &mut ContainmentGuard<C>,
+    config: TerminateTreeConfig,
+) -> SysprimsResult<ContainmentOutcome> {
+    let child = guard
+        .child
+        .as_mut()
+        .expect("active containment guard retains its child");
+    if child.process_id() != Some(guard.identity.pid) {
+        return Err(SysprimsError::invalid_argument(
+            "owned child identity changed; refusing containment operation",
+        ));
+    }
+    let job = guard.job.as_raw_handle() as HANDLE;
+    if child.raw_process_handle().is_none() {
+        return Err(SysprimsError::invalid_argument(
+            "owned process handle is unavailable; refusing containment operation",
+        ));
+    }
+    if unsafe { TerminateJobObject(job, 1) } == 0 {
+        return Err(SysprimsError::system(
+            "TerminateJobObject failed",
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+        ));
+    }
+    let exited = wait_for_contained_child(child, Duration::from_millis(config.kill_timeout_ms))?;
+
+    let mut warnings =
+        vec!["Post-spawn Job Object adoption has an escape window and is unproven".to_string()];
+    if !exited {
+        warnings.push("Timed out waiting to reap contained child".to_string());
+    } else {
+        guard.finalized = true;
+    }
+
+    Ok(ContainmentOutcome {
+        identity: guard.identity.clone(),
+        pgid: None,
+        signal_sent: None,
+        kill_signal: None,
+        escalated: false,
+        exited,
+        timed_out: !exited,
+        tree_kill_reliability: guard.reliability,
+        warnings,
+    })
+}
+
+pub fn contained_child_has_exited<C: ContainmentChild>(
+    guard: &ContainmentGuard<C>,
+) -> SysprimsResult<bool> {
+    let child = guard
+        .child
+        .as_ref()
+        .expect("active containment guard retains its child");
+    if child.process_id() != Some(guard.identity.pid) {
+        return Err(SysprimsError::invalid_argument(
+            "owned child identity changed; refusing containment operation",
+        ));
+    }
+    let process = child.raw_process_handle().ok_or_else(|| {
+        SysprimsError::invalid_argument(
+            "owned process handle is unavailable; refusing containment operation",
+        )
+    })? as HANDLE;
+
+    match unsafe { WaitForSingleObject(process, 0) } {
+        WAIT_OBJECT_0 => Ok(true),
+        WAIT_TIMEOUT => Ok(false),
+        _ => Err(SysprimsError::system(
+            "failed to observe contained child state",
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+        )),
+    }
+}
+
+pub fn drop_contained_impl<C: ContainmentChild>(guard: &mut ContainmentGuard<C>) {
+    let child = guard
+        .child
+        .as_mut()
+        .expect("active containment guard retains its child");
+    if child.process_id() != Some(guard.identity.pid) || child.raw_process_handle().is_none() {
+        return;
+    }
+
+    let _ = unsafe { TerminateJobObject(guard.job.as_raw_handle() as HANDLE, 1) };
+    let _ = wait_for_contained_child(child, Duration::from_secs(2));
+    guard.finalized = true;
+}
+
+fn wait_for_contained_child<C: ContainmentChild>(
+    child: &mut C,
+    timeout: Duration,
+) -> SysprimsResult<bool> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(true) => return Ok(true),
+            Ok(false) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
+            Ok(false) => return Ok(false),
+            Err(error) => {
+                return Err(SysprimsError::system(
+                    format!("failed to reap contained child: {error}"),
+                    error.raw_os_error().unwrap_or(0),
+                ));
+            }
+        }
+    }
+}
 
 pub fn run_with_timeout_impl(
     command: &str,
@@ -89,7 +202,7 @@ pub fn run_with_timeout_impl(
     config: &TimeoutConfig,
 ) -> SysprimsResult<TimeoutOutcome> {
     let use_job_object = config.grouping == GroupingMode::GroupByDefault;
-    let mut reliability = TreeKillReliability::Guaranteed;
+    let mut reliability = TreeKillReliability::Unproven;
 
     // Create Job Object if GroupByDefault
     let mut job_handle: Option<HANDLE> = if use_job_object {
@@ -201,82 +314,11 @@ fn create_job_object() -> SysprimsResult<HANDLE> {
 }
 
 pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult> {
-    let command = config.argv[0].as_str();
-    if command.is_empty() {
-        return Err(SysprimsError::invalid_argument(
-            "argv[0] (command) must not be empty",
-        ));
-    }
-
-    let mut cmd = Command::new(command);
-    for arg in config.argv.iter().skip(1) {
-        cmd.arg(arg);
-    }
-
-    if let Some(cwd) = config.cwd.as_deref() {
-        if !cwd.is_empty() {
-            cmd.current_dir(cwd);
-        }
-    }
-
-    if let Some(env) = config.env {
-        for (k, v) in env {
-            cmd.env(k, v);
-        }
-    }
-
-    let mut warnings: Vec<String> = Vec::new();
-    let mut reliability = TreeKillReliability::Guaranteed;
-
-    let job_handle = match create_job_object() {
-        Ok(h) => Some(h),
-        Err(_) => {
-            reliability = TreeKillReliability::BestEffort;
-            warnings.push("Job Object creation failed; spawning without grouping".to_string());
-            None
-        }
-    };
-
-    let child = cmd.spawn().map_err(|e| {
-        if let Some(job) = job_handle {
-            unsafe { CloseHandle(job) };
-        }
-        if e.kind() == std::io::ErrorKind::NotFound {
-            SysprimsError::not_found_command(command)
-        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-            SysprimsError::permission_denied_command(command)
-        } else {
-            SysprimsError::spawn_failed(command, e.to_string())
-        }
-    })?;
-
-    let pid = child.id();
-
-    if let Some(job) = job_handle {
-        let process_handle = child.as_raw_handle() as HANDLE;
-        let assigned = unsafe { AssignProcessToJobObject(job, process_handle) };
-        if assigned == 0 {
-            reliability = TreeKillReliability::BestEffort;
-            warnings.push("AssignProcessToJobObject failed; spawning without grouping".to_string());
-            unsafe { CloseHandle(job) };
-        } else {
-            register_job(pid, job);
-            spawn_cleanup_thread(pid);
-        }
-    }
-
-    Ok(SpawnInGroupResult {
-        schema_id: SPAWN_IN_GROUP_RESULT_V1,
-        timestamp: sysprims_core::time::now_rfc3339(),
-        platform: get_platform(),
-        pid,
-        pgid: None,
-        tree_kill_reliability: match reliability {
-            TreeKillReliability::Guaranteed => "guaranteed".to_string(),
-            TreeKillReliability::BestEffort => "best_effort".to_string(),
-        },
-        warnings,
-    })
+    let _ = config;
+    Err(SysprimsError::not_supported(
+        "spawn_in_group without an owned containment guard",
+        "windows; use spawn_contained",
+    ))
 }
 
 /// Kill the process tree.
@@ -313,6 +355,104 @@ fn kill_tree(
 
 #[cfg(test)]
 mod tests {
-    // Windows tests would go here, but we can't run them on macOS
-    // They'll be tested in CI on Windows runners
+    use super::*;
+    use std::process::Stdio;
+
+    #[test]
+    fn contained_job_terminates_owned_child() {
+        let mut command = Command::new("ping");
+        command
+            .args(["-n", "60", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let child = command.spawn().expect("test child spawn failed");
+        let mut guard = match adopt_contained_impl(child) {
+            Ok(guard) => guard,
+            Err(mut adoption) => {
+                let _ = adoption.child.kill();
+                let _ = adoption.child.wait();
+                panic!("contained adoption failed: {}", adoption.error);
+            }
+        };
+        assert_eq!(guard.reliability, TreeKillReliability::Unproven);
+        let outcome = terminate_contained_impl(&mut guard, TerminateTreeConfig::default())
+            .expect("Job termination failed");
+        assert!(outcome.exited);
+        assert_eq!(outcome.signal_sent, None);
+    }
+
+    #[test]
+    fn contained_job_completes_normally_before_releasing_child() {
+        let child = Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .expect("test child spawn failed");
+        let mut guard = adopt_contained_impl(child).expect("contained adoption failed");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let outcome = loop {
+            if let Some(outcome) = guard
+                .try_complete(TerminateTreeConfig::default())
+                .expect("contained completion failed")
+            {
+                break outcome;
+            }
+            assert!(Instant::now() < deadline, "contained child did not exit");
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        assert!(outcome.exited);
+        let mut child = match guard.into_child() {
+            Ok(child) => child,
+            Err(_) => panic!("finalized guard should release its reaped child"),
+        };
+        assert!(child
+            .try_wait()
+            .expect("child status should remain available")
+            .is_some());
+    }
+
+    #[test]
+    fn active_guard_drop_terminates_owned_child() {
+        let child = Command::new("ping")
+            .args(["-n", "60", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test child spawn failed");
+        let pid = child.id();
+        let guard = adopt_contained_impl(child).expect("contained adoption failed");
+
+        drop(guard);
+
+        assert!(
+            sysprims_proc::is_fully_gone(pid).expect("failed to inspect dropped child"),
+            "active guard drop must terminate and reap its child"
+        );
+    }
+
+    #[test]
+    fn pid_only_spawn_fails_closed() {
+        let error = spawn_in_group_impl(SpawnInGroupConfig {
+            argv: vec!["cmd".to_string(), "/C".to_string(), "exit 0".to_string()],
+            cwd: None,
+            env: None,
+        })
+        .expect_err("PID-only Windows spawn must fail closed");
+        assert!(matches!(error, SysprimsError::NotSupported { .. }));
+    }
+
+    #[test]
+    fn owned_spawn_fails_before_starting_on_windows() {
+        let command = Command::new("cmd");
+        let error = match spawn_contained_impl(command) {
+            Ok(_) => panic!("Windows owned spawn requires a suspended-launch seam"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            ContainmentSpawnError::Spawn(SysprimsError::NotSupported { .. })
+        ));
+    }
 }

@@ -52,7 +52,7 @@ Per OS, include a test that:
 1. Spawns a child that spawns grandchildren
 2. Grandchildren attempt to detach, ignore signals, or outlive parent
 3. Assert `sysprims-timeout` terminates the entire tree under Group-by-Default policy
-4. Record `tree_kill_reliability` ("guaranteed" or "best_effort")
+4. Record `tree_kill_reliability` ("guaranteed", "unproven", or "best_effort")
 
 This is the **core differentiator** - see [ADR-0003](../architecture/adr/0003-group-by-default.md).
 

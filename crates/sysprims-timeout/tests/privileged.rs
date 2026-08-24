@@ -25,9 +25,29 @@ mod privileged {
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::Duration;
+    use std::{cell::Cell, rc::Rc};
 
     use sysprims_signal::SIGKILL;
-    use sysprims_timeout::{run_with_timeout, TimeoutConfig, TimeoutOutcome, TreeKillReliability};
+    use sysprims_timeout::{
+        adopt_contained, run_with_timeout, spawn_contained, ContainmentChild, TerminateTreeConfig,
+        TimeoutConfig, TimeoutOutcome, TreeKillReliability,
+    };
+
+    #[derive(Debug)]
+    struct MutableIdentityChild {
+        child: std::process::Child,
+        visible_pid: Rc<Cell<Option<u32>>>,
+    }
+
+    impl ContainmentChild for MutableIdentityChild {
+        fn process_id(&self) -> Option<u32> {
+            self.visible_pid.get()
+        }
+
+        fn try_wait(&mut self) -> std::io::Result<bool> {
+            self.child.try_wait().map(|status| status.is_some())
+        }
+    }
 
     /// Check if we're running in the container test environment.
     /// Container tests mount workspace at /workspace and set SYSPRIMS_CONTAINER_TEST=1.
@@ -198,6 +218,218 @@ mod privileged {
             "All marker processes should be dead, {} remain",
             after
         );
+    }
+
+    /// Verify adopted group cleanup continues after the leader exits on SIGTERM.
+    #[test]
+    fn adopted_guard_cleans_descendants_after_leader_exit() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "(trap '' TERM; sleep 60) & echo ready; wait"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let child = command.spawn().expect("failed to spawn contained process");
+        let pgid = child.id();
+        thread::sleep(Duration::from_millis(200));
+        assert!(count_processes_in_group(pgid) >= 2);
+
+        let mut guard = adopt_contained(child).expect("failed to adopt process group");
+        assert_eq!(guard.tree_kill_reliability(), TreeKillReliability::Unproven);
+        let outcome = guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 100,
+                kill_timeout_ms: 500,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("contained termination failed");
+
+        assert!(outcome.escalated, "trapped descendant requires escalation");
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(count_processes_in_group(pgid), 0);
+    }
+
+    /// Verify a lost child capability fails closed before any group signal.
+    #[test]
+    fn adopted_guard_fails_closed_on_identity_loss() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sleep");
+        command.arg("60").stdin(Stdio::null());
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let child = command.spawn().expect("failed to spawn contained process");
+        let pid = child.id();
+        let visible_pid = Rc::new(Cell::new(Some(pid)));
+        let mut guard = adopt_contained(MutableIdentityChild {
+            child,
+            visible_pid: Rc::clone(&visible_pid),
+        })
+        .expect("failed to adopt process group");
+
+        visible_pid.set(None);
+        let error = guard
+            .terminate(TerminateTreeConfig::default())
+            .expect_err("identity loss must fail closed");
+        assert!(matches!(
+            error,
+            sysprims_core::SysprimsError::InvalidArgument { .. }
+        ));
+        assert!(sysprims_proc::get_process(pid).is_ok());
+
+        visible_pid.set(Some(pid));
+        let invalid_signal = guard
+            .terminate(TerminateTreeConfig {
+                kill_signal: i32::MAX,
+                ..TerminateTreeConfig::default()
+            })
+            .expect_err("invalid escalation signal must fail before termination starts");
+        assert!(matches!(
+            invalid_signal,
+            sysprims_core::SysprimsError::InvalidArgument { .. }
+        ));
+        assert!(sysprims_proc::get_process(pid).is_ok());
+
+        guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 10,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("guard should remain usable after fail-closed validation");
+    }
+
+    /// Verify normal completion cleans descendants before reaping the leader.
+    #[test]
+    fn adopted_guard_completes_after_leader_exit() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "(trap '' TERM; sleep 60) & sleep 0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let child = command.spawn().expect("failed to spawn contained process");
+        let pgid = child.id();
+        let mut guard = adopt_contained(child).expect("failed to adopt process group");
+        thread::sleep(Duration::from_millis(250));
+        assert!(count_processes_in_group(pgid) >= 1);
+
+        let outcome = guard
+            .try_complete(TerminateTreeConfig {
+                grace_timeout_ms: 10,
+                kill_timeout_ms: 500,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("contained completion failed after leader exit")
+            .expect("leader exit should be observed without an early reap");
+        assert!(outcome.exited);
+        assert!(outcome
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Live identity metadata unavailable")));
+        assert_eq!(count_processes_in_group(pgid), 0);
+        let mut child = match guard.into_child() {
+            Ok(child) => child,
+            Err(_) => panic!("finalized guard should release its reaped child"),
+        };
+        assert!(child
+            .try_wait()
+            .expect("child status should remain available")
+            .is_some());
+    }
+
+    /// Verify dropping an active guard kills its group and reaps its child.
+    #[test]
+    fn active_guard_drop_cleans_contained_group() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "(trap '' TERM; sleep 60) & wait"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let child = command.spawn().expect("failed to spawn contained process");
+        let pgid = child.id();
+        let guard = adopt_contained(child).expect("failed to adopt process group");
+        thread::sleep(Duration::from_millis(200));
+        assert!(count_processes_in_group(pgid) >= 2);
+
+        drop(guard);
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(count_processes_in_group(pgid), 0);
+    }
+
+    /// Verify the owned spawn path establishes the Unix group before exec.
+    #[test]
+    fn spawn_contained_returns_guaranteed_unix_guard() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sleep");
+        command.arg("60").stdin(Stdio::null());
+        let mut guard = spawn_contained(command).expect("contained spawn failed");
+        assert_eq!(
+            guard.tree_kill_reliability(),
+            TreeKillReliability::Guaranteed
+        );
+        guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 10,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("contained termination failed");
     }
 
     /// Count processes matching a pattern.

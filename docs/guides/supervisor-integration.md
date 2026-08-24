@@ -108,7 +108,7 @@ for _, warning := range outcome.Warnings {
 
 **Observability fields to persist**:
 
-- `tree_kill_reliability`: "guaranteed" or "best_effort"
+- `tree_kill_reliability`: "guaranteed", "unproven", or "best_effort"
 - `escalated`: whether SIGKILL was required
 - `warnings`: platform-specific issues
 
@@ -116,9 +116,15 @@ for _, warning := range outcome.Warnings {
 
 - If sysprims returns `PermissionDenied`, fall back to per-OS logic
 
-### Phase 3: Adopt SpawnInGroup
+### Phase 3: Adopt Owned Containment
 
-**Goal**: All jobs are "kill-tree safe" by construction.
+**Goal**: All jobs retain the process capability used for tree cleanup.
+
+The PID-returning binding API is supported on Unix. It fails closed on Windows
+because a PID cannot carry the owned Job handle. Rust supervisors should use
+`spawn_contained` on Unix or `adopt_contained` when integrating an external
+spawn owner such as a PTY library. Windows adoption is explicitly `unproven`
+until a create-suspended spawn seam is available.
 
 ```go
 config := sysprims.SpawnInGroupConfig{
@@ -146,8 +152,8 @@ if result.TreeKillReliability != "guaranteed" {
 **Platform notes**:
 
 - **Unix**: `PGID` contains the process group ID
-- **Windows**: `PGID` is nil; Job Object handles tree-kill internally
-- **Degradation**: If Job Object creation fails, reliability is "best_effort"
+- **Windows**: `SpawnInGroup` returns `NotSupported`; use an owned guard API
+- **Owned adoption**: post-spawn acquisition reports "unproven"
 
 ## Adapter Pattern
 
@@ -183,11 +189,11 @@ type LegacyAdapter struct{}
 
 ### Windows
 
-- Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+- Owned Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
 - Nested Job Objects may prevent grouping (common in containers)
 - No true signal semantics; `TerminateProcess` is immediate
 
-**Note:** On Windows, sysprims uses Job Objects where possible. v0.1.6 does not expose a stable Job token in the API surface yet; tree kill without a Job is best-effort.
+**Note:** On Windows, only the Rust owned guard currently retains a stable Job token. PID-only tree kill remains best-effort, and PID-returning grouped spawn fails closed.
 
 ### Containers
 
@@ -212,7 +218,7 @@ type LegacyAdapter struct{}
 | `PermissionDenied` | Cannot access process  | Fall back to legacy or alert   |
 | `InvalidArgument`  | Invalid PID (0, etc.)  | Bug in caller; fix immediately |
 
-**Note on grouping failures:** When Job Object creation fails (Windows) or `setpgid` fails (Unix), sysprims typically degrades gracefully rather than returning an error. Check `tree_kill_reliability` in the result and `warnings` array for degradation details.
+**Note on grouping failures:** Owned containment APIs fail closed when no capability can be established. Legacy timeout APIs may degrade to direct-child behavior; check `tree_kill_reliability` and `warnings`.
 
 ## References
 

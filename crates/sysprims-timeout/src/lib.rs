@@ -39,7 +39,7 @@
 //! }
 //! ```
 
-use std::process::ExitStatus;
+use std::process::{Child, Command, ExitStatus};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -113,8 +113,8 @@ impl Default for TimeoutConfig {
 
 /// Reliability of tree-kill operation.
 ///
-/// Indicates whether the timeout was able to guarantee killing the entire
-/// process tree, or had to fall back to best-effort single-process kill.
+/// Distinguishes proven containment, post-spawn containment with an escape
+/// window, and direct-child best effort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeKillReliability {
@@ -122,9 +122,303 @@ pub enum TreeKillReliability {
     /// was successfully created and used.
     Guaranteed,
 
+    /// A containment capability is owned, but it was attached after the child
+    /// started and descendants may have escaped before attachment completed.
+    Unproven,
+
     /// Best-effort only. Process group or Job Object creation failed;
     /// only the direct child was killed. Grandchildren may have escaped.
     BestEffort,
+}
+
+impl TreeKillReliability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Guaranteed => "guaranteed",
+            Self::Unproven => "unproven",
+            Self::BestEffort => "best_effort",
+        }
+    }
+}
+
+/// Stable process evidence captured when containment is acquired.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContainmentIdentity {
+    pub pid: u32,
+    pub start_time_unix_ms: u64,
+    pub exe_path: String,
+}
+
+/// Minimal owned-child contract used by [`ContainmentGuard`].
+///
+/// Consumers can wrap an external child type without exposing PTY handles or
+/// terminal data to sysprims.
+pub trait ContainmentChild {
+    fn process_id(&self) -> Option<u32>;
+    /// Poll and reap the child when it has exited.
+    fn try_wait(&mut self) -> std::io::Result<bool>;
+
+    #[cfg(windows)]
+    fn raw_process_handle(&self) -> Option<std::os::windows::io::RawHandle>;
+}
+
+impl ContainmentChild for Child {
+    fn process_id(&self) -> Option<u32> {
+        Some(self.id())
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<bool> {
+        Child::try_wait(self).map(|status| status.is_some())
+    }
+
+    #[cfg(windows)]
+    fn raw_process_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+        use std::os::windows::io::AsRawHandle;
+        Some(self.as_raw_handle())
+    }
+}
+
+/// Error returned when containment cannot be acquired.
+///
+/// The child is returned so acquisition failure never silently loses the
+/// caller's only reap handle.
+pub struct ContainmentAdoptionError<C> {
+    pub error: SysprimsError,
+    pub child: C,
+}
+
+impl<C> std::fmt::Debug for ContainmentAdoptionError<C> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ContainmentAdoptionError")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<C> std::fmt::Display for ContainmentAdoptionError<C> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl<C> std::error::Error for ContainmentAdoptionError<C> {}
+
+/// Error returned when an owned contained spawn cannot complete.
+#[derive(Debug)]
+pub enum ContainmentSpawnError {
+    Spawn(SysprimsError),
+    Adoption(SysprimsError),
+}
+
+impl std::fmt::Display for ContainmentSpawnError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Spawn(error) => error.fmt(formatter),
+            Self::Adoption(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ContainmentSpawnError {}
+
+/// An owned, stateful containment capability and child lifecycle.
+///
+/// Termination and normal completion mutably borrow the guard and are one-shot.
+/// Dropping an active guard kills the contained tree and makes a bounded attempt
+/// to reap the child. The guard never reconstructs containment from a
+/// caller-supplied PID.
+pub struct ContainmentGuard<C: ContainmentChild> {
+    child: Option<C>,
+    identity: ContainmentIdentity,
+    reliability: TreeKillReliability,
+    finalized: bool,
+    #[cfg(unix)]
+    pgid: u32,
+    #[cfg(unix)]
+    session_id: u32,
+    #[cfg(windows)]
+    job: std::os::windows::io::OwnedHandle,
+}
+
+impl<C: ContainmentChild> ContainmentGuard<C> {
+    pub fn identity(&self) -> &ContainmentIdentity {
+        &self.identity
+    }
+
+    pub fn tree_kill_reliability(&self) -> TreeKillReliability {
+        self.reliability
+    }
+
+    /// Recover the child adapter after successful termination or completion.
+    pub fn into_child(mut self) -> Result<C, Self> {
+        if self.finalized {
+            Ok(self
+                .child
+                .take()
+                .expect("finalized guard retains its child"))
+        } else {
+            Err(self)
+        }
+    }
+
+    /// Finalize a normally exited child without surrendering containment early.
+    ///
+    /// This observes leader exit without reaping. When the leader has exited,
+    /// the method cleans any remaining descendants before reaping and returns
+    /// the resulting outcome. It returns `Ok(None)` while the leader is running.
+    pub fn try_complete(
+        &mut self,
+        config: TerminateTreeConfig,
+    ) -> SysprimsResult<Option<ContainmentOutcome>> {
+        if self.finalized {
+            return Err(SysprimsError::invalid_argument(
+                "containment guard has already been finalized",
+            ));
+        }
+
+        #[cfg(unix)]
+        if !unix::contained_child_has_exited(self)? {
+            return Ok(None);
+        }
+
+        #[cfg(windows)]
+        if !windows::contained_child_has_exited(self)? {
+            return Ok(None);
+        }
+
+        self.terminate(config).map(Some)
+    }
+
+    /// Terminate the owned containment once, preserving the child until reap.
+    pub fn terminate(&mut self, config: TerminateTreeConfig) -> SysprimsResult<ContainmentOutcome> {
+        if self.finalized {
+            return Err(SysprimsError::invalid_argument(
+                "containment guard has already been finalized",
+            ));
+        }
+
+        #[cfg(unix)]
+        return unix::terminate_contained_impl(self, config);
+
+        #[cfg(windows)]
+        return windows::terminate_contained_impl(self, config);
+    }
+}
+
+impl<C: ContainmentChild> Drop for ContainmentGuard<C> {
+    fn drop(&mut self) {
+        if self.finalized || self.child.is_none() {
+            return;
+        }
+
+        #[cfg(unix)]
+        unix::drop_contained_impl(self);
+
+        #[cfg(windows)]
+        windows::drop_contained_impl(self);
+    }
+}
+
+/// Result from terminating an owned containment guard.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContainmentOutcome {
+    pub identity: ContainmentIdentity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pgid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal_sent: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kill_signal: Option<i32>,
+    pub escalated: bool,
+    pub exited: bool,
+    pub timed_out: bool,
+    pub tree_kill_reliability: TreeKillReliability,
+    pub warnings: Vec<String>,
+}
+
+/// Adopt an already-running child into an owned containment guard.
+///
+/// Post-spawn adoption is reported as [`TreeKillReliability::Unproven`]
+/// because descendants may escape before acquisition completes.
+pub fn adopt_contained<C: ContainmentChild>(
+    child: C,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
+    #[cfg(unix)]
+    return unix::adopt_contained_impl(child);
+
+    #[cfg(windows)]
+    return windows::adopt_contained_impl(child);
+}
+
+/// Spawn a standard-library child and return its owned containment guard.
+///
+/// Unix establishes the process group before exec and reports guaranteed
+/// acquisition. Windows fails closed until a create-suspended Job assignment
+/// path is available; use [`adopt_contained`] for explicitly unproven adoption.
+pub fn spawn_contained(command: Command) -> Result<ContainmentGuard<Child>, ContainmentSpawnError> {
+    #[cfg(unix)]
+    return unix::spawn_contained_impl(command);
+
+    #[cfg(windows)]
+    return windows::spawn_contained_impl(command);
+}
+
+fn capture_containment_identity(pid: u32) -> SysprimsResult<ContainmentIdentity> {
+    if pid == 0 || pid > sysprims_signal::MAX_SAFE_PID {
+        return Err(SysprimsError::invalid_argument(format!(
+            "pid {pid} is outside the safe process identity range"
+        )));
+    }
+
+    let process = sysprims_proc::get_process(pid)?;
+    let start_time_unix_ms = process.start_time_unix_ms.ok_or_else(|| {
+        SysprimsError::system(
+            "process start time unavailable during containment acquisition",
+            0,
+        )
+    })?;
+    let exe_path = process
+        .exe_path
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            SysprimsError::system(
+                "process executable unavailable during containment acquisition",
+                0,
+            )
+        })?;
+
+    Ok(ContainmentIdentity {
+        pid,
+        start_time_unix_ms,
+        exe_path,
+    })
+}
+
+#[cfg(unix)]
+fn verify_containment_identity(expected: &ContainmentIdentity) -> SysprimsResult<bool> {
+    let process = match sysprims_proc::get_process(expected.pid) {
+        Ok(process) => process,
+        Err(SysprimsError::NotFound { .. } | SysprimsError::PermissionDenied { .. }) => {
+            return Ok(false);
+        }
+        Err(error) => return Err(error),
+    };
+
+    if process
+        .start_time_unix_ms
+        .is_some_and(|actual| actual != expected.start_time_unix_ms)
+        || process
+            .exe_path
+            .as_deref()
+            .is_some_and(|actual| actual != expected.exe_path)
+    {
+        return Err(SysprimsError::invalid_argument(
+            "process identity changed; refusing containment operation",
+        ));
+    }
+
+    Ok(process.start_time_unix_ms.is_some() && process.exe_path.is_some())
 }
 
 // =============================================================================
@@ -238,10 +532,13 @@ pub struct SpawnInGroupResult {
     pub warnings: Vec<String>,
 }
 
-/// Spawn a process in a new process group (Unix) or Job Object (Windows).
+/// Spawn a process in a new process group on Unix.
 ///
 /// Use this when you would otherwise shell out to `setsid`/wrapper scripts to
 /// make jobs kill-tree safe.
+///
+/// On Windows, this PID-returning compatibility API fails closed because it
+/// cannot retain an owned Job handle. Use [`spawn_contained`] instead.
 ///
 /// # Examples
 ///
@@ -338,31 +635,10 @@ pub fn terminate_tree(
     }
 
     #[cfg(windows)]
-    {
-        // If this PID was spawned via spawn_in_group_impl(), we may have a Job Object.
-        // Prefer terminating the Job Object for better tree coverage.
-        if crate::windows::terminate_job_for_pid(pid).is_some() {
-            warnings.push("Terminated via Job Object (spawn_in_group)".to_string());
-
-            let grace_wait = wait_pid(pid, Duration::from_millis(config.grace_timeout_ms))?;
-            return Ok(TerminateTreeResult {
-                schema_id: TERMINATE_TREE_RESULT_V1,
-                timestamp: now_rfc3339(),
-                platform: get_platform(),
-                pid,
-                pgid: None,
-                signal_sent: config.signal,
-                kill_signal: None,
-                escalated: false,
-                exited: grace_wait.exited,
-                timed_out: grace_wait.timed_out,
-                tree_kill_reliability: "guaranteed".to_string(),
-                warnings,
-            });
-        }
-
-        warnings.push("Windows PID termination is best-effort without Job Object".to_string());
-    }
+    warnings.push(
+        "Windows PID termination is best-effort; use an owned containment guard for Job Objects"
+            .to_string(),
+    );
 
     // Step 1: send graceful signal
     // If group kill fails (e.g. permission-limited), fall back to PID kill.
@@ -398,10 +674,7 @@ pub fn terminate_tree(
             escalated: false,
             exited: true,
             timed_out: false,
-            tree_kill_reliability: match reliability {
-                TreeKillReliability::Guaranteed => "guaranteed".to_string(),
-                TreeKillReliability::BestEffort => "best_effort".to_string(),
-            },
+            tree_kill_reliability: reliability.as_str().to_string(),
             warnings,
         });
     }
@@ -462,10 +735,7 @@ pub fn terminate_tree(
         escalated: true,
         exited,
         timed_out,
-        tree_kill_reliability: match reliability {
-            TreeKillReliability::Guaranteed => "guaranteed".to_string(),
-            TreeKillReliability::BestEffort => "best_effort".to_string(),
-        },
+        tree_kill_reliability: reliability.as_str().to_string(),
         warnings,
     })
 }
@@ -575,6 +845,23 @@ mod tests {
     use super::*;
     use std::process::{Command, Stdio};
 
+    struct ChildWithoutPid;
+
+    impl ContainmentChild for ChildWithoutPid {
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+
+        fn try_wait(&mut self) -> std::io::Result<bool> {
+            Ok(false)
+        }
+
+        #[cfg(windows)]
+        fn raw_process_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+
     #[test]
     fn default_config_uses_sigterm() {
         let config = TimeoutConfig::default();
@@ -597,6 +884,23 @@ mod tests {
     fn default_config_does_not_preserve_status() {
         let config = TimeoutConfig::default();
         assert!(!config.preserve_status);
+    }
+
+    #[test]
+    fn reliability_strings_include_unproven() {
+        assert_eq!(TreeKillReliability::Guaranteed.as_str(), "guaranteed");
+        assert_eq!(TreeKillReliability::Unproven.as_str(), "unproven");
+        assert_eq!(TreeKillReliability::BestEffort.as_str(), "best_effort");
+    }
+
+    #[test]
+    fn failed_adoption_returns_child_ownership() {
+        let error = match adopt_contained(ChildWithoutPid) {
+            Ok(_) => panic!("adoption without a pid must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(error.error, SysprimsError::InvalidArgument { .. }));
+        assert!(error.child.process_id().is_none());
     }
 
     #[test]
