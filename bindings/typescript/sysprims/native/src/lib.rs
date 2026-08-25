@@ -113,6 +113,32 @@ fn err_void(err: SysprimsError) -> SysprimsCallVoidResult {
     }
 }
 
+fn validate_number(value: f64, name: &str, min: f64, max: f64) -> Result<f64, SysprimsError> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return Err(SysprimsError::invalid_argument(format!(
+            "{name} must be a finite integer"
+        )));
+    }
+    if value < min || value > max {
+        return Err(SysprimsError::invalid_argument(format!(
+            "{name} must be between {min:.0} and {max:.0}"
+        )));
+    }
+    Ok(value)
+}
+
+fn validate_pid_number(value: f64, name: &str) -> Result<u32, SysprimsError> {
+    validate_number(value, name, 1.0, MAX_SAFE_PID as f64).map(|value| value as u32)
+}
+
+fn validate_u32_number(value: f64, name: &str) -> Result<u32, SysprimsError> {
+    validate_number(value, name, 0.0, u32::MAX as f64).map(|value| value as u32)
+}
+
+fn validate_i32_number(value: f64, name: &str) -> Result<i32, SysprimsError> {
+    validate_number(value, name, i32::MIN as f64, i32::MAX as f64).map(|value| value as i32)
+}
+
 #[napi]
 pub fn sysprims_abi_version() -> u32 {
     1
@@ -223,7 +249,7 @@ struct GuardConfigWire {
     rule: GuardRuleWire,
     action: GuardActionWire,
     action_enabled: bool,
-    max_targets: u32,
+    max_targets: Option<u32>,
 }
 
 fn process_filter_has_criteria(filter: &ProcessFilter) -> bool {
@@ -290,6 +316,11 @@ fn parse_guard_config(config_json: &str) -> Result<GuardConfig, SysprimsError> {
             cascade: wire.action.cascade,
         },
     };
+    let max_targets = match wire.max_targets {
+        Some(0) => return Err(SysprimsError::invalid_argument("max_targets must be >= 1")),
+        Some(value) => value,
+        None => 64,
+    };
 
     Ok(GuardConfig {
         rule: GuardRule {
@@ -301,21 +332,21 @@ fn parse_guard_config(config_json: &str) -> Result<GuardConfig, SysprimsError> {
         },
         action,
         action_enabled: wire.action_enabled,
-        max_targets: if wire.max_targets == 0 {
-            64
-        } else {
-            wire.max_targets
-        },
+        max_targets,
     })
 }
 
 #[napi]
-pub fn sysprims_proc_get(pid: u32) -> SysprimsCallJsonResult {
+pub fn sysprims_proc_get(pid: f64) -> SysprimsCallJsonResult {
     sysprims_proc_get_ex(pid, String::new())
 }
 
 #[napi]
-pub fn sysprims_proc_get_ex(pid: u32, options_json: String) -> SysprimsCallJsonResult {
+pub fn sysprims_proc_get_ex(pid: f64, options_json: String) -> SysprimsCallJsonResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     let options = match parse_process_options(&options_json) {
         Ok(o) => o,
         Err(e) => return err_json(e),
@@ -408,7 +439,11 @@ pub fn sysprims_proc_listening_ports(filter_json: String) -> SysprimsCallJsonRes
 }
 
 #[napi]
-pub fn sysprims_proc_list_fds(pid: u32, filter_json: String) -> SysprimsCallJsonResult {
+pub fn sysprims_proc_list_fds(pid: f64, filter_json: String) -> SysprimsCallJsonResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     let filter = if filter_json.is_empty() || filter_json == "{}" {
         FdFilter::default()
     } else {
@@ -440,7 +475,15 @@ pub fn sysprims_proc_list_fds(pid: u32, filter_json: String) -> SysprimsCallJson
 }
 
 #[napi]
-pub fn sysprims_proc_wait_pid(pid: u32, timeout_ms: u32) -> SysprimsCallJsonResult {
+pub fn sysprims_proc_wait_pid(pid: f64, timeout_ms: f64) -> SysprimsCallJsonResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
+    let timeout_ms = match validate_u32_number(timeout_ms, "timeout_ms") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     match sysprims_proc::wait_pid(pid, Duration::from_millis(timeout_ms as u64)) {
         Ok(result) => match serde_json::to_string(&result) {
             Ok(json) => ok_json(json),
@@ -459,12 +502,25 @@ pub fn sysprims_proc_wait_pid(pid: u32, timeout_ms: u32) -> SysprimsCallJsonResu
 
 #[napi]
 pub fn sysprims_proc_descendants(
-    root_pid: u32,
-    max_levels: u32,
+    root_pid: f64,
+    max_levels: f64,
     config_json: String,
+    options_json: Option<String>,
 ) -> SysprimsCallJsonResult {
+    let root_pid = match validate_pid_number(root_pid, "root_pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
+    let max_levels = match validate_u32_number(max_levels, "max_levels") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     let parsed = match parse_descendants_config(&config_json) {
         Ok(c) => c,
+        Err(e) => return err_json(e),
+    };
+    let options = match parse_process_options(options_json.as_deref().unwrap_or_default()) {
+        Ok(o) => o,
         Err(e) => return err_json(e),
     };
 
@@ -476,7 +532,7 @@ pub fn sysprims_proc_descendants(
         sample_duration: parsed.sample_duration,
     };
 
-    match descendants_with_config_and_options(config, ProcessOptions::default()) {
+    match descendants_with_config_and_options(config, options) {
         Ok(result) => match serde_json::to_string(&result) {
             Ok(json) => ok_json(json),
             Err(e) => err_json(SysprimsError::internal(format!(
@@ -490,11 +546,23 @@ pub fn sysprims_proc_descendants(
 
 #[napi]
 pub fn sysprims_proc_kill_descendants(
-    root_pid: u32,
-    max_levels: u32,
-    signal: i32,
+    root_pid: f64,
+    max_levels: f64,
+    signal: f64,
     config_json: String,
 ) -> SysprimsCallJsonResult {
+    let root_pid = match validate_pid_number(root_pid, "root_pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
+    let max_levels = match validate_u32_number(max_levels, "max_levels") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
+    let signal = match validate_i32_number(signal, "signal") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     let parsed = match parse_descendants_config(&config_json) {
         Ok(c) => c,
         Err(e) => return err_json(e),
@@ -591,10 +659,18 @@ pub fn sysprims_proc_guard_step(config_json: String) -> SysprimsCallJsonResult {
 
 #[napi]
 pub fn sysprims_proc_ancestors(
-    pid: u32,
-    max_depth: u32,
+    pid: f64,
+    max_depth: f64,
     options_json: String,
 ) -> SysprimsCallJsonResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
+    let max_depth = match validate_u32_number(max_depth, "max_depth") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     let options = if options_json.is_empty() {
         ProcessOptions::default()
     } else {
@@ -687,7 +763,15 @@ pub fn sysprims_self_getsid() -> SysprimsCallU32Result {
 // -----------------------------------------------------------------------------
 
 #[napi]
-pub fn sysprims_signal_send(pid: u32, signal: i32) -> SysprimsCallVoidResult {
+pub fn sysprims_signal_send(pid: f64, signal: f64) -> SysprimsCallVoidResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
+    let signal = match validate_i32_number(signal, "signal") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
     match sysprims_signal::kill(pid, signal) {
         Ok(()) => ok_void(),
         Err(e) => err_void(e),
@@ -695,7 +779,15 @@ pub fn sysprims_signal_send(pid: u32, signal: i32) -> SysprimsCallVoidResult {
 }
 
 #[napi]
-pub fn sysprims_signal_send_group(pgid: u32, signal: i32) -> SysprimsCallVoidResult {
+pub fn sysprims_signal_send_group(pgid: f64, signal: f64) -> SysprimsCallVoidResult {
+    let pgid = match validate_pid_number(pgid, "pgid") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
+    let signal = match validate_i32_number(signal, "signal") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
     match sysprims_signal::killpg(pgid, signal) {
         Ok(()) => ok_void(),
         Err(e) => err_void(e),
@@ -703,7 +795,11 @@ pub fn sysprims_signal_send_group(pgid: u32, signal: i32) -> SysprimsCallVoidRes
 }
 
 #[napi]
-pub fn sysprims_terminate(pid: u32) -> SysprimsCallVoidResult {
+pub fn sysprims_terminate(pid: f64) -> SysprimsCallVoidResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
     match sysprims_signal::terminate(pid) {
         Ok(()) => ok_void(),
         Err(e) => err_void(e),
@@ -711,7 +807,11 @@ pub fn sysprims_terminate(pid: u32) -> SysprimsCallVoidResult {
 }
 
 #[napi]
-pub fn sysprims_force_kill(pid: u32) -> SysprimsCallVoidResult {
+pub fn sysprims_force_kill(pid: f64) -> SysprimsCallVoidResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
     match sysprims_signal::force_kill(pid) {
         Ok(()) => ok_void(),
         Err(e) => err_void(e),
@@ -762,7 +862,11 @@ impl From<WireTerminateTreeConfig> for TerminateTreeConfig {
 }
 
 #[napi]
-pub fn sysprims_terminate_tree(pid: u32, config_json: String) -> SysprimsCallJsonResult {
+pub fn sysprims_terminate_tree(pid: f64, config_json: String) -> SysprimsCallJsonResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
     let cfg = if config_json.is_empty() || config_json == "{}" {
         TerminateTreeConfig::default()
     } else {
@@ -1162,5 +1266,40 @@ pub fn sysprims_spawn_in_group(config_json: String) -> SysprimsCallJsonResult {
             ))),
         },
         Err(e) => err_json(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_boundary_rejects_lossy_js_numbers() {
+        for value in [f64::NAN, f64::INFINITY, -1.0, 1.5, 4_294_967_297.0] {
+            assert!(validate_pid_number(value, "pid").is_err());
+        }
+        assert!(validate_u32_number(4_294_967_297.0, "depth").is_err());
+        assert!(validate_i32_number(2_147_483_648.0, "signal").is_err());
+        assert_eq!(validate_pid_number(1.0, "pid").unwrap(), 1);
+        assert_eq!(
+            validate_pid_number(MAX_SAFE_PID as f64, "pid").unwrap(),
+            MAX_SAFE_PID
+        );
+    }
+
+    #[test]
+    fn guard_max_targets_distinguishes_omitted_from_zero() {
+        let defaulted = parse_guard_config(&format!(
+            r#"{{"rule":{{"root_pid":{}}},"action_enabled":false}}"#,
+            std::process::id()
+        ))
+        .unwrap();
+        assert_eq!(defaulted.max_targets, 64);
+
+        let explicit_zero = parse_guard_config(&format!(
+            r#"{{"rule":{{"root_pid":{}}},"action_enabled":false,"max_targets":0}}"#,
+            std::process::id()
+        ));
+        assert!(explicit_zero.is_err());
     }
 }

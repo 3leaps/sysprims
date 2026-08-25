@@ -31,6 +31,35 @@ npm run build:test
 
 Native prebuild artifacts are produced by the repository release workflows.
 
+### Repository Public API Drift Checks
+
+The checked-in [public API reference](docs/public-api.md) is generated from
+emitted declarations and checked against the reviewed capability contract, the
+committed C header, and the N-API inventory.
+
+These are repository-development commands. The generator scripts are not part
+of the published runtime package.
+
+```bash
+npm run api:generate      # update docs/public-api.md
+npm run api:check         # generate in a temporary directory and compare
+npm run api:check:native  # also require and inspect a built local addon
+```
+
+Run `npm run build:native` before `api:check:native`. The regular check inspects
+the addon automatically when one is available and otherwise validates the
+static, source-independent N-API contract used by pull requests without native
+artifacts.
+
+To inventory a freshly generated header instead of the committed default, set
+`SYSPRIMS_C_HEADER=/path/to/sysprims.h` or pass `--c-header /path/to/sysprims.h`
+directly to `node scripts/public-api.js check`.
+
+`make typescript-api-check` remains a standalone repository target rather than
+part of `make check`: the general Rust gate does not install Node dependencies.
+Pull-request CI runs `npm ci` before the drift check and also generates a fresh
+C header for comparison with current Rust exports.
+
 ## API
 
 ### Process Inspection
@@ -42,6 +71,12 @@ Native prebuild artifacts are produced by the repository release workflows.
 - `listFds(pid, filter?)`
 - `listeningPorts(filter?)`
 - `waitPID(pid, timeoutMs)`
+
+`descendants(pid, options?)` collects environment and thread details only when
+`includeEnv` or `includeThreads` is explicitly enabled. These options are off by
+default. Environment values may contain secrets, platform permissions can limit
+the available detail, and enriching an entire process tree can increase result
+size and latency.
 
 ### Guard And Tree Operations
 

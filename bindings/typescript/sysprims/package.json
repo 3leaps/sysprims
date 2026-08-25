@@ -13,6 +13,8 @@
   "files": [
     "dist/",
     "native/",
+    "docs/capability-intent-matrix.md",
+    "docs/public-api.md",
     "README.md",
     "LICENSE"
   ],
@@ -39,6 +41,9 @@
     "build:native": "napi build --cargo-cwd native --release --platform --strip dist/native",
     "build": "tsc -p tsconfig.build.json",
     "build:test": "tsc -p tsconfig.test.json",
+    "api:generate": "node scripts/public-api.js generate",
+    "api:check": "node --test scripts/public-api.test.js && node scripts/public-api.js check",
+    "api:check:native": "node scripts/public-api.js check --require-native",
     "test": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
     "test:ci": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"

@@ -13,7 +13,7 @@
 .PHONY: all help bootstrap bootstrap-force tools check test fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
-.PHONY: build-release build-ffi cbindgen
+.PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
@@ -71,6 +71,8 @@ help: ## Show available targets
 	@echo "  go-test             Run Go binding tests"
 	@echo "  header-go           Generate C header for Go bindings"
 	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
+	@echo "  typescript-api-generate  Generate TypeScript public API documentation"
+	@echo "  typescript-api-check     Check TypeScript capability/export/doc drift"
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
@@ -329,6 +331,12 @@ typecheck: ## Run TypeScript type checking
 	@echo "Type checking TypeScript bindings..."
 	@cd bindings/typescript/sysprims && npx tsc --noEmit -p tsconfig.test.json
 	@echo "[ok] TypeScript type check passed"
+
+typescript-api-generate: ## Generate checked-in TypeScript public API documentation
+	@cd bindings/typescript/sysprims && npm run api:generate
+
+typescript-api-check: ## Check TypeScript capability, export, and documentation drift
+	@cd bindings/typescript/sysprims && npm run api:check
 
 deny: ## Run cargo-deny license and advisory checks
 	@echo "Running cargo-deny..."

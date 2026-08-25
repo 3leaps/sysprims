@@ -40,7 +40,7 @@ function main() {
     process.exit(1);
   }
 
-  const args = ["--test", ...candidates];
+  const args = process.versions.bun ? ["test", ...candidates] : ["--test", ...candidates];
   const res = spawnSync(process.execPath, args, {
     stdio: "inherit",
     cwd: packageRoot,

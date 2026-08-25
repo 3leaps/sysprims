@@ -11,6 +11,7 @@ env:
   # and in go-bindings.yml / release.yml together when advancing. See
   # docs/standards/platform-support.md for toolchain policy.
   LLVM_MINGW_VERSION: '20260407'
+  CBINDGEN_VERSION: '0.29.2'
 jobs:
   format:
     name: Format Check
@@ -35,6 +36,29 @@ jobs:
         run: bash scripts/check-planning-hygiene.sh
       - name: npm trusted publishing runtime guard
         run: bash scripts/check-npm-trusted-publish-runtime.sh
+  typescript-api-drift:
+    name: TypeScript API Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bindings/typescript/sysprims/package-lock.json
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Install pinned cbindgen
+        run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
+      - name: Install TypeScript tooling
+        working-directory: bindings/typescript/sysprims
+        run: npm ci
+      - name: Generate current C header
+        run: cbindgen --config cbindgen.toml --crate sysprims-ffi --output "${RUNNER_TEMP}/sysprims.h"
+      - name: Check capability, export, and documentation drift
+        working-directory: bindings/typescript/sysprims
+        env:
+          SYSPRIMS_C_HEADER: ${{ runner.temp }}/sysprims.h
+        run: npm run api:check
   windows-cross-check:
     name: Windows Cross-Target Check (no SDK)
     runs-on: ubuntu-latest
@@ -185,7 +209,7 @@ jobs:
           if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
       - name: Install cbindgen
-        run: cargo install cbindgen --locked
+        run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
       - name: Build FFI library (Unix)
         if: runner.os != 'Windows'
         run: cargo build --release -p sysprims-ffi
