@@ -5,7 +5,17 @@ const path = require("node:path");
 const test = require("node:test");
 
 const contract = require("./public-api-contract.json");
-const { emitDeclarations, inspectPublicExports, renderDocument } = require("./public-api");
+const {
+  emitDeclarations,
+  inspectPublicExports,
+  normalizeLineEndings,
+  renderDocument,
+} = require("./public-api");
+
+test("matrix content is stable across checkout line endings", () => {
+  const markdown = "# Matrix\n\n| Surface | Policy |\n| --- | --- |\n";
+  assert.equal(normalizeLineEndings(markdown.replaceAll("\n", "\r\n")), markdown);
+});
 
 test("generated API changes when an exported member or union changes", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sysprims-api-shape-"));

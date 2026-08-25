@@ -17,6 +17,10 @@ function sorted(value) {
   return [...value].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
+function normalizeLineEndings(value) {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 function compareNames(label, actual, expected) {
   const actualNames = sorted(actual);
   const expectedNames = sorted(expected);
@@ -143,7 +147,7 @@ function compareClassifiedSurface(label, actual, expected) {
 
 function verifyMatrix() {
   const matrixPath = path.join(packageRoot, "docs", "capability-intent-matrix.md");
-  const markdown = fs.readFileSync(matrixPath, "utf8");
+  const markdown = normalizeLineEndings(fs.readFileSync(matrixPath, "utf8"));
   const digest = crypto.createHash("sha256").update(markdown).digest("hex");
   if (digest !== contract.matrixSha256) {
     fail("Capability intent matrix changed; an approved contract manifest update is required");
@@ -462,4 +466,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { emitDeclarations, inspectPublicExports, renderDocument };
+module.exports = { emitDeclarations, inspectPublicExports, normalizeLineEndings, renderDocument };
