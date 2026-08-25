@@ -245,14 +245,162 @@ where
 
 #[cfg(target_os = "linux")]
 fn observe_containment_completion(pgid: u32, session_id: u32) -> ContainmentCompletionEvidence {
-    stabilize_completion(ContainmentObservation::LinuxProcfsProcessGroup, || {
-        linux_group_snapshot(pgid, session_id)
+    use std::os::fd::AsRawFd;
+
+    let proc_directory = match std::fs::File::open("/proc") {
+        Ok(directory) => directory,
+        Err(_) => return unknown_completion(ContainmentObservation::LinuxProcfsProcessGroup),
+    };
+    let descriptor = proc_directory.as_raw_fd();
+    let fdinfo = match std::fs::read(format!("/proc/self/fdinfo/{descriptor}")) {
+        Ok(fdinfo) => fdinfo,
+        Err(_) => return unknown_completion(ContainmentObservation::LinuxProcfsProcessGroup),
+    };
+    let mountinfo = match std::fs::read("/proc/self/mountinfo") {
+        Ok(mountinfo) => mountinfo,
+        Err(_) => return unknown_completion(ContainmentObservation::LinuxProcfsProcessGroup),
+    };
+    let Some(mount_id) = linux_procfs_mount_id(&fdinfo) else {
+        return unknown_completion(ContainmentObservation::LinuxProcfsProcessGroup);
+    };
+    let proc_path = format!("/proc/self/fd/{descriptor}");
+    let proc_path = std::path::Path::new(&proc_path);
+
+    observe_linux_completion_with(
+        linux_procfs_visibility_is_complete(&mountinfo, mount_id)
+            && linux_procfs_matches_caller_namespace(proc_path),
+        || linux_group_snapshot(proc_path, pgid, session_id),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn observe_linux_completion_with<F>(
+    visibility_is_complete: bool,
+    snapshot: F,
+) -> ContainmentCompletionEvidence
+where
+    F: FnMut() -> Result<Vec<u32>, ()>,
+{
+    if !visibility_is_complete {
+        return unknown_completion(ContainmentObservation::LinuxProcfsProcessGroup);
+    }
+    stabilize_completion(ContainmentObservation::LinuxProcfsProcessGroup, snapshot)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_procfs_mount_id(fdinfo: &[u8]) -> Option<u64> {
+    fdinfo.split(|byte| *byte == b'\n').find_map(|line| {
+        let value = line.strip_prefix(b"mnt_id:")?;
+        std::str::from_utf8(value).ok()?.trim().parse().ok()
     })
 }
 
 #[cfg(target_os = "linux")]
-fn linux_group_snapshot(pgid: u32, session_id: u32) -> Result<Vec<u32>, ()> {
-    let entries = std::fs::read_dir("/proc").map_err(|_| ())?;
+fn linux_procfs_visibility_is_complete(mountinfo: &[u8], effective_mount_id: u64) -> bool {
+    let mut effective_mount_is_complete = false;
+    for line in mountinfo.split(|byte| *byte == b'\n') {
+        let Some(separator) = line.windows(3).position(|window| window == b" - ") else {
+            continue;
+        };
+        let mut mount_fields = line[..separator].split(|byte| byte.is_ascii_whitespace());
+        let mount_id = mount_fields
+            .next()
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        let _parent_id = mount_fields.next();
+        let _device = mount_fields.next();
+        let root = mount_fields.next();
+        let mount_point = mount_fields.next();
+        let mount_options = mount_fields.next();
+        let mut filesystem_fields = line[separator + 3..].split(|byte| byte.is_ascii_whitespace());
+        let filesystem_type = filesystem_fields.next();
+        let _mount_source = filesystem_fields.next();
+        let super_options = filesystem_fields.next();
+
+        if mount_point.is_some_and(linux_procfs_mount_masks_pid) {
+            return false;
+        }
+        if mount_id == Some(effective_mount_id) {
+            effective_mount_is_complete = root == Some(b"/".as_slice())
+                && mount_point == Some(b"/proc".as_slice())
+                && filesystem_type == Some(b"proc".as_slice())
+                && mount_options.is_some_and(linux_procfs_options_are_complete)
+                && super_options.is_some_and(linux_procfs_options_are_complete);
+        }
+    }
+    effective_mount_is_complete
+}
+
+#[cfg(target_os = "linux")]
+fn linux_procfs_mount_masks_pid(mount_point: &[u8]) -> bool {
+    let Some(relative) = mount_point.strip_prefix(b"/proc/") else {
+        return false;
+    };
+    let first_component = relative
+        .split(|byte| *byte == b'/')
+        .next()
+        .unwrap_or_default();
+    !first_component.is_empty() && first_component.iter().all(u8::is_ascii_digit)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_procfs_matches_caller_namespace(proc_path: &std::path::Path) -> bool {
+    let stat = match std::fs::read(proc_path.join("self/stat")) {
+        Ok(stat) => stat,
+        Err(_) => return false,
+    };
+    let caller_pgid = unsafe { libc::getpgid(0) };
+    let caller_session = unsafe { libc::getsid(0) };
+    if caller_pgid <= 0 || caller_session <= 0 {
+        return false;
+    }
+    linux_procfs_identity_matches(
+        &stat,
+        std::process::id(),
+        caller_pgid as u32,
+        caller_session as u32,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn linux_procfs_identity_matches(
+    stat: &[u8],
+    caller_pid: u32,
+    caller_pgid: u32,
+    caller_session: u32,
+) -> bool {
+    let Some(pid_end) = stat.iter().position(|byte| byte.is_ascii_whitespace()) else {
+        return false;
+    };
+    let Ok(procfs_pid) = std::str::from_utf8(&stat[..pid_end]) else {
+        return false;
+    };
+    let Ok(procfs_pid) = procfs_pid.parse::<u32>() else {
+        return false;
+    };
+    matches!(
+        parse_linux_stat_membership(stat),
+        Ok((_state, process_group, session))
+            if procfs_pid == caller_pid
+                && process_group == caller_pgid
+                && session == caller_session
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn linux_procfs_options_are_complete(options: &[u8]) -> bool {
+    options.split(|byte| *byte == b',').all(|option| {
+        !option.starts_with(b"hidepid") || matches!(option, b"hidepid=0" | b"hidepid=off")
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_group_snapshot(
+    proc_path: &std::path::Path,
+    pgid: u32,
+    session_id: u32,
+) -> Result<Vec<u32>, ()> {
+    let entries = std::fs::read_dir(proc_path).map_err(|_| ())?;
     let mut members = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_| ())?;
@@ -794,6 +942,71 @@ mod tests {
         assert_eq!(parse_linux_stat_membership(stat), Ok(('S', 17, 9)));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_procfs_visibility_rejects_restrictive_or_unverifiable_mounts() {
+        let unrestricted = b"29 24 0:25 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n";
+        let explicit_unrestricted = b"29 24 0:25 / /proc rw,nosuid,nodev,noexec,relatime,hidepid=0 - proc proc rw,hidepid=0\n";
+        let omitted_pid_visibility =
+            b"29 24 0:25 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw,hidepid=2\n";
+        let bind_mount = b"29 24 0:25 /123 /proc rw - proc proc rw\n";
+        let masked_pid =
+            b"29 24 0:25 / /proc rw - proc proc rw\n30 29 0:26 / /proc/123 rw - tmpfs tmpfs rw\n";
+
+        assert!(linux_procfs_visibility_is_complete(unrestricted, 29));
+        assert!(linux_procfs_visibility_is_complete(
+            explicit_unrestricted,
+            29
+        ));
+        assert!(!linux_procfs_visibility_is_complete(
+            omitted_pid_visibility,
+            29
+        ));
+        assert!(!linux_procfs_visibility_is_complete(bind_mount, 29));
+        assert!(!linux_procfs_visibility_is_complete(masked_pid, 29));
+        assert!(!linux_procfs_visibility_is_complete(
+            b"29 24 0:25 / /host-proc rw - proc proc rw\n",
+            29
+        ));
+        assert!(!linux_procfs_visibility_is_complete(b"malformed", 29));
+        assert!(!linux_procfs_visibility_is_complete(unrestricted, 30));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_restrictive_visibility_is_unknown_without_enumeration() {
+        let completion = observe_linux_completion_with(false, || {
+            panic!("restricted procfs must not be enumerated")
+        });
+        assert_eq!(
+            completion,
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+            }
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_procfs_mount_id_parser_reads_effective_mount() {
+        assert_eq!(
+            linux_procfs_mount_id(b"pos:\t0\nflags:\t0100000\nmnt_id:\t29\n"),
+            Some(29)
+        );
+        assert_eq!(linux_procfs_mount_id(b"mnt_id:\tnot-a-number\n"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_procfs_identity_must_match_caller_namespace() {
+        let stat = b"17 (observer) S 3 17 9 0 0";
+        assert!(linux_procfs_identity_matches(stat, 17, 17, 9));
+        assert!(!linux_procfs_identity_matches(stat, 1, 17, 9));
+        assert!(!linux_procfs_identity_matches(stat, 17, 4, 9));
+        assert!(!linux_procfs_identity_matches(stat, 17, 17, 5));
+        assert!(!linux_procfs_identity_matches(b"malformed", 17, 17, 9));
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_full_buffer_race_exhausts_bounded_retries() {
@@ -845,6 +1058,126 @@ mod tests {
                 observation: ContainmentObservation::MacosLibprocProcessGroup,
             }
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_owned_group_reports_survivors_and_guard_drop_cleans_them() {
+        use std::process::Stdio;
+
+        let mut command = Command::new("sleep");
+        command
+            .arg("60")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut guard = spawn_contained_impl(command).expect("contained spawn failed");
+        let pgid = guard.identity.pid;
+        let outcome = guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 10,
+                kill_timeout_ms: 25,
+                signal: libc::SIGSTOP,
+                kill_signal: libc::SIGSTOP,
+            })
+            .expect("contained observation failed");
+
+        match outcome.completion {
+            ContainmentCompletionEvidence::Survivors {
+                observation,
+                observed_count,
+                survivor_pids,
+            } => {
+                assert_eq!(
+                    observation,
+                    ContainmentObservation::MacosLibprocProcessGroup
+                );
+                assert_eq!(observed_count as usize, survivor_pids.len());
+                assert!(survivor_pids.contains(&pgid));
+            }
+            other => panic!("expected survivor evidence, got {other:?}"),
+        }
+        assert!(!outcome.exited);
+        assert!(outcome.timed_out);
+
+        drop(guard);
+        wait_for_macos_group_empty(pgid);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_owned_group_cleans_descendants_after_leader_exit() {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "(trap '' TERM; printf 'descendant-ready\\n'; sleep 60) & sleep 0.2",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut guard = spawn_contained_impl(command).expect("contained spawn failed");
+        let pgid = guard.identity.pid;
+        let stdout = guard
+            .child
+            .as_mut()
+            .and_then(|child| child.stdout.take())
+            .expect("contained child stdout unavailable");
+        let mut readiness = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut readiness)
+            .expect("failed to read descendant readiness");
+        assert_eq!(readiness, "descendant-ready\n");
+        assert!(
+            macos_group_snapshot(pgid)
+                .expect("failed to observe ready descendant")
+                .into_iter()
+                .any(|pid| pid != pgid),
+            "ready descendant was not live in the owned group"
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let outcome = loop {
+            if let Some(outcome) = guard
+                .try_complete(TerminateTreeConfig {
+                    grace_timeout_ms: 10,
+                    kill_timeout_ms: 500,
+                    ..TerminateTreeConfig::default()
+                })
+                .expect("contained completion failed")
+            {
+                break outcome;
+            }
+            assert!(Instant::now() < deadline, "group leader did not exit");
+            std::thread::sleep(POLL_INTERVAL);
+        };
+
+        assert!(outcome.exited);
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty {
+                observation: ContainmentObservation::MacosLibprocProcessGroup,
+            }
+        ));
+        wait_for_macos_group_empty(pgid);
+        assert!(guard.into_child().is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn wait_for_macos_group_empty(pgid: u32) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if matches!(macos_group_snapshot(pgid), Ok(members) if members.is_empty()) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "owned macOS process group still has live members"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        }
     }
 
     #[test]
