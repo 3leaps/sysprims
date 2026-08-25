@@ -444,7 +444,9 @@ function main() {
       fs.writeFileSync(outputPath, generated);
       console.log(`Generated ${path.relative(packageRoot, outputPath)}`);
     } else {
-      const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8") : "";
+      const current = fs.existsSync(outputPath)
+        ? normalizeLineEndings(fs.readFileSync(outputPath, "utf8"))
+        : "";
       if (current !== generated) {
         fail("Generated public API documentation is out of date; run npm run api:generate");
       }
