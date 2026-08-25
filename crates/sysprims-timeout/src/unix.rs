@@ -11,9 +11,11 @@ use libc::{killpg, SIGKILL};
 use sysprims_core::{SysprimsError, SysprimsResult};
 
 use crate::{
-    capture_containment_identity, verify_containment_identity, ContainmentAdoptionError,
-    ContainmentChild, ContainmentGuard, ContainmentOutcome, ContainmentSpawnError, GroupingMode,
-    TerminateTreeConfig, TimeoutConfig, TimeoutOutcome, TreeKillReliability,
+    capture_containment_identity, completion_from_pids, unknown_completion,
+    verify_containment_identity, ContainmentAdoptionError, ContainmentChild,
+    ContainmentCompletionEvidence, ContainmentGuard, ContainmentObservation, ContainmentOutcome,
+    ContainmentSpawnError, GroupingMode, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
+    TreeKillReliability, MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
 };
 use crate::{SpawnInGroupConfig, SpawnInGroupResult};
 use sysprims_core::get_platform;
@@ -160,7 +162,8 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         }
         #[cfg(target_os = "macos")]
         Err(error @ SysprimsError::PermissionDenied { .. }) if !identity_metadata_verified => {
-            if macos_group_has_live_descendants(guard.pgid, guard.identity.pid)? {
+            let completion = observe_containment_completion(guard.pgid, guard.session_id);
+            if !matches!(completion, ContainmentCompletionEvidence::Empty { .. }) {
                 return Err(error);
             }
             warnings.push(
@@ -189,7 +192,12 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         false
     };
 
-    let exited = wait_for_contained_child(child, Duration::from_millis(config.kill_timeout_ms))?;
+    let _ = wait_for_contained_child_exit(
+        guard.identity.pid,
+        Duration::from_millis(config.kill_timeout_ms),
+    );
+    let completion = observe_containment_completion(guard.pgid, guard.session_id);
+    let exited = reap_contained_child(child)?;
     if !exited {
         warnings.push("Timed out waiting to reap contained child".to_string());
     } else {
@@ -205,12 +213,99 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         exited,
         timed_out: !exited,
         tree_kill_reliability: guard.reliability,
+        completion,
         warnings,
     })
 }
 
+fn stabilize_completion<F>(
+    observation: ContainmentObservation,
+    mut snapshot: F,
+) -> ContainmentCompletionEvidence
+where
+    F: FnMut() -> Result<Vec<u32>, ()>,
+{
+    let mut previous = None;
+    for _ in 0..=MAX_COMPLETION_OBSERVATION_RETRIES {
+        let current = match snapshot() {
+            Ok(mut pids) => {
+                pids.sort_unstable();
+                pids
+            }
+            Err(()) => return unknown_completion(observation),
+        };
+        if previous.as_ref() == Some(&current) {
+            return completion_from_pids(observation, current);
+        }
+        previous = Some(current);
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    unknown_completion(observation)
+}
+
+#[cfg(target_os = "linux")]
+fn observe_containment_completion(pgid: u32, session_id: u32) -> ContainmentCompletionEvidence {
+    stabilize_completion(ContainmentObservation::LinuxProcfsProcessGroup, || {
+        linux_group_snapshot(pgid, session_id)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_group_snapshot(pgid: u32, session_id: u32) -> Result<Vec<u32>, ()> {
+    let entries = std::fs::read_dir("/proc").map_err(|_| ())?;
+    let mut members = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_| ())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == 0 || pid > sysprims_signal::MAX_SAFE_PID {
+            return Err(());
+        }
+        let stat = match std::fs::read(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(()),
+        };
+        let (state, process_group, session) = parse_linux_stat_membership(&stat)?;
+        if process_group == pgid && session == session_id && !matches!(state, 'Z' | 'X' | 'x') {
+            if members.len() == MAX_COMPLETION_OBSERVED_PIDS {
+                return Err(());
+            }
+            members.push(pid);
+        }
+    }
+    Ok(members)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_stat_membership(stat: &[u8]) -> Result<(char, u32, u32), ()> {
+    let end_paren = stat.iter().rposition(|byte| *byte == b')').ok_or(())?;
+    let suffix = std::str::from_utf8(&stat[end_paren + 1..]).map_err(|_| ())?;
+    let mut fields = suffix.split_whitespace();
+    let state = fields
+        .next()
+        .and_then(|value| value.chars().next())
+        .ok_or(())?;
+    let _parent_pid = fields.next().ok_or(())?;
+    let process_group = fields.next().ok_or(())?.parse().map_err(|_| ())?;
+    let session = fields.next().ok_or(())?.parse().map_err(|_| ())?;
+    Ok((state, process_group, session))
+}
+
 #[cfg(target_os = "macos")]
-fn macos_group_has_live_descendants(pgid: u32, leader_pid: u32) -> SysprimsResult<bool> {
+fn observe_containment_completion(pgid: u32, _session_id: u32) -> ContainmentCompletionEvidence {
+    stabilize_completion(ContainmentObservation::MacosLibprocProcessGroup, || {
+        macos_group_snapshot(pgid)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_group_snapshot(pgid: u32) -> Result<Vec<u32>, ()> {
     use std::ffi::c_void;
 
     const PROC_PGRP_ONLY: u32 = 2;
@@ -224,38 +319,65 @@ fn macos_group_has_live_descendants(pgid: u32, leader_pid: u32) -> SysprimsResul
         ) -> libc::c_int;
     }
 
-    let byte_count = unsafe { proc_listpids(PROC_PGRP_ONLY, pgid, std::ptr::null_mut(), 0) };
-    if byte_count < 0 {
-        return Err(SysprimsError::system(
-            "failed to size macOS process-group enumeration",
-            std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
-        ));
-    }
+    macos_group_snapshot_with(
+        |buffer| {
+            let written = match buffer {
+                None => unsafe { proc_listpids(PROC_PGRP_ONLY, pgid, std::ptr::null_mut(), 0) },
+                Some(buffer) => unsafe {
+                    proc_listpids(
+                        PROC_PGRP_ONLY,
+                        pgid,
+                        buffer.as_mut_ptr().cast(),
+                        std::mem::size_of_val(buffer) as libc::c_int,
+                    )
+                },
+            };
+            if written < 0 || !(written as usize).is_multiple_of(std::mem::size_of::<i32>()) {
+                return Err(());
+            }
+            Ok(written as usize / std::mem::size_of::<i32>())
+        },
+        |pid| sysprims_proc::is_live(pid).map_err(|_| ()),
+    )
+}
 
-    let mut pids = vec![0_i32; byte_count as usize / std::mem::size_of::<i32>() + 1];
-    let written = unsafe {
-        proc_listpids(
-            PROC_PGRP_ONLY,
-            pgid,
-            pids.as_mut_ptr().cast(),
-            (pids.len() * std::mem::size_of::<i32>()) as libc::c_int,
-        )
-    };
-    if written < 0 {
-        return Err(SysprimsError::system(
-            "failed to enumerate macOS process group",
-            std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
-        ));
-    }
-
-    let count = written as usize / std::mem::size_of::<i32>();
-    for pid in pids.into_iter().take(count).filter(|pid| *pid > 0) {
-        let pid = pid as u32;
-        if pid != leader_pid && sysprims_proc::is_live(pid)? {
-            return Ok(true);
+#[cfg(target_os = "macos")]
+fn macos_group_snapshot_with<F, L>(mut list: F, mut is_live: L) -> Result<Vec<u32>, ()>
+where
+    F: FnMut(Option<&mut [i32]>) -> Result<usize, ()>,
+    L: FnMut(u32) -> Result<bool, ()>,
+{
+    for _ in 0..=MAX_COMPLETION_OBSERVATION_RETRIES {
+        let reported = list(None)?;
+        if reported >= MAX_COMPLETION_OBSERVED_PIDS {
+            return Err(());
         }
+        let capacity = reported + 1;
+        let mut pids = Vec::new();
+        pids.try_reserve_exact(capacity).map_err(|_| ())?;
+        pids.resize(capacity, 0_i32);
+        let count = list(Some(&mut pids))?;
+        if count >= capacity {
+            continue;
+        }
+        let mut members = Vec::new();
+        for pid in pids.into_iter().take(count).filter(|pid| *pid > 0) {
+            let pid = pid as u32;
+            if pid > sysprims_signal::MAX_SAFE_PID {
+                return Err(());
+            }
+            if is_live(pid)? {
+                members.push(pid);
+            }
+        }
+        return Ok(members);
     }
-    Ok(false)
+    Err(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn observe_containment_completion(_pgid: u32, _session_id: u32) -> ContainmentCompletionEvidence {
+    unknown_completion(ContainmentObservation::UnsupportedPlatform)
 }
 
 pub fn contained_child_has_exited<C: ContainmentChild>(
@@ -322,6 +444,28 @@ fn wait_for_contained_child<C: ContainmentChild>(
             }
         }
     }
+}
+
+fn wait_for_contained_child_exit(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match sysprims_proc::is_live(pid) {
+            Ok(false) | Err(SysprimsError::NotFound { .. }) => return true,
+            Ok(true) | Err(_) if Instant::now() < deadline => {
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            Ok(true) | Err(_) => return false,
+        }
+    }
+}
+
+fn reap_contained_child<C: ContainmentChild>(child: &mut C) -> SysprimsResult<bool> {
+    child.try_wait().map_err(|error| {
+        SysprimsError::system(
+            format!("failed to reap contained child: {error}"),
+            error.raw_os_error().unwrap_or(0),
+        )
+    })
 }
 
 pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult> {
@@ -588,6 +732,10 @@ mod tests {
                 .expect("normal completion failed")
             {
                 assert!(outcome.exited);
+                assert!(matches!(
+                    outcome.completion,
+                    ContainmentCompletionEvidence::Empty { .. }
+                ));
                 break;
             }
             assert!(Instant::now() < deadline, "contained child did not exit");
@@ -595,6 +743,108 @@ mod tests {
         }
 
         assert!(guard.into_child().is_ok());
+    }
+
+    #[test]
+    fn completion_observation_requires_a_stable_snapshot() {
+        let mut attempts = 0;
+        let completion =
+            stabilize_completion(ContainmentObservation::LinuxProcfsProcessGroup, || {
+                attempts += 1;
+                Ok(if attempts == 1 {
+                    vec![41]
+                } else {
+                    vec![29, 41]
+                })
+            });
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            completion,
+            ContainmentCompletionEvidence::Survivors {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+                observed_count: 2,
+                survivor_pids: vec![29, 41],
+            }
+        );
+    }
+
+    #[test]
+    fn completion_observation_failure_is_unknown() {
+        assert_eq!(
+            stabilize_completion(ContainmentObservation::LinuxProcfsProcessGroup, || Err(())),
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+            }
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_stat_membership_parser_handles_complex_command_names() {
+        assert_eq!(
+            parse_linux_stat_membership(b"17 (worker ) pool) S 3 17 9 0 0"),
+            Ok(('S', 17, 9))
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_stat_membership_parser_ignores_non_utf8_command_names() {
+        let stat = b"17 (worker \xff pool) S 3 17 9 0 0";
+        assert_eq!(parse_linux_stat_membership(stat), Ok(('S', 17, 9)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_full_buffer_race_exhausts_bounded_retries() {
+        let mut fetches = 0;
+        let result = macos_group_snapshot_with(
+            |buffer| match buffer {
+                None => Ok(1),
+                Some(buffer) => {
+                    fetches += 1;
+                    Ok(buffer.len())
+                }
+            },
+            |_| Ok(true),
+        );
+        assert_eq!(fetches, MAX_COMPLETION_OBSERVATION_RETRIES + 1);
+        assert_eq!(result, Err(()));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_snapshot_returns_complete_live_members() {
+        let result = macos_group_snapshot_with(
+            |buffer| match buffer {
+                None => Ok(2),
+                Some(buffer) => {
+                    buffer[0] = 23;
+                    buffer[1] = 17;
+                    Ok(2)
+                }
+            },
+            |_| Ok(true),
+        );
+        assert_eq!(result, Ok(vec![23, 17]));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_snapshot_failure_is_unknown_completion() {
+        let completion =
+            stabilize_completion(ContainmentObservation::MacosLibprocProcessGroup, || {
+                macos_group_snapshot_with(
+                    |_| Err(()),
+                    |_| panic!("liveness must not run after enumeration failure"),
+                )
+            });
+        assert_eq!(
+            completion,
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::MacosLibprocProcessGroup,
+            }
+        );
     }
 
     #[test]

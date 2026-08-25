@@ -29,8 +29,9 @@ mod privileged {
 
     use sysprims_signal::SIGKILL;
     use sysprims_timeout::{
-        adopt_contained, run_with_timeout, spawn_contained, ContainmentChild, TerminateTreeConfig,
-        TimeoutConfig, TimeoutOutcome, TreeKillReliability,
+        adopt_contained, run_with_timeout, spawn_contained, ContainmentChild,
+        ContainmentCompletionEvidence, ContainmentObservation, TerminateTreeConfig, TimeoutConfig,
+        TimeoutOutcome, TreeKillReliability,
     };
 
     #[derive(Debug)]
@@ -259,6 +260,12 @@ mod privileged {
             .expect("contained termination failed");
 
         assert!(outcome.escalated, "trapped descendant requires escalation");
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+            }
+        ));
         thread::sleep(Duration::from_millis(200));
         assert_eq!(count_processes_in_group(pgid), 0);
     }
@@ -360,6 +367,16 @@ mod privileged {
             .expect("contained completion failed after leader exit")
             .expect("leader exit should be observed without an early reap");
         assert!(outcome.exited);
+        assert!(
+            matches!(
+                &outcome.completion,
+                ContainmentCompletionEvidence::Empty {
+                    observation: ContainmentObservation::LinuxProcfsProcessGroup,
+                }
+            ),
+            "unexpected completion evidence: {:?}",
+            outcome.completion
+        );
         assert!(outcome
             .warnings
             .iter()
@@ -373,6 +390,57 @@ mod privileged {
             .try_wait()
             .expect("child status should remain available")
             .is_some());
+    }
+
+    /// Verify live owned members are reported as evidence and cleaned on guard drop.
+    #[test]
+    fn adopted_guard_reports_survivors_without_resignaling_them() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sleep");
+        command.arg("60").stdin(Stdio::null());
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let child = command.spawn().expect("failed to spawn contained process");
+        let pgid = child.id();
+        let mut guard = adopt_contained(child).expect("failed to adopt process group");
+        let outcome = guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 10,
+                kill_timeout_ms: 25,
+                signal: libc::SIGSTOP,
+                kill_signal: libc::SIGSTOP,
+            })
+            .expect("contained observation failed");
+
+        match outcome.completion {
+            ContainmentCompletionEvidence::Survivors {
+                observation,
+                observed_count,
+                survivor_pids,
+            } => {
+                assert_eq!(observation, ContainmentObservation::LinuxProcfsProcessGroup);
+                assert_eq!(observed_count as usize, survivor_pids.len());
+                assert!(survivor_pids.contains(&pgid));
+            }
+            other => panic!("expected survivor evidence, got {other:?}"),
+        }
+        assert!(!outcome.exited);
+        assert!(outcome.timed_out);
+
+        drop(guard);
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(count_processes_in_group(pgid), 0);
     }
 
     /// Verify dropping an active guard kills its group and reaps its child.
@@ -424,12 +492,16 @@ mod privileged {
             guard.tree_kill_reliability(),
             TreeKillReliability::Guaranteed
         );
-        guard
+        let outcome = guard
             .terminate(TerminateTreeConfig {
                 grace_timeout_ms: 10,
                 ..TerminateTreeConfig::default()
             })
             .expect("contained termination failed");
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty { .. }
+        ));
     }
 
     /// Count processes matching a pattern.

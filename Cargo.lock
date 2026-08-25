@@ -759,6 +759,7 @@ dependencies = [
  "libc",
  "rsfulmen",
  "serde",
+ "serde_json",
  "sysprims-core",
  "sysprims-proc",
  "sysprims-session",
