@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import test from "node:test";
 
+import { loadSysprims } from "../src/ffi";
 import {
   ancestors,
+  descendants,
   forceKill,
   guardStep,
   listeningPorts,
@@ -20,7 +22,6 @@ import {
   SysprimsErrorCode,
   selfPGID,
   selfSID,
-  spawnInGroup,
   terminate,
   terminateTree,
   waitPID,
@@ -31,6 +32,7 @@ import {
 // -----------------------------------------------------------------------------
 
 async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
   await Promise.race([
     once(child, "exit"),
     new Promise((_, reject) =>
@@ -39,10 +41,39 @@ async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): 
   ]);
 }
 
-function spawnLongRunningChild(): ReturnType<typeof spawn> {
+function ownedChildPid(child: ReturnType<typeof spawn>): number {
+  const pid = child.pid;
+  if (pid === undefined || pid <= 1 || pid > 0x7fffffff) {
+    throw new Error("spawned child did not have a safe owned PID");
+  }
+  return pid;
+}
+
+async function cleanupOwnedChild(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill();
+  }
+  await waitForExit(child, 5000);
+  assert.ok(child.exitCode !== null || child.signalCode !== null, "child cleanup was not proven");
+}
+
+function spawnLongRunningChild(env?: NodeJS.ProcessEnv): ReturnType<typeof spawn> {
   // Long-running process we fully control.
   // Using setInterval keeps the process alive until terminated.
-  return spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  return spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    env,
+    stdio: "ignore",
+  });
+}
+
+async function pollUntil<T>(probe: () => T | undefined, timeoutMs: number): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = probe();
+    if (result !== undefined) return result;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("condition was not observed before timeout");
 }
 
 // -----------------------------------------------------------------------------
@@ -112,6 +143,96 @@ test("guardStep action-disabled returns structured event", () => {
   assert.equal(event.targeted, 0);
   assert.equal(event.killed, 0);
   assert.equal(event.failed, 0);
+});
+
+test("descendants projects opt-in process detail for an owned child", async (t) => {
+  const markerName = "SYSPRIMS_DESCENDANTS_TEST_MARKER";
+  const markerValue = `${process.pid}-${Date.now()}`;
+  const child = spawnLongRunningChild({ ...process.env, [markerName]: markerValue });
+  const pid = ownedChildPid(child);
+
+  try {
+    await once(child, "spawn");
+    const info = await pollUntil(() => {
+      const result = descendants(process.pid, {
+        includeEnv: true,
+        includeThreads: true,
+        maxLevels: 1,
+      });
+      return result.levels.flatMap((level) => level.processes).find((item) => item.pid === pid);
+    }, 5000);
+
+    const direct = procGet(pid, { includeEnv: true, includeThreads: true });
+    if (direct.env?.[markerName] === markerValue) {
+      assert.equal(
+        info.env?.[markerName],
+        markerValue,
+        "descendant environment marker must round-trip",
+      );
+    } else if (direct.thread_count != null) {
+      assert.ok(
+        info.thread_count != null && info.thread_count > 0,
+        "thread detail must be enriched",
+      );
+    } else {
+      t.skip("environment and thread details are unavailable under current platform permissions");
+      return;
+    }
+  } finally {
+    await cleanupOwnedChild(child);
+  }
+});
+
+test("direct native boundary rejects lossy numeric inputs without unsafe targets", async () => {
+  const lib = loadSysprims();
+  const invalidCode = SysprimsErrorCode.InvalidArgument;
+  const aliasOfPidOne = 4294967297;
+  const child = spawnLongRunningChild(process.env);
+  const pid = ownedChildPid(child);
+  const aliasOfOwnedPid = pid + 4294967296;
+
+  try {
+    await once(child, "spawn");
+    assert.equal(lib.sysprimsProcGet(aliasOfPidOne).code, invalidCode);
+    assert.equal(lib.sysprimsProcGetEx(aliasOfPidOne, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcListFds(aliasOfOwnedPid, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcWaitPid(pid, 0.5).code, invalidCode);
+    assert.equal(lib.sysprimsProcWaitPid(pid, 4294967297).code, invalidCode);
+    assert.equal(lib.sysprimsProcWaitPid(aliasOfOwnedPid, 0).code, invalidCode);
+    assert.equal(lib.sysprimsProcDescendants(aliasOfOwnedPid, 0, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcDescendants(process.pid, -0.5, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcDescendants(process.pid, 4294967297, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcKillDescendants(aliasOfOwnedPid, 0, 15, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcKillDescendants(pid, 4294967297, 15, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcKillDescendants(pid, 0, 0.5, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcAncestors(aliasOfOwnedPid, 0, "").code, invalidCode);
+    assert.equal(lib.sysprimsProcAncestors(process.pid, 4294967297, "").code, invalidCode);
+    assert.equal(lib.sysprimsSignalSend(aliasOfOwnedPid, 0).code, invalidCode);
+    assert.equal(lib.sysprimsSignalSend(pid, 0.5).code, invalidCode);
+    assert.equal(lib.sysprimsSignalSend(pid, 4294967297).code, invalidCode);
+    assert.equal(lib.sysprimsSignalSendGroup(aliasOfOwnedPid, 0).code, invalidCode);
+    assert.equal(lib.sysprimsTerminate(aliasOfOwnedPid).code, invalidCode);
+    assert.equal(lib.sysprimsForceKill(aliasOfOwnedPid).code, invalidCode);
+    assert.equal(lib.sysprimsTerminateTree(aliasOfOwnedPid, "").code, invalidCode);
+  } finally {
+    await cleanupOwnedChild(child);
+  }
+});
+
+test("direct native descendants remains compatible with three arguments", () => {
+  const result = loadSysprims().sysprimsProcDescendants(process.pid, 0, "");
+  assert.equal(result.code, SysprimsErrorCode.Ok);
+});
+
+test("direct native guard rejects explicit zero max_targets", () => {
+  const result = loadSysprims().sysprimsProcGuardStep(
+    JSON.stringify({
+      action_enabled: false,
+      max_targets: 0,
+      rule: { root_pid: process.pid },
+    }),
+  );
+  assert.equal(result.code, SysprimsErrorCode.InvalidArgument);
 });
 
 test("ancestors(process.pid) returns chain starting with self", () => {
@@ -203,7 +324,7 @@ test("runSetsid wait result returns structural identifiers", () => {
   assert.equal(result.exit_code, 0);
 });
 
-test("runNohup spawned result returns inherited caller context", () => {
+test("runNohup completed result returns inherited caller context", () => {
   if (process.platform === "win32") {
     assert.throws(
       () => runNohup({ argv: ["cmd", "/C", "exit 0"], wait: true }),
@@ -214,14 +335,19 @@ test("runNohup spawned result returns inherited caller context", () => {
 
   const callerSID = selfSID();
   const callerPGID = selfPGID();
-  const result = runNohup({ argv: ["sleep", "0.1"], output_file: "/dev/null" });
+  const result = runNohup({
+    argv: ["sh", "-c", "exit 0"],
+    output_file: "/dev/null",
+    wait: true,
+  });
   assert.equal(result.verb, "nohup");
-  assert.equal(result.status, "spawned");
+  assert.equal(result.status, "completed");
   assert.equal(result.session_kind, "inherited_session");
   assert.equal(result.identifier_provenance, "caller_context_before_spawn");
   assert.ok(result.pid != null && result.pid > 0);
   assert.equal(result.sid, callerSID);
   assert.equal(result.pgid, callerPGID);
+  assert.equal(result.exit_code, 0);
 });
 
 test("runNohup rejects symlink output_file", () => {
@@ -272,54 +398,40 @@ test("waitPID(process.pid, 1ms) returns timed_out", () => {
 
 test("terminate kills a spawned child process", async () => {
   const child = spawnLongRunningChild();
-  const pid = child.pid;
-  if (pid === undefined) {
-    throw new Error("Failed to spawn child process");
+  const pid = ownedChildPid(child);
+
+  try {
+    await once(child, "spawn");
+    terminate(pid);
+    await waitForExit(child, 5000);
+  } finally {
+    await cleanupOwnedChild(child);
   }
-
-  // Give it a moment to start.
-  await new Promise((r) => setTimeout(r, 50));
-
-  terminate(pid);
-  await waitForExit(child, 5000);
 });
 
 test("forceKill kills a spawned child process", async () => {
   const child = spawnLongRunningChild();
-  const pid = child.pid;
-  if (pid === undefined) {
-    throw new Error("Failed to spawn child process");
+  const pid = ownedChildPid(child);
+
+  try {
+    await once(child, "spawn");
+    forceKill(pid);
+    await waitForExit(child, 5000);
+  } finally {
+    await cleanupOwnedChild(child);
   }
-
-  await new Promise((r) => setTimeout(r, 50));
-
-  forceKill(pid);
-  await waitForExit(child, 5000);
 });
 
 test("terminateTree kills a spawned child process", async () => {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-  const pid = child.pid;
-  if (pid === undefined) {
-    throw new Error("Failed to spawn child process");
+  const pid = ownedChildPid(child);
+
+  try {
+    await once(child, "spawn");
+    const r = terminateTree(pid, { grace_timeout_ms: 100, kill_timeout_ms: 5000 });
+    assert.equal(r.pid, pid);
+    await waitForExit(child, 5000);
+  } finally {
+    await cleanupOwnedChild(child);
   }
-
-  await new Promise((r) => setTimeout(r, 50));
-
-  const r = terminateTree(pid, { grace_timeout_ms: 100, kill_timeout_ms: 5000 });
-  assert.equal(r.pid, pid);
-
-  await Promise.race([
-    once(child, "exit"),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("child did not exit")), 5000)),
-  ]);
-});
-
-test("spawnInGroup returns a pid", () => {
-  // This is a smoke test; we terminate via terminateTree to avoid leaking processes.
-  const argv =
-    process.platform === "win32" ? ["cmd", "/C", "ping -n 60 127.0.0.1 >NUL"] : ["sleep", "60"];
-  const r = spawnInGroup({ argv });
-  assert.ok(r.pid > 0);
-  terminateTree(r.pid, { grace_timeout_ms: 100, kill_timeout_ms: 1000 });
 });

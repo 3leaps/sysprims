@@ -46,18 +46,23 @@ Runs on every push to `main` and on PRs. Validates Rust code quality:
 - Format, lint, test, license checks
 - Cross-platform matrix (Linux, macOS, Windows)
 
-### Binding Workflows (Manual Trigger Only)
+### Binding Workflows
 
-The `go-bindings.yml` and `typescript-bindings.yml` workflows are **manually triggered** (`workflow_dispatch` only). They do not run on push or PR.
+`go-bindings.yml` remains manually triggered. `typescript-bindings.yml` supports
+manual runs and also runs on pull requests that change the TypeScript binding or
+its Rust capability dependencies. The TypeScript PR matrix runs native behavior
+on Node 18, Node 22, and pinned Bun across Linux x64, macOS arm64, and Windows
+x64, plus build/package-only checks for supported non-runtime targets.
 
 **Rationale:**
 
 - Binding validation requires building FFI shared libraries, which is expensive
-- Running on every push causes CI thrashing with no benefit during active development
-- Bindings are validated as a pre-release step, not on every commit
+- Path-filtered TypeScript PR validation catches projection and runtime drift
+  without running for unrelated changes
+- Go bindings remain validated as a pre-release step rather than on every commit
 - This keeps the feedback loop fast for core Rust development
 
-**When to run binding workflows:**
+**When to run binding workflows manually:**
 
 1. Before tagging a release (validates bindings work with current FFI)
 2. After significant FFI changes (manual verification)

@@ -1,0 +1,383 @@
+{
+  "matrixSha256": "0094175233c44e2b581c4259b4e583d0d9cfc4c66d6ae9ea64f11560550df440",
+  "publicValues": {
+    "SysprimsError": "Error values",
+    "SysprimsErrorCode": "Error values",
+    "ancestors": "Ancestor traversal",
+    "descendants": "Descendant traversal",
+    "forceKill": "Forced direct termination",
+    "forceKillMany": "JavaScript batch signal conveniences",
+    "guardStep": "Stateless guard evaluation",
+    "killDescendants": "Descendant remediation",
+    "killMany": "JavaScript batch signal conveniences",
+    "listFds": "File descriptor listing",
+    "listeningPorts": "Listening ports",
+    "procGet": "Process lookup",
+    "processList": "Process snapshot",
+    "runNohup": "Nohup spawn",
+    "runSetsid": "New session spawn",
+    "selfPGID": "Current process group",
+    "selfSID": "Current session",
+    "signalSend": "Signal one process",
+    "signalSendGroup": "Signal one process group",
+    "spawnInGroup": "PID-returning grouped spawn",
+    "terminate": "Graceful direct termination",
+    "terminateMany": "JavaScript batch signal conveniences",
+    "terminateTree": "PID-based tree termination",
+    "waitPID": "PID wait"
+  },
+  "publicTypes": {
+    "AncestorsOptions": "Ancestor traversal",
+    "AncestorsResult": "Ancestor traversal",
+    "BatchKillFailure": "JavaScript batch signal conveniences",
+    "BatchKillResult": "JavaScript batch signal conveniences",
+    "CpuMode": "Descendant traversal",
+    "DescendantsLevel": "Descendant traversal",
+    "DescendantsOptions": "Descendant traversal",
+    "DescendantsResult": "Descendant traversal",
+    "FdFilter": "File descriptor listing",
+    "FdInfo": "File descriptor listing",
+    "FdKind": "File descriptor listing",
+    "FdSnapshot": "File descriptor listing",
+    "GuardAction": "Stateless guard evaluation",
+    "GuardConfig": "Stateless guard evaluation",
+    "GuardEvent": "Stateless guard evaluation",
+    "GuardRule": "Stateless guard evaluation",
+    "KillDescendantsFailure": "Descendant remediation",
+    "KillDescendantsOptions": "Descendant remediation",
+    "KillDescendantsResult": "Descendant remediation",
+    "PortBinding": "Listening ports",
+    "PortBindingsSnapshot": "Listening ports",
+    "PortFilter": "Listening ports",
+    "ProcessFilter": "Process snapshot",
+    "ProcessInfo": "Process lookup",
+    "ProcessOptions": "Process lookup",
+    "ProcessSnapshot": "Process snapshot",
+    "ProcessState": "Process lookup",
+    "Protocol": "Listening ports",
+    "RunNohupConfig": "Nohup spawn",
+    "RunSetsidConfig": "New session spawn",
+    "SessionIdentifierProvenance": "New session spawn",
+    "SessionKind": "New session spawn",
+    "SessionSpawnResult": "New session spawn",
+    "SessionSpawnStatus": "New session spawn",
+    "SessionSpawnVerb": "New session spawn",
+    "SpawnInGroupConfig": "PID-returning grouped spawn",
+    "SpawnInGroupResult": "PID-returning grouped spawn",
+    "SysprimsError": "Error values",
+    "SysprimsErrorCode": "Error values",
+    "TerminateTreeConfig": "PID-based tree termination",
+    "TerminateTreeResult": "PID-based tree termination",
+    "WaitPidResult": "PID wait"
+  },
+  "napi": {
+    "sysprimsAbiVersion": {
+      "disposition": "internal-only",
+      "public": []
+    },
+    "sysprimsForceKill": {
+      "disposition": "exposed",
+      "public": [
+        "forceKill"
+      ]
+    },
+    "sysprimsProcAncestors": {
+      "disposition": "exposed",
+      "public": [
+        "ancestors"
+      ]
+    },
+    "sysprimsProcDescendants": {
+      "disposition": "exposed",
+      "public": [
+        "descendants"
+      ]
+    },
+    "sysprimsProcGet": {
+      "disposition": "internal-only",
+      "public": []
+    },
+    "sysprimsProcGetEx": {
+      "disposition": "exposed",
+      "public": [
+        "procGet"
+      ]
+    },
+    "sysprimsProcGuardStep": {
+      "disposition": "exposed",
+      "public": [
+        "guardStep"
+      ]
+    },
+    "sysprimsProcKillDescendants": {
+      "disposition": "exposed",
+      "public": [
+        "killDescendants"
+      ]
+    },
+    "sysprimsProcList": {
+      "disposition": "internal-only",
+      "public": []
+    },
+    "sysprimsProcListEx": {
+      "disposition": "exposed",
+      "public": [
+        "processList"
+      ]
+    },
+    "sysprimsProcListFds": {
+      "disposition": "exposed",
+      "public": [
+        "listFds"
+      ]
+    },
+    "sysprimsProcListeningPorts": {
+      "disposition": "exposed",
+      "public": [
+        "listeningPorts"
+      ]
+    },
+    "sysprimsProcWaitPid": {
+      "disposition": "exposed",
+      "public": [
+        "waitPID"
+      ]
+    },
+    "sysprimsRunNohup": {
+      "disposition": "exposed",
+      "public": [
+        "runNohup"
+      ]
+    },
+    "sysprimsRunSetsid": {
+      "disposition": "exposed",
+      "public": [
+        "runSetsid"
+      ]
+    },
+    "sysprimsSelfGetpgid": {
+      "disposition": "exposed",
+      "public": [
+        "selfPGID"
+      ]
+    },
+    "sysprimsSelfGetsid": {
+      "disposition": "exposed",
+      "public": [
+        "selfSID"
+      ]
+    },
+    "sysprimsSignalSend": {
+      "disposition": "exposed",
+      "public": [
+        "signalSend"
+      ]
+    },
+    "sysprimsSignalSendGroup": {
+      "disposition": "exposed",
+      "public": [
+        "signalSendGroup"
+      ]
+    },
+    "sysprimsSpawnInGroup": {
+      "disposition": "exposed",
+      "public": [
+        "spawnInGroup"
+      ]
+    },
+    "sysprimsTerminate": {
+      "disposition": "exposed",
+      "public": [
+        "terminate"
+      ]
+    },
+    "sysprimsTerminateTree": {
+      "disposition": "exposed",
+      "public": [
+        "terminateTree"
+      ]
+    }
+  },
+  "cAbi": {
+    "sysprims_abi_version": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_clear_error": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_force_kill": {
+      "disposition": "exposed",
+      "public": [
+        "forceKill"
+      ]
+    },
+    "sysprims_free_string": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_get_platform": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_last_error": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_last_error_code": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_ancestors": {
+      "disposition": "exposed",
+      "public": [
+        "ancestors"
+      ]
+    },
+    "sysprims_proc_descendants": {
+      "disposition": "exposed",
+      "public": [
+        "descendants"
+      ]
+    },
+    "sysprims_proc_descendants_ex": {
+      "disposition": "exposed",
+      "public": [
+        "descendants"
+      ]
+    },
+    "sysprims_proc_get": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_get_ex": {
+      "disposition": "exposed",
+      "public": [
+        "procGet"
+      ]
+    },
+    "sysprims_proc_guard_runner_create": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_guard_runner_free": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_guard_runner_stop": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_guard_runner_tick": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_guard_step": {
+      "disposition": "exposed",
+      "public": [
+        "guardStep"
+      ]
+    },
+    "sysprims_proc_kill_descendants": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_kill_descendants_ex": {
+      "disposition": "exposed",
+      "public": [
+        "killDescendants"
+      ]
+    },
+    "sysprims_proc_list": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_proc_list_ex": {
+      "disposition": "exposed",
+      "public": [
+        "processList"
+      ]
+    },
+    "sysprims_proc_list_fds": {
+      "disposition": "exposed",
+      "public": [
+        "listFds"
+      ]
+    },
+    "sysprims_proc_listening_ports": {
+      "disposition": "exposed",
+      "public": [
+        "listeningPorts"
+      ]
+    },
+    "sysprims_proc_wait_pid": {
+      "disposition": "exposed",
+      "public": [
+        "waitPID"
+      ]
+    },
+    "sysprims_run_nohup": {
+      "disposition": "exposed",
+      "public": [
+        "runNohup"
+      ]
+    },
+    "sysprims_run_setsid": {
+      "disposition": "exposed",
+      "public": [
+        "runSetsid"
+      ]
+    },
+    "sysprims_self_getpgid": {
+      "disposition": "exposed",
+      "public": [
+        "selfPGID"
+      ]
+    },
+    "sysprims_self_getsid": {
+      "disposition": "exposed",
+      "public": [
+        "selfSID"
+      ]
+    },
+    "sysprims_signal_send": {
+      "disposition": "exposed",
+      "public": [
+        "signalSend"
+      ]
+    },
+    "sysprims_signal_send_group": {
+      "disposition": "exposed",
+      "public": [
+        "signalSendGroup"
+      ]
+    },
+    "sysprims_spawn_in_group": {
+      "disposition": "exposed",
+      "public": [
+        "spawnInGroup"
+      ]
+    },
+    "sysprims_terminate": {
+      "disposition": "exposed",
+      "public": [
+        "terminate"
+      ]
+    },
+    "sysprims_terminate_tree": {
+      "disposition": "exposed",
+      "public": [
+        "terminateTree"
+      ]
+    },
+    "sysprims_timeout_run": {
+      "disposition": "excluded",
+      "public": []
+    },
+    "sysprims_version": {
+      "disposition": "excluded",
+      "public": []
+    }
+  }
+}

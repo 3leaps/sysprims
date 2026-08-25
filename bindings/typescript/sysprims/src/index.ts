@@ -29,6 +29,16 @@ import type {
   TerminateTreeResult,
   WaitPidResult,
 } from "./types";
+import {
+  U32_MAX,
+  validateDuration,
+  validateMaxLevels,
+  validatePid,
+  validatePort,
+  validateProcessFilter,
+  validateSignal,
+  validateU32,
+} from "./validation";
 
 export { SysprimsError, SysprimsErrorCode };
 export type {
@@ -41,6 +51,8 @@ export type {
   DescendantsOptions,
   DescendantsResult,
   FdFilter,
+  FdInfo,
+  FdKind,
   FdSnapshot,
   GuardAction,
   GuardConfig,
@@ -109,6 +121,7 @@ function serializeDescendantsConfig(options?: {
   const wire: Record<string, unknown> = {};
 
   if (options.filter) {
+    validateProcessFilter(options.filter);
     Object.assign(wire, options.filter);
   }
 
@@ -123,14 +136,7 @@ function serializeDescendantsConfig(options?: {
   }
 
   if (options.sampleDurationMs !== undefined) {
-    const sample = options.sampleDurationMs;
-    if (!Number.isFinite(sample) || sample < 0) {
-      throw new SysprimsError(
-        SysprimsErrorCode.InvalidArgument,
-        "sampleDurationMs must be a finite number >= 0",
-      );
-    }
-    wire.sample_duration_ms = Math.trunc(sample);
+    wire.sample_duration_ms = validateDuration(options.sampleDurationMs, "sampleDurationMs");
   }
 
   if (options.cascade === true) {
@@ -153,9 +159,10 @@ function serializeDescendantsConfig(options?: {
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
 export function procGet(pid: number, options?: ProcessOptions): ProcessInfo {
+  validatePid(pid);
   const lib = loadSysprims();
   const optionsJson = serializeProcessOptions(options);
-  const result = callJsonReturn(() => lib.sysprimsProcGetEx(pid >>> 0, optionsJson));
+  const result = callJsonReturn(() => lib.sysprimsProcGetEx(pid, optionsJson));
   return result as ProcessInfo;
 }
 
@@ -187,6 +194,7 @@ export function procGet(pid: number, options?: ProcessOptions): ProcessInfo {
  * const heavy = processList({ cpu_above: 50, memory_above_kb: 100000 });
  */
 export function processList(filter?: ProcessFilter, options?: ProcessOptions): ProcessSnapshot {
+  validateProcessFilter(filter);
   const lib = loadSysprims();
   const filterJson = filter ? JSON.stringify(filter) : "";
   const optionsJson = serializeProcessOptions(options);
@@ -221,6 +229,7 @@ export function processList(filter?: ProcessFilter, options?: ProcessOptions): P
  * const http = listeningPorts({ local_port: 8080 });
  */
 export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
+  if (filter?.local_port !== undefined) validatePort(filter.local_port);
   const lib = loadSysprims();
   const filterJson = filter ? JSON.stringify(filter) : "";
   const result = callJsonReturn(() => lib.sysprimsProcListeningPorts(filterJson));
@@ -230,8 +239,6 @@ export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
 // -----------------------------------------------------------------------------
 // Descendants
 // -----------------------------------------------------------------------------
-
-const MAX_LEVELS_ALL = 0xffffffff; // u32::MAX
 
 /**
  * Get descendants of a process.
@@ -258,14 +265,13 @@ const MAX_LEVELS_ALL = 0xffffffff; // u32::MAX
  * const result = descendants(1234, { filter: { name_contains: "worker" } });
  */
 export function descendants(pid: number, options?: DescendantsOptions): DescendantsResult {
-  const lib = loadSysprims();
-  const maxLevels =
-    options?.maxLevels != null && Number.isFinite(options.maxLevels)
-      ? options.maxLevels >>> 0
-      : MAX_LEVELS_ALL;
+  validatePid(pid);
+  const maxLevels = validateMaxLevels(options?.maxLevels);
   const configJson = serializeDescendantsConfig(options);
+  const optionsJson = serializeProcessOptions(options);
+  const lib = loadSysprims();
   return callJsonReturn(() =>
-    lib.sysprimsProcDescendants(pid >>> 0, maxLevels, configJson),
+    lib.sysprimsProcDescendants(pid, maxLevels, configJson, optionsJson),
   ) as DescendantsResult;
 }
 
@@ -298,14 +304,13 @@ export function killDescendants(
   signal = 15,
   options?: KillDescendantsOptions,
 ): KillDescendantsResult {
-  const lib = loadSysprims();
-  const maxLevels =
-    options?.maxLevels != null && Number.isFinite(options.maxLevels)
-      ? options.maxLevels >>> 0
-      : MAX_LEVELS_ALL;
+  validatePid(pid);
+  validateSignal(signal);
+  const maxLevels = validateMaxLevels(options?.maxLevels);
   const configJson = serializeDescendantsConfig(options);
+  const lib = loadSysprims();
   return callJsonReturn(() =>
-    lib.sysprimsProcKillDescendants(pid >>> 0, maxLevels, signal | 0, configJson),
+    lib.sysprimsProcKillDescendants(pid, maxLevels, signal, configJson),
   ) as KillDescendantsResult;
 }
 
@@ -315,6 +320,19 @@ export function killDescendants(
  * Actions are gated by `action_enabled`; when false, this is evaluate-only.
  */
 export function guardStep(config: GuardConfig): GuardEvent {
+  validatePid(config.rule.root_pid, "rule.root_pid");
+  if (config.rule.max_levels !== undefined) validateU32(config.rule.max_levels, "rule.max_levels");
+  validateProcessFilter(config.rule, "rule");
+  if (config.rule.sample_duration_ms !== undefined) {
+    validateDuration(config.rule.sample_duration_ms, "rule.sample_duration_ms");
+  }
+  if (config.action?.signal !== undefined) validateSignal(config.action.signal, "action.signal");
+  if (config.max_targets !== undefined) {
+    validateU32(config.max_targets, "max_targets");
+    if (config.max_targets === 0) {
+      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "max_targets must be >= 1");
+    }
+  }
   const lib = loadSysprims();
   const configJson = JSON.stringify(config);
   return callJsonReturn(() => lib.sysprimsProcGuardStep(configJson)) as GuardEvent;
@@ -337,15 +355,16 @@ export function guardStep(config: GuardConfig): GuardEvent {
  * @throws {SysprimsError} InvalidArgument if pid is 0
  */
 export function ancestors(pid: number, options?: AncestorsOptions): AncestorsResult {
-  const lib = loadSysprims();
-  const maxDepth = options?.maxDepth ?? 64;
+  validatePid(pid);
+  const maxDepth = validateU32(options?.maxDepth ?? 64, "maxDepth");
   const optionsJson = serializeProcessOptions(
     options?.includeEnv || options?.includeThreads
       ? { includeEnv: options?.includeEnv, includeThreads: options?.includeThreads }
       : undefined,
   );
+  const lib = loadSysprims();
   return callJsonReturn(() =>
-    lib.sysprimsProcAncestors(pid >>> 0, maxDepth >>> 0, optionsJson),
+    lib.sysprimsProcAncestors(pid, maxDepth, optionsJson),
   ) as AncestorsResult;
 }
 
@@ -361,8 +380,10 @@ export function ancestors(pid: number, options?: AncestorsOptions): AncestorsRes
  * - Windows: process wait APIs when available
  */
 export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
+  validatePid(pid);
+  validateDuration(timeoutMs, "timeoutMs", U32_MAX);
   const lib = loadSysprims();
-  const result = callJsonReturn(() => lib.sysprimsProcWaitPid(pid >>> 0, timeoutMs));
+  const result = callJsonReturn(() => lib.sysprimsProcWaitPid(pid, timeoutMs));
   return result as WaitPidResult;
 }
 
@@ -376,9 +397,10 @@ export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
  * Best-effort behavior: fields may be missing and warnings may be present.
  */
 export function listFds(pid: number, filter?: FdFilter): FdSnapshot {
+  validatePid(pid);
   const lib = loadSysprims();
   const filterJson = filter ? JSON.stringify(filter) : "";
-  const result = callJsonReturn(() => lib.sysprimsProcListFds(pid >>> 0, filterJson));
+  const result = callJsonReturn(() => lib.sysprimsProcListFds(pid, filterJson));
   return result as FdSnapshot;
 }
 
@@ -477,8 +499,10 @@ export function runNohup(config: RunNohupConfig): SessionSpawnResult {
  * signalSend(1234, 15);
  */
 export function signalSend(pid: number, signal: number): void {
+  validatePid(pid);
+  validateSignal(signal);
   const lib = loadSysprims();
-  callVoid(() => lib.sysprimsSignalSend(pid >>> 0, signal | 0));
+  callVoid(() => lib.sysprimsSignalSend(pid, signal));
 }
 
 /**
@@ -494,8 +518,10 @@ export function signalSend(pid: number, signal: number): void {
  * @throws {SysprimsError} NotSupported on Windows
  */
 export function signalSendGroup(pgid: number, signal: number): void {
+  validatePid(pgid, "pgid");
+  validateSignal(signal);
   const lib = loadSysprims();
-  callVoid(() => lib.sysprimsSignalSendGroup(pgid >>> 0, signal | 0));
+  callVoid(() => lib.sysprimsSignalSendGroup(pgid, signal));
 }
 
 /**
@@ -509,8 +535,9 @@ export function signalSendGroup(pgid: number, signal: number): void {
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
 export function terminate(pid: number): void {
+  validatePid(pid);
   const lib = loadSysprims();
-  callVoid(() => lib.sysprimsTerminate(pid >>> 0));
+  callVoid(() => lib.sysprimsTerminate(pid));
 }
 
 /**
@@ -524,35 +551,17 @@ export function terminate(pid: number): void {
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
 export function forceKill(pid: number): void {
+  validatePid(pid);
   const lib = loadSysprims();
-  callVoid(() => lib.sysprimsForceKill(pid >>> 0));
+  callVoid(() => lib.sysprimsForceKill(pid));
 }
-
-const MAX_SAFE_PID = 2147483647;
 
 function validatePidList(pids: number[]): void {
   if (!Array.isArray(pids) || pids.length === 0) {
     throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pids must not be empty");
   }
   for (const pid of pids) {
-    if (!Number.isInteger(pid)) {
-      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pid must be an integer");
-    }
-    if (pid <= 0) {
-      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pid must be > 0");
-    }
-    if (pid > MAX_SAFE_PID) {
-      throw new SysprimsError(
-        SysprimsErrorCode.InvalidArgument,
-        `pid ${pid} exceeds maximum safe value ${MAX_SAFE_PID}`,
-      );
-    }
-  }
-}
-
-function validateSignal(signal: number): void {
-  if (!Number.isInteger(signal)) {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signal must be an integer");
+    validatePid(pid);
   }
 }
 
@@ -570,10 +579,10 @@ export function killMany(pids: number[], signal: number): BatchKillResult {
   for (const pid of pids) {
     try {
       signalSend(pid, signal);
-      result.succeeded.push(pid >>> 0);
+      result.succeeded.push(pid);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      result.failed.push({ pid: pid >>> 0, error: msg } satisfies BatchKillFailure);
+      result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
     }
   }
   return result;
@@ -592,10 +601,10 @@ export function terminateMany(pids: number[]): BatchKillResult {
   for (const pid of pids) {
     try {
       terminate(pid);
-      result.succeeded.push(pid >>> 0);
+      result.succeeded.push(pid);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      result.failed.push({ pid: pid >>> 0, error: msg } satisfies BatchKillFailure);
+      result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
     }
   }
   return result;
@@ -614,10 +623,10 @@ export function forceKillMany(pids: number[]): BatchKillResult {
   for (const pid of pids) {
     try {
       forceKill(pid);
-      result.succeeded.push(pid >>> 0);
+      result.succeeded.push(pid);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      result.failed.push({ pid: pid >>> 0, error: msg } satisfies BatchKillFailure);
+      result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
     }
   }
   return result;
@@ -636,11 +645,21 @@ export function forceKillMany(pids: number[]): BatchKillResult {
  * sysprims may use group kill for better coverage.
  */
 export function terminateTree(pid: number, config?: TerminateTreeConfig): TerminateTreeResult {
-  const lib = loadSysprims();
+  validatePid(pid);
 
   if (!config) {
-    return callJsonReturn(() => lib.sysprimsTerminateTree(pid >>> 0, "")) as TerminateTreeResult;
+    const lib = loadSysprims();
+    return callJsonReturn(() => lib.sysprimsTerminateTree(pid, "")) as TerminateTreeResult;
   }
+
+  if (config.grace_timeout_ms != null) {
+    validateDuration(config.grace_timeout_ms, "grace_timeout_ms");
+  }
+  if (config.kill_timeout_ms != null) {
+    validateDuration(config.kill_timeout_ms, "kill_timeout_ms");
+  }
+  if (config.signal != null) validateSignal(config.signal, "signal");
+  if (config.kill_signal != null) validateSignal(config.kill_signal, "kill_signal");
 
   const cfg: TerminateTreeConfig = {
     schema_id:
@@ -649,8 +668,9 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
     ...config,
   };
 
+  const lib = loadSysprims();
   return callJsonReturn(() =>
-    lib.sysprimsTerminateTree(pid >>> 0, JSON.stringify(cfg)),
+    lib.sysprimsTerminateTree(pid, JSON.stringify(cfg)),
   ) as TerminateTreeResult;
 }
 

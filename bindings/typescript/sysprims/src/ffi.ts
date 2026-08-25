@@ -49,6 +49,7 @@ export type SysprimsLib = {
     rootPid: number,
     maxLevels: number,
     configJson: string,
+    optionsJson?: string,
   ) => SysprimsCallJsonResult;
   sysprimsProcKillDescendants: (
     rootPid: number,

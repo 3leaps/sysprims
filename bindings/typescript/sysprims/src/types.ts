@@ -266,7 +266,7 @@ export interface DescendantsResult {
 /**
  * Options for descendants traversal.
  */
-export interface DescendantsOptions {
+export interface DescendantsOptions extends ProcessOptions {
   /** Maximum depth (1 = children only). Omit or use Infinity for all levels. */
   maxLevels?: number;
   /** Optional filter applied to descendant processes. */

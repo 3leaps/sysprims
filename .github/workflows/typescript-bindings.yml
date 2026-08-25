@@ -1,21 +1,64 @@
 name: TypeScript Bindings
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bindings/typescript/sysprims/**'
+      - 'crates/sysprims-core/**'
+      - 'crates/sysprims-proc/**'
+      - 'crates/sysprims-session/**'
+      - 'crates/sysprims-signal/**'
+      - 'crates/sysprims-timeout/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/workflows/typescript-bindings.yml'
 env:
   CARGO_TERM_COLOR: always
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Native behavior (${{ matrix.platform }}, ${{ matrix.runtime }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-          - os: ubuntu-latest-arm64-s
+            platform: linux-x64
+            runtime: node-18
+            node-version: '18'
+          - os: ubuntu-latest
+            platform: linux-x64
+            runtime: node-22
+            node-version: '22'
+          - os: ubuntu-latest
+            platform: linux-x64
+            runtime: bun-1.3.3
+            node-version: '22'
           - os: macos-14
+            platform: macos-arm64
+            runtime: node-18
+            node-version: '18'
+          - os: macos-14
+            platform: macos-arm64
+            runtime: node-22
+            node-version: '22'
+          - os: macos-14
+            platform: macos-arm64
+            runtime: bun-1.3.3
+            node-version: '22'
           - os: windows-latest
-          - os: windows-latest-arm64-s
+            platform: windows-x64
+            runtime: node-18
+            node-version: '18'
+          - os: windows-latest
+            platform: windows-x64
+            runtime: node-22
+            node-version: '22'
+          - os: windows-latest
+            platform: windows-x64
+            runtime: bun-1.3.3
+            node-version: '22'
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust
@@ -23,13 +66,90 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: bindings/typescript/sysprims/package-lock.json
+      - name: Setup Bun 1.3.3
+        if: startsWith(matrix.runtime, 'bun-')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
-      - name: Test
+        run: npm ci
+      - name: Build package, native addon, and behavior tests
         working-directory: bindings/typescript/sysprims
-        run: npm run test:ci
+        run: npm run clean && npm run build && npm run build:native && npm run build:test
+      - name: Check runtime N-API inventory (Node)
+        if: startsWith(matrix.runtime, 'node-')
+        working-directory: bindings/typescript/sysprims
+        run: npm run api:check:native
+      - name: Check runtime N-API inventory (Bun)
+        if: startsWith(matrix.runtime, 'bun-')
+        working-directory: bindings/typescript/sysprims
+        run: bun scripts/public-api.js check --require-native
+      - name: Run behavior tests (Node)
+        if: startsWith(matrix.runtime, 'node-')
+        working-directory: bindings/typescript/sysprims
+        run: node scripts/run-tests.js
+      - name: Run behavior tests (Bun)
+        if: startsWith(matrix.runtime, 'bun-')
+        working-directory: bindings/typescript/sysprims
+        run: bun scripts/run-tests.js
+  package-only:
+    name: Build/package only (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest-arm64-s
+            platform: linux-arm64-gnu
+            target: aarch64-unknown-linux-gnu
+            expected-file: sysprims.linux-arm64-gnu.node
+            package-dir: linux-arm64-gnu
+          - os: ubuntu-latest-arm64-s
+            platform: linux-arm64-musl
+            target: aarch64-unknown-linux-musl
+            expected-file: sysprims.linux-arm64-musl.node
+            package-dir: linux-arm64-musl
+          - os: windows-latest-arm64-s
+            platform: windows-arm64-msvc
+            target: aarch64-pc-windows-msvc
+            expected-file: sysprims.win32-arm64-msvc.node
+            package-dir: win32-arm64-msvc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bindings/typescript/sysprims/package-lock.json
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm ci
+      - name: Install musl toolchain
+        if: endsWith(matrix.target, '-musl')
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - name: Check native target
+        run: cargo check -p sysprims-ts-napi --target ${{ matrix.target }}
+      - name: Build target native addon
+        working-directory: bindings/typescript/sysprims
+        run: npx napi build --cargo-cwd native --release --platform --js false --strip --target ${{ matrix.target }}
+      - name: Create target package
+        working-directory: bindings/typescript/sysprims
+        env:
+          EXPECTED_FILE: ${{ matrix.expected-file }}
+          PACKAGE_DIR: ${{ matrix.package-dir }}
+        run: |
+          npx napi create-npm-dir -t .
+          node scripts/stage-platform-package.js
+      - name: Inspect target package
+        working-directory: bindings/typescript/sysprims
+        run: npm pack --dry-run ./npm/${{ matrix.package-dir }}
   test-musl:
     name: Test (linux-musl, alpine)
     runs-on: ubuntu-latest
