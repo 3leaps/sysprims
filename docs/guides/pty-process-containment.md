@@ -58,11 +58,28 @@ descendants, and only then reaps. After successful completion or termination,
 Dropping an active guard kills the contained tree and makes a bounded reap
 attempt on both Unix and Windows.
 
+Each `ContainmentOutcome` includes structured `completion` evidence collected
+after the final cleanup action and before the leader is reaped or the owned Job
+handle is released:
+
+- `Empty` means a complete supported observation found no live members.
+- `Survivors` includes a sorted, unique list of live member PIDs and its exact
+  count.
+- `Unknown` means visibility, capacity, allocation, stabilization, or platform
+  support was insufficient for a trustworthy answer.
+
+Completion evidence is a point-in-time receipt, not a permanent guarantee.
+It is independent of leader `exited` state and `tree_kill_reliability`; an empty
+sample does not upgrade `unproven` acquisition. Survivor PIDs are evidence only.
+PID reuse makes them unsafe to pass to signaling APIs or use as a suggested
+target list.
+
+Linux completion uses a bounded `/proc` process-group/session scan. macOS uses a
+bounded libproc process-group scan with explicit sizing-race detection. Partial,
+unstable, or permission-limited observations report `Unknown`, never `Empty`.
 On macOS, signalling a process group whose only remaining member is an exited,
-unreaped leader can report that no members are signalable. The guard records
-that condition and uses libproc group enumeration to confirm there are no live
-descendants before reaping the retained leader. Permission failures while the
-leader is live, or while a live descendant remains, still fail closed.
+unreaped leader can report that no members are signalable; only a trustworthy
+empty libproc observation allows the guard to proceed to reap in that case.
 
 ## Owned Standard-Library Spawn
 
@@ -87,7 +104,9 @@ ConPTY or take ownership of terminal handles.
 
 Owned Windows termination calls `TerminateJobObject` immediately. POSIX signal
 and grace-period fields in `TerminateTreeConfig` do not apply; the outcome
-therefore reports no graceful signal or escalation signal.
+therefore reports no graceful signal or escalation signal. Completion evidence
+comes from a bounded Job process-ID-list query while the guard still owns the
+Job handle. An incomplete or failed query reports `Unknown`.
 
 ## Legacy PID APIs
 

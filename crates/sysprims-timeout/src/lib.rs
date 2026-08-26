@@ -131,6 +131,80 @@ pub enum TreeKillReliability {
     BestEffort,
 }
 
+pub(crate) const MAX_COMPLETION_OBSERVED_PIDS: usize = 4096;
+pub(crate) const MAX_COMPLETION_OBSERVATION_RETRIES: usize = 3;
+
+/// Read-only mechanism used to observe containment membership.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainmentObservation {
+    /// Linux `/proc` process-group and session scan.
+    LinuxProcfsProcessGroup,
+    /// macOS libproc process-group scan.
+    MacosLibprocProcessGroup,
+    /// Windows Job process-ID-list query.
+    WindowsJobProcessIdList,
+    /// No trustworthy platform observation mechanism was available.
+    UnsupportedPlatform,
+}
+
+/// Point-in-time evidence observed after the final containment cleanup action.
+///
+/// This evidence is independent of leader reap and containment acquisition
+/// reliability. Survivor PIDs are evidence only: PID reuse makes them unsafe to
+/// pass to process-signaling APIs or treat as suggested cleanup targets.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ContainmentCompletionEvidence {
+    /// A complete supported observation found no live containment members.
+    Empty { observation: ContainmentObservation },
+    /// A complete supported observation found live containment members.
+    Survivors {
+        observation: ContainmentObservation,
+        observed_count: u32,
+        survivor_pids: Vec<u32>,
+    },
+    /// A complete, trustworthy observation was unavailable.
+    Unknown { observation: ContainmentObservation },
+}
+
+pub(crate) fn unknown_completion(
+    observation: ContainmentObservation,
+) -> ContainmentCompletionEvidence {
+    ContainmentCompletionEvidence::Unknown { observation }
+}
+
+pub(crate) fn completion_from_pids(
+    observation: ContainmentObservation,
+    mut pids: Vec<u32>,
+) -> ContainmentCompletionEvidence {
+    if pids.len() >= MAX_COMPLETION_OBSERVED_PIDS
+        || pids
+            .iter()
+            .any(|pid| *pid == 0 || *pid > sysprims_signal::MAX_SAFE_PID)
+    {
+        return unknown_completion(observation);
+    }
+
+    let observed_count = pids.len();
+    pids.sort_unstable();
+    pids.dedup();
+    if pids.len() != observed_count {
+        return unknown_completion(observation);
+    }
+    if pids.is_empty() {
+        ContainmentCompletionEvidence::Empty { observation }
+    } else {
+        ContainmentCompletionEvidence::Survivors {
+            observation,
+            observed_count: pids.len() as u32,
+            survivor_pids: pids,
+        }
+    }
+}
+
 impl TreeKillReliability {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -334,6 +408,8 @@ pub struct ContainmentOutcome {
     pub exited: bool,
     pub timed_out: bool,
     pub tree_kill_reliability: TreeKillReliability,
+    /// Point-in-time membership evidence collected before leader reap or Job release.
+    pub completion: ContainmentCompletionEvidence,
     pub warnings: Vec<String>,
 }
 
@@ -891,6 +967,61 @@ mod tests {
         assert_eq!(TreeKillReliability::Guaranteed.as_str(), "guaranteed");
         assert_eq!(TreeKillReliability::Unproven.as_str(), "unproven");
         assert_eq!(TreeKillReliability::BestEffort.as_str(), "best_effort");
+    }
+
+    #[test]
+    fn completion_evidence_sorts_unique_safe_pids() {
+        assert_eq!(
+            completion_from_pids(
+                ContainmentObservation::LinuxProcfsProcessGroup,
+                vec![42, 7, 19],
+            ),
+            ContainmentCompletionEvidence::Survivors {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+                observed_count: 3,
+                survivor_pids: vec![7, 19, 42],
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_completion_evidence_is_unknown() {
+        assert_eq!(
+            completion_from_pids(ContainmentObservation::LinuxProcfsProcessGroup, vec![7, 7],),
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+            }
+        );
+    }
+
+    #[test]
+    fn completion_evidence_at_pid_limit_is_unknown() {
+        let pids = (2..2 + MAX_COMPLETION_OBSERVED_PIDS as u32).collect();
+        assert_eq!(
+            completion_from_pids(ContainmentObservation::LinuxProcfsProcessGroup, pids),
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+            }
+        );
+    }
+
+    #[test]
+    fn completion_evidence_serializes_as_a_tagged_receipt() {
+        let value = serde_json::to_value(ContainmentCompletionEvidence::Survivors {
+            observation: ContainmentObservation::MacosLibprocProcessGroup,
+            observed_count: 2,
+            survivor_pids: vec![17, 23],
+        })
+        .expect("completion evidence should serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "status": "survivors",
+                "observation": "macos_libproc_process_group",
+                "observed_count": 2,
+                "survivor_pids": [17, 23],
+            })
+        );
     }
 
     #[test]

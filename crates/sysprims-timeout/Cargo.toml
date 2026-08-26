@@ -29,4 +29,5 @@ libc = { workspace = true }
 windows-sys = { workspace = true }
 
 [dev-dependencies]
+serde_json.workspace = true
 sysprims-session = { workspace = true }

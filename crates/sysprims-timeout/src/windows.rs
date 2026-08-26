@@ -10,11 +10,12 @@ use std::ptr;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, ERROR_MORE_DATA, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
@@ -22,9 +23,11 @@ use windows_sys::Win32::System::Threading::WaitForSingleObject;
 use sysprims_core::{SysprimsError, SysprimsResult};
 
 use crate::{
-    capture_containment_identity, ContainmentAdoptionError, ContainmentChild, ContainmentGuard,
-    ContainmentOutcome, ContainmentSpawnError, GroupingMode, SpawnInGroupConfig,
-    SpawnInGroupResult, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome, TreeKillReliability,
+    capture_containment_identity, completion_from_pids, unknown_completion,
+    ContainmentAdoptionError, ContainmentChild, ContainmentCompletionEvidence, ContainmentGuard,
+    ContainmentObservation, ContainmentOutcome, ContainmentSpawnError, GroupingMode,
+    SpawnInGroupConfig, SpawnInGroupResult, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
+    TreeKillReliability, MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
 };
 
 /// Polling interval for checking if child has exited.
@@ -110,7 +113,9 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
             std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
         ));
     }
-    let exited = wait_for_contained_child(child, Duration::from_millis(config.kill_timeout_ms))?;
+    let _ = wait_for_contained_child_exit(child, Duration::from_millis(config.kill_timeout_ms))?;
+    let completion = observe_job_completion(job);
+    let exited = reap_contained_child(child)?;
 
     let mut warnings =
         vec!["Post-spawn Job Object adoption has an escape window and is unproven".to_string()];
@@ -129,6 +134,7 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         exited,
         timed_out: !exited,
         tree_kill_reliability: guard.reliability,
+        completion,
         warnings,
     })
 }
@@ -193,6 +199,142 @@ fn wait_for_contained_child<C: ContainmentChild>(
             }
         }
     }
+}
+
+fn wait_for_contained_child_exit<C: ContainmentChild>(
+    child: &C,
+    timeout: Duration,
+) -> SysprimsResult<bool> {
+    let process = child.raw_process_handle().ok_or_else(|| {
+        SysprimsError::invalid_argument(
+            "owned process handle is unavailable; refusing containment operation",
+        )
+    })? as HANDLE;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match unsafe { WaitForSingleObject(process, 0) } {
+            WAIT_OBJECT_0 => return Ok(true),
+            WAIT_TIMEOUT if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
+            WAIT_TIMEOUT => return Ok(false),
+            _ => {
+                return Err(SysprimsError::system(
+                    "failed to observe contained child state",
+                    std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+                ));
+            }
+        }
+    }
+}
+
+fn reap_contained_child<C: ContainmentChild>(child: &mut C) -> SysprimsResult<bool> {
+    child.try_wait().map_err(|error| {
+        SysprimsError::system(
+            format!("failed to reap contained child: {error}"),
+            error.raw_os_error().unwrap_or(0),
+        )
+    })
+}
+
+#[derive(Debug)]
+struct JobProcessSnapshot {
+    assigned: usize,
+    pids: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum JobQueryError {
+    RetryWithCapacity(usize),
+    Unavailable,
+}
+
+const INITIAL_JOB_PROCESS_ID_CAPACITY: usize = 64;
+
+fn query_job_process_snapshot(
+    job: HANDLE,
+    capacity: usize,
+) -> Result<JobProcessSnapshot, JobQueryError> {
+    if capacity == 0 || capacity >= MAX_COMPLETION_OBSERVED_PIDS {
+        return Err(JobQueryError::Unavailable);
+    }
+    let pid_word_offset = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList)
+        / std::mem::size_of::<usize>();
+    let mut words = Vec::<usize>::new();
+    words
+        .try_reserve_exact(capacity + pid_word_offset)
+        .map_err(|_| JobQueryError::Unavailable)?;
+    words.resize(capacity + pid_word_offset, 0);
+    let byte_len = words
+        .len()
+        .checked_mul(std::mem::size_of::<usize>())
+        .and_then(|length| u32::try_from(length).ok())
+        .ok_or(JobQueryError::Unavailable)?;
+    let success = unsafe {
+        QueryInformationJobObject(
+            job,
+            JobObjectBasicProcessIdList,
+            words.as_mut_ptr().cast(),
+            byte_len,
+            ptr::null_mut(),
+        )
+    };
+    let header = unsafe { &*words.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
+    let assigned = header.NumberOfAssignedProcesses as usize;
+    let listed = header.NumberOfProcessIdsInList as usize;
+    if success == 0 {
+        let error = std::io::Error::last_os_error().raw_os_error();
+        return if error == Some(ERROR_MORE_DATA as i32) {
+            Err(JobQueryError::RetryWithCapacity(assigned.max(listed)))
+        } else {
+            Err(JobQueryError::Unavailable)
+        };
+    }
+    if listed > capacity || listed >= MAX_COMPLETION_OBSERVED_PIDS {
+        return Err(JobQueryError::Unavailable);
+    }
+    let mut pids = Vec::new();
+    pids.try_reserve_exact(listed)
+        .map_err(|_| JobQueryError::Unavailable)?;
+    for pid in &words[pid_word_offset..pid_word_offset + listed] {
+        pids.push(u32::try_from(*pid).map_err(|_| JobQueryError::Unavailable)?);
+    }
+    Ok(JobProcessSnapshot { assigned, pids })
+}
+
+fn observe_job_completion(job: HANDLE) -> ContainmentCompletionEvidence {
+    observe_job_completion_with(|capacity| query_job_process_snapshot(job, capacity))
+}
+
+fn observe_job_completion_with<F>(mut query: F) -> ContainmentCompletionEvidence
+where
+    F: FnMut(usize) -> Result<JobProcessSnapshot, JobQueryError>,
+{
+    let observation = ContainmentObservation::WindowsJobProcessIdList;
+    let mut capacity = INITIAL_JOB_PROCESS_ID_CAPACITY;
+    for _ in 0..=MAX_COMPLETION_OBSERVATION_RETRIES {
+        let snapshot = match query(capacity) {
+            Ok(snapshot) => snapshot,
+            Err(JobQueryError::RetryWithCapacity(required)) => {
+                let next = required.max(capacity.saturating_mul(2));
+                if next >= MAX_COMPLETION_OBSERVED_PIDS {
+                    return unknown_completion(observation);
+                }
+                capacity = next;
+                continue;
+            }
+            Err(JobQueryError::Unavailable) => return unknown_completion(observation),
+        };
+        if snapshot.assigned == snapshot.pids.len()
+            && snapshot.assigned < MAX_COMPLETION_OBSERVED_PIDS
+        {
+            return completion_from_pids(observation, snapshot.pids);
+        }
+        let next = snapshot.assigned.max(capacity);
+        if next >= MAX_COMPLETION_OBSERVED_PIDS {
+            return unknown_completion(observation);
+        }
+        capacity = next;
+    }
+    unknown_completion(observation)
 }
 
 pub fn run_with_timeout_impl(
@@ -381,6 +523,10 @@ mod tests {
             .expect("Job termination failed");
         assert!(outcome.exited);
         assert_eq!(outcome.signal_sent, None);
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty { .. }
+        ));
     }
 
     #[test]
@@ -402,6 +548,10 @@ mod tests {
             std::thread::sleep(POLL_INTERVAL);
         };
         assert!(outcome.exited);
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty { .. }
+        ));
         let mut child = match guard.into_child() {
             Ok(child) => child,
             Err(_) => panic!("finalized guard should release its reaped child"),
@@ -454,5 +604,87 @@ mod tests {
             error,
             ContainmentSpawnError::Spawn(SysprimsError::NotSupported { .. })
         ));
+    }
+
+    #[test]
+    fn job_observation_retries_incomplete_snapshot() {
+        let mut attempts = 0;
+        let evidence = observe_job_completion_with(|_| {
+            attempts += 1;
+            if attempts == 1 {
+                Ok(JobProcessSnapshot {
+                    assigned: 2,
+                    pids: vec![17],
+                })
+            } else {
+                Ok(JobProcessSnapshot {
+                    assigned: 2,
+                    pids: vec![23, 17],
+                })
+            }
+        });
+        assert_eq!(attempts, 2);
+        assert_eq!(
+            evidence,
+            ContainmentCompletionEvidence::Survivors {
+                observation: ContainmentObservation::WindowsJobProcessIdList,
+                observed_count: 2,
+                survivor_pids: vec![17, 23],
+            }
+        );
+    }
+
+    #[test]
+    fn job_observation_grows_incomplete_query_buffer() {
+        let mut capacities = Vec::new();
+        let evidence = observe_job_completion_with(|capacity| {
+            capacities.push(capacity);
+            if capacity < 200 {
+                Err(JobQueryError::RetryWithCapacity(200))
+            } else {
+                Ok(JobProcessSnapshot {
+                    assigned: 0,
+                    pids: Vec::new(),
+                })
+            }
+        });
+        assert_eq!(capacities, vec![INITIAL_JOB_PROCESS_ID_CAPACITY, 200]);
+        assert_eq!(
+            evidence,
+            ContainmentCompletionEvidence::Empty {
+                observation: ContainmentObservation::WindowsJobProcessIdList,
+            }
+        );
+    }
+
+    #[test]
+    fn job_observation_failure_is_unknown() {
+        let mut attempts = 0;
+        let evidence = observe_job_completion_with(|_| {
+            attempts += 1;
+            Err(JobQueryError::Unavailable)
+        });
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            evidence,
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::WindowsJobProcessIdList,
+            }
+        );
+    }
+
+    #[test]
+    fn job_observation_at_pid_limit_is_unknown() {
+        let evidence = observe_job_completion_with(|_| {
+            Err(JobQueryError::RetryWithCapacity(
+                MAX_COMPLETION_OBSERVED_PIDS,
+            ))
+        });
+        assert_eq!(
+            evidence,
+            ContainmentCompletionEvidence::Unknown {
+                observation: ContainmentObservation::WindowsJobProcessIdList,
+            }
+        );
     }
 }
