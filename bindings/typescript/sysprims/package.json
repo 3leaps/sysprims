@@ -44,6 +44,7 @@
     "api:generate": "node scripts/public-api.js generate",
     "api:check": "node --test scripts/public-api.test.js && node scripts/public-api.js check",
     "api:check:native": "node scripts/public-api.js check --require-native",
+    "platform-packages:check": "node scripts/verify-platform-packages.js",
     "test": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
     "test:ci": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"

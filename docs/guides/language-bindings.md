@@ -218,9 +218,9 @@ npm run build:native  # Builds the N-API addon
 - C/C++ compiler
 - Node.js 18+
 
-**From npm (future):**
+**From npm:**
 
-When npm publishing is enabled, prebuilt platform packages will be installed automatically:
+Prebuilt platform packages are installed automatically:
 
 ```bash
 npm install @3leaps/sysprims
@@ -231,24 +231,41 @@ No build tools required when using npm prebuilds.
 
 ### API Surface
 
-The TypeScript bindings provide parity with Go bindings:
+The intended TypeScript surface is recorded in the
+[capability intent matrix](../../bindings/typescript/sysprims/docs/capability-intent-matrix.md)
+and the generated [public API reference](../../bindings/typescript/sysprims/docs/public-api.md).
+CI checks emitted declarations, N-API exports, the public C comparison surface,
+and generated documentation for drift.
 
-| Function                        | Description                                                         |
-| ------------------------------- | ------------------------------------------------------------------- |
-| `procGet(pid)`                  | Get process info by PID (includes `start_time_unix_ms`, `exe_path`) |
-| `processList(filter?)`          | List processes with optional filtering                              |
-| `listeningPorts(filter?)`       | Map listening ports to processes                                    |
-| `selfPGID()`                    | Get current process group ID (Unix)                                 |
-| `selfSID()`                     | Get current session ID (Unix)                                       |
-| `runSetsid(config)`             | Spawn a command in a new POSIX session                              |
-| `runNohup(config)`              | Spawn a SIGHUP-ignoring command in the inherited session            |
-| `signalSend(pid, signal)`       | Send signal to process                                              |
-| `signalSendGroup(pgid, signal)` | Send signal to process group (Unix)                                 |
-| `terminate(pid)`                | Graceful termination                                                |
-| `forceKill(pid)`                | Immediate kill                                                      |
-| `waitPID(pid, timeoutMs)`       | Wait for process exit with timeout (v0.1.6+)                        |
-| `spawnInGroup(config)`          | Spawn in a new Unix process group; unsupported on Windows           |
-| `terminateTree(pid, config?)`   | Graceful-then-kill tree termination (v0.1.6+)                       |
+| Function                            | Description                                                          |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `procGet(pid, options?)`            | Get process info by PID with opt-in details                          |
+| `processList(filter?, options?)`    | List processes with filtering and opt-in details                     |
+| `ancestors(pid, options?)`          | Walk process ancestry                                                |
+| `descendants(pid, options?)`        | Walk descendants with default-off environment/thread enrichment     |
+| `listFds(pid, filter?)`             | List process file descriptors                                       |
+| `listeningPorts(filter?)`           | Map listening ports to processes                                    |
+| `waitPID(pid, timeoutMs)`           | Wait for process exit with timeout                                  |
+| `guardStep(config)`                 | Run one guard observation/remediation step                           |
+| `killDescendants(pid, signal?, options?)` | Signal matching descendants with per-target results                  |
+| `terminateTree(pid, config?)`       | Graceful-then-kill tree termination                                 |
+| `signalSend(pid, signal)`           | Send a signal to a process                                          |
+| `signalSendGroup(pgid, signal)`     | Send a signal to a process group on Unix                            |
+| `terminate(pid)`                    | Graceful termination                                                 |
+| `forceKill(pid)`                    | Immediate kill                                                       |
+| `killMany(pids, signal)`            | Signal multiple processes with per-PID results                       |
+| `terminateMany(pids)`               | Gracefully terminate multiple processes                              |
+| `forceKillMany(pids)`               | Force-kill multiple processes                                        |
+| `spawnInGroup(config)`              | Spawn in a new Unix process group; unsupported on Windows            |
+| `runSetsid(config)`                 | Spawn a command in a new POSIX session                               |
+| `runNohup(config)`                  | Spawn a SIGHUP-ignoring command on Unix                               |
+| `selfPGID()`                        | Get the current process group ID on Unix                             |
+| `selfSID()`                         | Get the current session ID on Unix                                   |
+
+Numeric PID, process-group, signal, depth, duration, port, and filter inputs
+are validated before JavaScript coercion or native loading and revalidated at
+the N-API boundary. The TypeScript package excludes owned containment and
+timeout execution and does not reconstruct lifecycle ownership from a PID.
 
 ### Filter Conventions
 

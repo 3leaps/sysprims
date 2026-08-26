@@ -68,9 +68,9 @@ On Unix, this uses `setpgid`/`killpg`. On Windows, Job Objects with `JOB_OBJECT_
 
 ```toml
 [dependencies]
-sysprims-timeout = "0.1"
-sysprims-signal = "0.1"
-sysprims-proc = "0.1"
+sysprims-timeout = "0.2"
+sysprims-signal = "0.2"
+sysprims-proc = "0.2"
 ```
 
 ```rust
@@ -495,7 +495,8 @@ sysprims integrates with the [Fulmen](https://github.com/fulmenhq) ecosystem:
 
 - **[rsfulmen](https://github.com/fulmenhq/rsfulmen)**: sysprims uses rsfulmen's signal constants (`SIGTERM`, `SIGKILL`, etc.) for cross-platform consistency
 - **Go bindings**: Available with consistent signal semantics
-- **Python/TypeScript bindings**: Planned for v0.1.x series, will integrate with respective fulmen libraries
+- **Python bindings**: Planned for the v0.2.x series
+- **TypeScript bindings**: Available through the Node-API package above
 
 This ensures signal semantics and exit codes are consistent whether you're writing Rust, Go, Python, or TypeScript.
 
