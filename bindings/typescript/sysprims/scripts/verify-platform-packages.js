@@ -6,6 +6,7 @@ const packageRoot = path.resolve(__dirname, "..");
 const rootPackage = require(path.join(packageRoot, "package.json"));
 const packagePrefix = "@3leaps/sysprims-";
 const requested = new Set(process.argv.slice(2));
+const targeted = requested.size > 0;
 const packagePlatforms = {
   "linux-x64-gnu": { os: "linux", cpu: "x64", libc: "glibc" },
   "linux-x64-musl": { os: "linux", cpu: "x64", libc: "musl" },
@@ -81,7 +82,7 @@ for (const [name, dependencyVersion] of platformDependencies) {
   if (packagePlatforms[packageDir].libc === undefined && platformPackage.libc !== undefined) {
     throw new Error(`${packageDir} must not declare libc`);
   }
-  if (requested.size > 0 && !requested.has(packageDir)) continue;
+  if (targeted && !requested.has(packageDir)) continue;
 
   const packed = spawnSync("npm", ["pack", "--dry-run", "--json", `./npm/${packageDir}`], {
     cwd: packageRoot,
