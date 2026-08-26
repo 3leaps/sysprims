@@ -5,6 +5,7 @@ formatter:
   type: basic
   indent: 2
   line_ending: lf
+  pad_line_comments: 2
 
 # Exclude patterns
 exclude:

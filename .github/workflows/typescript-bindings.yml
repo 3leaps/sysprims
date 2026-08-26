@@ -149,7 +149,7 @@ jobs:
           node scripts/stage-platform-package.js
       - name: Inspect target package
         working-directory: bindings/typescript/sysprims
-        run: npm pack --dry-run ./npm/${{ matrix.package-dir }}
+        run: node scripts/verify-platform-packages.js "${{ matrix.package-dir }}"
   test-musl:
     name: Test (linux-musl, alpine)
     runs-on: ubuntu-latest

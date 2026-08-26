@@ -16,10 +16,13 @@ jobs:
   format:
     name: Format Check
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      options: --user root
     steps:
       - uses: actions/checkout@v7
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Check formatting through Goneat DX
+        run: make fmt-check
   lint:
     name: Clippy
     runs-on: ubuntu-latest
@@ -267,7 +270,7 @@ jobs:
     name: License & Dependency Check
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.4
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
       options: --user root
     steps:
       - uses: actions/checkout@v7
@@ -276,7 +279,7 @@ jobs:
       - name: Advisory check
         run: cargo deny check advisories
       - name: Dependency assessment
-        run: goneat assess --categories dependencies --fail-on high
+        run: goneat assess --categories dependencies --check --fail-on high
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest

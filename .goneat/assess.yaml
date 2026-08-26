@@ -1,10 +1,10 @@
 # goneat assess configuration for sysprims
 # Rust project with FFI bindings
 #
-# goneat lint can run Rust clippy when Rust toolchain/clippy are available.
-# We still keep strict Rust gates in Makefile (cargo fmt --check and
-# cargo clippy --workspace --all-targets -- -D warnings) for parity
-# with repository quality expectations.
+# goneat is the DX and hook entry point. Rust formatting and linting remain
+# delegated to rustfmt and clippy through the Makefile and CI. Biome owns
+# JavaScript/TypeScript formatting through the package-local biome.json, while
+# goneat owns formatter discovery, check/fix mode, and unified reporting.
 #
 # This config primarily scopes additional non-Rust lint checks.
 # Keep comments current with the installed goneat release.
@@ -48,7 +48,7 @@ lint:
   shell:
     shfmt:
       enabled: true
-      fix: true
+      fix: false
     shellcheck:
       enabled: false
       path: ""

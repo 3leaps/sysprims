@@ -503,7 +503,7 @@ fn parse_ipv6(addr_hex: &str) -> SysprimsResult<Ipv6Addr> {
             .map_err(|_| SysprimsError::internal("invalid IPv6 hex"))?;
     }
 
-    for chunk in bytes.chunks_exact_mut(4) {
+    for chunk in bytes.as_chunks_mut::<4>().0 {
         chunk.reverse();
     }
 

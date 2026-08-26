@@ -379,6 +379,7 @@ mod tests {
         let dir = unique_temp_dir("nohup-cwd-env");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("marker"), "ok").unwrap();
+        let output_file = dir.join("nohup.out");
 
         let mut env = std::collections::BTreeMap::new();
         env.insert("SYSPRIMS_SESSION_TEST".to_string(), "expected".to_string());
@@ -392,8 +393,8 @@ mod tests {
             &NohupConfig {
                 wait: true,
                 cwd: Some(dir.clone()),
+                output_file: Some(output_file.display().to_string()),
                 env: Some(env),
-                ..Default::default()
             },
         );
 

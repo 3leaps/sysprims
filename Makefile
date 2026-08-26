@@ -34,7 +34,7 @@ BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions for reproducibility
 SFETCH_VERSION := latest
-GONEAT_VERSION ?= v0.5.1
+GONEAT_VERSION ?= v0.5.16
 GONEAT_FORMAT_FAIL_ON ?= medium
 
 # Tool paths
@@ -304,12 +304,7 @@ fmt-check: ## Check formatting without modifying
 	$(CARGO) fmt --all -- --check
 	@if command -v goneat >/dev/null 2>&1; then \
 		echo "Checking markdown, YAML, JSON formatting (goneat assess format)..."; \
-		if goneat assess --categories format --check --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null; then \
-			true; \
-		else \
-			echo "[--] goneat assess format failed or unavailable; falling back to goneat format --check"; \
-			goneat format --check --quiet; \
-		fi; \
+		goneat assess --categories format --check --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null; \
 	else \
 		echo "[!!] goneat not found — skipping non-Rust format check (run 'make bootstrap')"; \
 	fi
@@ -321,7 +316,7 @@ lint: ## Run linting (cargo clippy + goneat lint)
 	@bash scripts/check-npm-trusted-publish-runtime.sh
 	@if command -v goneat >/dev/null 2>&1; then \
 		echo "Linting YAML, shell, workflows..."; \
-		goneat assess --categories lint --fail-on medium --ci-summary --log-level warn --output /dev/null; \
+		goneat assess --categories lint --check --fail-on medium --ci-summary --log-level warn --output /dev/null; \
 	else \
 		echo "[!!] goneat not found — skipping non-Rust linting (run 'make bootstrap')"; \
 	fi
