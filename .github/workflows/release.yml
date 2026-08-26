@@ -80,7 +80,7 @@ jobs:
     name: Build Linux
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.4
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
       options: --user root
     needs: validate-version
     strategy:
@@ -444,7 +444,7 @@ jobs:
     name: Generate C Header
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.3.4
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
       options: --user root
     needs: validate-version
     steps:
