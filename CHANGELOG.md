@@ -10,6 +10,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - Pending
+
+### Added
+
+- Safe `spawn_contained(Command)` acquisition for owned Unix children. The
+  child enters a new session and process group in its pre-exec hook, and the
+  returned guard retains the same-spawn proof needed for group signaling.
+- A receipt-bound PTY adapter seam: `prepare_session_acquisition` provides the
+  replacement `setsid` hook and pending proof, while the generic
+  `contain_acquired_session` constructor is explicitly `unsafe`.
+- Fixed-size, async-signal-safe child acknowledgement and one-shot acquisition
+  tokens that fail closed on missing, partial, duplicated, or mismatched use.
+- Privileged disposable-container coverage for hostile descendants that leave
+  their acquired Unix process group.
+
+### Changed
+
+- `TreeKillReliability::Guaranteed` now requires race-free spawn-time
+  acquisition plus retained group-signaling eligibility. It does not claim
+  that descendants cannot later leave a cooperative Unix process group.
+- Receipt-bound termination revalidates the child, session, process group, and
+  exclusive unreaped ownership before signaling. The leader remains unreaped
+  through final group escalation so its PID and PGID cannot be reused.
+- PID-only and legacy group-spawn paths remain `best_effort`; post-spawn owned
+  adoption remains `unproven`.
+- Guaranteed Windows spawn continues to fail closed until create-suspended Job
+  assignment is available.
+
+### Fixed
+
+- A leader-exit race between live identity validation and process-group lookup
+  now accepts only the exact receipt-bound exited-but-unreaped transition.
+  Lost reap ownership and live identity mismatches still fail closed.
+- Linux process start-time conversion preserves clock-tick precision when
+  binding receipt identity.
+
+### Upgrade Notes
+
+- The new acquisition and containment APIs are Rust-only in this release.
+  FFI, Go, and TypeScript binding surfaces are unchanged.
+- A PTY integration must install the sysprims hook instead of performing its
+  own `setsid`, and must retain exclusive unreaped ownership for the unsafe
+  generic adapter contract.
+- No portable-PTY companion crate or consumer integration is included.
+
 ## [0.2.0] - Pending
 
 ### Added
@@ -656,7 +701,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/3leaps/sysprims/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/3leaps/sysprims/compare/v0.1.20...v0.2.0
 [0.1.20]: https://github.com/3leaps/sysprims/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/3leaps/sysprims/compare/v0.1.18...v0.1.19
