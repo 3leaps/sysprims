@@ -6,7 +6,7 @@
 
 ---
 
-## v0.2.1 - Pending
+## v0.2.1 - 2026-08-27
 
 **Status:** Spawn-Time Containment Acquisition
 
