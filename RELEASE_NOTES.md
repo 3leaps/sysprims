@@ -6,6 +6,54 @@
 
 ---
 
+## v0.2.1 - Pending
+
+**Status:** Spawn-Time Containment Acquisition
+
+v0.2.1 adds receipt-bound spawn-time session and process-group acquisition for
+owned Rust commands and PTY adapters. The retained proof closes the
+spawn-to-containment race while preserving an honest boundary: `guaranteed`
+means acquisition and group-signaling eligibility, not OS-enforced descendant
+non-escape.
+
+### Highlights
+
+- **Safe owned spawn**: `spawn_contained(Command)` installs the acquisition
+  hook, spawns once, validates the child acknowledgement, and returns an owned
+  guard.
+- **PTY adapter seam**: `prepare_session_acquisition` supplies the replacement
+  `setsid` hook and pending proof without taking PTY descriptors or terminal
+  ownership.
+- **Explicit unsafe boundary**: generic external-child receipt consumption is
+  `unsafe` and requires the same child plus exclusive unreaped ownership.
+- **One-shot proof**: fixed-size child acknowledgement and non-cloneable tokens
+  reject missing, partial, duplicated, and mismatched acquisition.
+- **Signal identity**: receipt-bound guards verify child identity, session,
+  process group, and unreaped ownership before group signals.
+- **Leader-exit handling**: final group escalation remains valid when the exact
+  leader has exited but is still unreaped, preventing PID and PGID reuse while
+  surviving descendants are signaled.
+- **Hostile boundary tests**: privileged container tests exercise descendants
+  that intentionally leave the cooperative process group.
+
+### Upgrade Notes
+
+- These new APIs are Rust-only. The FFI, Go, and TypeScript public surfaces are
+  unchanged in v0.2.1.
+- PTY integrations must install the sysprims acquisition hook instead of their
+  own `setsid`, then retain exclusive unreaped ownership through guard
+  finalization.
+- `TreeKillReliability::Guaranteed` does not promise that a Unix descendant
+  cannot create or join a different session or process group.
+- PID-only termination remains `best_effort`; post-spawn owned adoption remains
+  `unproven`.
+- Guaranteed Windows spawn remains unsupported until create-suspended Job
+  assignment is available.
+- No portable-PTY companion crate or downstream consumer integration ships in
+  this release.
+
+---
+
 ## v0.2.0 - Pending
 
 **Status:** Process Containment Release
@@ -73,29 +121,6 @@ publication. No public API or process-control behavior changes are intended.
 - Go prebuilt libraries are produced by the Go Bindings Prep workflow after this
   version commit is merged to `main`; do not tag v0.1.20 before that artifact PR
   merges.
-
----
-
-## v0.1.19 - 2026-08-21
-
-**Status:** Maintenance Release
-
-v0.1.19 is a small maintenance release. It refreshes the compatible Rust lockfile and
-TypeScript `@types/node` 22.20.1. No public API or process-control behavior changes are
-intended.
-
-### Highlights
-
-- **Compatible Rust lockfile refresh**: crate versions updated within existing constraints.
-  `thiserror` remains 1.0.69. napi remains 2.16.x.
-- **TypeScript types**: `@types/node` 22.20.1. The `package.json` range stays `^22.10.0`.
-- **CLI Clippy**: dropped a redundant borrow in the signal table printer.
-
-### Upgrade Notes
-
-- No public API changes are intended.
-- Signed GitHub release and Go module tags were published.
-- TypeScript npm publication resumes in v0.1.20.
 
 ---
 
