@@ -61,7 +61,10 @@ All dependencies must pass cargo-deny license checks. No GPL/LGPL/AGPL code path
 
 ### 3. Group-by-Default Reliability
 
-Process tree cleanup is the core differentiator. All timeout operations default to killing the entire process tree. See [ADR-0003](./adr/0003-group-by-default.md).
+Process-group/Job cleanup is the core differentiator. Timeout operations target
+the acquired cooperative group or owned Job by default; Unix descendants may
+later leave a process group. See
+[ADR-0003](../decisions/ADR-0003-group-by-default.md).
 
 ### 4. Schema-Driven Contracts
 

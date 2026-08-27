@@ -111,11 +111,15 @@ sysprims kill 88680 88681 88682 -s TERM
 
 In testing, surgical kills successfully terminated runaway helpers while preserving the parent VSCodium windows - no respawns occurred and no work was lost. This makes Option A the preferred starting point.
 
-### Option B: Tree Termination - Kill the Parent
+### Option B: Parent PID Termination
 
-> **Before using terminate-tree, consider:** Have you tried killing the individual runaway processes first? Tree termination is irreversible and closes all windows managed by the parent. If surgical strikes (Option A) can resolve the issue, you preserve your application state and open documents.
+> **Before using terminate-tree, consider:** Have you tried killing the
+> individual runaway processes first? Parent termination is irreversible and
+> may close application windows. The PID-only compatibility command does not
+> carry an owned descendant-containment capability.
 
-If surgical kills don't work (processes respawn immediately, or too many children are affected), terminate the entire tree:
+If surgical kills do not work because the parent immediately respawns helpers,
+terminate the parent PID:
 
 ```bash
 sysprims terminate-tree 26021 \
@@ -131,17 +135,20 @@ Output:
   "timestamp": "2026-01-29T21:23:07.677021Z",
   "platform": "macos",
   "pid": 26021,
-  "pgid": 26021,
+  "pgid": null,
   "signal_sent": 15,
   "escalated": false,
   "exited": true,
   "timed_out": false,
-  "tree_kill_reliability": "guaranteed",
-  "warnings": []
+  "tree_kill_reliability": "best_effort",
+  "warnings": [
+    "PID-only termination has no sealed group capability; signaling the target PID only"
+  ]
 }
 ```
 
-**Important**: Tree termination kills the parent and all descendants. In this case, that means all windows managed by this VSCodium instance are closed.
+**Important**: PID-only termination targets the selected process. Use an owned
+containment guard when descendant cleanup is required.
 
 ## Step 4: Verify Termination
 
@@ -164,7 +171,7 @@ sysprims pstat --pid 88680 --json
 | `signal_sent`           | Signal used (15 = SIGTERM, 9 = SIGKILL)  |
 | `escalated`             | Whether SIGKILL was needed after SIGTERM |
 | `exited`                | Process terminated successfully          |
-| `tree_kill_reliability` | `"guaranteed"` if PGID kill was used     |
+| `tree_kill_reliability` | `"best_effort"` for the PID-only API     |
 | `warnings`              | Any edge cases encountered               |
 
 ### Safety Options
@@ -195,11 +202,14 @@ These protections are CLI-specific. The underlying library allows these operatio
 
 1. **Investigate first**: Use `pstat` to understand the process tree before terminating anything.
 
-2. **Start surgical**: Try killing individual runaway children first (Option A). If the parent respawns them or multiple children are affected, then escalate to tree termination.
+2. **Start surgical**: Try killing individual runaway children first (Option
+   A). If the parent respawns them, consider terminating the parent PID.
 
 3. **Use identity guards**: Always use `--require-exe-path` or `--require-start-time-ms` when automating termination, to protect against PID reuse.
 
-4. **Understand scope**: Tree termination affects all descendants. For applications like VS Code that may have multiple windows under one process, tree termination closes all windows in that instance.
+4. **Understand scope**: PID-only termination may stop the parent application
+   without proving descendant cleanup. For applications like VS Code, stopping
+   the parent may close all windows in that instance.
 
 ## Identifying the Root Cause
 
@@ -257,7 +267,7 @@ for (const p of runaway) {
   byParent.set(p.ppid, group);
 }
 
-// Terminate tree with identity verification
+// Terminate the parent PID with identity verification
 for (const [ppid, children] of byParent) {
   const parent = procGet(ppid);
 
@@ -269,9 +279,7 @@ for (const [ppid, children] of byParent) {
   });
 
   if (result.exited) {
-    console.log(
-      `Terminated tree rooted at ${ppid} (${children.length} runaway children)`,
-    );
+    console.log(`Terminated parent PID ${ppid}; re-check ${children.length} helpers`);
   }
 }
 ```
@@ -287,7 +295,7 @@ for (const [ppid, children] of byParent) {
 | Kill single process (try first)         | `sysprims kill <PID> -s TERM`                                 |
 | Kill single process (if TERM ignored)   | `sysprims kill <PID> -s KILL`                                 |
 | Kill multiple processes                 | `sysprims kill <PID> <PID> ... -s TERM --json`                |
-| Terminate process tree (last resort)    | `sysprims terminate-tree <PID> --require-exe-path <PATH>`     |
+| Terminate parent PID (last resort)      | `sysprims terminate-tree <PID> --require-exe-path <PATH>`     |
 
 ---
 

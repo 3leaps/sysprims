@@ -2,19 +2,20 @@
 //!
 //! This crate provides:
 //! - Process execution with timeout ([`run_with_timeout`])
-//! - Group-by-default semantics (entire process tree killed on timeout)
+//! - Group-by-default semantics (cooperative process groups signaled on timeout)
 //! - Signal escalation (SIGTERM → SIGKILL after configurable delay)
 //! - Observable fallback status for tree-kill reliability
 //!
 //! # Group-by-Default
 //!
 //! The core differentiator of sysprims over GNU timeout. When a command times
-//! out, the **entire process tree** is killed, not just the direct child:
+//! out, the acquired process group is signaled, not just the direct child:
 //!
 //! - **Unix**: Creates a new process group; child is group leader
 //! - **Windows**: Creates a Job Object with `KILL_ON_JOB_CLOSE`
 //!
-//! This prevents orphaned processes that ignore SIGTERM or attempt to escape.
+//! This gives race-free group acquisition and signaling eligibility. It is not
+//! an OS-enforced promise that descendants cannot later leave the group.
 //!
 //! # Examples
 //!
@@ -64,7 +65,7 @@ pub use sysprims_signal::{SIGKILL, SIGTERM};
 #[serde(rename_all = "snake_case")]
 pub enum GroupingMode {
     /// Create new process group (Unix) or Job Object (Windows).
-    /// Kill entire tree on timeout. **This is the default.**
+    /// Signal the acquired group/job on timeout. **This is the default.**
     #[default]
     GroupByDefault,
 
@@ -113,21 +114,22 @@ impl Default for TimeoutConfig {
 
 /// Reliability of tree-kill operation.
 ///
-/// Distinguishes proven containment, post-spawn containment with an escape
-/// window, and direct-child best effort.
+/// Distinguishes proven spawn-time acquisition, post-spawn containment with an
+/// escape window, and direct-child best effort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeKillReliability {
-    /// Tree-kill guaranteed. Process group (Unix) or Job Object (Windows)
-    /// was successfully created and used.
+    /// Spawn-time containment acquisition and group-signaling eligibility were
+    /// proven. On Unix, descendants can still leave a cooperative process
+    /// group later; this is not a non-escape guarantee.
     Guaranteed,
 
     /// A containment capability is owned, but it was attached after the child
     /// started and descendants may have escaped before attachment completed.
     Unproven,
 
-    /// Best-effort only. Process group or Job Object creation failed;
-    /// only the direct child was killed. Grandchildren may have escaped.
+    /// Best-effort only. No owned, proven containment capability is retained;
+    /// coverage may be limited to the direct child.
     BestEffort,
 }
 
@@ -219,14 +221,19 @@ impl TreeKillReliability {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ContainmentIdentity {
     pub pid: u32,
+    /// Zero only when a sealed same-spawn receipt is paired with an already
+    /// exited, unreaped child before live metadata can be captured.
     pub start_time_unix_ms: u64,
+    /// Empty only for the same receipt-bound fast-exit state.
     pub exe_path: String,
 }
 
 /// Minimal owned-child contract used by [`ContainmentGuard`].
 ///
 /// Consumers can wrap an external child type without exposing PTY handles or
-/// terminal data to sysprims.
+/// terminal data to sysprims. The adapter must retain exclusive reap ownership
+/// from receipt consumption through guard finalization; `process_id` must name
+/// that unreaped child for the adapter's lifetime.
 pub trait ContainmentChild {
     fn process_id(&self) -> Option<u32>;
     /// Poll and reap the child when it has exited.
@@ -311,6 +318,8 @@ pub struct ContainmentGuard<C: ContainmentChild> {
     pgid: u32,
     #[cfg(unix)]
     session_id: u32,
+    #[cfg(unix)]
+    session_receipt: Option<sysprims_session::UnixSessionReceipt>,
     #[cfg(windows)]
     job: std::os::windows::io::OwnedHandle,
 }
@@ -427,11 +436,35 @@ pub fn adopt_contained<C: ContainmentChild>(
     return windows::adopt_contained_impl(child);
 }
 
+/// Consume a sealed same-spawn session receipt with its owned child.
+///
+/// This is the Unix entry point for an external spawner that installed
+/// [`sysprims_session::UnixSessionAcquisitionHook`] in place of its own
+/// `setsid`/`setpgid` acquisition. The receipt is destroyed on every failure,
+/// and the child is returned through [`ContainmentAdoptionError`].
+///
+/// # Safety
+///
+/// `child` must be the same spawned child that emitted `receipt`. The adapter
+/// must hold exclusive, unreaped ownership, keep `process_id()` stable, and
+/// perform no external wait or reap until the guard finalizes. Violating these
+/// requirements can let PID reuse redirect a group signal to an unrelated
+/// process. Runtime ownership and identity checks remain defense-in-depth.
+#[cfg(unix)]
+pub unsafe fn contain_acquired_session<C: ContainmentChild>(
+    child: C,
+    receipt: sysprims_session::UnixSessionReceipt,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
+    unix::contain_acquired_session_impl(child, receipt)
+}
+
 /// Spawn a standard-library child and return its owned containment guard.
 ///
-/// Unix establishes the process group before exec and reports guaranteed
-/// acquisition. Windows fails closed until a create-suspended Job assignment
-/// path is available; use [`adopt_contained`] for explicitly unproven adoption.
+/// Unix uses the same sealed spawn-time session receipt as
+/// [`contain_acquired_session`] and reports guaranteed acquisition/group
+/// signaling eligibility. Windows fails closed until a create-suspended Job
+/// assignment path is available; use [`adopt_contained`] for explicitly
+/// unproven adoption.
 pub fn spawn_contained(command: Command) -> Result<ContainmentGuard<Child>, ContainmentSpawnError> {
     #[cfg(unix)]
     return unix::spawn_contained_impl(command);
@@ -613,8 +646,10 @@ pub struct SpawnInGroupResult {
 /// Use this when you would otherwise shell out to `setsid`/wrapper scripts to
 /// make jobs kill-tree safe.
 ///
-/// On Windows, this PID-returning compatibility API fails closed because it
-/// cannot retain an owned Job handle. Use [`spawn_contained`] instead.
+/// This PID-returning compatibility API cannot retain the owned child and
+/// sealed receipt required for [`TreeKillReliability::Guaranteed`]. Unix
+/// therefore reports `best_effort`; Windows fails closed because it cannot
+/// retain an owned Job handle. Use [`spawn_contained`] instead.
 ///
 /// # Examples
 ///
@@ -644,10 +679,11 @@ pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroup
 
 // Timestamp generation consolidated in sysprims_core::time::now_rfc3339()
 
-/// Terminate a process (and best-effort tree) with escalation.
+/// Terminate a process by PID with escalation.
 ///
-/// PID-only API: if the target PID is a process group leader (Unix only), this will
-/// prefer group kill for better coverage. Otherwise it signals the PID directly.
+/// This compatibility API has no owned child or sealed containment receipt, so
+/// it signals only the supplied PID and always reports `best_effort`. Use an
+/// owned [`ContainmentGuard`] for process-group or Job Object termination.
 ///
 /// # Examples
 ///
@@ -677,63 +713,22 @@ pub fn terminate_tree(
     }
 
     let mut warnings: Vec<String> = Vec::new();
-    let mut pgid: Option<u32> = None;
-    let mut reliability = TreeKillReliability::BestEffort;
-
-    // Decide whether we can safely use group kill (Unix only).
-    #[cfg(unix)]
-    {
-        use sysprims_signal::MAX_SAFE_PID;
-        if pid <= MAX_SAFE_PID {
-            let pid_i32 = pid as i32;
-            let self_pgid = unsafe { libc::getpgid(0) };
-            let target_pgid = unsafe { libc::getpgid(pid_i32) };
-
-            if target_pgid == -1 {
-                warnings.push("Could not determine process group for pid".to_string());
-            } else if target_pgid == pid_i32 {
-                // Target is a group leader. Only use killpg if it isn't our own group.
-                if self_pgid != -1 && target_pgid == self_pgid {
-                    warnings.push(
-                        "Target pid is in caller's process group; refusing group kill".to_string(),
-                    );
-                } else {
-                    pgid = Some(target_pgid as u32);
-                    reliability = TreeKillReliability::Guaranteed;
-                }
-            } else {
-                warnings
-                    .push("Target pid is not a process group leader; using pid kill".to_string());
-            }
-        } else {
-            warnings.push("pid exceeds max safe pid for POSIX kill".to_string());
-        }
-    }
+    let pgid: Option<u32> = None;
+    let reliability = TreeKillReliability::BestEffort;
 
     #[cfg(windows)]
     warnings.push(
         "Windows PID termination is best-effort; use an owned containment guard for Job Objects"
             .to_string(),
     );
+    #[cfg(unix)]
+    warnings.push(
+        "PID-only termination has no sealed group capability; signaling the target PID only"
+            .to_string(),
+    );
 
     // Step 1: send graceful signal
-    // If group kill fails (e.g. permission-limited), fall back to PID kill.
-    if let Some(g) = pgid {
-        match sysprims_signal::killpg(g, config.signal) {
-            Ok(()) => {}
-            Err(SysprimsError::PermissionDenied { .. }) => {
-                warnings.push(
-                    "Permission denied signaling process group; falling back to pid".to_string(),
-                );
-                pgid = None;
-                reliability = TreeKillReliability::BestEffort;
-                sysprims_signal::kill(pid, config.signal)?;
-            }
-            Err(e) => return Err(e),
-        }
-    } else {
-        sysprims_signal::kill(pid, config.signal)?;
-    }
+    sysprims_signal::kill(pid, config.signal)?;
 
     // Step 2: wait for exit
     let grace = Duration::from_millis(config.grace_timeout_ms);
@@ -756,23 +751,7 @@ pub fn terminate_tree(
     }
 
     // Step 3: escalate
-    if let Some(g) = pgid {
-        match sysprims_signal::killpg(g, config.kill_signal) {
-            Ok(()) => {}
-            Err(SysprimsError::PermissionDenied { .. }) => {
-                warnings.push(
-                    "Permission denied signaling process group (kill); falling back to pid"
-                        .to_string(),
-                );
-                pgid = None;
-                reliability = TreeKillReliability::BestEffort;
-                sysprims_signal::kill(pid, config.kill_signal)?;
-            }
-            Err(e) => return Err(e),
-        }
-    } else {
-        sysprims_signal::kill(pid, config.kill_signal)?;
-    }
+    sysprims_signal::kill(pid, config.kill_signal)?;
 
     let kill_wait = wait_pid(pid, Duration::from_millis(config.kill_timeout_ms))?;
     let mut exited = kill_wait.exited;
@@ -838,7 +817,8 @@ pub enum TimeoutOutcome {
 
         /// Whether tree-kill was reliable.
         ///
-        /// `Guaranteed` if process group/Job Object worked.
+        /// `Guaranteed` when spawn-time acquisition and group/job signaling
+        /// eligibility were proven.
         /// `BestEffort` if only the direct child was killed.
         tree_kill_reliability: TreeKillReliability,
     },
@@ -847,7 +827,9 @@ pub enum TimeoutOutcome {
 /// Run a command with timeout.
 ///
 /// Spawns the command and waits for it to complete or timeout. If the command
-/// times out, the entire process tree is killed (when using `GroupByDefault`).
+/// times out, the acquired process group or Job is signaled (when using
+/// `GroupByDefault`). Cooperative descendants in that containment are targeted;
+/// Unix descendants can still leave a process group later.
 ///
 /// # Arguments
 ///
@@ -1069,6 +1051,8 @@ mod tests {
             "expected child to be exited, got: {result:?}"
         );
         assert!(!result.timed_out, "unexpected timeout: {result:?}");
+        assert_eq!(result.tree_kill_reliability, "best_effort");
+        assert_eq!(result.pgid, None);
 
         let _ = child.wait();
     }

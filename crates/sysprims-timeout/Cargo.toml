@@ -24,6 +24,7 @@ serde = { workspace = true, features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+sysprims-session = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }

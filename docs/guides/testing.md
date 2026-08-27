@@ -45,16 +45,18 @@ OS-specific tests:
 - UTF-8 strings round-trip correctly
 - Memory ownership/free is correct
 
-## Non-Negotiable: Tree Escape Test
+## Non-Negotiable: Containment Test
 
 Per OS, include a test that:
 
 1. Spawns a child that spawns grandchildren
-2. Grandchildren attempt to detach, ignore signals, or outlive parent
-3. Assert `sysprims-timeout` terminates the entire tree under Group-by-Default policy
+2. In-containment grandchildren ignore the graceful signal or outlive the leader
+3. Assert final escalation targets all remaining in-group/Job members
 4. Record `tree_kill_reliability` ("guaranteed", "unproven", or "best_effort")
 
-This is the **core differentiator** - see [ADR-0003](../architecture/adr/0003-group-by-default.md).
+Test Unix session/group escape separately as a documented cooperative-group
+limitation; do not interpret `guaranteed` as non-escape. This is the **core
+differentiator** - see [ADR-0003](../architecture/adr/0003-group-by-default.md).
 
 ## CI Matrix
 

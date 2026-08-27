@@ -104,8 +104,8 @@ enum Command {
     /// Run a command with a timeout.
     ///
     /// If the command runs longer than the specified duration, it will be
-    /// terminated. By default, the entire process tree is killed (not just
-    /// the direct child).
+    /// terminated. By default, a dedicated containment is acquired and its
+    /// cooperative members are signaled.
     Timeout(TimeoutArgs),
 
     /// Display process information.
@@ -114,10 +114,10 @@ enum Command {
     /// for automation, or table format for human consumption.
     Pstat(PstatArgs),
 
-    /// Terminate a process tree by PID.
+    /// Terminate a process by PID with escalation.
     ///
-    /// This is best-effort cross-platform termination of a PID and its descendants.
-    /// On Unix this uses process groups when possible; on Windows it uses Job Objects.
+    /// This PID-only compatibility command is best-effort and does not infer
+    /// an owned process group or Job Object from the PID.
     TerminateTree(TerminateTreeArgs),
 
     /// List descendants of a process.

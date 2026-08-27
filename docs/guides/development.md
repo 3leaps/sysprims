@@ -61,8 +61,10 @@ goneat validate-data --schema schemas/timeout-result/v1.0.0.schema.json output.j
 
 ### Unix (Process Groups)
 
-- Group-by-default uses process groups (`setpgid`) and signals group on timeout
-- `killpg()` terminates entire tree
+- Owned group-by-default uses a pre-exec `setsid` hook and sealed receipt
+- `killpg()` targets members that remain in the cooperative process group
+- `guaranteed` covers race-free acquisition and signaling eligibility, not
+  descendant non-escape
 
 ## Binding Development
 

@@ -1,14 +1,14 @@
-//! Tree Escape Tests - The Core Thesis of sysprims
+//! Process Group Cleanup Tests
 //!
-//! These tests validate that sysprims-timeout kills the ENTIRE process tree
-//! on timeout, not just the direct child. This is the core differentiator
-//! over GNU timeout which leaves orphaned processes.
+//! These tests validate that sysprims-timeout signals the acquired cooperative
+//! process group on timeout, not just the direct child. A descendant that
+//! successfully leaves the group is outside this contract.
 //!
 //! # Test Strategy
 //!
-//! 1. Spawn a script that creates grandchildren attempting to escape
+//! 1. Spawn a script that creates cooperative grandchildren
 //! 2. Run it with sysprims timeout
-//! 3. Verify ALL processes are killed (no orphans)
+//! 3. Verify all in-group processes are gone
 //!
 //! # Escape Techniques Tested
 //!
@@ -127,7 +127,7 @@ fn tree_escape_background_grandchildren_are_killed() {
     )
     .expect("run_with_timeout failed");
 
-    // Verify timeout occurred with guaranteed tree-kill
+    // Verify timeout occurred with guaranteed acquisition/group signaling.
     match result {
         TimeoutOutcome::TimedOut {
             tree_kill_reliability,
@@ -136,7 +136,7 @@ fn tree_escape_background_grandchildren_are_killed() {
             assert_eq!(
                 tree_kill_reliability,
                 TreeKillReliability::Guaranteed,
-                "Expected guaranteed tree-kill"
+                "Expected guaranteed group acquisition and signaling"
             );
         }
         TimeoutOutcome::Completed { .. } => {
@@ -147,7 +147,7 @@ fn tree_escape_background_grandchildren_are_killed() {
     // Give OS time to clean up processes
     thread::sleep(Duration::from_millis(200));
 
-    // Verify no orphaned processes remain
+    // Verify no marked in-group processes remain
     let after_count = count_processes_matching(&marker);
     assert_eq!(
         after_count, 0,
@@ -169,7 +169,7 @@ fn tree_escape_background_grandchildren_are_killed() {
 ///
 /// This test documents the limitation rather than asserting it doesn't happen.
 #[test]
-#[cfg(unix)]
+#[cfg(all(unix, feature = "privileged-tests"))]
 fn tree_escape_setsid_documents_limitation() {
     use sysprims_session::{run_setsid, SetsidConfig};
 

@@ -315,9 +315,11 @@ const result = spawnInGroup({
 console.log(`Spawned PID ${result.pid}`);
 ```
 
-`spawnInGroup` fails closed on Windows because the binding returns only a PID
-and cannot retain the Job handle required for later tree cleanup. Windows
-callers should not treat PID-only `terminateTree` as Job-backed containment.
+`spawnInGroup` reports `best_effort` on Unix because the binding returns only a
+PID and cannot retain a receipt-bound child capability. It fails closed on
+Windows because it cannot retain the Job handle required for later tree
+cleanup. Callers should not treat PID-only `terminateTree` as owned
+containment.
 
 **terminateTree** - Graceful-then-kill tree termination:
 

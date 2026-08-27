@@ -1,9 +1,9 @@
 ---
 title: "sysprims-timeout Module Spec"
 module: "sysprims-timeout"
-version: "1.1"
+version: "1.2"
 status: "Active"
-last_updated: "2026-01-25"
+last_updated: "2026-08-27"
 adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 ---
 
@@ -11,9 +11,15 @@ adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 
 ## 1) Overview
 
-**Purpose:** Provide a library-first `run_with_timeout()` primitive and thin CLI wrapper that match widely expected `timeout` semantics while delivering a stronger guarantee: **terminate the whole process tree by default** (group-by-default), with **observable fallbacks** when the OS cannot guarantee it.
+**Purpose:** Provide a library-first `run_with_timeout()` primitive and thin
+CLI wrapper that match widely expected `timeout` semantics while acquiring and
+signaling a process group or Job by default, with observable fallbacks.
 
-**Core differentiator (ADR-0003):** Unlike GNU timeout, which kills only the direct child, sysprims-timeout kills the entire process tree. This prevents orphaned processes that ignore SIGTERM or attempt to escape.
+**Core differentiator (ADR-0003):** Unlike GNU timeout, which targets only the
+direct child, sysprims-timeout acquires and signals a cooperative process group
+or owned Job. `Guaranteed` means race-free spawn-time acquisition and
+group/job-signaling eligibility. It does not claim that Unix descendants cannot
+later leave a process group.
 
 **In scope (v0.1.0):**
 
@@ -23,7 +29,8 @@ adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 - Escalate to SIGKILL after `kill_after` delay
 - `--preserve-status` behavior (propagate child exit code on normal completion)
 - Group-by-default process control:
-  - Unix: process groups via `setpgid(0, 0)` and `killpg()`
+  - Unix: owned `setsid` acquisition with a sealed same-spawn receipt and
+    `killpg()`; legacy PID-returning paths are explicitly `best_effort`
   - Windows: Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
 - Machine-readable JSON output including `schema_id` and reliability fields
 
@@ -93,7 +100,7 @@ timeout [OPTION] DURATION COMMAND [ARG]...
 #[serde(rename_all = "snake_case")]
 pub enum GroupingMode {
     /// Create new process group (Unix) or Job Object (Windows).
-    /// Kill entire tree on timeout. **This is the default.**
+    /// Signal the acquired group/job on timeout. **This is the default.**
     #[default]
     GroupByDefault,
 
@@ -120,7 +127,8 @@ pub struct TimeoutConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeKillReliability {
-    /// Containment was established before child execution could escape it.
+    /// Spawn-time acquisition and group/job signaling eligibility were proven.
+    /// This is not a Unix descendant non-escape guarantee.
     Guaranteed,
     /// An owned containment capability was attached after spawn.
     Unproven,
@@ -162,8 +170,8 @@ pub fn run_with_timeout_default(
 
 /// Spawn a process in a new process group (v0.1.6+; Unix compatibility API).
 ///
-/// Creates a child process with reliable tree-kill capability.
-/// Does not wait for the process to exit.
+/// Creates a child process in a new Unix process group.
+/// Does not retain ownership and therefore reports best-effort reliability.
 pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroupResult>;
 
 /// Spawn a child with an owned process-group or Job Object guard.
@@ -174,15 +182,21 @@ pub fn spawn_contained(command: Command)
 pub fn adopt_contained<C: ContainmentChild>(child: C)
     -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>>;
 
+/// Consume an opaque same-spawn Unix session receipt with its owned child.
+pub unsafe fn contain_acquired_session<C: ContainmentChild>(
+    child: C,
+    receipt: sysprims_session::UnixSessionReceipt,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>>;
+
 /// Observe normal leader exit without reaping, then clean descendants and reap.
 impl<C: ContainmentChild> ContainmentGuard<C> {
     pub fn try_complete(&mut self, config: TerminateTreeConfig)
         -> SysprimsResult<Option<ContainmentOutcome>>;
 }
 
-/// Terminate a process tree with graceful-then-kill escalation (v0.1.6+).
+/// Terminate a process by PID with graceful-then-kill escalation (v0.1.6+).
 ///
-/// Works on arbitrary PIDs, not just spawned children.
+/// Works on arbitrary PIDs and reports best-effort reliability.
 pub fn terminate_tree(pid: u32, config: TerminateTreeConfig) -> SysprimsResult<TerminateTreeResult>;
 ```
 
@@ -224,7 +238,7 @@ pub struct SpawnInGroupResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pgid: Option<u32>,
 
-    /// Reliability of tree-kill capability.
+    /// Reliability of the PID-only grouped-spawn compatibility result.
     pub tree_kill_reliability: TreeKillReliability,
 
     /// Platform-specific warnings (grouping failures, permission limits, etc.)
@@ -234,7 +248,10 @@ pub struct SpawnInGroupResult {
 
 **Platform notes:**
 
-- **Unix**: Creates new process group via `setpgid(0, 0)`. Returns `pgid`.
+- **Unix**: `spawn_contained` uses the `sysprims-session` `setsid` hook and
+  sealed acknowledgement receipt. `spawn_in_group` remains a PID-returning
+  compatibility API using pre-exec `setpgid(0, 0)` and reports `BestEffort`
+  because it cannot retain the receipt and owned child.
 - **Windows**: The PID-returning compatibility API fails closed because it cannot return an owned Job capability. Use `adopt_contained` for explicitly `Unproven` post-spawn ownership. `spawn_contained` remains unsupported until it can assign a suspended child to the Job before execution.
 - **Degradation**: `Unproven` means an owned capability exists but post-spawn assignment left an escape window. `BestEffort` means no tree capability exists.
 
@@ -296,7 +313,7 @@ pub struct TerminateTreeResult {
     /// True if overall operation timed out.
     pub timed_out: bool,
 
-    /// Reliability of PID-based tree-kill ("guaranteed" or "best_effort").
+    /// Reliability of PID-based termination (always "best_effort").
     pub tree_kill_reliability: String,
 
     /// Platform-specific warnings.
@@ -306,7 +323,8 @@ pub struct TerminateTreeResult {
 
 **Platform notes:**
 
-- **Unix**: Sends signal to process group if pgid available, otherwise direct PID.
+- **Unix**: PID-only termination signals the direct PID. Group signaling
+  requires an owned containment guard.
 - **Windows**: PID-based termination uses direct `TerminateProcess` and is best-effort. Job termination requires the owned containment guard API.
 
 ### 4.5 Error Handling
@@ -327,16 +345,27 @@ Per ADR-0008:
 1. **Timeout invariant:** If deadline reached, `TimedOut` must be returned and CLI exit must be `124`.
 
 2. **Group-by-default invariant (ADR-0003):**
-   - Unix: child runs in its own process group via `setpgid(0, 0)`
+   - Unix owned spawn: the child acquires `sid == pgid == pid` via one
+     async-signal-safe `setsid` hook, and a private fixed-size acknowledgement
+     proves hook execution. Generic external-child consumption is unsafe and
+     requires same-spawn, exclusive-unreaped ownership; runtime checks remain
+     defense-in-depth
+   - Unix compatibility spawn: the child runs in its own process group via
+     pre-exec `setpgid(0, 0)`
    - Windows: owned adoption assigns the child to a Job Object with `KILL_ON_JOB_CLOSE`; guaranteed owned spawn requires create-suspended assignment
    - Termination targets the group/job, not just the direct child
 
-3. **Observable reliability invariant:** If guaranteed tree-kill cannot be established:
+3. **Observable reliability invariant:** If guaranteed acquisition and
+   group/job-signaling eligibility cannot be established:
    - owned post-spawn containment reports `Unproven`
    - direct-child fallback reports `BestEffort`
    - JSON output reflects actual behavior
 
-4. **Guard lifecycle invariant:** The owned guard observes normal leader exit without reaping. It cleans remaining descendants before reaping and releasing the child. Dropping an active guard kills the contained tree and makes a bounded reap attempt on every platform.
+4. **Guard lifecycle invariant:** The owned guard observes normal leader exit
+   without reaping. It revalidates the same-spawn receipt, owned child, captured
+   identity, session, and group before signaling; keeps the leader unreaped
+   through the final group signal; and only then reaps. After reap the guard is
+   inert. Receipt/child mismatch fails closed and returns child ownership.
 
 5. **Signal escalation invariant:** If process doesn't exit after `signal_sent` within `kill_after`, escalate to SIGKILL.
 
@@ -377,7 +406,7 @@ sysprims timeout [OPTIONS] <DURATION> -- <COMMAND> [ARGS...]
 
 | Feature          | Unix                 | Windows                              |
 | ---------------- | -------------------- | ------------------------------------ |
-| Process grouping | `setpgid(0, 0)`      | Job Object                           |
+| Process grouping | owned `setsid` receipt; compatibility `setpgid(0, 0)` | Job Object |
 | Tree kill        | `killpg(-pgid, sig)` | `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` |
 | SIGTERM          | Native signal        | TerminateProcess                     |
 | SIGKILL          | Native signal        | TerminateProcess                     |
@@ -403,5 +432,5 @@ sysprims timeout [OPTIONS] <DURATION> -- <COMMAND> [ARGS...]
 
 ---
 
-_Spec version: 1.1_
-_Last updated: 2026-01-25_
+_Spec version: 1.2_
+_Last updated: 2026-08-27_

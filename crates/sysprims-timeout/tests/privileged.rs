@@ -154,7 +154,7 @@ mod privileged {
         );
     }
 
-    /// Verify that timeout with group-by-default actually kills the tree.
+    /// Verify that timeout cleans all cooperative in-group descendants.
     #[test]
     fn timeout_group_by_default_kills_tree() {
         let marker = format!(
@@ -192,7 +192,7 @@ mod privileged {
         )
         .expect("run_with_timeout should not error");
 
-        // Verify timeout occurred with guaranteed tree-kill
+        // Verify spawn-time acquisition and group-signaling eligibility.
         match result {
             TimeoutOutcome::TimedOut {
                 tree_kill_reliability,
@@ -201,7 +201,7 @@ mod privileged {
                 assert_eq!(
                     tree_kill_reliability,
                     TreeKillReliability::Guaranteed,
-                    "Should have guaranteed tree-kill reliability"
+                    "Should have guaranteed acquisition/group-signaling reliability"
                 );
             }
             TimeoutOutcome::Completed { .. } => {
@@ -212,7 +212,7 @@ mod privileged {
         // Wait for cleanup
         thread::sleep(Duration::from_millis(300));
 
-        // Verify no orphans remain
+        // Verify no marked in-group descendants remain
         let after = count_matching_processes(&marker);
         assert_eq!(
             after, 0,
@@ -268,6 +268,57 @@ mod privileged {
         ));
         thread::sleep(Duration::from_millis(200));
         assert_eq!(count_processes_in_group(pgid), 0);
+    }
+
+    /// Verify the receipt-bound guard keeps the exited leader unreaped until
+    /// an in-session descendant that ignores TERM receives the final SIGKILL.
+    #[test]
+    fn guaranteed_guard_cleans_descendant_after_leader_exit() {
+        if !in_container_environment() {
+            eprintln!("SKIP: containment guard test requires container environment");
+            return;
+        }
+
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "trap 'exit 0' TERM; (trap '' TERM; exec sleep 60) & wait",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let mut guard = spawn_contained(command).expect("contained spawn failed");
+        let pgid = guard.identity().pid;
+        thread::sleep(Duration::from_millis(200));
+        assert!(count_processes_in_group(pgid) >= 2);
+        assert_eq!(
+            guard.tree_kill_reliability(),
+            TreeKillReliability::Guaranteed
+        );
+
+        let outcome = guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 100,
+                kill_timeout_ms: 500,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("contained termination failed");
+
+        assert!(outcome.escalated, "TERM-ignoring descendant needs SIGKILL");
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty {
+                observation: ContainmentObservation::LinuxProcfsProcessGroup,
+            }
+        ));
+        assert_eq!(count_processes_in_group(pgid), 0);
+        assert!(
+            guard.terminate(TerminateTreeConfig::default()).is_err(),
+            "finalized guard must be inert"
+        );
+        assert!(guard.into_child().is_ok(), "leader must remain reap-owned");
     }
 
     /// Verify a lost child capability fails closed before any group signal.
