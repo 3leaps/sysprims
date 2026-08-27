@@ -202,7 +202,7 @@ fn validate_containment_before_signal<C: ContainmentChild>(
     let receipt_only_fast_exit = guard.session_receipt.is_some()
         && guard.identity.start_time_unix_ms == 0
         && guard.identity.exe_path.is_empty();
-    let identity_metadata_verified = if receipt_only_fast_exit {
+    let mut identity_metadata_verified = if receipt_only_fast_exit {
         false
     } else {
         verify_containment_identity(&guard.identity)?
@@ -222,11 +222,14 @@ fn validate_containment_before_signal<C: ContainmentChild>(
         let pid_i32 = guard.identity.pid as i32;
         let current_pgid = unsafe { libc::getpgid(pid_i32) };
         let current_session_id = unsafe { libc::getsid(pid_i32) };
-        if current_pgid != guard.pgid as i32 || current_session_id != guard.session_id as i32 {
-            return Err(SysprimsError::invalid_argument(
-                "process group identity changed; refusing containment operation",
-            ));
-        }
+        identity_metadata_verified = reconcile_group_identity_after_live_check(
+            guard.session_receipt.is_some(),
+            guard.pgid,
+            guard.session_id,
+            current_pgid,
+            current_session_id,
+            || owned_child_is_exited_unreaped(guard.identity.pid),
+        )?;
     }
 
     if unsafe { libc::getpgid(0) } == guard.pgid as i32 {
@@ -236,6 +239,28 @@ fn validate_containment_before_signal<C: ContainmentChild>(
     }
 
     Ok(identity_metadata_verified)
+}
+
+fn reconcile_group_identity_after_live_check<F>(
+    receipt_bound: bool,
+    expected_pgid: u32,
+    expected_session_id: u32,
+    current_pgid: i32,
+    current_session_id: i32,
+    verify_exited_unreaped: F,
+) -> SysprimsResult<bool>
+where
+    F: FnOnce() -> SysprimsResult<bool>,
+{
+    if current_pgid == expected_pgid as i32 && current_session_id == expected_session_id as i32 {
+        return Ok(true);
+    }
+    if receipt_bound && verify_exited_unreaped()? {
+        return Ok(false);
+    }
+    Err(SysprimsError::invalid_argument(
+        "process group identity changed; refusing containment operation",
+    ))
 }
 
 fn owned_child_is_exited_unreaped(pid: u32) -> SysprimsResult<bool> {
@@ -1103,6 +1128,48 @@ mod tests {
         assert!(outcome.exited);
         assert!(guard.terminate(TerminateTreeConfig::default()).is_err());
         assert!(guard.into_child().is_ok());
+    }
+
+    #[test]
+    fn receipt_bound_exit_between_identity_and_group_lookup_uses_fast_exit() {
+        let ownership_rechecked = std::cell::Cell::new(false);
+        let identity_metadata_verified =
+            reconcile_group_identity_after_live_check(true, 42, 42, -1, -1, || {
+                ownership_rechecked.set(true);
+                Ok(true)
+            })
+            .expect("matching exited-unreaped ownership must preserve containment");
+
+        assert!(!identity_metadata_verified);
+        assert!(ownership_rechecked.get());
+    }
+
+    #[test]
+    fn live_group_mismatch_after_identity_check_still_fails_closed() {
+        let error = reconcile_group_identity_after_live_check(true, 42, 42, 41, 42, || Ok(false))
+            .expect_err("live group mismatch must not become a fast-exit path");
+
+        assert!(matches!(error, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn receipt_bound_termination_exit_race_stress() {
+        for _ in 0..32 {
+            let mut command = Command::new("sleep");
+            command.arg("60");
+            let (child, receipt) = spawn_with_session_receipt(command);
+            let mut guard = contain_acquired_session_impl(child, receipt)
+                .expect("receipt consumption failed during stress run");
+
+            let outcome = guard
+                .terminate(TerminateTreeConfig {
+                    grace_timeout_ms: 0,
+                    kill_timeout_ms: 500,
+                    ..TerminateTreeConfig::default()
+                })
+                .expect("receipt-bound termination lost the exit race");
+            assert!(outcome.exited);
+        }
     }
 
     #[test]
