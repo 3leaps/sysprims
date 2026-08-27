@@ -96,13 +96,16 @@ GNU timeout kills only the direct child. This leaves orphaned processes running 
 - Grandchildren ignore SIGTERM
 - Child forks and exits (orphaning the grandchild)
 
-sysprims-timeout uses process groups (Unix) or Job Objects (Windows) to kill the entire tree.
+sysprims-timeout uses process groups (Unix) or Job Objects (Windows) to target
+the acquired containment. Unix descendants can leave a cooperative group, so
+the guarantee covers acquisition and signaling eligibility rather than
+non-escape.
 
 ### Observable Fallback
 
-When tree-kill cannot be guaranteed (e.g., setpgid fails), the implementation:
+When owned spawn-time containment cannot be proven, the implementation:
 
-- Falls back to direct child kill
+- Uses the direct child or explicitly compatible PID-only behavior
 - Reports `tree_kill_reliability: best_effort` in output
 - Does NOT silently fail or lie about behavior
 

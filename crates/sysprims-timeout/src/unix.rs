@@ -1,14 +1,15 @@
 //! Unix implementation of timeout with process groups.
 //!
-//! Uses `setpgid(0, 0)` to create a new process group with the child as leader,
-//! then `killpg()` to signal the entire group on timeout.
+//! Uses a pre-fork `setsid()` hook and sealed receipt to acquire an owned
+//! session before reporting guaranteed group-signaling eligibility.
 
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command};
+use std::process::{Child, Command, ExitStatus};
 use std::time::{Duration, Instant};
 
-use libc::{killpg, SIGKILL};
+use libc::SIGKILL;
 use sysprims_core::{SysprimsError, SysprimsResult};
+use sysprims_session::UnixSessionReceipt;
 
 use crate::{
     capture_containment_identity, completion_from_pids, unknown_completion,
@@ -28,13 +29,12 @@ pub fn spawn_contained_impl(
     mut command: Command,
 ) -> Result<ContainmentGuard<Child>, ContainmentSpawnError> {
     let program = command.get_program().to_string_lossy().into_owned();
+    let (hook, pending_receipt) =
+        sysprims_session::prepare_session_acquisition().map_err(ContainmentSpawnError::Spawn)?;
+    // SAFETY: the hook is prepared before fork and is the command's only
+    // session/group acquirer. Its child-side implementation is async-signal-safe.
     unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
+        command.pre_exec(move || hook.acquire());
     }
 
     let child = command.spawn().map_err(|error| {
@@ -46,19 +46,34 @@ pub fn spawn_contained_impl(
             SysprimsError::spawn_failed(&program, error.to_string())
         })
     })?;
-    let mut guard = match adopt_contained_impl(child) {
-        Ok(guard) => guard,
-        Err(mut adoption) => {
-            if let Some(pid) = adoption.child.process_id() {
-                let _ = sysprims_signal::killpg(pid, libc::SIGKILL);
-            }
-            let _ = adoption.child.kill();
-            let _ = adoption.child.wait();
-            return Err(ContainmentSpawnError::Adoption(adoption.error));
+    let receipt = match pending_receipt.into_receipt(child.id()) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            cleanup_failed_spawn_child(child);
+            return Err(ContainmentSpawnError::Adoption(error));
         }
     };
-    guard.reliability = TreeKillReliability::Guaranteed;
-    Ok(guard)
+    match contain_acquired_session_impl(child, receipt) {
+        Ok(guard) => Ok(guard),
+        Err(adoption) => {
+            cleanup_failed_spawn_child(adoption.child);
+            Err(ContainmentSpawnError::Adoption(adoption.error))
+        }
+    }
+}
+
+fn cleanup_failed_spawn_child(mut child: Child) {
+    match child.try_wait() {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Err(_) => {
+            // Ownership could not be confirmed through the child adapter.
+            // Fail closed without signaling a raw PID.
+        }
+    }
 }
 
 pub fn adopt_contained_impl<C: ContainmentChild>(
@@ -76,7 +91,233 @@ pub fn adopt_contained_impl<C: ContainmentChild>(
         finalized: false,
         pgid: evidence.1,
         session_id: evidence.2,
+        session_receipt: None,
     })
+}
+
+pub fn contain_acquired_session_impl<C: ContainmentChild>(
+    child: C,
+    receipt: UnixSessionReceipt,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
+    let evidence = match acquire_receipt_evidence(&child, &receipt) {
+        Ok(evidence) => evidence,
+        Err(error) => return Err(ContainmentAdoptionError { error, child }),
+    };
+
+    Ok(ContainmentGuard {
+        child: Some(child),
+        identity: evidence,
+        reliability: TreeKillReliability::Guaranteed,
+        finalized: false,
+        pgid: receipt.process_group_id(),
+        session_id: receipt.session_id(),
+        session_receipt: Some(receipt),
+    })
+}
+
+fn acquire_receipt_evidence<C: ContainmentChild>(
+    child: &C,
+    receipt: &UnixSessionReceipt,
+) -> SysprimsResult<crate::ContainmentIdentity> {
+    let pid = child
+        .process_id()
+        .ok_or_else(|| SysprimsError::invalid_argument("child process id is unavailable"))?;
+    if receipt.child_pid() != pid
+        || receipt.process_group_id() != pid
+        || receipt.session_id() != pid
+        || receipt.session_kind() != "new_session"
+        || receipt.identifier_provenance() != "setsid_structural_child_pid"
+    {
+        return Err(SysprimsError::invalid_argument(
+            "session acquisition receipt does not match the owned child",
+        ));
+    }
+
+    let child_was_exited = verify_owned_child_slot(pid)?;
+    let identity = match capture_containment_identity(pid) {
+        Ok(identity) => identity,
+        Err(_) if child_was_exited || owned_child_is_exited_unreaped(pid)? => {
+            crate::ContainmentIdentity {
+                pid,
+                start_time_unix_ms: 0,
+                exe_path: String::new(),
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    let pid_i32 = pid as i32;
+    // SAFETY: `pid_i32` was range-checked through the receipt and owned child.
+    let pgid = unsafe { libc::getpgid(pid_i32) };
+    // SAFETY: same validated positive PID as above.
+    let session_id = unsafe { libc::getsid(pid_i32) };
+    if pgid != pid_i32 || session_id != pid_i32 {
+        if child_was_exited || owned_child_is_exited_unreaped(pid)? {
+            return Ok(identity);
+        }
+        return Err(SysprimsError::invalid_argument(
+            "spawn-time session acquisition no longer matches the owned child",
+        ));
+    }
+    // SAFETY: PID zero is used only with getpgid to query the caller; no signal
+    // is sent.
+    if unsafe { libc::getpgid(0) } == pgid {
+        return Err(SysprimsError::invalid_argument(
+            "acquired child shares the caller's process group",
+        ));
+    }
+    Ok(identity)
+}
+
+fn validate_containment_before_signal<C: ContainmentChild>(
+    guard: &ContainmentGuard<C>,
+) -> SysprimsResult<bool> {
+    let child = guard
+        .child
+        .as_ref()
+        .expect("active containment guard retains its child");
+    if child.process_id() != Some(guard.identity.pid) {
+        return Err(SysprimsError::invalid_argument(
+            "owned child identity changed; refusing containment operation",
+        ));
+    }
+
+    if let Some(receipt) = guard.session_receipt.as_ref() {
+        if receipt.child_pid() != guard.identity.pid
+            || receipt.process_group_id() != guard.pgid
+            || receipt.session_id() != guard.session_id
+            || receipt.session_kind() != "new_session"
+            || receipt.identifier_provenance() != "setsid_structural_child_pid"
+        {
+            return Err(SysprimsError::invalid_argument(
+                "sealed session receipt no longer matches the containment guard",
+            ));
+        }
+    }
+
+    let owned_child_exited = if guard.session_receipt.is_some() {
+        Some(verify_owned_child_slot(guard.identity.pid)?)
+    } else {
+        None
+    };
+    let receipt_only_fast_exit = guard.session_receipt.is_some()
+        && guard.identity.start_time_unix_ms == 0
+        && guard.identity.exe_path.is_empty();
+    let mut identity_metadata_verified = if receipt_only_fast_exit {
+        false
+    } else {
+        verify_containment_identity(&guard.identity)?
+    };
+    let exited_ownership_verified = owned_child_exited.unwrap_or(false)
+        || (guard.session_receipt.is_some()
+            && !identity_metadata_verified
+            && owned_child_is_exited_unreaped(guard.identity.pid)?);
+    if guard.session_receipt.is_some() && !identity_metadata_verified && !exited_ownership_verified
+    {
+        return Err(SysprimsError::invalid_argument(
+            "guaranteed child identity and unreaped ownership are unavailable; refusing group signal",
+        ));
+    }
+
+    if identity_metadata_verified {
+        let pid_i32 = guard.identity.pid as i32;
+        let current_pgid = unsafe { libc::getpgid(pid_i32) };
+        let current_session_id = unsafe { libc::getsid(pid_i32) };
+        identity_metadata_verified = reconcile_group_identity_after_live_check(
+            guard.session_receipt.is_some(),
+            guard.pgid,
+            guard.session_id,
+            current_pgid,
+            current_session_id,
+            || owned_child_is_exited_unreaped(guard.identity.pid),
+        )?;
+    }
+
+    if unsafe { libc::getpgid(0) } == guard.pgid as i32 {
+        return Err(SysprimsError::invalid_argument(
+            "contained group matches the caller's group; refusing group signal",
+        ));
+    }
+
+    Ok(identity_metadata_verified)
+}
+
+fn reconcile_group_identity_after_live_check<F>(
+    receipt_bound: bool,
+    expected_pgid: u32,
+    expected_session_id: u32,
+    current_pgid: i32,
+    current_session_id: i32,
+    verify_exited_unreaped: F,
+) -> SysprimsResult<bool>
+where
+    F: FnOnce() -> SysprimsResult<bool>,
+{
+    if current_pgid == expected_pgid as i32 && current_session_id == expected_session_id as i32 {
+        return Ok(true);
+    }
+    if receipt_bound && verify_exited_unreaped()? {
+        return Ok(false);
+    }
+    Err(SysprimsError::invalid_argument(
+        "process group identity changed; refusing containment operation",
+    ))
+}
+
+fn owned_child_is_exited_unreaped(pid: u32) -> SysprimsResult<bool> {
+    for attempt in 0..=5 {
+        if verify_owned_child_slot(pid)? {
+            return Ok(true);
+        }
+        if attempt < 5 {
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+    Ok(false)
+}
+
+/// Verify that this process still owns the unreaped child slot.
+///
+/// A successful zero-status `waitid` proves a live child; a returned matching
+/// PID proves an exited child while `WNOWAIT` preserves the reap capability.
+fn verify_owned_child_slot(pid: u32) -> SysprimsResult<bool> {
+    let mut information = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    // SAFETY: `information` points to writable storage, the PID is range
+    // checked by the receipt, and WNOWAIT preserves exclusive reap ownership.
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            information.as_mut_ptr(),
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result != 0 {
+        let error = std::io::Error::last_os_error();
+        return Err(if error.raw_os_error() == Some(libc::ECHILD) {
+            SysprimsError::invalid_argument(
+                "owned child reap capability is unavailable; refusing guaranteed containment",
+            )
+        } else {
+            SysprimsError::system(
+                format!("cannot verify unreaped child ownership: {error}"),
+                error.raw_os_error().unwrap_or(0),
+            )
+        });
+    }
+
+    // SAFETY: successful waitid initialized `information`.
+    let information = unsafe { information.assume_init() };
+    // SAFETY: waitid populated the child-status variant of siginfo_t.
+    let observed_pid = unsafe { information.si_pid() };
+    if observed_pid == 0 {
+        return Ok(false);
+    }
+    if observed_pid == pid as libc::pid_t {
+        return Ok(true);
+    }
+    Err(SysprimsError::invalid_argument(
+        "waitid returned a different child; refusing guaranteed containment",
+    ))
 }
 
 fn acquire_unix_evidence<C: ContainmentChild>(
@@ -118,40 +359,21 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
     validate_signal(config.signal, "signal")?;
     validate_signal(config.kill_signal, "kill_signal")?;
 
-    let child = guard
-        .child
-        .as_mut()
-        .expect("active containment guard retains its child");
-    if child.process_id() != Some(guard.identity.pid) {
-        return Err(SysprimsError::invalid_argument(
-            "owned child identity changed; refusing containment operation",
-        ));
-    }
-    let identity_metadata_verified = verify_containment_identity(&guard.identity)?;
-
-    if identity_metadata_verified {
-        let pid_i32 = guard.identity.pid as i32;
-        let current_pgid = unsafe { libc::getpgid(pid_i32) };
-        let current_session_id = unsafe { libc::getsid(pid_i32) };
-        if current_pgid != guard.pgid as i32 || current_session_id != guard.session_id as i32 {
-            return Err(SysprimsError::invalid_argument(
-                "process group identity changed; refusing containment operation",
-            ));
-        }
-    }
-
-    if unsafe { libc::getpgid(0) } == guard.pgid as i32 {
-        return Err(SysprimsError::invalid_argument(
-            "contained group matches the caller's group; refusing group signal",
-        ));
-    }
+    let identity_metadata_verified = validate_containment_before_signal(guard)?;
 
     let mut warnings = Vec::new();
     if !identity_metadata_verified {
-        warnings.push(
-            "Live identity metadata unavailable; proceeding with owned child and bound group"
-                .to_string(),
-        );
+        if guard.session_receipt.is_some() {
+            warnings.push(
+                "Leader exited unreaped; same-spawn receipt and waitid ownership preserve group identity"
+                    .to_string(),
+            );
+        } else {
+            warnings.push(
+                "Live identity metadata unavailable; proceeding with owned child and bound group"
+                    .to_string(),
+            );
+        }
     }
 
     let graceful_sent = match sysprims_signal::killpg(guard.pgid, config.signal) {
@@ -180,10 +402,23 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
     }
 
     let escalated = if graceful_sent {
+        validate_containment_before_signal(guard)?;
         match sysprims_signal::killpg(guard.pgid, config.kill_signal) {
             Ok(()) => true,
             Err(SysprimsError::NotFound { .. }) => {
                 warnings.push("Process group exited before escalation".to_string());
+                false
+            }
+            #[cfg(target_os = "macos")]
+            Err(error @ SysprimsError::PermissionDenied { .. }) => {
+                let completion = observe_containment_completion(guard.pgid, guard.session_id);
+                if !matches!(completion, ContainmentCompletionEvidence::Empty { .. }) {
+                    return Err(error);
+                }
+                warnings.push(
+                    "macOS process-group enumeration confirmed no live descendants before escalation"
+                        .to_string(),
+                );
                 false
             }
             Err(error) => return Err(error),
@@ -197,6 +432,10 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         Duration::from_millis(config.kill_timeout_ms),
     );
     let completion = observe_containment_completion(guard.pgid, guard.session_id);
+    let child = guard
+        .child
+        .as_mut()
+        .expect("active containment guard retains its child");
     let exited = reap_contained_child(child)?;
     if !exited {
         warnings.push("Timed out waiting to reap contained child".to_string());
@@ -540,24 +779,33 @@ pub fn contained_child_has_exited<C: ContainmentChild>(
             "owned child identity changed; refusing containment operation",
         ));
     }
+    if let Some(receipt) = guard.session_receipt.as_ref() {
+        if receipt.child_pid() != guard.identity.pid
+            || receipt.process_group_id() != guard.pgid
+            || receipt.session_id() != guard.session_id
+        {
+            return Err(SysprimsError::invalid_argument(
+                "sealed session receipt no longer matches the containment guard",
+            ));
+        }
+    }
 
     sysprims_proc::is_live(guard.identity.pid).map(|live| !live)
 }
 
 pub fn drop_contained_impl<C: ContainmentChild>(guard: &mut ContainmentGuard<C>) {
+    if validate_containment_before_signal(guard).is_err() {
+        return;
+    }
     let child = guard
         .child
         .as_mut()
         .expect("active containment guard retains its child");
-    if child.process_id() != Some(guard.identity.pid)
-        || unsafe { libc::getpgid(0) } == guard.pgid as i32
-    {
-        return;
-    }
 
     let _ = sysprims_signal::killpg(guard.pgid, SIGKILL);
-    let _ = wait_for_contained_child(child, Duration::from_secs(2));
-    guard.finalized = true;
+    if wait_for_contained_child(child, Duration::from_secs(2)).unwrap_or(false) {
+        guard.finalized = true;
+    }
 }
 
 fn validate_signal(signal: i32, name: &str) -> SysprimsResult<()> {
@@ -669,8 +917,10 @@ pub fn spawn_in_group_impl(config: SpawnInGroupConfig) -> SysprimsResult<SpawnIn
         platform: get_platform(),
         pid,
         pgid: Some(pid),
-        tree_kill_reliability: "guaranteed".to_string(),
-        warnings: vec![],
+        tree_kill_reliability: "best_effort".to_string(),
+        warnings: vec![
+            "PID-only grouped spawn does not retain an owned child and sealed receipt".to_string(),
+        ],
     })
 }
 
@@ -683,137 +933,159 @@ pub fn run_with_timeout_impl(
     let mut cmd = Command::new(command);
     cmd.args(args);
 
-    // Set up process group if GroupByDefault
-    let use_process_group = config.grouping == GroupingMode::GroupByDefault;
-
-    if use_process_group {
-        // SAFETY: setpgid(0, 0) creates a new process group with the child's
-        // PID as the PGID. This is safe and standard practice for job control.
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setpgid(0, 0) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+    if config.grouping == GroupingMode::GroupByDefault {
+        return run_contained_with_timeout(cmd, timeout, config);
     }
 
-    // Spawn the child process
-    let mut child = cmd.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            SysprimsError::not_found_command(command)
-        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-            SysprimsError::permission_denied_command(command)
-        } else {
-            SysprimsError::spawn_failed(command, e.to_string())
-        }
-    })?;
-
+    let mut child = spawn_timeout_child(cmd, command)?;
     let child_pid = child.id() as i32;
     let start = Instant::now();
 
-    // Wait loop with timeout
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                // Child exited within timeout
                 return Ok(TimeoutOutcome::Completed {
                     exit_status: status,
                 });
             }
-            Ok(None) => {
-                // Still running - check timeout
-                if start.elapsed() >= timeout {
-                    // Timeout! Kill the tree
-                    return kill_tree(child_pid, &mut child, config, use_process_group);
-                }
-                std::thread::sleep(POLL_INTERVAL);
-            }
-            Err(e) => {
+            Ok(None) if start.elapsed() < timeout => std::thread::sleep(POLL_INTERVAL),
+            Ok(None) => return kill_foreground_child(child_pid, &mut child, config),
+            Err(error) => {
                 return Err(SysprimsError::system(
-                    format!("wait failed: {}", e),
-                    e.raw_os_error().unwrap_or(0),
+                    format!("wait failed: {error}"),
+                    error.raw_os_error().unwrap_or(0),
                 ));
             }
         }
     }
 }
 
-/// Kill the process tree and wait for exit.
-///
-/// If using process group, sends signal to entire group via `killpg()`.
-/// Otherwise, sends signal to direct child only.
-///
-/// IMPORTANT: When using process groups, we ALWAYS send SIGKILL after
-/// `kill_after` duration, even if the group leader has exited. This is
-/// because background children may have trapped SIGTERM and the leader
-/// exiting doesn't mean all group members are dead.
-fn kill_tree(
+fn spawn_timeout_child(mut command: Command, program: &str) -> SysprimsResult<Child> {
+    command.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            SysprimsError::not_found_command(program)
+        } else if error.kind() == std::io::ErrorKind::PermissionDenied {
+            SysprimsError::permission_denied_command(program)
+        } else {
+            SysprimsError::spawn_failed(program, error.to_string())
+        }
+    })
+}
+
+struct StatusChild {
+    child: Child,
+    exit_status: Option<ExitStatus>,
+}
+
+impl ContainmentChild for StatusChild {
+    fn process_id(&self) -> Option<u32> {
+        Some(self.child.id())
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<bool> {
+        if self.exit_status.is_some() {
+            return Ok(true);
+        }
+        self.exit_status = self.child.try_wait()?;
+        Ok(self.exit_status.is_some())
+    }
+}
+
+fn run_contained_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    config: &TimeoutConfig,
+) -> SysprimsResult<TimeoutOutcome> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    let (hook, pending_receipt) = sysprims_session::prepare_session_acquisition()?;
+    // SAFETY: this is the command's sole pre-exec session/group acquisition
+    // hook, prepared before fork and restricted to async-signal-safe work.
+    unsafe {
+        command.pre_exec(move || hook.acquire());
+    }
+
+    let child = spawn_timeout_child(command, &program)?;
+    let receipt = match pending_receipt.into_receipt(child.id()) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            cleanup_failed_spawn_child(child);
+            return Err(error);
+        }
+    };
+    let child = StatusChild {
+        child,
+        exit_status: None,
+    };
+    let mut guard = match contain_acquired_session_impl(child, receipt) {
+        Ok(guard) => guard,
+        Err(adoption) => {
+            cleanup_failed_spawn_child(adoption.child.child);
+            return Err(adoption.error);
+        }
+    };
+
+    let termination = TerminateTreeConfig {
+        grace_timeout_ms: duration_millis_u64(config.kill_after),
+        kill_timeout_ms: 2_000,
+        signal: config.signal,
+        kill_signal: SIGKILL,
+    };
+    let start = Instant::now();
+    loop {
+        if guard.try_complete(termination.clone())?.is_some() {
+            let child = guard.into_child().map_err(|_| {
+                SysprimsError::system("completed containment guard remained active", 0)
+            })?;
+            let exit_status = child.exit_status.ok_or_else(|| {
+                SysprimsError::system("contained child completed without an exit status", 0)
+            })?;
+            return Ok(TimeoutOutcome::Completed { exit_status });
+        }
+        if start.elapsed() >= timeout {
+            let outcome = guard.terminate(termination)?;
+            // The legacy timeout contract reports escalation when the
+            // post-grace force-kill phase was reached, even if the final
+            // group signal found no remaining signalable member.
+            let escalated = outcome.escalated || outcome.signal_sent.is_some();
+            return Ok(TimeoutOutcome::TimedOut {
+                signal_sent: config.signal,
+                escalated,
+                tree_kill_reliability: outcome.tree_kill_reliability,
+            });
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+fn duration_millis_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn kill_foreground_child(
     pid: i32,
     child: &mut Child,
     config: &TimeoutConfig,
-    use_process_group: bool,
 ) -> SysprimsResult<TimeoutOutcome> {
-    let reliability = if use_process_group {
-        TreeKillReliability::Guaranteed
-    } else {
-        TreeKillReliability::BestEffort
-    };
+    let reliability = TreeKillReliability::BestEffort;
 
-    // Send initial signal
-    if use_process_group {
-        // Child is process group leader, so pid == pgid
-        // SAFETY: killpg is safe with valid pgid and signal
-        unsafe {
-            killpg(pid, config.signal);
-        }
-    } else {
-        // Foreground mode: signal direct child only
-        // Use sysprims_signal for consistency
-        let _ = sysprims_signal::kill(pid as u32, config.signal);
-    }
-
-    // Wait for kill_after duration for graceful exit
+    let _ = sysprims_signal::kill(pid as u32, config.signal);
     let escalation_deadline = Instant::now() + config.kill_after;
-    let mut leader_exited = false;
-
     while Instant::now() < escalation_deadline {
-        if !leader_exited && child.try_wait().ok().flatten().is_some() {
-            leader_exited = true;
-            // For non-group mode, we can return early since we only care about the direct child
-            if !use_process_group {
-                return Ok(TimeoutOutcome::TimedOut {
-                    signal_sent: config.signal,
-                    escalated: false,
-                    tree_kill_reliability: reliability,
-                });
-            }
-            // For group mode, continue waiting - other group members may still be alive
+        if child.try_wait().ok().flatten().is_some() {
+            return Ok(TimeoutOutcome::TimedOut {
+                signal_sent: config.signal,
+                escalated: false,
+                tree_kill_reliability: reliability,
+            });
         }
         std::thread::sleep(POLL_INTERVAL);
     }
 
-    // Escalate to SIGKILL
-    // For process groups, ALWAYS send SIGKILL to ensure trapped processes are killed
-    let escalated = if use_process_group {
-        // SAFETY: killpg with SIGKILL to ensure termination of entire group
-        // This may signal already-dead processes (ESRCH) which is harmless
-        unsafe {
-            killpg(pid, SIGKILL);
-        }
-        true
-    } else {
-        let _ = sysprims_signal::force_kill(pid as u32);
-        true
-    };
-
-    // Reap the zombie (if not already reaped)
+    let _ = sysprims_signal::force_kill(pid as u32);
     let _ = child.wait();
-
     Ok(TimeoutOutcome::TimedOut {
         signal_sent: config.signal,
-        escalated,
+        escalated: true,
         tree_kill_reliability: reliability,
     })
 }
@@ -821,6 +1093,157 @@ fn kill_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn spawn_with_session_receipt(mut command: Command) -> (Child, UnixSessionReceipt) {
+        let (hook, pending) = sysprims_session::prepare_session_acquisition().unwrap();
+        // SAFETY: the helper installs the prepared hook as the command's sole
+        // child session/group acquirer.
+        unsafe {
+            command.pre_exec(move || hook.acquire());
+        }
+        let child = command.spawn().unwrap();
+        let receipt = pending.into_receipt(child.id()).unwrap();
+        (child, receipt)
+    }
+
+    #[test]
+    fn receipt_specific_entry_point_creates_one_shot_guaranteed_guard() {
+        let mut command = Command::new("sleep");
+        command.arg("60");
+        let (child, receipt) = spawn_with_session_receipt(command);
+        let mut guard =
+            contain_acquired_session_impl(child, receipt).expect("receipt consumption failed");
+        assert_eq!(
+            guard.tree_kill_reliability(),
+            TreeKillReliability::Guaranteed
+        );
+
+        let outcome = guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 0,
+                kill_timeout_ms: 500,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("contained termination failed");
+        assert!(outcome.exited);
+        assert!(guard.terminate(TerminateTreeConfig::default()).is_err());
+        assert!(guard.into_child().is_ok());
+    }
+
+    #[test]
+    fn receipt_bound_exit_between_identity_and_group_lookup_uses_fast_exit() {
+        let ownership_rechecked = std::cell::Cell::new(false);
+        let identity_metadata_verified =
+            reconcile_group_identity_after_live_check(true, 42, 42, -1, -1, || {
+                ownership_rechecked.set(true);
+                Ok(true)
+            })
+            .expect("matching exited-unreaped ownership must preserve containment");
+
+        assert!(!identity_metadata_verified);
+        assert!(ownership_rechecked.get());
+    }
+
+    #[test]
+    fn live_group_mismatch_after_identity_check_still_fails_closed() {
+        let error = reconcile_group_identity_after_live_check(true, 42, 42, 41, 42, || Ok(false))
+            .expect_err("live group mismatch must not become a fast-exit path");
+
+        assert!(matches!(error, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn receipt_bound_termination_exit_race_stress() {
+        for _ in 0..32 {
+            let mut command = Command::new("sleep");
+            command.arg("60");
+            let (child, receipt) = spawn_with_session_receipt(command);
+            let mut guard = contain_acquired_session_impl(child, receipt)
+                .expect("receipt consumption failed during stress run");
+
+            let outcome = guard
+                .terminate(TerminateTreeConfig {
+                    grace_timeout_ms: 0,
+                    kill_timeout_ms: 500,
+                    ..TerminateTreeConfig::default()
+                })
+                .expect("receipt-bound termination lost the exit race");
+            assert!(outcome.exited);
+        }
+    }
+
+    #[test]
+    fn wrong_child_consumes_receipt_and_returns_child_ownership() {
+        let mut acquired_command = Command::new("sleep");
+        acquired_command.arg("60");
+        let (mut acquired_child, receipt) = spawn_with_session_receipt(acquired_command);
+        let wrong_child = Command::new("sleep").arg("60").spawn().unwrap();
+        let wrong_pid = wrong_child.id();
+
+        let error = match contain_acquired_session_impl(wrong_child, receipt) {
+            Ok(_) => panic!("receipt must not pair with a different child"),
+            Err(error) => error,
+        };
+        assert_eq!(error.child.id(), wrong_pid);
+
+        let mut returned_child = error.child;
+        returned_child.kill().unwrap();
+        returned_child.wait().unwrap();
+        acquired_child.kill().unwrap();
+        acquired_child.wait().unwrap();
+    }
+
+    #[test]
+    fn reaped_child_cannot_consume_receipt_as_guaranteed() {
+        let (mut child, receipt) = spawn_with_session_receipt(Command::new("true"));
+        child.wait().unwrap();
+
+        let error = match contain_acquired_session_impl(child, receipt) {
+            Ok(_) => panic!("reaped child must not retain guaranteed ownership"),
+            Err(error) => error,
+        };
+        assert!(matches!(error.error, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn guaranteed_guard_fails_closed_after_external_reap() {
+        let mut command = Command::new("sleep");
+        command.arg("60");
+        let (child, receipt) = spawn_with_session_receipt(command);
+        let mut guard = contain_acquired_session_impl(child, receipt).unwrap();
+        let child = guard.child.as_mut().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let error = guard
+            .terminate(TerminateTreeConfig::default())
+            .expect_err("lost reap ownership must fail before group signaling");
+        assert!(matches!(error, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn fast_exit_receipt_never_loses_child_ownership() {
+        let (child, receipt) = spawn_with_session_receipt(Command::new("true"));
+        let mut guard =
+            contain_acquired_session_impl(child, receipt).expect("fast exit must remain owned");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if guard
+                .try_complete(TerminateTreeConfig {
+                    grace_timeout_ms: 0,
+                    kill_timeout_ms: 100,
+                    ..TerminateTreeConfig::default()
+                })
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        assert!(guard.into_child().is_ok());
+    }
 
     #[test]
     fn timeout_completes_fast_command() {
@@ -861,6 +1284,23 @@ mod tests {
         );
 
         assert!(matches!(result, Err(SysprimsError::NotFoundCommand { .. })));
+    }
+
+    #[test]
+    fn pid_only_grouped_spawn_is_not_reported_as_guaranteed() {
+        let result = spawn_in_group_impl(SpawnInGroupConfig {
+            argv: vec!["true".to_string()],
+            cwd: None,
+            env: None,
+        })
+        .unwrap();
+
+        assert_eq!(result.tree_kill_reliability, "best_effort");
+        assert!(!result.warnings.is_empty());
+        // SAFETY: this process is our child; waitpid supplies its only reap.
+        unsafe {
+            libc::waitpid(result.pid as libc::pid_t, std::ptr::null_mut(), 0);
+        }
     }
 
     #[test]

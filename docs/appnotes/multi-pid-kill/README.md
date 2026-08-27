@@ -98,14 +98,15 @@ Restart the orchestrator:
 ./spawn-workers.sh 3
 ```
 
-Now kill the orchestrator - all workers die with it:
+Now signal the orchestrator and worker PIDs as one validated set:
 
 ```bash
-# Replace 12345 with the orchestrator PID
-./target/debug/sysprims kill 12345 -s TERM
+# Replace these values with the PIDs printed by the fixture
+./target/debug/sysprims kill 12345 12346 12347 12348 -s TERM
 ```
 
-All processes terminate because they share a process group.
+All validated targets receive the signal. Multi-PID kill does not infer an
+owned process group from the orchestrator PID.
 
 ## Validation Semantics
 
@@ -139,7 +140,7 @@ pkill -f spawn-workers.sh
 | Scenario                        | Command                               |
 | ------------------------------- | ------------------------------------- |
 | Kill specific runaway processes | `sysprims kill PID1 PID2 ... -s TERM` |
-| Kill entire process tree        | `sysprims kill PARENT_PID -s TERM`    |
+| Signal a known process group    | `sysprims kill --group PGID -s TERM`  |
 | Kill with timeout escalation    | `sysprims timeout 5s -- command`      |
 
 ## See Also

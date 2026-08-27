@@ -2,7 +2,7 @@
 
 > **Status**: Accepted  
 > **Date**: 2025-12-31  
-> **Amended**: 2026-08-24
+> **Amended**: 2026-08-27
 > **Authors**: Architecture Council
 
 ## Context
@@ -20,16 +20,28 @@ This is sysprims's core reliability differentiator. We must get it right.
 
 ### Default Behavior
 
-All `sysprims-timeout` operations create process groups (Unix) or Job Objects (Windows) by default. The entire process tree is terminated on timeout.
+`sysprims-timeout` acquires process groups (Unix) or Job Objects (Windows) by
+default and targets that containment on timeout. `guaranteed` means race-free
+spawn-time acquisition and group/job-signaling eligibility. A Unix process
+group is cooperative containment: descendants may later change session or
+group, so this is not an OS-enforced non-escape guarantee.
 
 ### Unix Implementation
 
 ```rust
-// Pre-spawn: configure child to become process group leader
-command.pre_exec(|| {
-    unsafe { libc::setpgid(0, 0) };
-    Ok(())
-});
+// Parent, before fork: prepare a non-cloneable hook and private receipt channel.
+let (hook, pending) = prepare_session_acquisition()?;
+
+// Child, post-fork/pre-exec: exactly one async-signal-safe acquirer.
+command.pre_exec(move || hook.acquire());
+
+// Parent, after spawn: require positive same-spawn acknowledgement and bind it
+// to the owned child before constructing a guaranteed guard.
+let child = command.spawn()?;
+let receipt = pending.into_receipt(child.id())?;
+// SAFETY: this is the same child that emitted the receipt, and its adapter
+// retains exclusive unreaped ownership through guard finalization.
+let guard = unsafe { contain_acquired_session(child, receipt)? };
 
 // On timeout: signal the entire group
 unsafe {
@@ -42,6 +54,16 @@ unsafe {
     libc::killpg(child_pgid, libc::SIGKILL);
 }
 ```
+
+The sealed receipt records the structural `setsid` result
+(`sid == pgid == child_pid`) with
+`identifier_provenance = "setsid_structural_child_pid"`. It cannot be
+constructed from a PID, boolean, enum, post-spawn observation, or another
+library's testimony. The guard retains exclusive reap ownership and keeps the
+leader unreaped through the final group signal, preventing PID/PGID reuse.
+Legacy PID-returning group spawn paths may still use pre-exec `setpgid`; they do
+not provide a receipt for an external owned child and therefore report
+`best_effort`, never `guaranteed`.
 
 ### Windows Implementation
 
@@ -122,12 +144,16 @@ let config = TimeoutConfig {
 
 ### Testing Requirement
 
-Every platform CI job **must** include a "tree escape" test:
+Every platform CI job **must** include group-cleanup coverage:
 
 1. Spawn child that creates 10 grandchildren
-2. Grandchildren attempt to detach/ignore signals
-3. `sysprims-timeout` kills within deadline
-4. Assert: no orphaned processes remain
+2. Cooperative grandchildren remain in the acquired group
+3. `sysprims-timeout` signals the group within deadline
+4. Assert: no in-group processes remain
+
+Hostile detach/non-escape boundary cases run only in the disposable-container
+`make test-diabolical` target. Those cases document that a descendant which
+successfully leaves a Unix group is outside the group-signaling contract.
 
 This is non-negotiable; it's the core differentiator.
 
@@ -137,7 +163,7 @@ This is non-negotiable; it's the core differentiator.
 
 - CI jobs actually terminate on timeout
 - Containers can shut down cleanly
-- Resource leaks from orphaned processes eliminated
+- Resource leaks from cooperative in-group descendants are prevented
 - Clear improvement over GNU timeout
 
 ### Negative

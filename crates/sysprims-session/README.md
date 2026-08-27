@@ -68,6 +68,39 @@ let pgid = getpgid(0)?;
 setpgid(0, 0)?;
 ```
 
+### Spawn-Time Acquisition Receipt
+
+External spawners that own the child and terminal handles can prepare a
+single-use session hook before fork, install it in place of any other
+`setsid`/`setpgid` acquirer, validate its positive acknowledgement, and pass the
+receipt to the timeout crate's explicit external-child ownership boundary:
+
+```rust
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+use sysprims_session::prepare_session_acquisition;
+
+let (hook, pending) = prepare_session_acquisition()?;
+let mut command = Command::new("worker");
+unsafe {
+    command.pre_exec(move || hook.acquire());
+}
+let child = command.spawn()?;
+let receipt = pending.into_receipt(child.id())?;
+```
+
+The prepared hook carries a shared one-byte token, so reusing the configured
+command for a second spawn fails closed before a second `setsid`. Dropping the
+pending receipt closes its private descriptors. Linux creates those descriptors
+with atomic close-on-exec/nonblocking flags; other Unix targets use the
+platform `pipe`/`fcntl` fallback.
+
+The hook performs one `setsid` and one fixed-size nonblocking write in the
+post-fork/pre-exec child. It performs no allocation, locking, formatting,
+blocking, or panic. The opaque receipt is not cloneable and cannot be minted
+from a PID or post-spawn observation. Consumers pair it with the owned child via
+`sysprims_timeout::contain_acquired_session`.
+
 ## Design Notes
 
 ### setsid

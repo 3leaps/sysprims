@@ -65,8 +65,11 @@ tracing = ["dep:tracing"]
 
 | Platform | Mechanism      | Guarantee                    |
 | -------- | -------------- | ---------------------------- |
-| Windows  | Job Objects    | Guaranteed (when assignable) |
-| Unix     | Process groups | Guaranteed                   |
+| Windows  | Job Objects    | Guaranteed only with create-suspended assignment |
+| Unix     | Process groups | Guaranteed acquisition and group-signaling eligibility |
+
+`Guaranteed` does not claim OS-enforced descendant non-escape. In particular,
+a Unix descendant may later create or join another session or process group.
 
 If a platform limitation prevents guarantees, the limitation MUST be:
 

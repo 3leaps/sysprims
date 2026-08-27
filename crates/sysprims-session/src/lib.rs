@@ -14,6 +14,8 @@
 //!
 //! - [`run_setsid`] - Run a command in a new session
 //! - [`run_nohup`] - Run a command immune to SIGHUP
+//! - [`prepare_session_acquisition`] - Prepare a Unix spawn-time session
+//!   acquisition hook and sealed same-spawn receipt
 //!
 //! # Example
 //!
@@ -30,6 +32,12 @@ use sysprims_core::SysprimsResult;
 
 #[cfg(unix)]
 mod unix;
+
+#[cfg(unix)]
+pub use unix::{
+    prepare_session_acquisition, PendingUnixSessionReceipt, UnixSessionAcquisitionHook,
+    UnixSessionReceipt,
+};
 
 // ============================================================================
 // setsid - Create New Session

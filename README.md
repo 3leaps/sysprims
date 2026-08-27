@@ -20,7 +20,9 @@ You're building software that needs to spawn processes with timeouts, send signa
 ## What sysprims Offers
 
 - **GPL-free**: MIT/Apache-2.0 dual licensed. Link statically or dynamically without copyleft concerns.
-- **Group-by-default**: When you timeout a process, the entire tree dies. No orphans, no leaked resources.
+- **Group-by-default**: Timeout acquires a dedicated group and targets every
+  cooperative member through final escalation, with explicit reliability
+  reporting.
 - **Cross-platform**: Linux (musl + glibc), macOS (arm64), Windows (x64 + arm64) from a single API.
 - **Library-first**: Embed directly in Rust, Go, Python, or TypeScript. CLIs are thin wrappers.
 
@@ -44,13 +46,20 @@ Grandchildren continue running as orphans
 
 ```
 Parent spawns Child in new process group (Unix) / Job Object (Windows)
-Child spawns Grandchildren (automatically in same group/job)
+Child spawns cooperative Grandchildren (inherited group/job)
 Parent times out, signals entire group/job
-→ All processes terminate together
-→ No orphans, no leaks
+→ In-group processes are targeted together
+→ Group cleanup is observable
 ```
 
-On Unix, this uses `setpgid`/`killpg`. On Windows, Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. When Job Object creation fails (nested jobs, privilege limits), sysprims proceeds with best-effort termination and exposes the degradation in JSON output so your automation can detect it.
+On Unix, owned spawns use a `setsid` hook with a sealed same-spawn receipt and
+signal through the retained guard with `killpg`. PID-only compatibility paths
+cannot retain that proof and report `best_effort`. A process group is
+cooperative containment: descendants can later leave it, so `guaranteed`
+describes acquisition and group-signaling eligibility rather than OS-enforced
+non-escape. On Windows, Job Objects use
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Any degradation is exposed in structured
+output so automation can detect it.
 
 ## Who Should Use This
 
@@ -204,7 +213,7 @@ sysprims kill-descendants <PID> --cpu-above 80 --signal KILL --yes
 
 ### sysprims-timeout
 
-Process execution with deadlines and reliable tree-kill.
+Process execution with deadlines and receipt-proven group signaling.
 
 ```rust
 use sysprims_timeout::{run_with_timeout, run_with_timeout_default, TimeoutConfig, GroupingMode};
@@ -215,7 +224,7 @@ let result = run_with_timeout_default("make", &["build"], Duration::from_secs(30
 
 // Or configure explicitly
 let config = TimeoutConfig {
-    grouping: GroupingMode::Foreground,  // Opt-out of tree-kill for legacy compat
+    grouping: GroupingMode::Foreground,  // Opt out of owned group signaling
     ..Default::default()
 };
 let result = run_with_timeout("make", &["build"], Duration::from_secs(300), config)?;

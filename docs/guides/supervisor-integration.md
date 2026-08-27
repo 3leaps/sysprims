@@ -120,11 +120,12 @@ for _, warning := range outcome.Warnings {
 
 **Goal**: All jobs retain the process capability used for tree cleanup.
 
-The PID-returning binding API is supported on Unix. It fails closed on Windows
-because a PID cannot carry the owned Job handle. Rust supervisors should use
-`spawn_contained` on Unix or `adopt_contained` when integrating an external
-spawn owner such as a PTY library. Windows adoption is explicitly `unproven`
-until a create-suspended spawn seam is available.
+The PID-returning binding API is supported as `best_effort` compatibility on
+Unix. It fails closed on Windows because a PID cannot carry the owned Job
+handle. Rust supervisors should use `spawn_contained` on Unix or
+`adopt_contained` when integrating an external spawn owner such as a PTY
+library. Windows adoption is explicitly `unproven` until a create-suspended
+spawn seam is available.
 
 ```go
 config := sysprims.SpawnInGroupConfig{
@@ -151,7 +152,8 @@ if result.TreeKillReliability != "guaranteed" {
 
 **Platform notes**:
 
-- **Unix**: `PGID` contains the process group ID
+- **Unix**: `PGID` contains the process group ID, but the PID-only result is
+  `best_effort` because no receipt-bound child capability is retained
 - **Windows**: `SpawnInGroup` returns `NotSupported`; use an owned guard API
 - **Owned adoption**: post-spawn acquisition reports "unproven"
 

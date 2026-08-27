@@ -300,8 +300,8 @@ fn read_process_info(pid: u32, options: &ProcessOptions) -> SysprimsResult<Proce
     // Calculate elapsed time
     let boot_time = get_boot_time();
     let clock_ticks = get_clock_ticks();
-    let start_time_secs = stat.starttime / clock_ticks + boot_time;
-    let start_time_unix_ms = start_time_secs.saturating_mul(1000);
+    let start_time_unix_ms = process_start_time_unix_ms(boot_time, stat.starttime, clock_ticks);
+    let start_time_secs = start_time_unix_ms / 1000;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -822,6 +822,15 @@ fn get_clock_ticks() -> u64 {
     }
 }
 
+fn process_start_time_unix_ms(boot_time_secs: u64, start_ticks: u64, ticks_per_second: u64) -> u64 {
+    boot_time_secs.saturating_mul(1000).saturating_add(
+        start_ticks
+            .saturating_mul(1000)
+            .checked_div(ticks_per_second)
+            .unwrap_or(0),
+    )
+}
+
 /// Get page size in bytes.
 ///
 /// Returns 4096 as fallback if sysconf fails (returns -1).
@@ -863,6 +872,11 @@ mod tests {
         assert!(ticks > 0, "Clock ticks should be positive");
         // Common values are 100 or 1000
         assert!((100..=10000).contains(&ticks));
+    }
+
+    #[test]
+    fn process_start_time_preserves_subsecond_ticks() {
+        assert_eq!(process_start_time_unix_ms(1_000, 12_345, 100), 1_123_450);
     }
 
     #[test]

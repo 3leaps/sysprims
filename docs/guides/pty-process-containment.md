@@ -6,10 +6,47 @@ process-group or Job Object capability used for tree termination.
 
 ## Unix Composition
 
-`portable-pty` creates its child as a session and process-group leader on Unix.
-Keep that child handle and move it into a small adapter for
-`adopt_contained`. The guard verifies the live PID, executable, start time,
-process group, and session before it can signal the group.
+Guaranteed acquisition requires a prepared-spawn slot that installs the
+sysprims session hook **instead of** the PTY library's own `setsid`. There is
+exactly one session/group acquirer for the child. The PTY library retains its
+terminal handles and may perform controlling-terminal setup after the hook.
+
+The parent prepares the hook and acknowledgement channel before fork. The child
+hook performs `setsid` and writes one fixed-size, nonblocking acknowledgement.
+After spawn, the parent validates that acknowledgement and consumes the opaque
+receipt with the owned child at an explicit unsafe ownership boundary:
+
+```rust,ignore
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+use sysprims_session::prepare_session_acquisition;
+use sysprims_timeout::{contain_acquired_session, TerminateTreeConfig};
+
+let (hook, pending) = prepare_session_acquisition()?;
+let mut command = Command::new("worker");
+
+// A PTY prepared-spawn adapter installs this callback in place of its built-in
+// setsid. sysprims never takes PTY file descriptors or terminal ownership.
+unsafe {
+    command.pre_exec(move || hook.acquire());
+}
+
+let child = command.spawn()?;
+let receipt = pending.into_receipt(child.id())?;
+// SAFETY: this is the same child that emitted the receipt, and its adapter
+// retains exclusive unreaped ownership through guard finalization.
+let mut containment = unsafe { contain_acquired_session(child, receipt)? };
+```
+
+The hook is async-signal-safe by contract: its child-side path performs no
+allocation, locking, formatting, blocking, or panic. Missing, duplicate, or
+malformed acknowledgement; a second session acquirer; and child/receipt
+mismatch all fail closed without a reusable receipt.
+
+The current `portable-pty` release does not expose this replacement slot.
+Until a tagged companion does, keep its child handle and move it into a small
+adapter for `adopt_contained`. The guard verifies the live PID, executable,
+start time, process group, and session before it can signal the group.
 
 ```rust,ignore
 use sysprims_timeout::{
@@ -40,7 +77,7 @@ loop {
 }
 ```
 
-Adoption is reported as `unproven`, not `guaranteed`, because it occurs after
+Post-spawn adoption is reported as `unproven`, not `guaranteed`, because it occurs after
 the child starts. Once acquired, the guard owns the unreaped child and bound
 group identity. Termination verifies that evidence before the first signal,
 then escalates the bound group even if the leader exits before the grace period
@@ -55,7 +92,14 @@ Do not call the adapter's reaping `try_wait` while the guard is active.
 `try_complete` observes leader exit without reaping, cleans any remaining
 descendants, and only then reaps. After successful completion or termination,
 `into_child` returns the adapter so it can inspect any retained exit status.
-Dropping an active guard kills the contained tree and makes a bounded reap
+Receipt-bound Unix guards also verify with `waitid(WNOWAIT)` that the parent
+still owns the unreaped child slot before every guaranteed group signal. An
+adapter that externally reaps or changes its reported child PID fails closed.
+The generic external-child constructor is therefore `unsafe`: the caller must
+also guarantee that the adapter is the same spawn that emitted the receipt and
+retains exclusive unreaped ownership. Violating that precondition can let PID
+reuse redirect a signal; runtime checks remain defense-in-depth.
+Dropping an active guard signals its containment and makes a bounded reap
 attempt on both Unix and Windows.
 
 Each `ContainmentOutcome` includes structured `completion` evidence collected
@@ -84,10 +128,13 @@ empty libproc observation allows the guard to proceed to reap in that case.
 ## Owned Standard-Library Spawn
 
 For commands that do not need a PTY-owned spawn, pass a configured
-`std::process::Command` to `spawn_contained`. On Unix, sysprims establishes the
-group before exec and reports `guaranteed`. On Windows, this API fails closed
-until a create-suspended Job assignment path is available; callers may instead
-use explicitly `unproven` post-spawn adoption.
+`std::process::Command` to `spawn_contained`. On Unix, sysprims uses the same
+`setsid` hook and sealed same-spawn receipt before reporting `guaranteed`. Here,
+`guaranteed` means race-free acquisition and group-signaling eligibility. It
+does not mean that a Unix descendant is unable to create or join a different
+session or group later. On Windows, this API fails closed until a
+create-suspended Job assignment path is available; callers may instead use
+explicitly `unproven` post-spawn adoption.
 
 ## Windows Status
 
@@ -114,6 +161,7 @@ Job handle. An incomplete or failed query reports `Unknown`.
 not rediscover Job Objects or containment guards from a PID. Use the owned
 guard whenever PID reuse safety and leader-exits-first group cleanup matter.
 
-The PID-returning `spawn_in_group` API cannot retain a Windows Job capability,
-so it fails closed on Windows. New Rust callers should use `spawn_contained`
-instead.
+The PID-returning `spawn_in_group` API reports `best_effort` on Unix because it
+cannot retain the owned child and sealed receipt, and it fails closed on Windows
+because it cannot retain a Job capability. New Rust callers should use
+`spawn_contained` instead.

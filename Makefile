@@ -10,7 +10,7 @@
 #   make fmt        - Format code (cargo fmt + goneat assess format --fix)
 #   make build      - Build all crates and FFI
 
-.PHONY: all help bootstrap bootstrap-force tools check test fmt fmt-check lint typecheck build clean version install
+.PHONY: all help bootstrap bootstrap-force tools check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
@@ -36,6 +36,7 @@ BIN_DIR := $(CURDIR)/bin
 SFETCH_VERSION := latest
 GONEAT_VERSION ?= v0.5.16
 GONEAT_FORMAT_FAIL_ON ?= medium
+CONTAINER_RUNTIME ?= docker
 
 # Tool paths
 # sfetch: repo-local (trust anchor) or PATH
@@ -80,6 +81,7 @@ help: ## Show available targets
 	@echo "  check-windows-msvc  cargo check for x86_64-pc-windows-msvc"
 	@echo "  check-windows-gnu   cargo check for x86_64-pc-windows-gnu"
 	@echo "  test            Run test suite"
+	@echo "  test-diabolical Run hostile process-control tests in a disposable container"
 	@echo "  fmt             Format code (cargo fmt + goneat assess format --fix)"
 	@echo "  lint            Run linting (cargo clippy + goneat lint)"
 	@echo "  precommit       Pre-commit checks (fast: fmt, clippy)"
@@ -287,6 +289,20 @@ test: ## Run test suite
 	@echo "Running tests..."
 	$(CARGO) test --workspace
 	@echo "[ok] Tests passed"
+
+test-diabolical: ## Run hostile process-control tests in a disposable container
+	@echo "Running isolated process-control tests with $(CONTAINER_RUNTIME)..."
+	@if ! command -v "$(CONTAINER_RUNTIME)" >/dev/null 2>&1; then \
+		echo "[!!] $(CONTAINER_RUNTIME) not found"; \
+		exit 1; \
+	fi
+	$(CONTAINER_RUNTIME) build -t sysprims-test-fixture -f Dockerfile.container .
+	@mkdir -p "$(CURDIR)/target"
+	$(CONTAINER_RUNTIME) run --rm \
+		-v "$(CURDIR):/workspace:ro" \
+		-v "$(CURDIR)/target:/workspace/target" \
+		sysprims-test-fixture
+	@echo "[ok] Isolated process-control tests passed"
 
 fmt: ## Format code (cargo fmt + goneat assess format --fix)
 	@echo "Formatting Rust..."
