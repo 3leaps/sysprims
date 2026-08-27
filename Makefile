@@ -615,7 +615,8 @@ version: ## Print current version
 
 DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
-SYSPRIMS_RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
+# Canonical releases use the repository tag, not the path-prefixed Go module tag.
+SYSPRIMS_RELEASE_TAG ?= v$(VERSION)
 
 # Signing keys (set these environment variables)
 SYSPRIMS_MINISIGN_KEY ?=
