@@ -140,7 +140,7 @@ pkill -f spawn-workers.sh
 | Scenario                        | Command                               |
 | ------------------------------- | ------------------------------------- |
 | Kill specific runaway processes | `sysprims kill PID1 PID2 ... -s TERM` |
-| Kill entire process tree        | `sysprims kill PARENT_PID -s TERM`    |
+| Signal a known process group    | `sysprims kill --group PGID -s TERM`  |
 | Kill with timeout escalation    | `sysprims timeout 5s -- command`      |
 
 ## See Also
