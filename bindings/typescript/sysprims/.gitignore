@@ -3,6 +3,9 @@ dist-test/
 node_modules/
 
 # NAPI build/publish artifacts
-npm/
+npm/*
+!npm/*/
+npm/*/*
+!npm/*/package.json
 prebuilds/
 *.node

@@ -1,0 +1,24 @@
+{
+  "name": "@3leaps/sysprims-darwin-arm64",
+  "version": "0.2.2",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "sysprims.darwin-arm64.node",
+  "files": [
+    "sysprims.darwin-arm64.node"
+  ],
+  "description": "GPL-free cross-platform process utilities (TypeScript bindings via Node-API native addon)",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3leaps/sysprims.git",
+    "directory": "bindings/typescript/sysprims"
+  }
+}

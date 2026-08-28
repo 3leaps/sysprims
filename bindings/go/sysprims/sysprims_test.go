@@ -23,6 +23,9 @@ func TestVersion(t *testing.T) {
 	if len(v) < 3 {
 		t.Errorf("Version() returned unexpectedly short string: %q", v)
 	}
+	if expected := os.Getenv("SYSPRIMS_EXPECT_VERSION"); expected != "" && v != expected {
+		t.Errorf("Version() = %q, expected staged runtime version %q", v, expected)
+	}
 	t.Logf("Version: %s", v)
 }
 

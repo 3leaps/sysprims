@@ -18,15 +18,17 @@
 .PHONY: release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-verify-keys release-notes release-upload release-preflight
-.PHONY: version-patch version-minor version-major version-set
+.PHONY: release-guard-tag-version release-guard-tag-version-post
+.PHONY: version-patch version-minor version-major version-set version-sync
+.PHONY: version-check version-tooling-test
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
 
-# Version from Cargo.toml (SSOT) - extracted via cargo metadata
-VERSION := $(shell cargo metadata --no-deps --format-version 1 2>/dev/null | \
-	grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "dev")
+# VERSION is the release-coordinate SSOT. version-check proves every owned
+# Cargo/TypeScript surface agrees before release work can proceed.
+VERSION := $(shell tr -d '\r\n' < VERSION 2>/dev/null || echo "dev")
 
 # Tool installation directory
 # Bootstrap installs sfetch to repo-local bin/
@@ -108,7 +110,9 @@ help: ## Show available targets
 	@echo "  version-minor   Bump minor version (0.1.0 -> 0.2.0)"
 	@echo "  version-major   Bump major version (0.1.0 -> 1.0.0)"
 	@echo "  version-set     Set explicit version (V=X.Y.Z)"
-	@echo "  version-sync    Sync VERSION to Cargo.toml"
+	@echo "  version-sync    Sync VERSION to every authored Rust/TypeScript coordinate"
+	@echo "  version-check   Validate the complete authored version pack"
+	@echo "  version-tooling-test  Run isolated version/tag guard controls"
 	@echo ""
 	@echo "Current version: $(VERSION)"
 
@@ -590,6 +594,7 @@ precommit: ## Run pre-commit checks (fast)
 
 prepush: ## Run pre-push checks (thorough)
 	@$(MAKE) GONEAT_FORMAT_FAIL_ON=medium check
+	@$(MAKE) version-check version-tooling-test
 	@echo "[ok] Pre-push checks passed"
 
 pr-final: prepush ## Final PR merge-readiness gate
@@ -650,7 +655,7 @@ dist-local-clean: ## Remove dist/local contents
 	rm -rf $(DIST_LOCAL)
 	@echo "[ok] Local dist directory cleaned"
 
-release-download: ## Download release assets from GitHub
+release-download: release-guard-tag-version-post ## Download release assets from GitHub
 	@if [ -z "$(SYSPRIMS_RELEASE_TAG)" ] || [ "$(SYSPRIMS_RELEASE_TAG)" = "v" ]; then \
 		echo "Error: No release tag found. Set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; \
 		exit 1; \
@@ -660,7 +665,7 @@ release-download: ## Download release assets from GitHub
 release-checksums: ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE)
 
-release-sign: ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
+release-sign: release-guard-tag-version-post ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
 	@if [ -z "$(SYSPRIMS_MINISIGN_KEY)" ]; then \
 		echo "Error: SYSPRIMS_MINISIGN_KEY not set"; \
 		echo ""; \
@@ -703,7 +708,7 @@ release-notes: ## Copy release notes to dist
 		echo "[--] No release notes found at $$src"; \
 	fi
 
-release-upload: release-verify release-notes ## Upload signed artifacts to GitHub release
+release-upload: release-guard-tag-version-post release-verify release-notes ## Upload signed artifacts to GitHub release
 	./scripts/upload-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
 release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
@@ -716,23 +721,13 @@ release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
 		exit 1; \
 	fi
 	@echo "[ok] Working tree is clean"
-	@# Check 2: Prepush quality gates
+	@# Check 2: Explicit intended tag and complete authored version pack
+	@$(MAKE) release-guard-tag-version MODE=pre-tag --silent
+	@# Check 3: Prepush quality gates
 	@$(MAKE) prepush --silent
 	@echo "[ok] Prepush checks passed"
-	@# Check 3: Version sync
-	@version_file=$$(cat $(VERSION_FILE) 2>/dev/null); \
-	if [ -z "$$version_file" ]; then \
-		echo "[!!] VERSION file not found"; \
-		exit 1; \
-	fi; \
-	cargo_version=$$(cargo metadata --no-deps --format-version 1 2>/dev/null | \
-		grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4); \
-	if [ "$$version_file" != "$$cargo_version" ]; then \
-		echo "[!!] Version mismatch: VERSION=$$version_file, Cargo.toml=$$cargo_version"; \
-		echo "    Run: make version-sync"; \
-		exit 1; \
-	fi; \
-	echo "[ok] Version synced: $$version_file"; \
+	@# Check 4: Release notes and local/remote sync
+	@version_file=$$(cat $(VERSION_FILE)); \
 	release_notes="docs/releases/v$$version_file.md"; \
 	if [ ! -f "$$release_notes" ]; then \
 		echo "[!!] Release notes not found at $$release_notes"; \
@@ -765,8 +760,8 @@ release: release-clean release-download release-checksums release-sign release-e
 # Version Management
 # -----------------------------------------------------------------------------
 #
-# Version SSOT is the VERSION file (not Cargo.toml).
-# Cargo.toml workspace version should match VERSION file.
+# Version SSOT is the VERSION file. All authored Cargo/TypeScript coordinates
+# move in the same rollback-capable command.
 #
 # Usage:
 #   make version-patch    # 0.1.0 -> 0.1.1
@@ -777,54 +772,37 @@ release: release-clean release-download release-checksums release-sign release-e
 VERSION_FILE := VERSION
 
 version-patch: ## Bump patch version (0.1.0 -> 0.1.1)
-	@current=$$(cat $(VERSION_FILE)); \
-	major=$$(echo $$current | cut -d. -f1); \
-	minor=$$(echo $$current | cut -d. -f2); \
-	patch=$$(echo $$current | cut -d. -f3); \
-	new_patch=$$((patch + 1)); \
-	new_version="$$major.$$minor.$$new_patch"; \
-	echo "$$new_version" > $(VERSION_FILE); \
-	echo "Version bumped: $$current -> $$new_version"
+	@node scripts/version-pack.mjs bump patch
 
 version-minor: ## Bump minor version (0.1.0 -> 0.2.0)
-	@current=$$(cat $(VERSION_FILE)); \
-	major=$$(echo $$current | cut -d. -f1); \
-	minor=$$(echo $$current | cut -d. -f2); \
-	new_minor=$$((minor + 1)); \
-	new_version="$$major.$$new_minor.0"; \
-	echo "$$new_version" > $(VERSION_FILE); \
-	echo "Version bumped: $$current -> $$new_version"
+	@node scripts/version-pack.mjs bump minor
 
 version-major: ## Bump major version (0.1.0 -> 1.0.0)
-	@current=$$(cat $(VERSION_FILE)); \
-	major=$$(echo $$current | cut -d. -f1); \
-	new_major=$$((major + 1)); \
-	new_version="$$new_major.0.0"; \
-	echo "$$new_version" > $(VERSION_FILE); \
-	echo "Version bumped: $$current -> $$new_version"
+	@node scripts/version-pack.mjs bump major
 
 version-set: ## Set explicit version (V=X.Y.Z)
 	@if [ -z "$(V)" ]; then \
 		echo "Usage: make version-set V=1.2.3"; \
 		exit 1; \
 	fi
-	@echo "$(V)" > $(VERSION_FILE)
-	@echo "Version set to $(V)"
+	@node scripts/version-pack.mjs set "$(V)"
 
-version-sync: ## Sync VERSION file to Cargo.toml and TypeScript package.json
-	@ver=$$(cat $(VERSION_FILE)); \
-	if command -v cargo-set-version >/dev/null 2>&1; then \
-		cargo set-version --workspace "$$ver"; \
-		echo "[ok] Synced Cargo.toml to $$ver"; \
-	else \
-		echo "[!!] cargo-edit not installed (cargo install cargo-edit)"; \
-		echo "Manual update required: set version = \"$$ver\" in Cargo.toml"; \
-	fi
-	@ver=$$(cat $(VERSION_FILE)); \
-	ts_pkg="bindings/typescript/sysprims/package.json"; \
-	if [ -f "$$ts_pkg" ]; then \
-		sed -i.bak -e "s/\"version\": \"[0-9]*\.[0-9]*\.[0-9]*\"/\"version\": \"$$ver\"/" "$$ts_pkg"; \
-		sed -i.bak -e "s/@3leaps\/sysprims-\([^\"]*\)\": \"[0-9]*\.[0-9]*\.[0-9]*\"/@3leaps\/sysprims-\1\": \"$$ver\"/g" "$$ts_pkg"; \
-		rm -f "$$ts_pkg.bak"; \
-		echo "[ok] Synced TypeScript package.json to $$ver"; \
-	fi
+version-sync: ## Sync VERSION to every authored Rust/TypeScript coordinate
+	@node scripts/version-pack.mjs sync
+
+version-check: ## Validate the complete authored version pack
+	@node scripts/version-pack.mjs check
+
+version-tooling-test: ## Run isolated version and tag-guard controls
+	@node --test scripts/version-pack.test.mjs
+
+MODE ?= pre-tag
+release-guard-tag-version: ## Validate the explicit release tag against VERSION
+	@SYSPRIMS_TAG_GUARD_MODE="$(MODE)" \
+		SYSPRIMS_RELEASE_TAG="$(SYSPRIMS_RELEASE_TAG)" \
+		bash scripts/release-guard-tag-version.sh
+
+release-guard-tag-version-post: ## Require exact annotated canonical/Go tags on HEAD
+	@SYSPRIMS_TAG_GUARD_MODE=post-tag \
+		SYSPRIMS_RELEASE_TAG="$(SYSPRIMS_RELEASE_TAG)" \
+		bash scripts/release-guard-tag-version.sh
