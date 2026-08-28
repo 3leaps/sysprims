@@ -23,15 +23,16 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate VERSION matches tag
+        with:
+          fetch-depth: 0
+      - name: Guard exact tags and complete version pack
         id: version
         run: |
-          FILE_VERSION=$(cat VERSION)
-          TAG_VERSION=${GITHUB_REF_NAME#v}
-          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-            echo "VERSION mismatch: file=$FILE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
+          set -euo pipefail
+          SYSPRIMS_TAG_GUARD_MODE=post-tag \
+            SYSPRIMS_RELEASE_TAG="$GITHUB_REF_NAME" \
+            bash scripts/release-guard-tag-version.sh
+          FILE_VERSION="$(cat VERSION)"
           echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
           echo "Version validated: $FILE_VERSION"
   verify-go-bindings-assets:
@@ -58,7 +59,8 @@ jobs:
             linux-amd64-musl \
             linux-arm64 \
             linux-arm64-musl \
-            windows-amd64
+            windows-amd64 \
+            windows-arm64
           do
             path="bindings/go/sysprims/lib/${platform}/libsysprims_ffi.a"
             if [ ! -f "$path" ]; then

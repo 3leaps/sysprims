@@ -25,7 +25,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate version matches VERSION file
+      - name: Validate complete version pack
         id: version
         run: |
           set -euo pipefail
@@ -36,6 +36,7 @@ jobs:
             echo "Update VERSION first, or rerun with the correct input."
             exit 1
           fi
+          node scripts/version-pack.mjs check
           echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
   build-linux:
     name: Build FFI (Linux)
@@ -123,14 +124,57 @@ jobs:
         with:
           name: ffi-shared-${{ matrix.artifact_suffix }}
           path: dist/ffi-shared/${{ matrix.artifact_suffix }}
+  test-go-linux-glibc:
+    name: Smoke Go Runtime (${{ matrix.platform }}, static + shared)
+    runs-on: ${{ matrix.runner }}
+    needs: [validate, build-linux]
+    strategy:
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-latest-arm64-s
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+      - name: Download staged static library
+        uses: actions/download-artifact@v8
+        with:
+          name: ffi-${{ matrix.platform }}
+          path: staged-static
+      - name: Download staged shared library
+        uses: actions/download-artifact@v8
+        with:
+          name: ffi-shared-${{ matrix.platform }}
+          path: staged-shared
+      - name: Smoke staged Go runtime versions
+        env:
+          SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          platform="${{ matrix.platform }}"
+          mkdir -p "bindings/go/sysprims/lib/${platform}"
+          mkdir -p "bindings/go/sysprims/lib-shared/${platform}"
+          cp staged-static/libsysprims_ffi.a "bindings/go/sysprims/lib/${platform}/"
+          cp staged-shared/libsysprims_ffi.so "bindings/go/sysprims/lib-shared/${platform}/"
+          cd bindings/go/sysprims
+          go test -run '^TestVersion$' .
+          LD_LIBRARY_PATH="$PWD/lib-shared/${platform}" \
+            go test -run '^TestVersion$' -tags=sysprims_shared .
   build-macos:
     name: Build FFI (macOS)
-    runs-on: macos-latest
+    runs-on: macos-15
     needs: validate
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
@@ -153,6 +197,47 @@ jobs:
           cp target/aarch64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-arm64/
           cp target/x86_64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-amd64/
           cp target/aarch64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-arm64/
+      - name: Smoke staged Go runtime versions (both macOS architectures)
+        env:
+          SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "macOS Go proof requires the arm64 runner so Rosetta can execute amd64" >&2
+            exit 1
+          fi
+          for platform in darwin-arm64 darwin-amd64; do
+            mkdir -p "bindings/go/sysprims/lib/${platform}"
+            mkdir -p "bindings/go/sysprims/lib-shared/${platform}"
+            cp "dist/ffi/${platform}/libsysprims_ffi.a" "bindings/go/sysprims/lib/${platform}/"
+            cp "dist/ffi-shared/${platform}/libsysprims_ffi.dylib" "bindings/go/sysprims/lib-shared/${platform}/"
+          done
+          cd bindings/go/sysprims
+
+          go test -run '^TestVersion$' .
+          DYLD_LIBRARY_PATH="$PWD/lib-shared/darwin-arm64" \
+            go test -run '^TestVersion$' -tags=sysprims_shared .
+
+          if ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          cat >"$RUNNER_TEMP/clang-x86_64" <<'EOF'
+          #!/bin/sh
+          exec clang -arch x86_64 "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/clang-x86_64"
+
+          CGO_ENABLED=1 GOARCH=amd64 CC="$RUNNER_TEMP/clang-x86_64" \
+            go test -c -o "$RUNNER_TEMP/sysprims-static-amd64.test" .
+          arch -x86_64 "$RUNNER_TEMP/sysprims-static-amd64.test" \
+            -test.run '^TestVersion$'
+
+          CGO_ENABLED=1 GOARCH=amd64 CC="$RUNNER_TEMP/clang-x86_64" \
+            go test -c -tags=sysprims_shared \
+            -o "$RUNNER_TEMP/sysprims-shared-amd64.test" .
+          DYLD_LIBRARY_PATH="$PWD/lib-shared/darwin-amd64" \
+            arch -x86_64 "$RUNNER_TEMP/sysprims-shared-amd64.test" \
+            -test.run '^TestVersion$'
       - name: Upload FFI artifact (darwin-amd64)
         uses: actions/upload-artifact@v7
         with:
@@ -179,6 +264,9 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
@@ -204,6 +292,20 @@ jobs:
           mkdir -p dist/ffi-shared/windows-amd64
           cp target/x86_64-pc-windows-gnu/release/sysprims_ffi.dll dist/ffi-shared/windows-amd64/
           cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.dll.a dist/ffi-shared/windows-amd64/
+      - name: Smoke staged Go runtime versions (Windows amd64)
+        shell: msys2 {0}
+        env:
+          SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p bindings/go/sysprims/lib/windows-amd64
+          mkdir -p bindings/go/sysprims/lib-shared/windows-amd64
+          cp dist/ffi/windows-amd64/libsysprims_ffi.a bindings/go/sysprims/lib/windows-amd64/
+          cp dist/ffi-shared/windows-amd64/* bindings/go/sysprims/lib-shared/windows-amd64/
+          cd bindings/go/sysprims
+          go test -run '^TestVersion$' .
+          PATH="$PWD/lib-shared/windows-amd64:$PATH" \
+            go test -run '^TestVersion$' -tags=sysprims_shared .
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v7
         with:
@@ -220,6 +322,9 @@ jobs:
     needs: validate
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
       - name: Install llvm-mingw (aarch64 ucrt, pinned)
         shell: pwsh
         run: |
@@ -254,6 +359,26 @@ jobs:
           if (Test-Path "$out/libsysprims_ffi.dll.a") {
             Copy-Item "$out/libsysprims_ffi.dll.a" dist/ffi-shared/windows-arm64/
           }
+      - name: Smoke staged Go runtime versions (Windows arm64)
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          CC: aarch64-w64-mingw32-gcc
+          SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path bindings/go/sysprims/lib/windows-arm64 | Out-Null
+          New-Item -ItemType Directory -Force -Path bindings/go/sysprims/lib-shared/windows-arm64 | Out-Null
+          Copy-Item dist/ffi/windows-arm64/libsysprims_ffi.a bindings/go/sysprims/lib/windows-arm64/
+          Copy-Item dist/ffi-shared/windows-arm64/* bindings/go/sysprims/lib-shared/windows-arm64/
+          Push-Location bindings/go/sysprims
+          try {
+            go test -run '^TestVersion$' .
+            $env:PATH = "$(Resolve-Path lib-shared/windows-arm64);$env:PATH"
+            go test -run '^TestVersion$' -tags=sysprims_shared .
+          } finally {
+            Pop-Location
+          }
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v7
         with:
@@ -265,7 +390,7 @@ jobs:
           name: ffi-shared-windows-arm64
           path: dist/ffi-shared/windows-arm64
   test-musl-shared-go:
-    name: Test Go Shared Mode (linux-musl, alpine)
+    name: Smoke Go Runtime (linux-amd64-musl, static + shared)
     runs-on: ubuntu-latest
     container:
       image: golang:1.22-alpine
@@ -277,27 +402,78 @@ jobs:
         run: |
           set -eu
           apk add --no-cache bash build-base
+      - name: Download musl artifacts (linux-amd64-musl)
+        uses: actions/download-artifact@v8
+        with:
+          name: ffi-linux-amd64-musl
+          path: ffi-linux-amd64-musl
       - name: Download musl shared artifact (linux-amd64-musl)
         uses: actions/download-artifact@v8
         with:
           name: ffi-shared-linux-amd64-musl
           path: ffi-shared-linux-amd64-musl
-      - name: Place shared lib into Go bindings lib-shared tree
+      - name: Place static and shared libs into Go bindings tree
         shell: sh
         run: |
           set -eu
+          mkdir -p bindings/go/sysprims/lib/linux-amd64-musl
           mkdir -p bindings/go/sysprims/lib-shared/linux-amd64-musl
-          mkdir -p bindings/go/sysprims/lib-shared/local/linux-amd64-musl
+          cp ffi-linux-amd64-musl/libsysprims_ffi.a bindings/go/sysprims/lib/linux-amd64-musl/
           cp ffi-shared-linux-amd64-musl/libsysprims_ffi.so bindings/go/sysprims/lib-shared/linux-amd64-musl/
-      - name: Run Go tests (musl + shared)
+      - name: Smoke staged Go runtime versions (musl)
         working-directory: bindings/go/sysprims
         shell: sh
         env:
           CGO_ENABLED: "1"
+          SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -eu
           go version
-          go test -v -tags="musl,sysprims_shared" ./...
+          go test -run '^TestVersion$' -tags=musl .
+          LD_LIBRARY_PATH="$PWD/lib-shared/linux-amd64-musl" \
+            go test -run '^TestVersion$' -tags="musl,sysprims_shared" .
+  test-musl-shared-go-arm64:
+    name: Smoke Go Runtime (linux-arm64-musl, static + shared)
+    runs-on: ubuntu-latest-arm64-s
+    container:
+      image: golang:1.22-alpine
+    needs: [validate, build-linux]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        shell: sh
+        run: |
+          set -eu
+          apk add --no-cache bash build-base
+      - name: Download musl artifacts (linux-arm64-musl)
+        uses: actions/download-artifact@v8
+        with:
+          name: ffi-linux-arm64-musl
+          path: ffi-linux-arm64-musl
+      - name: Download musl shared artifact (linux-arm64-musl)
+        uses: actions/download-artifact@v8
+        with:
+          name: ffi-shared-linux-arm64-musl
+          path: ffi-shared-linux-arm64-musl
+      - name: Place static and shared libs into Go bindings tree
+        shell: sh
+        run: |
+          set -eu
+          mkdir -p bindings/go/sysprims/lib/linux-arm64-musl
+          mkdir -p bindings/go/sysprims/lib-shared/linux-arm64-musl
+          cp ffi-linux-arm64-musl/libsysprims_ffi.a bindings/go/sysprims/lib/linux-arm64-musl/
+          cp ffi-shared-linux-arm64-musl/libsysprims_ffi.so bindings/go/sysprims/lib-shared/linux-arm64-musl/
+      - name: Smoke staged Go runtime versions (musl)
+        working-directory: bindings/go/sysprims
+        shell: sh
+        env:
+          CGO_ENABLED: "1"
+          SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -eu
+          go test -run '^TestVersion$' -tags=musl .
+          LD_LIBRARY_PATH="$PWD/lib-shared/linux-arm64-musl" \
+            go test -run '^TestVersion$' -tags="musl,sysprims_shared" .
   cbindgen:
     name: Generate C Header
     runs-on: ubuntu-latest
@@ -320,7 +496,16 @@ jobs:
   update-go-bindings:
     name: Create Go Bindings PR
     runs-on: ubuntu-latest
-    needs: [validate, build-linux, build-macos, build-windows, build-windows-arm64, cbindgen]
+    needs:
+      - validate
+      - build-linux
+      - test-go-linux-glibc
+      - test-musl-shared-go
+      - test-musl-shared-go-arm64
+      - build-macos
+      - build-windows
+      - build-windows-arm64
+      - cbindgen
     permissions:
       contents: write
       pull-requests: write

@@ -32,9 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-npm  # Required for npm OIDC trusted publishing
     steps:
-      # Note: Do NOT use fetch-tags here. When running from a tag ref,
-      # it causes a git fetch conflict. The tag is already checked out.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -101,26 +101,12 @@ jobs:
             echo "ref.tag=${TAG}"
             exit 1
           fi
-
-          VERSION_FROM_TAG="${TAG#v}"
-          VERSION_FILE=$(cat VERSION)
-          if [ "$VERSION_FILE" != "$VERSION_FROM_TAG" ]; then
-            echo "::error::VERSION file does not match tag"
-            echo "VERSION=$VERSION_FILE"
-            echo "tag=$TAG"
-            exit 1
-          fi
-
-          PKG_VERSION=$(node -p "require('./bindings/typescript/sysprims/package.json').version")
-          if [ "$PKG_VERSION" != "$VERSION_FROM_TAG" ]; then
-            echo "::error::bindings/typescript/sysprims/package.json version does not match tag"
-            echo "package.json=$PKG_VERSION"
-            echo "tag=$TAG"
-            exit 1
-          fi
+          SYSPRIMS_TAG_GUARD_MODE=post-tag \
+            SYSPRIMS_RELEASE_TAG="$TAG" \
+            bash scripts/release-guard-tag-version.sh
 
           {
-            echo "version=${VERSION_FROM_TAG}"
+            echo "version=${TAG#v}"
             echo "tag=${TAG}"
             echo "head_sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_ENV"
