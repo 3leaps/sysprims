@@ -12,11 +12,12 @@ use sysprims_core::{SysprimsError, SysprimsResult};
 use sysprims_session::UnixSessionReceipt;
 
 use crate::{
-    capture_containment_identity, completion_from_pids, unknown_completion,
-    verify_containment_identity, ContainmentAdoptionError, ContainmentChild,
-    ContainmentCompletionEvidence, ContainmentGuard, ContainmentObservation, ContainmentOutcome,
-    ContainmentSpawnError, GroupingMode, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
-    TreeKillReliability, MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
+    capture_containment_identity, capture_receipt_bound_containment_identity, completion_from_pids,
+    unknown_completion, verify_containment_identity, ContainmentAdoptionError, ContainmentChild,
+    ContainmentCompletionEvidence, ContainmentGuard, ContainmentIdentityValidation,
+    ContainmentObservation, ContainmentOutcome, ContainmentSpawnError, GroupingMode,
+    TerminateTreeConfig, TimeoutConfig, TimeoutOutcome, TreeKillReliability,
+    MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
 };
 use crate::{SpawnInGroupConfig, SpawnInGroupResult};
 use sysprims_core::get_platform;
@@ -134,7 +135,7 @@ fn acquire_receipt_evidence<C: ContainmentChild>(
     }
 
     let child_was_exited = verify_owned_child_slot(pid)?;
-    let identity = match capture_containment_identity(pid) {
+    let identity = match capture_receipt_bound_containment_identity(pid) {
         Ok(identity) => identity,
         Err(_) if child_was_exited || owned_child_is_exited_unreaped(pid)? => {
             crate::ContainmentIdentity {
@@ -181,7 +182,7 @@ fn validate_containment_before_signal<C: ContainmentChild>(
         ));
     }
 
-    if let Some(receipt) = guard.session_receipt.as_ref() {
+    let identity_validation = if let Some(receipt) = guard.session_receipt.as_ref() {
         if receipt.child_pid() != guard.identity.pid
             || receipt.process_group_id() != guard.pgid
             || receipt.session_id() != guard.session_id
@@ -192,7 +193,10 @@ fn validate_containment_before_signal<C: ContainmentChild>(
                 "sealed session receipt no longer matches the containment guard",
             ));
         }
-    }
+        ContainmentIdentityValidation::ReceiptBoundExecVolatile
+    } else {
+        ContainmentIdentityValidation::Strict
+    };
 
     let owned_child_exited = if guard.session_receipt.is_some() {
         Some(verify_owned_child_slot(guard.identity.pid)?)
@@ -205,7 +209,7 @@ fn validate_containment_before_signal<C: ContainmentChild>(
     let mut identity_metadata_verified = if receipt_only_fast_exit {
         false
     } else {
-        verify_containment_identity(&guard.identity)?
+        verify_containment_identity(&guard.identity, identity_validation)?
     };
     let exited_ownership_verified = owned_child_exited.unwrap_or(false)
         || (guard.session_receipt.is_some()
@@ -1093,6 +1097,27 @@ fn kill_foreground_child(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::path::{Path, PathBuf};
+
+    struct SequencedIdentityChild {
+        child: Child,
+        pid: u32,
+        process_id_calls: Cell<usize>,
+        unavailable_on_call: usize,
+    }
+
+    impl ContainmentChild for SequencedIdentityChild {
+        fn process_id(&self) -> Option<u32> {
+            let call = self.process_id_calls.get() + 1;
+            self.process_id_calls.set(call);
+            (call != self.unavailable_on_call).then_some(self.pid)
+        }
+
+        fn try_wait(&mut self) -> std::io::Result<bool> {
+            self.child.try_wait().map(|status| status.is_some())
+        }
+    }
 
     fn spawn_with_session_receipt(mut command: Command) -> (Child, UnixSessionReceipt) {
         let (hook, pending) = sysprims_session::prepare_session_acquisition().unwrap();
@@ -1104,6 +1129,54 @@ mod tests {
         let child = command.spawn().unwrap();
         let receipt = pending.into_receipt(child.id()).unwrap();
         (child, receipt)
+    }
+
+    fn exec_gate_path(scene: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "sysprims-timeout-exec-gate-{}-{scene}",
+            std::process::id()
+        ))
+    }
+
+    fn command_waiting_for_two_execs(gate: &Path, final_script: &str) -> Command {
+        let mut command = Command::new("sh");
+        // After acquisition, the leader execs `env`, which then execs `bash`.
+        // This keeps the regression deterministic across two executable-image
+        // transitions before the requested scene begins.
+        command.args([
+            "-c",
+            "while [ ! -e \"$1\" ]; do sleep 0.01; done; exec env bash -c \"$2\"",
+            "sysprims-exec-gate",
+            gate.to_str().expect("temporary path must be UTF-8"),
+            final_script,
+        ]);
+        command
+    }
+
+    fn open_exec_gate(gate: &Path) {
+        std::fs::write(gate, b"continue").expect("failed to open exec gate");
+    }
+
+    fn remove_exec_gate(gate: &Path) {
+        let _ = std::fs::remove_file(gate);
+    }
+
+    fn wait_for_executable_change(pid: u32, original: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if sysprims_proc::get_process(pid)
+                .ok()
+                .and_then(|process| process.exe_path)
+                .is_some_and(|exe| exe != original)
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "receipt-bound child did not cross the exec gate"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        }
     }
 
     #[test]
@@ -1131,6 +1204,94 @@ mod tests {
     }
 
     #[test]
+    fn receipt_bound_explicit_termination_allows_multiple_execs() {
+        let gate = exec_gate_path("explicit");
+        remove_exec_gate(&gate);
+        let command = command_waiting_for_two_execs(&gate, "sleep 60 & wait");
+        let mut guard = spawn_contained_impl(command).expect("contained spawn failed");
+        let original_exe = guard.identity().exe_path.clone();
+
+        open_exec_gate(&gate);
+        wait_for_executable_change(guard.identity().pid, &original_exe);
+        remove_exec_gate(&gate);
+
+        let outcome = guard
+            .terminate(TerminateTreeConfig {
+                grace_timeout_ms: 10,
+                kill_timeout_ms: 500,
+                ..TerminateTreeConfig::default()
+            })
+            .expect("receipt-bound termination must survive multiple execs");
+        assert_eq!(
+            outcome.tree_kill_reliability,
+            TreeKillReliability::Guaranteed
+        );
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty { .. }
+        ));
+        assert!(outcome.exited);
+
+        let mut child = match guard.into_child() {
+            Ok(child) => child,
+            Err(_) => panic!("finalized guard must return child"),
+        };
+        assert!(child
+            .try_wait()
+            .expect("reaped child status must remain available")
+            .is_some());
+    }
+
+    #[test]
+    fn receipt_bound_natural_completion_allows_multiple_execs() {
+        let gate = exec_gate_path("natural");
+        remove_exec_gate(&gate);
+        let command = command_waiting_for_two_execs(&gate, "sleep 60 & exit 0");
+        let mut guard = spawn_contained_impl(command).expect("contained spawn failed");
+
+        open_exec_gate(&gate);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let outcome = loop {
+            if let Some(outcome) = guard
+                .try_complete(TerminateTreeConfig {
+                    grace_timeout_ms: 10,
+                    kill_timeout_ms: 500,
+                    ..TerminateTreeConfig::default()
+                })
+                .expect("receipt-bound completion must survive multiple execs")
+            {
+                break outcome;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "receipt-bound leader did not exit naturally"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        remove_exec_gate(&gate);
+
+        assert_eq!(
+            outcome.tree_kill_reliability,
+            TreeKillReliability::Guaranteed
+        );
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty { .. }
+        ));
+        assert!(outcome.exited);
+
+        let mut child = match guard.into_child() {
+            Ok(child) => child,
+            Err(_) => panic!("finalized guard must return child"),
+        };
+        assert!(child
+            .try_wait()
+            .expect("reaped child status must remain available")
+            .is_some());
+    }
+
+    #[test]
     fn receipt_bound_exit_between_identity_and_group_lookup_uses_fast_exit() {
         let ownership_rechecked = std::cell::Cell::new(false);
         let identity_metadata_verified =
@@ -1149,6 +1310,40 @@ mod tests {
         let error = reconcile_group_identity_after_live_check(true, 42, 42, 41, 42, || Ok(false))
             .expect_err("live group mismatch must not become a fast-exit path");
 
+        assert!(matches!(error, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn live_session_mismatch_after_identity_check_still_fails_closed() {
+        let error = reconcile_group_identity_after_live_check(true, 42, 42, 42, 41, || Ok(false))
+            .expect_err("live session mismatch must not become a fast-exit path");
+
+        assert!(matches!(error, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn escalation_revalidates_the_owned_child_before_signaling() {
+        let mut command = Command::new("sleep");
+        command.arg("60");
+        let (child, receipt) = spawn_with_session_receipt(command);
+        let pid = child.id();
+        let child = SequencedIdentityChild {
+            child,
+            pid,
+            process_id_calls: Cell::new(0),
+            unavailable_on_call: 3,
+        };
+        let mut guard =
+            contain_acquired_session_impl(child, receipt).expect("receipt consumption failed");
+
+        let error = guard
+            .terminate(TerminateTreeConfig {
+                signal: libc::SIGSTOP,
+                kill_signal: libc::SIGCONT,
+                grace_timeout_ms: 0,
+                kill_timeout_ms: 100,
+            })
+            .expect_err("lost child identity must stop pre-escalation signaling");
         assert!(matches!(error, SysprimsError::InvalidArgument { .. }));
     }
 

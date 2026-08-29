@@ -224,7 +224,12 @@ pub struct ContainmentIdentity {
     /// Zero only when a sealed same-spawn receipt is paired with an already
     /// exited, unreaped child before live metadata can be captured.
     pub start_time_unix_ms: u64,
-    /// Empty only for the same receipt-bound fast-exit state.
+    /// Observational executable metadata captured when containment is acquired.
+    ///
+    /// Unix guards backed by a sealed same-spawn receipt allow this value to
+    /// change across `exec` and may leave it empty when it is unavailable.
+    /// Adopted guards require it to remain available and unchanged. It is also
+    /// empty for the receipt-bound fast-exit state described above.
     pub exe_path: String,
 }
 
@@ -474,6 +479,28 @@ pub fn spawn_contained(command: Command) -> Result<ContainmentGuard<Child>, Cont
 }
 
 fn capture_containment_identity(pid: u32) -> SysprimsResult<ContainmentIdentity> {
+    capture_containment_identity_with_mode(pid, ContainmentIdentityValidation::Strict)
+}
+
+#[cfg(unix)]
+fn capture_receipt_bound_containment_identity(pid: u32) -> SysprimsResult<ContainmentIdentity> {
+    capture_containment_identity_with_mode(
+        pid,
+        ContainmentIdentityValidation::ReceiptBoundExecVolatile,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContainmentIdentityValidation {
+    Strict,
+    #[cfg(unix)]
+    ReceiptBoundExecVolatile,
+}
+
+fn capture_containment_identity_with_mode(
+    pid: u32,
+    mode: ContainmentIdentityValidation,
+) -> SysprimsResult<ContainmentIdentity> {
     if pid == 0 || pid > sysprims_signal::MAX_SAFE_PID {
         return Err(SysprimsError::invalid_argument(format!(
             "pid {pid} is outside the safe process identity range"
@@ -487,15 +514,17 @@ fn capture_containment_identity(pid: u32) -> SysprimsResult<ContainmentIdentity>
             0,
         )
     })?;
-    let exe_path = process
-        .exe_path
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| {
-            SysprimsError::system(
+    let exe_path = match (mode, process.exe_path.filter(|path| !path.is_empty())) {
+        (_, Some(path)) => path,
+        (ContainmentIdentityValidation::Strict, None) => {
+            return Err(SysprimsError::system(
                 "process executable unavailable during containment acquisition",
                 0,
-            )
-        })?;
+            ));
+        }
+        #[cfg(unix)]
+        (ContainmentIdentityValidation::ReceiptBoundExecVolatile, None) => String::new(),
+    };
 
     Ok(ContainmentIdentity {
         pid,
@@ -505,7 +534,10 @@ fn capture_containment_identity(pid: u32) -> SysprimsResult<ContainmentIdentity>
 }
 
 #[cfg(unix)]
-fn verify_containment_identity(expected: &ContainmentIdentity) -> SysprimsResult<bool> {
+fn verify_containment_identity(
+    expected: &ContainmentIdentity,
+    mode: ContainmentIdentityValidation,
+) -> SysprimsResult<bool> {
     let process = match sysprims_proc::get_process(expected.pid) {
         Ok(process) => process,
         Err(SysprimsError::NotFound { .. } | SysprimsError::PermissionDenied { .. }) => {
@@ -514,20 +546,40 @@ fn verify_containment_identity(expected: &ContainmentIdentity) -> SysprimsResult
         Err(error) => return Err(error),
     };
 
-    if process
-        .start_time_unix_ms
-        .is_some_and(|actual| actual != expected.start_time_unix_ms)
-        || process
-            .exe_path
-            .as_deref()
-            .is_some_and(|actual| actual != expected.exe_path)
-    {
+    verify_containment_identity_observation(
+        expected,
+        process.start_time_unix_ms,
+        process.exe_path.as_deref(),
+        mode,
+    )
+}
+
+#[cfg(unix)]
+fn verify_containment_identity_observation(
+    expected: &ContainmentIdentity,
+    actual_start_time_unix_ms: Option<u64>,
+    actual_exe_path: Option<&str>,
+    mode: ContainmentIdentityValidation,
+) -> SysprimsResult<bool> {
+    if actual_start_time_unix_ms.is_some_and(|actual| actual != expected.start_time_unix_ms) {
         return Err(SysprimsError::invalid_argument(
             "process identity changed; refusing containment operation",
         ));
     }
 
-    Ok(process.start_time_unix_ms.is_some() && process.exe_path.is_some())
+    match mode {
+        ContainmentIdentityValidation::Strict => {
+            if actual_exe_path.is_some_and(|actual| actual != expected.exe_path) {
+                return Err(SysprimsError::invalid_argument(
+                    "process identity changed; refusing containment operation",
+                ));
+            }
+            Ok(actual_start_time_unix_ms.is_some() && actual_exe_path.is_some())
+        }
+        ContainmentIdentityValidation::ReceiptBoundExecVolatile => {
+            Ok(actual_start_time_unix_ms.is_some())
+        }
+    }
 }
 
 // =============================================================================
@@ -949,6 +1001,85 @@ mod tests {
         assert_eq!(TreeKillReliability::Guaranteed.as_str(), "guaranteed");
         assert_eq!(TreeKillReliability::Unproven.as_str(), "unproven");
         assert_eq!(TreeKillReliability::BestEffort.as_str(), "best_effort");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn receipt_bound_identity_treats_executable_as_observational() {
+        let expected = ContainmentIdentity {
+            pid: 42,
+            start_time_unix_ms: 1_000,
+            exe_path: "/before-exec".to_string(),
+        };
+
+        assert!(verify_containment_identity_observation(
+            &expected,
+            Some(1_000),
+            Some("/after-two-execs"),
+            ContainmentIdentityValidation::ReceiptBoundExecVolatile,
+        )
+        .unwrap());
+        assert!(verify_containment_identity_observation(
+            &expected,
+            Some(1_000),
+            None,
+            ContainmentIdentityValidation::ReceiptBoundExecVolatile,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn receipt_bound_identity_requires_matching_observable_start_time() {
+        let expected = ContainmentIdentity {
+            pid: 42,
+            start_time_unix_ms: 1_000,
+            exe_path: "/before-exec".to_string(),
+        };
+
+        assert!(!verify_containment_identity_observation(
+            &expected,
+            None,
+            Some("/after-exec"),
+            ContainmentIdentityValidation::ReceiptBoundExecVolatile,
+        )
+        .unwrap());
+        assert!(matches!(
+            verify_containment_identity_observation(
+                &expected,
+                Some(2_000),
+                Some("/after-exec"),
+                ContainmentIdentityValidation::ReceiptBoundExecVolatile,
+            ),
+            Err(SysprimsError::InvalidArgument { .. })
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn adopted_identity_keeps_strict_executable_validation() {
+        let expected = ContainmentIdentity {
+            pid: 42,
+            start_time_unix_ms: 1_000,
+            exe_path: "/before-exec".to_string(),
+        };
+
+        assert!(matches!(
+            verify_containment_identity_observation(
+                &expected,
+                Some(1_000),
+                Some("/after-exec"),
+                ContainmentIdentityValidation::Strict,
+            ),
+            Err(SysprimsError::InvalidArgument { .. })
+        ));
+        assert!(!verify_containment_identity_observation(
+            &expected,
+            Some(1_000),
+            None,
+            ContainmentIdentityValidation::Strict,
+        )
+        .unwrap());
     }
 
     #[test]
