@@ -356,6 +356,30 @@ fn acquire_unix_evidence<C: ContainmentChild>(
     Ok((identity, pgid as u32, session_id as u32))
 }
 
+fn reconcile_group_signal_failure<F>(
+    error: SysprimsError,
+    observe_completion: F,
+    empty_warning: &'static str,
+) -> SysprimsResult<&'static str>
+where
+    F: FnOnce() -> ContainmentCompletionEvidence,
+{
+    let reconcilable = matches!(&error, SysprimsError::NotFound { .. })
+        || (cfg!(target_os = "macos") && matches!(&error, SysprimsError::PermissionDenied { .. }));
+    if !reconcilable {
+        return Err(error);
+    }
+
+    if !matches!(
+        observe_completion(),
+        ContainmentCompletionEvidence::Empty { .. }
+    ) {
+        return Err(error);
+    }
+
+    Ok(empty_warning)
+}
+
 pub fn terminate_contained_impl<C: ContainmentChild>(
     guard: &mut ContainmentGuard<C>,
     config: TerminateTreeConfig,
@@ -382,23 +406,15 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
 
     let graceful_sent = match sysprims_signal::killpg(guard.pgid, config.signal) {
         Ok(()) => true,
-        Err(SysprimsError::NotFound { .. }) if !identity_metadata_verified => {
-            warnings.push("Process group exited before cleanup signal".to_string());
+        Err(error) => {
+            let warning = reconcile_group_signal_failure(
+                error,
+                || observe_containment_completion(guard.pgid, guard.session_id),
+                "Process group became empty before cleanup signal; proceeding to reap",
+            )?;
+            warnings.push(warning.to_string());
             false
         }
-        #[cfg(target_os = "macos")]
-        Err(error @ SysprimsError::PermissionDenied { .. }) if !identity_metadata_verified => {
-            let completion = observe_containment_completion(guard.pgid, guard.session_id);
-            if !matches!(completion, ContainmentCompletionEvidence::Empty { .. }) {
-                return Err(error);
-            }
-            warnings.push(
-                "macOS process-group enumeration confirmed no live descendants; proceeding to reap"
-                    .to_string(),
-            );
-            false
-        }
-        Err(error) => return Err(error),
     };
 
     if graceful_sent {
@@ -409,23 +425,15 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         validate_containment_before_signal(guard)?;
         match sysprims_signal::killpg(guard.pgid, config.kill_signal) {
             Ok(()) => true,
-            Err(SysprimsError::NotFound { .. }) => {
-                warnings.push("Process group exited before escalation".to_string());
+            Err(error) => {
+                let warning = reconcile_group_signal_failure(
+                    error,
+                    || observe_containment_completion(guard.pgid, guard.session_id),
+                    "Process group became empty before escalation; proceeding to reap",
+                )?;
+                warnings.push(warning.to_string());
                 false
             }
-            #[cfg(target_os = "macos")]
-            Err(error @ SysprimsError::PermissionDenied { .. }) => {
-                let completion = observe_containment_completion(guard.pgid, guard.session_id);
-                if !matches!(completion, ContainmentCompletionEvidence::Empty { .. }) {
-                    return Err(error);
-                }
-                warnings.push(
-                    "macOS process-group enumeration confirmed no live descendants before escalation"
-                        .to_string(),
-                );
-                false
-            }
-            Err(error) => return Err(error),
         }
     } else {
         false
@@ -1303,6 +1311,52 @@ mod tests {
 
         assert!(!identity_metadata_verified);
         assert!(ownership_rechecked.get());
+    }
+
+    #[test]
+    fn post_validation_signal_failure_requires_empty_completion() {
+        let observation = ContainmentObservation::LinuxProcfsProcessGroup;
+        let warning = reconcile_group_signal_failure(
+            SysprimsError::not_found(42),
+            || ContainmentCompletionEvidence::Empty { observation },
+            "empty group",
+        )
+        .expect("an empty observed group may proceed to exact-child reap");
+        assert_eq!(warning, "empty group");
+
+        let survivors = reconcile_group_signal_failure(
+            SysprimsError::not_found(42),
+            || ContainmentCompletionEvidence::Survivors {
+                observation,
+                observed_count: 1,
+                survivor_pids: vec![43],
+            },
+            "must not be returned",
+        )
+        .expect_err("live survivors must preserve the signal failure");
+        assert!(matches!(survivors, SysprimsError::NotFound { .. }));
+
+        let unknown = reconcile_group_signal_failure(
+            SysprimsError::not_found(42),
+            || ContainmentCompletionEvidence::Unknown { observation },
+            "must not be returned",
+        )
+        .expect_err("unknown completion must preserve the signal failure");
+        assert!(matches!(unknown, SysprimsError::NotFound { .. }));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_permission_denied_signal_failure_requires_empty_completion() {
+        let warning = reconcile_group_signal_failure(
+            SysprimsError::permission_denied(42, "signal_group"),
+            || ContainmentCompletionEvidence::Empty {
+                observation: ContainmentObservation::MacosLibprocProcessGroup,
+            },
+            "empty group",
+        )
+        .expect("macOS EPERM with an empty observed group may proceed to reap");
+        assert_eq!(warning, "empty group");
     }
 
     #[test]
