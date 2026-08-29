@@ -118,6 +118,17 @@ sample does not upgrade `unproven` acquisition. Survivor PIDs are evidence only.
 PID reuse makes them unsafe to pass to signaling APIs or use as a suggested
 target list.
 
+The guard and outcome also report `boundary_strength` independently:
+
+- `kernel_enforced_job` means the exact Windows child was assigned before first
+  execution to an owned Job with neither breakaway mode enabled.
+- `cooperative_group` means a Unix session/process group whose descendants may
+  later leave.
+- `unknown` means the stronger boundary property was not proven.
+
+Boundary strength never upgrades acquisition reliability, completion, or
+leader-reap evidence.
+
 Linux completion uses a bounded `/proc` process-group/session scan. macOS uses a
 bounded libproc process-group scan with explicit sizing-race detection. Partial,
 unstable, or permission-limited observations report `Unknown`, never `Empty`.
@@ -145,9 +156,19 @@ assignment. Dropping the owned Job handle applies `KILL_ON_JOB_CLOSE` to
 processes that were successfully assigned.
 
 A `guaranteed` Windows path requires create-suspended, assign-to-Job, then
-resume. `portable-pty` 0.9 does not expose that ConPTY preparation hook, so
-ConPTY adoption must not be presented as guaranteed. sysprims does not emulate
-ConPTY or take ownership of terminal handles.
+resume. A ConPTY adapter can prepare a `PreparedWindowsJob` before creation,
+call `assign_process` with the exact suspended process handle, and consume the
+sealed receipt with `contain_acquired_windows_job`. Receipt consumption verifies
+the same process and Job membership again, then transfers the Job and sole
+wait/reap authority into the guard. The adapter retains its pseudoconsole and
+presentation-pipe handles and resumes its separately owned primary thread
+exactly once. Assignment, proof, adoption, or resume failure must resolve the
+still-owned child without making it runnable.
+
+The standard-library `spawn_contained(Command)` path remains unchanged and
+fails closed on Windows because it does not own the primary-thread resume seam.
+Post-spawn ConPTY adoption must not be presented as guaranteed. sysprims does
+not emulate ConPTY or take ownership of terminal handles.
 
 Owned Windows termination calls `TerminateJobObject` immediately. POSIX signal
 and grace-period fields in `TerminateTreeConfig` do not apply; the outcome

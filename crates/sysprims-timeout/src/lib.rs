@@ -56,6 +56,8 @@ mod windows;
 
 // Re-export signal constants for convenience
 pub use sysprims_signal::{SIGKILL, SIGTERM};
+#[cfg(windows)]
+pub use windows::{PreparedWindowsJob, WindowsJobReceipt};
 
 /// Process grouping strategy.
 ///
@@ -131,6 +133,25 @@ pub enum TreeKillReliability {
     /// Best-effort only. No owned, proven containment capability is retained;
     /// coverage may be limited to the direct child.
     BestEffort,
+}
+
+/// Strength of the acquired containment boundary.
+///
+/// This is independent of [`TreeKillReliability`]. Reliability describes when
+/// termination authority was acquired; boundary strength describes whether
+/// descendants are constrained by a cooperative group or a kernel-enforced
+/// non-breakaway Job.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainmentBoundaryStrength {
+    /// The exact Windows child was assigned before first execution to an owned
+    /// Job configured without either breakaway mode.
+    KernelEnforcedJob,
+    /// A Unix session/process-group boundary. Descendants may later leave.
+    CooperativeGroup,
+    /// The stronger boundary property was not proven.
+    Unknown,
 }
 
 pub(crate) const MAX_COMPLETION_OBSERVED_PIDS: usize = 4096;
@@ -213,6 +234,16 @@ impl TreeKillReliability {
             Self::Guaranteed => "guaranteed",
             Self::Unproven => "unproven",
             Self::BestEffort => "best_effort",
+        }
+    }
+}
+
+impl ContainmentBoundaryStrength {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::KernelEnforcedJob => "kernel_enforced_job",
+            Self::CooperativeGroup => "cooperative_group",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -318,6 +349,7 @@ pub struct ContainmentGuard<C: ContainmentChild> {
     child: Option<C>,
     identity: ContainmentIdentity,
     reliability: TreeKillReliability,
+    boundary_strength: ContainmentBoundaryStrength,
     finalized: bool,
     #[cfg(unix)]
     pgid: u32,
@@ -336,6 +368,10 @@ impl<C: ContainmentChild> ContainmentGuard<C> {
 
     pub fn tree_kill_reliability(&self) -> TreeKillReliability {
         self.reliability
+    }
+
+    pub fn boundary_strength(&self) -> ContainmentBoundaryStrength {
+        self.boundary_strength
     }
 
     /// Recover the child adapter after successful termination or completion.
@@ -422,6 +458,7 @@ pub struct ContainmentOutcome {
     pub exited: bool,
     pub timed_out: bool,
     pub tree_kill_reliability: TreeKillReliability,
+    pub boundary_strength: ContainmentBoundaryStrength,
     /// Point-in-time membership evidence collected before leader reap or Job release.
     pub completion: ContainmentCompletionEvidence,
     pub warnings: Vec<String>,
@@ -461,6 +498,27 @@ pub unsafe fn contain_acquired_session<C: ContainmentChild>(
     receipt: sysprims_session::UnixSessionReceipt,
 ) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
     unix::contain_acquired_session_impl(child, receipt)
+}
+
+/// Consume a sealed pre-execution Windows Job receipt with its owned child.
+///
+/// The receipt can only be produced by [`PreparedWindowsJob::assign_process`],
+/// which assigns and verifies the exact process in a non-breakaway Job before
+/// this transition. The child remains suspended until the adapter has received
+/// the guard and explicitly resumes its separately owned primary thread.
+///
+/// # Safety
+///
+/// `child` must own the exact process handle passed to
+/// [`PreparedWindowsJob::assign_process`]. The adapter must still own the
+/// corresponding suspended primary thread, must not have resumed it, and must
+/// transfer exclusive wait/reap authority to the returned guard.
+#[cfg(windows)]
+pub unsafe fn contain_acquired_windows_job<C: ContainmentChild>(
+    child: C,
+    receipt: WindowsJobReceipt,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
+    windows::contain_acquired_windows_job_impl(child, receipt)
 }
 
 /// Spawn a standard-library child and return its owned containment guard.
@@ -1001,6 +1059,19 @@ mod tests {
         assert_eq!(TreeKillReliability::Guaranteed.as_str(), "guaranteed");
         assert_eq!(TreeKillReliability::Unproven.as_str(), "unproven");
         assert_eq!(TreeKillReliability::BestEffort.as_str(), "best_effort");
+    }
+
+    #[test]
+    fn boundary_strength_strings_are_independent() {
+        assert_eq!(
+            ContainmentBoundaryStrength::KernelEnforcedJob.as_str(),
+            "kernel_enforced_job"
+        );
+        assert_eq!(
+            ContainmentBoundaryStrength::CooperativeGroup.as_str(),
+            "cooperative_group"
+        );
+        assert_eq!(ContainmentBoundaryStrength::Unknown.as_str(), "unknown");
     }
 
     #[test]
