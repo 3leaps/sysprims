@@ -1,9 +1,9 @@
 ---
 title: "sysprims-timeout Module Spec"
 module: "sysprims-timeout"
-version: "1.2"
+version: "1.3"
 status: "Active"
-last_updated: "2026-08-27"
+last_updated: "2026-08-29"
 adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 ---
 
@@ -136,6 +136,23 @@ pub enum TreeKillReliability {
     BestEffort,
 }
 
+/// Strength of the acquired containment boundary.
+///
+/// This is independent of TreeKillReliability: reliability describes when
+/// termination authority was acquired, while boundary strength describes
+/// whether descendants are constrained by the acquired boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainmentBoundaryStrength {
+    /// The exact Windows child was assigned before execution to an owned,
+    /// non-breakaway Job.
+    KernelEnforcedJob,
+    /// A Unix session/process-group boundary; descendants may later leave.
+    CooperativeGroup,
+    /// The stronger boundary property was not proven.
+    Unknown,
+}
+
 /// Outcome of timeout execution.
 pub enum TimeoutOutcome {
     /// Command completed within timeout.
@@ -188,8 +205,37 @@ pub unsafe fn contain_acquired_session<C: ContainmentChild>(
     receipt: sysprims_session::UnixSessionReceipt,
 ) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>>;
 
+/// Prepare a non-breakaway Windows Job before the adapter creates a child.
+#[cfg(windows)]
+pub struct PreparedWindowsJob;
+
+/// Sealed, single-use proof that one exact process was assigned to the Job.
+#[cfg(windows)]
+pub struct WindowsJobReceipt;
+
+#[cfg(windows)]
+impl PreparedWindowsJob {
+    pub fn new() -> SysprimsResult<Self>;
+
+    /// Assign and verify the exact still-suspended process.
+    pub unsafe fn assign_process(
+        self,
+        process: std::os::windows::io::RawHandle,
+    ) -> SysprimsResult<WindowsJobReceipt>;
+}
+
+/// Consume the sealed Job receipt with the same owned, still-suspended child.
+#[cfg(windows)]
+pub unsafe fn contain_acquired_windows_job<C: ContainmentChild>(
+    child: C,
+    receipt: WindowsJobReceipt,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>>;
+
 /// Observe normal leader exit without reaping, then clean descendants and reap.
 impl<C: ContainmentChild> ContainmentGuard<C> {
+    pub fn tree_kill_reliability(&self) -> TreeKillReliability;
+    pub fn boundary_strength(&self) -> ContainmentBoundaryStrength;
+
     pub fn try_complete(&mut self, config: TerminateTreeConfig)
         -> SysprimsResult<Option<ContainmentOutcome>>;
 }
@@ -252,7 +298,13 @@ pub struct SpawnInGroupResult {
   sealed acknowledgement receipt. `spawn_in_group` remains a PID-returning
   compatibility API using pre-exec `setpgid(0, 0)` and reports `BestEffort`
   because it cannot retain the receipt and owned child.
-- **Windows**: The PID-returning compatibility API fails closed because it cannot return an owned Job capability. Use `adopt_contained` for explicitly `Unproven` post-spawn ownership. `spawn_contained` remains unsupported until it can assign a suspended child to the Job before execution.
+- **Windows**: The PID-returning compatibility API fails closed because it
+  cannot return an owned Job capability. `adopt_contained` reports `Unproven`
+  acquisition and `Unknown` boundary strength. Adapters with an exact suspended
+  child use `PreparedWindowsJob`, assign and verify that child before execution,
+  consume the receipt into the guard, and only then resume it. The
+  standard-library `spawn_contained(Command)` path remains unsupported because
+  `Command` does not expose the required suspended-process transaction.
 - **Degradation**: `Unproven` means an owned capability exists but post-spawn assignment left an escape window. `BestEffort` means no tree capability exists.
 
 ### 4.4 TerminateTree Types (v0.1.6+)
@@ -352,7 +404,12 @@ Per ADR-0008:
      defense-in-depth
    - Unix compatibility spawn: the child runs in its own process group via
      pre-exec `setpgid(0, 0)`
-   - Windows: owned adoption assigns the child to a Job Object with `KILL_ON_JOB_CLOSE`; guaranteed owned spawn requires create-suspended assignment
+   - Windows post-spawn adoption assigns the child to a Job Object with
+     `KILL_ON_JOB_CLOSE` and reports `Unproven`
+   - Windows adapter-owned acquisition prepares a Job without either breakaway
+     flag, creates exactly one suspended child, assigns and verifies that exact
+     process, consumes the sealed receipt into the guard, and resumes only after
+     the guard owns termination authority
    - Termination targets the group/job, not just the direct child
 
 3. **Observable reliability invariant:** If guaranteed acquisition and
@@ -361,15 +418,23 @@ Per ADR-0008:
    - direct-child fallback reports `BestEffort`
    - JSON output reflects actual behavior
 
-4. **Guard lifecycle invariant:** The owned guard observes normal leader exit
+4. **Independent boundary-strength invariant:**
+   - `KernelEnforcedJob` requires proof that the exact still-suspended Windows
+     child is a member of an owned Job configured without breakaway modes
+   - Unix session/process-group containment reports `CooperativeGroup`
+   - post-spawn Windows adoption and unproven boundaries report `Unknown`
+   - boundary strength never upgrades acquisition reliability, completion
+     evidence, or reap status
+
+5. **Guard lifecycle invariant:** The owned guard observes normal leader exit
    without reaping. It revalidates the same-spawn receipt, owned child, captured
    identity, session, and group before signaling; keeps the leader unreaped
    through the final group signal; and only then reaps. After reap the guard is
    inert. Receipt/child mismatch fails closed and returns child ownership.
 
-5. **Signal escalation invariant:** If process doesn't exit after `signal_sent` within `kill_after`, escalate to SIGKILL.
+6. **Signal escalation invariant:** If process doesn't exit after `signal_sent` within `kill_after`, escalate to SIGKILL.
 
-6. **Preserve-status invariant:** `--preserve-status` affects only non-timeout completion.
+7. **Preserve-status invariant:** `--preserve-status` affects only non-timeout completion.
 
 ## 5) CLI Contract
 
@@ -404,12 +469,14 @@ sysprims timeout [OPTIONS] <DURATION> -- <COMMAND> [ARGS...]
 
 ## 6) Platform Implementation
 
-| Feature          | Unix                 | Windows                              |
-| ---------------- | -------------------- | ------------------------------------ |
-| Process grouping | owned `setsid` receipt; compatibility `setpgid(0, 0)` | Job Object |
-| Tree kill        | `killpg(-pgid, sig)` | `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` |
-| SIGTERM          | Native signal        | TerminateProcess                     |
-| SIGKILL          | Native signal        | TerminateProcess                     |
+| Feature              | Unix                                                    | Windows                                                                  |
+| -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Process grouping     | owned `setsid` receipt; compatibility `setpgid(0, 0)`    | prepared exact-child Job receipt; post-spawn Job adoption                |
+| Boundary strength    | `CooperativeGroup`                                      | `KernelEnforcedJob` for prepared receipt; `Unknown` for adoption          |
+| Tree kill            | `killpg(-pgid, sig)`                                    | `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`                                     |
+| Standard owned spawn | supported through the sealed `setsid` receipt           | fails closed; adapters must own the suspended `CreateProcessW` lifecycle |
+| SIGTERM              | Native signal                                           | TerminateProcess                                                         |
+| SIGKILL              | Native signal                                           | TerminateProcess                                                         |
 
 ## 7) Traceability Matrix
 
@@ -422,6 +489,10 @@ sysprims timeout [OPTIONS] <DURATION> -- <COMMAND> [ARGS...]
 | Signal escalation               | GNU timeout | `kill_after`, `escalated`        | `--kill-after` | integration                       | Pass   |
 | Group-by-default                | ADR-0003    | `GroupByDefault`                 | default        | tree-escape                       | Pass   |
 | Observable fallback             | ADR-0003    | `TreeKillReliability`            | `--json`       | integration                       | Pass   |
+| Independent boundary strength   | spec §4.6   | `ContainmentBoundaryStrength`    | -              | unit/platform                     | Pass   |
+| Prepared Windows Job receipt    | spec §4.2   | `PreparedWindowsJob`             | -              | Windows platform                  | Pass   |
+| Exact pre-execution assignment  | spec §4.6   | `contain_acquired_windows_job`   | -              | Windows platform/adapter          | Pass   |
+| Windows standard spawn closed   | spec §4.3   | `spawn_contained`                | -              | Windows platform                  | Pass   |
 | Default SIGTERM                 | spec        | `TimeoutConfig::default()`       | default        | `default_config_*`                | Pass   |
 | Default 10s kill_after          | spec        | `TimeoutConfig::default()`       | default        | `default_config_*`                | Pass   |
 | spawn_in_group (v0.1.6)         | spec §4.3   | `spawn_in_group`                 | -              | `test_spawn_in_group_*`           | Pass   |
@@ -432,5 +503,5 @@ sysprims timeout [OPTIONS] <DURATION> -- <COMMAND> [ARGS...]
 
 ---
 
-_Spec version: 1.2_
-_Last updated: 2026-08-27_
+_Spec version: 1.3_
+_Last updated: 2026-08-29_
