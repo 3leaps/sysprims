@@ -13,11 +13,11 @@ use sysprims_session::UnixSessionReceipt;
 
 use crate::{
     capture_containment_identity, capture_receipt_bound_containment_identity, completion_from_pids,
-    unknown_completion, verify_containment_identity, ContainmentAdoptionError, ContainmentChild,
-    ContainmentCompletionEvidence, ContainmentGuard, ContainmentIdentityValidation,
-    ContainmentObservation, ContainmentOutcome, ContainmentSpawnError, GroupingMode,
-    TerminateTreeConfig, TimeoutConfig, TimeoutOutcome, TreeKillReliability,
-    MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
+    unknown_completion, verify_containment_identity, ContainmentAdoptionError,
+    ContainmentBoundaryStrength, ContainmentChild, ContainmentCompletionEvidence, ContainmentGuard,
+    ContainmentIdentityValidation, ContainmentObservation, ContainmentOutcome,
+    ContainmentSpawnError, GroupingMode, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
+    TreeKillReliability, MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
 };
 use crate::{SpawnInGroupConfig, SpawnInGroupResult};
 use sysprims_core::get_platform;
@@ -89,6 +89,7 @@ pub fn adopt_contained_impl<C: ContainmentChild>(
         child: Some(child),
         identity: evidence.0,
         reliability: TreeKillReliability::Unproven,
+        boundary_strength: ContainmentBoundaryStrength::CooperativeGroup,
         finalized: false,
         pgid: evidence.1,
         session_id: evidence.2,
@@ -109,6 +110,7 @@ pub fn contain_acquired_session_impl<C: ContainmentChild>(
         child: Some(child),
         identity: evidence,
         reliability: TreeKillReliability::Guaranteed,
+        boundary_strength: ContainmentBoundaryStrength::CooperativeGroup,
         finalized: false,
         pgid: receipt.process_group_id(),
         session_id: receipt.session_id(),
@@ -464,6 +466,7 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         exited,
         timed_out: !exited,
         tree_kill_reliability: guard.reliability,
+        boundary_strength: guard.boundary_strength,
         completion,
         warnings,
     })

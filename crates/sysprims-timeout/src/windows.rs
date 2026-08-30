@@ -3,8 +3,7 @@
 //! Uses Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` to ensure
 //! all processes in the job are terminated when the job handle is closed.
 
-use std::os::windows::io::AsRawHandle;
-use std::os::windows::io::{FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::process::{Child, Command};
 use std::ptr;
 use std::time::{Duration, Instant};
@@ -13,25 +12,111 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_MORE_DATA, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
     TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows_sys::Win32::System::Threading::WaitForSingleObject;
+use windows_sys::Win32::System::Threading::{GetProcessId, WaitForSingleObject};
 
 use sysprims_core::{SysprimsError, SysprimsResult};
 
 use crate::{
     capture_containment_identity, completion_from_pids, unknown_completion,
-    ContainmentAdoptionError, ContainmentChild, ContainmentCompletionEvidence, ContainmentGuard,
-    ContainmentObservation, ContainmentOutcome, ContainmentSpawnError, GroupingMode,
-    SpawnInGroupConfig, SpawnInGroupResult, TerminateTreeConfig, TimeoutConfig, TimeoutOutcome,
-    TreeKillReliability, MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
+    ContainmentAdoptionError, ContainmentBoundaryStrength, ContainmentChild,
+    ContainmentCompletionEvidence, ContainmentGuard, ContainmentObservation, ContainmentOutcome,
+    ContainmentSpawnError, GroupingMode, SpawnInGroupConfig, SpawnInGroupResult,
+    TerminateTreeConfig, TimeoutConfig, TimeoutOutcome, TreeKillReliability,
+    MAX_COMPLETION_OBSERVATION_RETRIES, MAX_COMPLETION_OBSERVED_PIDS,
 };
 
 /// Polling interval for checking if child has exited.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// A prepared non-breakaway Windows Job that has not yet acquired a process.
+///
+/// Preparation configures `KILL_ON_JOB_CLOSE` before process creation. This
+/// value is single-use: assignment consumes it and either produces a sealed
+/// receipt or closes the Job.
+pub struct PreparedWindowsJob {
+    job: OwnedHandle,
+}
+
+/// Sealed evidence that one exact process was assigned to a prepared Job.
+///
+/// The receipt is opaque and single-use. Dropping it closes the Job, which is a
+/// termination action for an assigned process.
+pub struct WindowsJobReceipt {
+    job: OwnedHandle,
+    process_handle: usize,
+    process_id: u32,
+}
+
+impl PreparedWindowsJob {
+    pub fn new() -> SysprimsResult<Self> {
+        let job = create_job_object()?;
+        Ok(Self {
+            // SAFETY: create_job_object returned a fresh owned Job handle.
+            job: unsafe { OwnedHandle::from_raw_handle(job) },
+        })
+    }
+
+    /// Assign and verify the exact still-suspended process.
+    ///
+    /// This is the only assignment operation on a prepared Job. The Job is
+    /// consumed even on failure, so callers cannot retry assignment or weaken
+    /// policy after an error.
+    ///
+    /// # Safety
+    ///
+    /// `process` must be the live process handle returned by the adapter's one
+    /// suspended `CreateProcessW` call. The primary thread must not have been
+    /// resumed, and the adapter must retain ownership of both handles until the
+    /// receipt is consumed with that same child.
+    pub unsafe fn assign_process(self, process: RawHandle) -> SysprimsResult<WindowsJobReceipt> {
+        let process = process as HANDLE;
+        if process.is_null() || process == INVALID_HANDLE_VALUE {
+            return Err(SysprimsError::invalid_argument(
+                "suspended child process handle is invalid",
+            ));
+        }
+        let process_id = GetProcessId(process);
+        if process_id == 0 {
+            return Err(last_system_error("GetProcessId failed"));
+        }
+        let job = self.job.as_raw_handle() as HANDLE;
+        if AssignProcessToJobObject(job, process) == 0 {
+            return Err(last_group_error("AssignProcessToJobObject failed"));
+        }
+        let mut member = 0;
+        if IsProcessInJob(process, job, &mut member) == 0 {
+            return Err(last_group_error("IsProcessInJob failed"));
+        }
+        if member == 0 {
+            return Err(SysprimsError::group_creation_failed(
+                "exact suspended child is not a member of the prepared Job",
+            ));
+        }
+
+        Ok(WindowsJobReceipt {
+            job: self.job,
+            process_handle: process as usize,
+            process_id,
+        })
+    }
+}
+
+fn last_system_error(operation: &str) -> SysprimsError {
+    SysprimsError::system(
+        operation,
+        std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+    )
+}
+
+fn last_group_error(operation: &str) -> SysprimsError {
+    let error = std::io::Error::last_os_error();
+    SysprimsError::group_creation_failed(format!("{operation}: {error}"))
+}
 
 pub fn spawn_contained_impl(
     command: Command,
@@ -83,6 +168,72 @@ pub fn adopt_contained_impl<C: ContainmentChild>(
         child: Some(child),
         identity,
         reliability: TreeKillReliability::Unproven,
+        boundary_strength: ContainmentBoundaryStrength::Unknown,
+        finalized: false,
+        job,
+    })
+}
+
+pub fn contain_acquired_windows_job_impl<C: ContainmentChild>(
+    child: C,
+    receipt: WindowsJobReceipt,
+) -> Result<ContainmentGuard<C>, ContainmentAdoptionError<C>> {
+    let pid = match child.process_id() {
+        Some(pid) if pid == receipt.process_id => pid,
+        _ => {
+            return Err(ContainmentAdoptionError {
+                error: SysprimsError::invalid_argument(
+                    "Windows Job receipt process id does not match the owned child",
+                ),
+                child,
+            });
+        }
+    };
+    let process = match child.raw_process_handle() {
+        Some(process) if process as usize == receipt.process_handle => process as HANDLE,
+        _ => {
+            return Err(ContainmentAdoptionError {
+                error: SysprimsError::invalid_argument(
+                    "Windows Job receipt process handle does not match the owned child",
+                ),
+                child,
+            });
+        }
+    };
+    if unsafe { GetProcessId(process) } != pid {
+        return Err(ContainmentAdoptionError {
+            error: SysprimsError::invalid_argument(
+                "owned Windows process handle no longer identifies the receipt child",
+            ),
+            child,
+        });
+    }
+    let job = receipt.job;
+    let mut member = 0;
+    if unsafe { IsProcessInJob(process, job.as_raw_handle() as HANDLE, &mut member) } == 0 {
+        return Err(ContainmentAdoptionError {
+            error: last_group_error("IsProcessInJob receipt verification failed"),
+            child,
+        });
+    }
+    if member == 0 {
+        return Err(ContainmentAdoptionError {
+            error: SysprimsError::group_creation_failed(
+                "owned child is no longer a member of the prepared Job",
+            ),
+            child,
+        });
+    }
+    let identity = match capture_containment_identity(pid) {
+        Ok(identity) => identity,
+        Err(error) => return Err(ContainmentAdoptionError { error, child }),
+    };
+
+    Ok(ContainmentGuard {
+        child: Some(child),
+        identity,
+        reliability: TreeKillReliability::Guaranteed,
+        boundary_strength: ContainmentBoundaryStrength::KernelEnforcedJob,
         finalized: false,
         job,
     })
@@ -134,6 +285,7 @@ pub fn terminate_contained_impl<C: ContainmentChild>(
         exited,
         timed_out: !exited,
         tree_kill_reliability: guard.reliability,
+        boundary_strength: guard.boundary_strength,
         completion,
         warnings,
     })
@@ -498,7 +650,81 @@ fn kill_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::process::CommandExt;
     use std::process::Stdio;
+    use windows_sys::Win32::System::JobObjects::{
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    };
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+    #[test]
+    fn prepared_job_disables_breakaway_modes() {
+        let prepared = PreparedWindowsJob::new().expect("prepared Job creation failed");
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            QueryInformationJobObject(
+                prepared.job.as_raw_handle() as HANDLE,
+                JobObjectExtendedLimitInformation,
+                (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ptr::null_mut(),
+            )
+        };
+        assert_ne!(result, 0, "prepared Job policy query failed");
+        let flags = info.BasicLimitInformation.LimitFlags;
+        assert_ne!(flags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, 0);
+        assert_eq!(flags & JOB_OBJECT_LIMIT_BREAKAWAY_OK, 0);
+        assert_eq!(flags & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK, 0);
+    }
+
+    #[test]
+    fn prepared_job_seals_exact_suspended_child() {
+        let prepared = PreparedWindowsJob::new().expect("prepared Job creation failed");
+        let mut command = Command::new("ping");
+        command
+            .args(["-n", "60", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_SUSPENDED);
+        let child = command.spawn().expect("suspended test child spawn failed");
+        let process = child.as_raw_handle();
+        let receipt = unsafe {
+            prepared
+                .assign_process(process)
+                .expect("exact suspended child assignment failed")
+        };
+        let mut guard = unsafe {
+            crate::contain_acquired_windows_job(child, receipt)
+                .expect("receipt-bound Job containment failed")
+        };
+
+        assert_eq!(
+            guard.tree_kill_reliability(),
+            TreeKillReliability::Guaranteed
+        );
+        assert_eq!(
+            guard.boundary_strength(),
+            ContainmentBoundaryStrength::KernelEnforcedJob
+        );
+        assert!(
+            !contained_child_has_exited(&guard).expect("suspended child observation failed"),
+            "suspended child must not execute before an explicit resume"
+        );
+
+        let outcome = guard
+            .terminate(TerminateTreeConfig::default())
+            .expect("suspended child Job termination failed");
+        assert!(outcome.exited);
+        assert_eq!(
+            outcome.boundary_strength,
+            ContainmentBoundaryStrength::KernelEnforcedJob
+        );
+        assert!(matches!(
+            outcome.completion,
+            ContainmentCompletionEvidence::Empty { .. }
+        ));
+    }
 
     #[test]
     fn contained_job_terminates_owned_child() {

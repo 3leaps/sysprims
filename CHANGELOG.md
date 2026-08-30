@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A prepared Windows Job receipt for PTY adapters that create one child
+  suspended, assign and verify that exact process before first execution, and
+  transfer the owned Job into a `ContainmentGuard`.
+- Independent `ContainmentBoundaryStrength` evidence. A pre-execution,
+  non-breakaway Windows Job reports `kernel_enforced_job`; Unix groups report
+  `cooperative_group`; unproven stronger boundaries report `unknown`.
+
 ## [0.2.1] - 2026-08-27
 
 ### Added

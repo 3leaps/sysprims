@@ -57,9 +57,11 @@ signal through the retained guard with `killpg`. PID-only compatibility paths
 cannot retain that proof and report `best_effort`. A process group is
 cooperative containment: descendants can later leave it, so `guaranteed`
 describes acquisition and group-signaling eligibility rather than OS-enforced
-non-escape. On Windows, Job Objects use
-`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Any degradation is exposed in structured
-output so automation can detect it.
+non-escape. On Windows, a prepared, exact-process Job assignment before first
+execution can independently report `kernel_enforced_job`; post-spawn adoption
+reports unknown boundary strength. Job Objects use
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` without either breakaway mode. Any
+degradation is exposed in structured output so automation can detect it.
 
 ## Who Should Use This
 
