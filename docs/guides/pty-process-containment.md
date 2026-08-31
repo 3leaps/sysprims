@@ -43,10 +43,16 @@ allocation, locking, formatting, blocking, or panic. Missing, duplicate, or
 malformed acknowledgement; a second session acquirer; and child/receipt
 mismatch all fail closed without a reusable receipt.
 
-The current `portable-pty` release does not expose this replacement slot.
-Until a tagged companion does, keep its child handle and move it into a small
-adapter for `adopt_contained`. The guard verifies the live PID, executable,
-start time, process group, and session before it can signal the group.
+The separately versioned
+[`sysprims-pty`](https://github.com/3leaps/sysprims-pty) companion exposes this
+replacement slot while preserving the `portable-pty` API shape. Use the
+companion release that pins the immutable sysprims `v0.2.2` source revision.
+The companion tag is independent from the core tag.
+
+Adapters without a prepared-spawn slot can still keep their child handle and
+move it into a small adapter for `adopt_contained`. The guard verifies the live
+PID, executable, start time, process group, and session before it can signal
+the group.
 
 ```rust,ignore
 use sysprims_timeout::{

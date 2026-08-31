@@ -6,6 +6,59 @@
 
 ---
 
+## v0.2.2 - 2026-08-30
+
+**Status:** Prepared PTY Containment
+
+v0.2.2 adds prepared Windows Job acquisition and independent boundary-strength
+evidence to the core containment contract. The separately versioned
+[`sysprims-pty`](https://github.com/3leaps/sysprims-pty) companion composes the
+core Unix and Windows acquisition seams with PTY-owned process creation.
+
+### Highlights
+
+- **Prepared Windows Job**: create a non-breakaway Job before spawn, consume it
+  in one exact suspended-process assignment, and seal the verified membership
+  into an opaque receipt.
+- **Receipt-bound guard**: verify the exact process handle, PID, and Job
+  membership again before transferring sole Job and wait/reap authority into
+  `ContainmentGuard`.
+- **Independent boundary evidence**: report `kernel_enforced_job`,
+  `cooperative_group`, or `unknown` without upgrading acquisition reliability,
+  completion, or leader-reap evidence.
+- **Unix identity hardening**: preserve only the exact exited-but-unreaped
+  leader transition during validation and group signaling; fail closed on live
+  identity changes or lost reap ownership.
+- **Deterministic receipt handoff**: wait within a fixed parent-side bound for
+  the complete child pre-exec acknowledgement while continuing to reject
+  absent, partial, duplicate, or invalid packets.
+- **Coherent version pack**: Rust, TypeScript root/lockfile, and authored npm
+  platform manifests move together at `0.2.2`, with pre-tag guards for stale
+  coordinates.
+
+### Release Coordinates
+
+- Rust workspace: repository tag `v0.2.2`.
+- Go module: path-prefixed tag `bindings/go/sysprims/v0.2.2` on the same
+  commit.
+- TypeScript: `@3leaps/sysprims@0.2.2`, published from the verified core tag.
+- PTY adapter: its own `sysprims-pty` release tag after the core source pin is
+  retargeted; it is not included in `v0.2.2`.
+
+### Upgrade Notes
+
+- `TreeKillReliability::Guaranteed` continues to mean proven acquisition and
+  retained group-signaling eligibility. Unix groups remain cooperative.
+- `kernel_enforced_job` means the exact Windows child entered the immediate Job
+  before first execution with neither breakaway mode enabled. It is not a
+  sandbox or trust claim.
+- Managed owned-containment APIs remain Rust-only. The C FFI, Go, and
+  TypeScript bindings do not add that lifecycle in v0.2.2.
+- The standard-library Windows `spawn_contained(Command)` path still fails
+  closed because it does not own the create-suspended primary-thread seam.
+
+---
+
 ## v0.2.1 - 2026-08-27
 
 **Status:** Spawn-Time Containment Acquisition
@@ -99,28 +152,6 @@ Windows Job ownership.
 - Dependency-major upgrades are intentionally excluded from this release.
 - Go and TypeScript native artifacts for all supported platforms must be
   regenerated from the final tag-target commit before publication.
-
----
-
-## v0.1.20 - 2026-08-21
-
-**Status:** Maintenance Release
-
-v0.1.20 pins TypeScript N-API prebuild CI to Rust 1.88.0 and resumes TypeScript npm
-publication. No public API or process-control behavior changes are intended.
-
-### Highlights
-
-- **TypeScript N-API prebuilds**: pin `dtolnay/rust-toolchain` to **1.88.0**.
-- **TypeScript npm**: publication resumes on this cut.
-
-### Upgrade Notes
-
-- No public API changes are intended.
-- **v0.1.19** remains the signed GitHub and Go module release for that cut.
-- Go prebuilt libraries are produced by the Go Bindings Prep workflow after this
-  version commit is merged to `main`; do not tag v0.1.20 before that artifact PR
-  merges.
 
 ---
 

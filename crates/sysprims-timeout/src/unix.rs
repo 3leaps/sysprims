@@ -1110,6 +1110,17 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, MutexGuard};
+
+    // These tests create and destructively signal real process groups. Keep
+    // their OS-level scenes isolated while pure helper tests remain parallel.
+    static PROCESS_CONTROL_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn process_control_test_lock() -> MutexGuard<'static, ()> {
+        PROCESS_CONTROL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     struct SequencedIdentityChild {
         child: Child,
@@ -1192,6 +1203,7 @@ mod tests {
 
     #[test]
     fn receipt_specific_entry_point_creates_one_shot_guaranteed_guard() {
+        let _process_control = process_control_test_lock();
         let mut command = Command::new("sleep");
         command.arg("60");
         let (child, receipt) = spawn_with_session_receipt(command);
@@ -1216,6 +1228,7 @@ mod tests {
 
     #[test]
     fn receipt_bound_explicit_termination_allows_multiple_execs() {
+        let _process_control = process_control_test_lock();
         let gate = exec_gate_path("explicit");
         remove_exec_gate(&gate);
         let command = command_waiting_for_two_execs(&gate, "sleep 60 & wait");
@@ -1255,6 +1268,7 @@ mod tests {
 
     #[test]
     fn receipt_bound_natural_completion_allows_multiple_execs() {
+        let _process_control = process_control_test_lock();
         let gate = exec_gate_path("natural");
         remove_exec_gate(&gate);
         let command = command_waiting_for_two_execs(&gate, "sleep 60 & exit 0");
@@ -1380,6 +1394,7 @@ mod tests {
 
     #[test]
     fn escalation_revalidates_the_owned_child_before_signaling() {
+        let _process_control = process_control_test_lock();
         let mut command = Command::new("sleep");
         command.arg("60");
         let (child, receipt) = spawn_with_session_receipt(command);
@@ -1406,6 +1421,7 @@ mod tests {
 
     #[test]
     fn receipt_bound_termination_exit_race_stress() {
+        let _process_control = process_control_test_lock();
         for _ in 0..32 {
             let mut command = Command::new("sleep");
             command.arg("60");
@@ -1426,6 +1442,7 @@ mod tests {
 
     #[test]
     fn wrong_child_consumes_receipt_and_returns_child_ownership() {
+        let _process_control = process_control_test_lock();
         let mut acquired_command = Command::new("sleep");
         acquired_command.arg("60");
         let (mut acquired_child, receipt) = spawn_with_session_receipt(acquired_command);
@@ -1447,6 +1464,7 @@ mod tests {
 
     #[test]
     fn reaped_child_cannot_consume_receipt_as_guaranteed() {
+        let _process_control = process_control_test_lock();
         let (mut child, receipt) = spawn_with_session_receipt(Command::new("true"));
         child.wait().unwrap();
 
@@ -1459,6 +1477,7 @@ mod tests {
 
     #[test]
     fn guaranteed_guard_fails_closed_after_external_reap() {
+        let _process_control = process_control_test_lock();
         let mut command = Command::new("sleep");
         command.arg("60");
         let (child, receipt) = spawn_with_session_receipt(command);
@@ -1475,6 +1494,7 @@ mod tests {
 
     #[test]
     fn fast_exit_receipt_never_loses_child_ownership() {
+        let _process_control = process_control_test_lock();
         let (child, receipt) = spawn_with_session_receipt(Command::new("true"));
         let mut guard =
             contain_acquired_session_impl(child, receipt).expect("fast exit must remain owned");
@@ -1499,6 +1519,7 @@ mod tests {
 
     #[test]
     fn timeout_completes_fast_command() {
+        let _process_control = process_control_test_lock();
         let result = run_with_timeout_impl(
             "echo",
             &["hello"],
@@ -1512,6 +1533,7 @@ mod tests {
 
     #[test]
     fn timeout_triggers_on_slow_command() {
+        let _process_control = process_control_test_lock();
         let result = run_with_timeout_impl(
             "sleep",
             &["60"],
@@ -1540,6 +1562,7 @@ mod tests {
 
     #[test]
     fn pid_only_grouped_spawn_is_not_reported_as_guaranteed() {
+        let _process_control = process_control_test_lock();
         let result = spawn_in_group_impl(SpawnInGroupConfig {
             argv: vec!["true".to_string()],
             cwd: None,
@@ -1557,6 +1580,7 @@ mod tests {
 
     #[test]
     fn normal_completion_is_observed_without_early_reap() {
+        let _process_control = process_control_test_lock();
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 0.1"]);
         let mut guard = spawn_contained_impl(command).expect("contained spawn failed");
@@ -1755,6 +1779,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_owned_group_reports_survivors_and_guard_drop_cleans_them() {
+        let _process_control = process_control_test_lock();
         use std::process::Stdio;
 
         let mut command = Command::new("sleep");
@@ -1799,6 +1824,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_owned_group_cleans_descendants_after_leader_exit() {
+        let _process_control = process_control_test_lock();
         use std::io::{BufRead, BufReader};
         use std::process::Stdio;
 
@@ -1874,6 +1900,7 @@ mod tests {
 
     #[test]
     fn foreground_mode_does_not_create_process_group() {
+        let _process_control = process_control_test_lock();
         let config = TimeoutConfig {
             grouping: GroupingMode::Foreground,
             kill_after: Duration::from_millis(100),
