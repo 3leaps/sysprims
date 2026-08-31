@@ -29,6 +29,9 @@ core Unix and Windows acquisition seams with PTY-owned process creation.
 - **Unix identity hardening**: preserve only the exact exited-but-unreaped
   leader transition during validation and group signaling; fail closed on live
   identity changes or lost reap ownership.
+- **Deterministic receipt handoff**: wait within a fixed parent-side bound for
+  the complete child pre-exec acknowledgement while continuing to reject
+  absent, partial, duplicate, or invalid packets.
 - **Coherent version pack**: Rust, TypeScript root/lockfile, and authored npm
   platform manifests move together at `0.2.2`, with pre-tag guards for stale
   coordinates.

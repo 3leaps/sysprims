@@ -17,6 +17,7 @@ use std::{
         atomic::{AtomicBool, AtomicI32, Ordering},
         Arc,
     },
+    time::{Duration, Instant},
 };
 
 use sysprims_core::{SysprimsError, SysprimsResult};
@@ -36,6 +37,9 @@ struct SessionAcknowledgement {
 }
 
 const SESSION_ACK_LEN: usize = std::mem::size_of::<SessionAcknowledgement>();
+// Bound the parent-side wait so a scheduled child can publish its fixed
+// pre-exec packet without turning a broken acquisition hook into a hang.
+const SESSION_ACK_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct SessionHookState {
     writer_fd: AtomicI32,
@@ -200,35 +204,7 @@ impl PendingUnixSessionReceipt {
             ));
         }
 
-        let mut acknowledgement = [0_u8; SESSION_ACK_LEN * 2];
-        // SAFETY: `reader` owns a valid nonblocking descriptor and the stack
-        // buffer is writable for its full declared length.
-        let read = unsafe {
-            libc::read(
-                self.reader.as_raw_fd(),
-                acknowledgement.as_mut_ptr().cast(),
-                acknowledgement.len(),
-            )
-        };
-        if read < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::EAGAIN)
-                || error.raw_os_error() == Some(libc::EWOULDBLOCK)
-            {
-                return Err(SysprimsError::invalid_argument(
-                    "session acquisition acknowledgement is missing or malformed",
-                ));
-            }
-            return Err(SysprimsError::system(
-                format!("session acquisition acknowledgement read failed: {error}"),
-                error.raw_os_error().unwrap_or(0),
-            ));
-        }
-        if read as usize != SESSION_ACK_LEN {
-            return Err(SysprimsError::invalid_argument(
-                "session acquisition acknowledgement is missing or malformed",
-            ));
-        }
+        let acknowledgement = read_session_acknowledgement(&self.reader)?;
 
         // SAFETY: the read length was validated above. `read_unaligned` avoids
         // assuming the byte buffer has the acknowledgement type's alignment.
@@ -251,6 +227,74 @@ impl PendingUnixSessionReceipt {
             process_group_id: packet.session_id,
             session_id: packet.session_id,
         })
+    }
+}
+
+fn read_session_acknowledgement(reader: &OwnedFd) -> SysprimsResult<[u8; SESSION_ACK_LEN]> {
+    let deadline = Instant::now() + SESSION_ACK_WAIT_TIMEOUT;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(SysprimsError::invalid_argument(
+                "session acquisition acknowledgement is missing or malformed",
+            ));
+        }
+        let timeout_ms = remaining.as_millis().max(1).min(libc::c_int::MAX as u128) as libc::c_int;
+        let mut poll_descriptor = libc::pollfd {
+            fd: reader.as_raw_fd(),
+            events: libc::POLLIN | libc::POLLHUP,
+            revents: 0,
+        };
+        // SAFETY: `poll_descriptor` is valid for one element and the timeout
+        // is bounded. This wait runs only in the parent after spawn.
+        let ready = unsafe { libc::poll(&mut poll_descriptor, 1, timeout_ms) };
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(SysprimsError::system(
+                format!("session acquisition acknowledgement wait failed: {error}"),
+                error.raw_os_error().unwrap_or(0),
+            ));
+        }
+        if ready == 0 {
+            return Err(SysprimsError::invalid_argument(
+                "session acquisition acknowledgement is missing or malformed",
+            ));
+        }
+
+        let mut acknowledgement = [0_u8; SESSION_ACK_LEN * 2];
+        // SAFETY: `reader` owns a valid nonblocking descriptor and the stack
+        // buffer is writable for its full declared length.
+        let read = unsafe {
+            libc::read(
+                reader.as_raw_fd(),
+                acknowledgement.as_mut_ptr().cast(),
+                acknowledgement.len(),
+            )
+        };
+        if read < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EAGAIN)
+                || error.raw_os_error() == Some(libc::EWOULDBLOCK)
+                || error.raw_os_error() == Some(libc::EINTR)
+            {
+                continue;
+            }
+            return Err(SysprimsError::system(
+                format!("session acquisition acknowledgement read failed: {error}"),
+                error.raw_os_error().unwrap_or(0),
+            ));
+        }
+        if read as usize != SESSION_ACK_LEN {
+            return Err(SysprimsError::invalid_argument(
+                "session acquisition acknowledgement is missing or malformed",
+            ));
+        }
+        let mut packet = [0_u8; SESSION_ACK_LEN];
+        packet.copy_from_slice(&acknowledgement[..SESSION_ACK_LEN]);
+        return Ok(packet);
     }
 }
 
@@ -705,6 +749,47 @@ mod tests {
 
         child.kill().unwrap();
         child.wait().unwrap();
+    }
+
+    #[test]
+    fn receipt_reader_waits_for_delayed_child_acknowledgement() {
+        let (reader, writer) = create_acknowledgement_pipe().unwrap();
+        let expected_pid = std::process::id();
+        let writer_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(25));
+            let acknowledgement = SessionAcknowledgement {
+                magic: SESSION_ACK_MAGIC,
+                version: SESSION_ACK_VERSION,
+                child_pid: expected_pid,
+                session_id: expected_pid,
+            };
+            // SAFETY: the thread owns the valid writer and the fixed stack
+            // packet remains live for this call.
+            let written = unsafe {
+                libc::write(
+                    writer,
+                    std::ptr::addr_of!(acknowledgement).cast(),
+                    SESSION_ACK_LEN,
+                )
+            };
+            // SAFETY: the thread owns the writer and closes it exactly once.
+            unsafe {
+                libc::close(writer);
+            }
+            assert_eq!(written, SESSION_ACK_LEN as isize);
+        });
+
+        let acknowledgement = read_session_acknowledgement(&reader).unwrap();
+        writer_thread.join().unwrap();
+        // SAFETY: the reader returned one complete packet. `read_unaligned`
+        // avoids assuming the byte buffer has the packet type's alignment.
+        let packet = unsafe {
+            std::ptr::read_unaligned(acknowledgement.as_ptr().cast::<SessionAcknowledgement>())
+        };
+        assert_eq!(packet.magic, SESSION_ACK_MAGIC);
+        assert_eq!(packet.version, SESSION_ACK_VERSION);
+        assert_eq!(packet.child_pid, expected_pid);
+        assert_eq!(packet.session_id, expected_pid);
     }
 
     #[test]

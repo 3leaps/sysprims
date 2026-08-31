@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unix containment accepts only the exact exited-but-unreaped leader transition
   when the child exits during group validation or signaling, while live
   identity changes and lost reap ownership continue to fail closed.
+- Parent-side receipt minting waits within a fixed bound for the child hook's
+  complete pre-exec acknowledgement instead of failing on a scheduling delay;
+  absent, partial, duplicate, or invalid acknowledgements still fail closed.
 
 ### Upgrade Notes
 
