@@ -435,16 +435,9 @@ jobs:
   test-musl-shared-go-arm64:
     name: Smoke Go Runtime (linux-arm64-musl, static + shared)
     runs-on: ubuntu-latest-arm64-s
-    container:
-      image: golang:1.22-alpine
     needs: [validate, build-linux]
     steps:
       - uses: actions/checkout@v7
-      - name: Install build dependencies
-        shell: sh
-        run: |
-          set -eu
-          apk add --no-cache bash build-base
       - name: Download musl artifacts (linux-arm64-musl)
         uses: actions/download-artifact@v8
         with:
@@ -456,24 +449,31 @@ jobs:
           name: ffi-shared-linux-arm64-musl
           path: ffi-shared-linux-arm64-musl
       - name: Place static and shared libs into Go bindings tree
-        shell: sh
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           mkdir -p bindings/go/sysprims/lib/linux-arm64-musl
           mkdir -p bindings/go/sysprims/lib-shared/linux-arm64-musl
           cp ffi-linux-arm64-musl/libsysprims_ffi.a bindings/go/sysprims/lib/linux-arm64-musl/
           cp ffi-shared-linux-arm64-musl/libsysprims_ffi.so bindings/go/sysprims/lib-shared/linux-arm64-musl/
       - name: Smoke staged Go runtime versions (musl)
-        working-directory: bindings/go/sysprims
-        shell: sh
+        shell: bash
         env:
-          CGO_ENABLED: "1"
           SYSPRIMS_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          set -eu
-          go test -run '^TestVersion$' -tags=musl .
-          LD_LIBRARY_PATH="$PWD/lib-shared/linux-arm64-musl" \
-            go test -run '^TestVersion$' -tags="musl,sysprims_shared" .
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace/bindings/go/sysprims \
+            -e CGO_ENABLED=1 \
+            -e SYSPRIMS_EXPECT_VERSION \
+            golang:1.22-alpine \
+            sh -eu -c '
+              apk add --no-cache build-base
+              go test -run "^TestVersion$" -tags=musl .
+              LD_LIBRARY_PATH="$PWD/lib-shared/linux-arm64-musl" \
+                go test -run "^TestVersion$" -tags="musl,sysprims_shared" .
+            '
   cbindgen:
     name: Generate C Header
     runs-on: ubuntu-latest
