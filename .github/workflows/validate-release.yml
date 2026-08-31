@@ -37,6 +37,8 @@ jobs:
           GO_VERSION="v${VERSION}"
 
           echo "Testing: go get ${GO_MODULE}@${GO_VERSION}"
+          WORKDIR="$(mktemp -d)"
+          cd "${WORKDIR}"
           go mod init test-sysprims
           go get "${GO_MODULE}@${GO_VERSION}"
 
