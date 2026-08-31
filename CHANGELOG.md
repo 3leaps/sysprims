@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-30
+
 ### Added
 
 - A prepared Windows Job receipt for PTY adapters that create one child
@@ -18,6 +20,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Independent `ContainmentBoundaryStrength` evidence. A pre-execution,
   non-breakaway Windows Job reports `kernel_enforced_job`; Unix groups report
   `cooperative_group`; unproven stronger boundaries report `unknown`.
+
+### Changed
+
+- Receipt-bound containment verifies the exact owned child, acquisition
+  identity, group or Job membership, and unreaped ownership before acting.
+- Release version tooling synchronizes the Rust workspace, TypeScript root and
+  lockfile, and all authored npm platform manifests at `0.2.2`; pre-tag guards
+  reject incoherent version packs.
+
+### Fixed
+
+- Unix containment accepts only the exact exited-but-unreaped leader transition
+  when the child exits during group validation or signaling, while live
+  identity changes and lost reap ownership continue to fail closed.
+
+### Upgrade Notes
+
+- The separately versioned `sysprims-pty` adapter composes the prepared Unix
+  session and Windows Job seams with PTY-owned process creation. It is not part
+  of the core tag.
+- `Guaranteed` remains acquisition and group-signaling evidence.
+  `kernel_enforced_job` is a separate boundary-strength value, not a sandbox
+  claim.
+- Managed owned-containment APIs remain Rust-only; the C FFI, Go, and
+  TypeScript public APIs do not gain that lifecycle in this release.
 
 ## [0.2.1] - 2026-08-27
 
@@ -710,7 +737,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/3leaps/sysprims/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/3leaps/sysprims/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/3leaps/sysprims/compare/v0.1.20...v0.2.0
 [0.1.20]: https://github.com/3leaps/sysprims/compare/v0.1.19...v0.1.20
