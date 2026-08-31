@@ -4,9 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+publish = true
 description = "Process inspection and enumeration utilities"
+documentation = "https://docs.rs/sysprims-proc"
+readme = "README.md"
 
 [features]
 default = ["proc_ext"]

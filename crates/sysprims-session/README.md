@@ -1,5 +1,10 @@
 # sysprims-session
 
+Session and process group acquisition primitives for sysprims.
+
+See the [sysprims repository](https://github.com/3leaps/sysprims) for
+documentation, release notes, and supported platform policy.
+
 GPL-free session and process group management primitives.
 
 ## Overview

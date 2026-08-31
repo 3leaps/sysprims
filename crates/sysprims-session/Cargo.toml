@@ -4,9 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+publish = true
 description = "GPL-free session and process group management (setsid, nohup)"
+documentation = "https://docs.rs/sysprims-session"
+readme = "README.md"
 
 [dependencies]
 sysprims-core.workspace = true
