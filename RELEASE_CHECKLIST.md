@@ -111,6 +111,11 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     ```bash
     gh workflow run "TypeScript Bindings" --ref main
     ```
+  - Pull-request TypeScript validation uses `npm install --omit=optional` rather than
+    `npm ci` because release-prep branches reference same-version platform packages
+    before the npm publication workflow has created them. Do not switch these PR
+    validation jobs back to `npm ci` unless the release process also changes how
+    platform optional dependencies are staged.
 
 - [ ] Create and push tags (must point to the SAME commit):
 
@@ -135,6 +140,18 @@ Notes:
 - Go requires the path-prefixed tag because the module is `github.com/3leaps/sysprims/bindings/go/sysprims`.
 - Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
 - See `docs/decisions/ADR-0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
+
+### Required Post-Tag Execution Order
+
+After both tags are pushed, keep release execution in this order:
+
+1. Verify the tag-triggered release workflow and optional validation workflow.
+2. Publish the five crates.io library crates in dependency order.
+3. Download, checksum, sign, verify, upload, and publish the GitHub release assets.
+4. Run TypeScript N-API prebuilds and npm publication from the verified tag.
+
+If any step fails or produces unexpected artifacts, pause before moving to the
+next step.
 
 ### CI Verification
 
@@ -169,31 +186,8 @@ Notes:
     - windows-amd64 → `x86_64-pc-windows-gnu` (msys2/MinGW-w64)
     - windows-arm64 → `aarch64-pc-windows-gnullvm` (llvm-mingw), since v0.1.16
 
-  TypeScript bindings (run AFTER signing, from the tag ref):
-  1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
-
-     ```bash
-     VERSION=$(cat VERSION)
-     gh workflow run "TypeScript N-API Prebuilds" --ref "v${VERSION}"
-     ```
-
-     Wait for completion. This builds `.node` binaries and stages npm package directories.
-
-  2. Run npm publish workflow on the tag (requires OIDC trusted publishing):
-     ```bash
-     VERSION=$(cat VERSION)
-     gh workflow run "TypeScript npm Publish" --ref "v${VERSION}"
-     ```
-     The workflow validates:
-     - Running from a `v*` tag ref (required for OIDC and environment protection)
-     - Node.js >= 22.14.0 and npm >= 11.5.1 for npm trusted publishing
-     - VERSION file and package.json match the tag
-     - Prebuilds were built from the same commit as the tag
-
-  Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow must run
-  from a tag ref to satisfy the `publish-npm` environment protection rules, and the
-  publish job intentionally uses Node.js 24 even though validation/prebuild jobs remain
-  on Node.js 20.
+  Do not run TypeScript prebuild or npm publication workflows yet; they run
+  after crates.io publication and signed GitHub release upload.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 
@@ -356,6 +350,38 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
    ```bash
    gh release edit v$(cat VERSION) --draft=false
    ```
+
+### TypeScript bindings publication (after signing/upload)
+
+Run these only after crates.io publication is complete and the signed GitHub
+release assets have been uploaded and published.
+
+1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
+
+   ```bash
+   VERSION=$(cat VERSION)
+   gh workflow run "TypeScript N-API Prebuilds" --ref "v${VERSION}"
+   ```
+
+   Wait for completion. This builds `.node` binaries and stages npm package directories.
+
+2. Run npm publish workflow on the tag (requires OIDC trusted publishing):
+
+   ```bash
+   VERSION=$(cat VERSION)
+   gh workflow run "TypeScript npm Publish" --ref "v${VERSION}"
+   ```
+
+   The workflow validates:
+   - Running from a `v*` tag ref (required for OIDC and environment protection)
+   - Node.js >= 22.14.0 and npm >= 11.5.1 for npm trusted publishing
+   - VERSION file and package.json match the tag
+   - Prebuilds were built from the same commit as the tag
+
+Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow must
+run from a tag ref to satisfy the `publish-npm` environment protection rules,
+and the publish job intentionally uses Node.js 24 even though
+validation/prebuild jobs remain on Node.js 20.
 
 ## 3. Post-Release Verification
 

@@ -75,31 +75,34 @@ degradation is exposed in structured output so automation can detect it.
 
 ## Quick Start
 
-### v0.2.2 Release Coordinates
+### v0.2.3 Release Coordinates
 
-The core release and its language packages share version `0.2.2`, but each
+The core release and its language packages share version `0.2.3`, but each
 ecosystem resolves that version through its own coordinate. Publication
 workflows run from the verified core tag.
 
 | Surface | Pin |
 | --- | --- |
-| Rust workspace | Repository tag `v0.2.2` |
-| Go module | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.2` |
-| TypeScript | `npm install @3leaps/sysprims@0.2.2` |
-| PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release tag that pins core v0.2.2 |
+| Rust crates | `sysprims-core`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`, and `sysprims-timeout` at `0.2.3` |
+| Rust workspace | Repository tag `v0.2.3` |
+| Go module | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.3` |
+| TypeScript | `npm install @3leaps/sysprims@0.2.3` |
+| PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release tag that pins core v0.2.3 |
 
-The canonical `v0.2.2` and path-prefixed
-`bindings/go/sysprims/v0.2.2` tags identify the same core commit.
+The canonical `v0.2.3` and path-prefixed
+`bindings/go/sysprims/v0.2.3` tags identify the same core commit.
 `sysprims-pty` has an independent version and tag lifecycle; it is not included
-in the core tag.
+in the core tag. Only the five Rust library crates are published to crates.io;
+the CLI, C FFI crate, and TypeScript N-API crate are release-built but not
+published as Rust crates.
 
 ### As a Rust Library
 
 ```toml
 [dependencies]
-sysprims-timeout = { git = "https://github.com/3leaps/sysprims", tag = "v0.2.2" }
-sysprims-signal = { git = "https://github.com/3leaps/sysprims", tag = "v0.2.2" }
-sysprims-proc = { git = "https://github.com/3leaps/sysprims", tag = "v0.2.2" }
+sysprims-timeout = "0.2.3"
+sysprims-signal = "0.2.3"
+sysprims-proc = "0.2.3"
 ```
 
 ```rust
@@ -410,8 +413,8 @@ if (err == SYSPRIMS_OK) {
 
 | Language   | Status           | Package                                                   |
 | ---------- | ---------------- | --------------------------------------------------------- |
-| Go         | Available        | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.2` |
-| TypeScript | Available        | `npm install @3leaps/sysprims@0.2.2`                      |
+| Go         | Available        | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.3` |
+| TypeScript | Available        | `npm install @3leaps/sysprims@0.2.3`                      |
 | Python     | Planned (v0.2.x) | `pip install sysprims`                                    |
 
 ### As a Go Library

@@ -1,6 +1,6 @@
 {
   "name": "@3leaps/sysprims",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "GPL-free cross-platform process utilities (TypeScript bindings via Node-API native addon)",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -51,13 +51,13 @@
   },
   "dependencies": {},
   "optionalDependencies": {
-    "@3leaps/sysprims-linux-x64-gnu": "0.2.2",
-    "@3leaps/sysprims-linux-x64-musl": "0.2.2",
-    "@3leaps/sysprims-linux-arm64-gnu": "0.2.2",
-    "@3leaps/sysprims-linux-arm64-musl": "0.2.2",
-    "@3leaps/sysprims-darwin-arm64": "0.2.2",
-    "@3leaps/sysprims-win32-x64-msvc": "0.2.2",
-    "@3leaps/sysprims-win32-arm64-msvc": "0.2.2"
+    "@3leaps/sysprims-linux-x64-gnu": "0.2.3",
+    "@3leaps/sysprims-linux-x64-musl": "0.2.3",
+    "@3leaps/sysprims-linux-arm64-gnu": "0.2.3",
+    "@3leaps/sysprims-linux-arm64-musl": "0.2.3",
+    "@3leaps/sysprims-darwin-arm64": "0.2.3",
+    "@3leaps/sysprims-win32-x64-msvc": "0.2.3",
+    "@3leaps/sysprims-win32-arm64-msvc": "0.2.3"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",

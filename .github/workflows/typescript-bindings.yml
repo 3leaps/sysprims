@@ -76,7 +76,11 @@ jobs:
           bun-version: 1.3.3
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: |
+          # Use npm install instead of npm ci because release-prep branches
+          # point optionalDependencies at same-version platform packages before
+          # those packages exist in the npm registry.
+          npm install --omit=optional
       - name: Build package, native addon, and behavior tests
         working-directory: bindings/typescript/sysprims
         run: npm run clean && npm run build && npm run build:native && npm run build:test
@@ -130,7 +134,11 @@ jobs:
           cache-dependency-path: bindings/typescript/sysprims/package-lock.json
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: |
+          # Use npm install instead of npm ci because release-prep branches
+          # point optionalDependencies at same-version platform packages before
+          # those packages exist in the npm registry.
+          npm install --omit=optional
       - name: Install musl toolchain
         if: endsWith(matrix.target, '-musl')
         run: sudo apt-get update && sudo apt-get install --yes musl-tools
