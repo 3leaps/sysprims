@@ -197,6 +197,75 @@ Notes:
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 
+### crates.io (library crates only, after the tag)
+
+Do this only after the exact release tag is on `origin` and points at the
+intended release commit. The principal or Echo lead must explicitly cue the
+upload. Token and owners stay out of the tree.
+
+`make release-check` / `cargo package --workspace --no-verify` creates local
+tarballs. It does **not** publish anything to crates.io. On the first
+publication of these crate names, dependent build verification happens in the
+cued publish sequence after predecessor crates are indexed.
+
+What gets published:
+
+| Crate | crates.io |
+|-------|-----------|
+| `sysprims-core` | yes (first) |
+| `sysprims-signal` | yes (after core is indexed) |
+| `sysprims-session` | yes (after core is indexed) |
+| `sysprims-proc` | yes (after signal is indexed) |
+| `sysprims-timeout` | yes (last) |
+| `sysprims-cli` | **never** (`publish = false`) |
+| `sysprims-ffi` | **no** (`publish = false`) |
+| `sysprims-ts-napi` | **no** (`publish = false`) |
+
+Workspace `publish` stays `false`. The five public Rust libraries opt in.
+
+Use a crates.io token scoped to the five library crate names. First upload of a
+crate name requires `publish-new` and `publish-update`; later releases should
+use update-only scope. Never store the token in this repository.
+
+Publish from a clean checkout of the tag:
+
+```bash
+VERSION=$(cat VERSION)
+git checkout "v${VERSION}"
+cargo publish --dry-run -p sysprims-core
+cargo publish -p sysprims-core
+cargo info --registry crates-io "sysprims-core@${VERSION}"
+cargo publish --dry-run -p sysprims-signal
+cargo publish -p sysprims-signal
+cargo info --registry crates-io "sysprims-signal@${VERSION}"
+cargo publish --dry-run -p sysprims-session
+cargo publish -p sysprims-session
+cargo info --registry crates-io "sysprims-session@${VERSION}"
+cargo publish --dry-run -p sysprims-proc
+cargo publish -p sysprims-proc
+cargo info --registry crates-io "sysprims-proc@${VERSION}"
+cargo publish --dry-run -p sysprims-timeout
+cargo publish -p sysprims-timeout
+```
+
+- [ ] Dry-run then publish each crate in dependency order.
+- [ ] Confirm each predecessor with
+      `cargo info --registry crates-io <crate>@${VERSION}` before the next
+      dependent publish.
+- [ ] On the first upload of these crate names, expect standalone dry-runs for
+      dependent crates to fail until predecessor crates are actually indexed.
+- [ ] Do **not** `cargo publish -p sysprims-cli`, `sysprims-ffi`, or
+      `sysprims-ts-napi`.
+
+Negative control:
+
+```bash
+cargo publish --dry-run -p sysprims-cli
+cargo publish --dry-run -p sysprims-ffi
+cargo publish --dry-run -p sysprims-ts-napi
+# expected: error, crate cannot be published
+```
+
 ## 2. Manual Signing (Local Machine)
 
 ### Set Environment Variables

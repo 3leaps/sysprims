@@ -15,7 +15,7 @@
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
-.PHONY: release-clean release-download release-checksums release-sign
+.PHONY: release-check release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-verify-keys release-notes release-upload release-preflight
 .PHONY: release-guard-tag-version release-guard-tag-version-post
@@ -96,6 +96,7 @@ help: ## Show available targets
 	@echo ""
 	@echo "Release (manual signing workflow):"
 	@echo "  release-preflight     Verify all pre-tag requirements (REQUIRED before tagging)"
+	@echo "  release-check         Version consistency + cargo package (does not publish)"
 	@echo "  release-download      Download CI artifacts from GitHub"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
@@ -698,6 +699,18 @@ release-verify-keys: ## Verify exported keys are public-only
 
 release-verify: release-verify-checksums release-verify-signatures release-verify-keys ## Run all release verification
 	@echo "[ok] All release verifications passed"
+
+release-check: version-check ## Version consistency + package check (does not publish)
+	@echo "Checking release readiness..."
+	@echo ""
+	@echo "Packaging workspace crates (does not cargo publish)..."
+	$(CARGO) package --workspace --no-verify
+	@echo "[ok] Package check passed"
+	@echo ""
+	@echo "Release checklist:"
+	@echo "  ✓ Version consistency validated"
+	@echo "  ✓ Package check passed"
+	@echo "  ✓ cargo publish was not run"
 
 release-notes: ## Copy release notes to dist
 	@src="docs/releases/$(SYSPRIMS_RELEASE_TAG).md"; \

@@ -196,7 +196,8 @@ function checkCargo(root, expected, errors) {
         dependency.source === null &&
         dependency.req !== "*" &&
         dependency.req !== expected &&
-        dependency.req !== `=${expected}`
+        dependency.req !== `=${expected}` &&
+        dependency.req !== `^${expected}`
       ) {
         errors.push(
           `Cargo internal dependency ${pkg.name} -> ${dependency.name} pins ${dependency.req}, expected ${expected}`,
@@ -403,6 +404,26 @@ function updateJsonSurfaces(root, version) {
   writeJsonAtomic(lockPath, lock);
 }
 
+function updateCargoWorkspaceDependencyPins(root, version) {
+  const cargoPath = join(root, "Cargo.toml");
+  let cargoToml = readFileSync(cargoPath, "utf8");
+  let replaced = 0;
+  cargoToml = cargoToml.replace(
+    /^(sysprims-[A-Za-z0-9_-]+\s*=\s*\{[^\n]*\})$/gm,
+    (line) => {
+      if (!/\bversion\s*=/.test(line)) {
+        fail(`workspace dependency is missing version pin: ${line}`);
+      }
+      replaced += 1;
+      return line.replace(/\bversion\s*=\s*"[^"]+"/, `version = "${version}"`);
+    }
+  );
+  if (replaced === 0) {
+    fail("cannot find versioned sysprims workspace dependency pins");
+  }
+  writeTextAtomic(cargoPath, cargoToml);
+}
+
 function withRollback(root, paths, operation) {
   const backupRoot = mkdtempSync(join(tmpdir(), "sysprims-version-pack-"));
   try {
@@ -440,6 +461,7 @@ export function synchronize(
     run(root, "cargo", ["set-version", "--workspace", version], {
       stdio: "inherit",
     });
+    updateCargoWorkspaceDependencyPins(root, version);
     afterCargoSetVersion?.();
     updateJsonSurfaces(root, version);
     check(root, true);

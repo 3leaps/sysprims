@@ -17,14 +17,16 @@ edition = "2021"
 rust-version = "1.88.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/3leaps/sysprims"
+homepage = "https://github.com/3leaps/sysprims"
 authors = ["3leaps Architecture Council"]
+publish = false
 
 [workspace.dependencies]
-sysprims-core = { path = "crates/sysprims-core" }
-sysprims-timeout = { path = "crates/sysprims-timeout" }
-sysprims-signal = { path = "crates/sysprims-signal" }
-sysprims-proc = { path = "crates/sysprims-proc" }
-sysprims-session = { path = "crates/sysprims-session" }
+sysprims-core = { version = "0.2.2", path = "crates/sysprims-core" }
+sysprims-timeout = { version = "0.2.2", path = "crates/sysprims-timeout" }
+sysprims-signal = { version = "0.2.2", path = "crates/sysprims-signal" }
+sysprims-proc = { version = "0.2.2", path = "crates/sysprims-proc" }
+sysprims-session = { version = "0.2.2", path = "crates/sysprims-session" }
 
 # Fulmen Ecosystem
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental

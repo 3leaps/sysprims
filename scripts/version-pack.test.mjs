@@ -79,7 +79,7 @@ version = "0.2.1"
 edition = "2021"
 
 [workspace.dependencies]
-sysprims-fixture = { path = "crate" }
+sysprims-fixture = { version = "0.2.1", path = "crate" }
 serde = "0.2.1"
 `,
   );
@@ -247,6 +247,10 @@ test("sync updates owned fields and removes only stale resolution evidence", () 
   assert.match(
     readFileSync(join(root, "Cargo.lock"), "utf8"),
     /name = "sysprims-fixture"\nversion = "0\.2\.2"/,
+  );
+  assert.match(
+    readFileSync(join(root, "Cargo.toml"), "utf8"),
+    /sysprims-fixture = \{ version = "0\.2\.2", path = "crate" \}/,
   );
   assert.equal(version(root, "check").status, 0);
 });

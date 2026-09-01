@@ -4,9 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+publish = true
 description = "Core types, errors, and platform abstractions for sysprims"
+documentation = "https://docs.rs/sysprims-core"
+readme = "README.md"
 
 [dependencies]
 rsfulmen = { workspace = true }
