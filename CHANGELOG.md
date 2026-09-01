@@ -10,6 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-01
+
+### Added
+
+- Cargo publication metadata for the five Rust library crates:
+  `sysprims-core`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`,
+  and `sysprims-timeout`.
+- Crate-local README files for the Rust library crates so crates.io package
+  pages have standalone summaries.
+- `make release-check`, which validates version coherence and constructs the
+  workspace Cargo packages without publishing.
+- Release checklist steps for crates.io publication order and negative
+  controls that keep the CLI, C FFI crate, and TypeScript N-API crate
+  unpublished as Rust crates.
+
+### Changed
+
+- Workspace-internal Cargo dependency pins now carry the release version
+  alongside their local paths, so published library crates resolve correctly.
+- Pull-request TypeScript validation installs dev tooling with
+  `npm install --omit=optional`, allowing release-prep branches to reference
+  same-version platform packages before those packages exist in the npm
+  registry.
+
 ## [0.2.2] - 2026-08-30
 
 ### Added
@@ -740,7 +764,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/3leaps/sysprims/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/3leaps/sysprims/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/3leaps/sysprims/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/3leaps/sysprims/compare/v0.1.20...v0.2.0

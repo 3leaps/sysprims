@@ -54,7 +54,11 @@ jobs:
         run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
       - name: Install TypeScript tooling
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: |
+          # Use npm install instead of npm ci because release-prep branches
+          # point optionalDependencies at same-version platform packages before
+          # those packages exist in the npm registry.
+          npm install --omit=optional
       - name: Generate current C header
         run: cbindgen --config cbindgen.toml --crate sysprims-ffi --output "${RUNNER_TEMP}/sysprims.h"
       - name: Check capability, export, and documentation drift

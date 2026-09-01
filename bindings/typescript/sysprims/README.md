@@ -18,11 +18,11 @@ Runtime support:
 ## Installation
 
 ```bash
-npm install @3leaps/sysprims@0.2.2
+npm install @3leaps/sysprims@0.2.3
 ```
 
 The package and its platform-specific native packages are published from the
-verified `v0.2.2` repository tag.
+verified `v0.2.3` repository tag.
 
 For local development from this repository:
 
@@ -60,8 +60,10 @@ directly to `node scripts/public-api.js check`.
 
 `make typescript-api-check` remains a standalone repository target rather than
 part of `make check`: the general Rust gate does not install Node dependencies.
-Pull-request CI runs `npm ci` before the drift check and also generates a fresh
-C header for comparison with current Rust exports.
+Pull-request CI installs dev tooling with `npm install --omit=optional` before
+the drift check because release-prep branches reference same-version platform
+packages before those packages exist in the npm registry. CI also generates a
+fresh C header for comparison with current Rust exports.
 
 ## API
 

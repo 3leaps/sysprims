@@ -6,6 +6,52 @@
 
 ---
 
+## v0.2.3 - 2026-09-01
+
+**Status:** Cargo Publication Enablement
+
+v0.2.3 enables crates.io publication for the Rust library surface while keeping
+the command-line, C FFI, and TypeScript native implementation crates private to
+the repository release workflow.
+
+### Highlights
+
+- **Rust library publication**: `sysprims-core`, `sysprims-signal`,
+  `sysprims-session`, `sysprims-proc`, and `sysprims-timeout` opt in to Cargo
+  publication with standalone crate README files and repository metadata.
+- **Private implementation crates**: `sysprims-cli`, `sysprims-ffi`, and
+  `sysprims-ts-napi` remain unpublished as Rust crates.
+- **Versioned workspace dependencies**: internal Cargo path dependencies carry
+  the same release version so published crates resolve through crates.io.
+- **Release dry-run target**: `make release-check` validates the version pack
+  and constructs Cargo package tarballs without publishing.
+- **Release checklist update**: crates.io publication order and negative
+  controls are documented for the first upload.
+- **TypeScript CI install mode**: pull-request validation omits optional
+  same-version platform packages until the npm release workflow publishes them.
+
+### Release Coordinates
+
+- Rust crates: `sysprims-core`, `sysprims-signal`, `sysprims-session`,
+  `sysprims-proc`, and `sysprims-timeout` at `0.2.3`.
+- Rust workspace: repository tag `v0.2.3`.
+- Go module: path-prefixed tag `bindings/go/sysprims/v0.2.3` on the same
+  commit.
+- TypeScript: `@3leaps/sysprims@0.2.3`, published from the verified core tag.
+
+### Upgrade Notes
+
+- Rust consumers can switch the five public library crates from git-tag
+  dependencies to crates.io versions after publication.
+- The first crates.io upload must publish in dependency order:
+  `sysprims-core`, then `sysprims-signal` and `sysprims-session`, then
+  `sysprims-proc`, then `sysprims-timeout`.
+- TypeScript platform packages are still produced by the tag-based npm
+  workflows; they are not installed during pull-request validation before
+  publication.
+
+---
+
 ## v0.2.2 - 2026-08-30
 
 **Status:** Prepared PTY Containment
@@ -104,55 +150,5 @@ non-escape.
   assignment is available.
 - No portable-PTY companion crate or downstream consumer integration ships in
   this release.
-
----
-
-## v0.2.0 - Pending
-
-**Status:** Process Containment Release
-
-v0.2.0 adds an owned process-containment lifecycle for Rust PTY and supervisor
-integrations, structured point-in-time cleanup evidence, and additive
-TypeScript parity and numeric-safety enforcement. It also removes PID-only
-Windows Job ownership.
-
-### Highlights
-
-- **Owned containment**: retain the child and process-group or Job capability
-  through normal completion, forced termination, and active-guard cleanup.
-- **Reliability reporting**: distinguish `guaranteed`, `unproven`, and
-  `best_effort` tree cleanup.
-- **Identity safety**: bind cleanup to captured PID, start time, executable,
-  process group, and session evidence.
-- **Completion evidence**: report point-in-time `Empty`, `Survivors`, or
-  `Unknown` membership with platform provenance after owned-containment cleanup.
-- **TypeScript parity**: opt into descendant environment and thread details,
-  with default-off behavior and permission-aware visibility.
-- **TypeScript safety**: reject invalid PID, process-group, signal, depth,
-  duration, port, and filter values before coercion or native loading, then
-  revalidate them at the N-API boundary.
-- **Projection drift enforcement**: generate and check the public TypeScript
-  declaration shape, N-API inventory, C comparison surface, and API reference.
-- **Runtime matrix**: exercise native behavior under Node.js 18, Node.js 22,
-  and Bun 1.3.3 on Linux x64, macOS arm64, and Windows x64.
-- **Schema update**: timeout result schema v1.1 includes `unproven` reliability.
-
-### Upgrade Notes
-
-- Rust consumers exhaustively matching `TreeKillReliability` must add the
-  `Unproven` variant.
-- Windows `spawn_in_group` now returns `NotSupported`; use an owned guard
-  integration. Guaranteed Windows spawn remains unavailable until
-  create-suspended Job assignment is implemented.
-- Dropping an active `ContainmentGuard` terminates its contained processes.
-- Completion evidence does not upgrade acquisition reliability, and returned
-  survivor PIDs are evidence rather than safe signaling targets.
-- Completion evidence and owned containment remain Rust-only in this release;
-  no JavaScript owned-containment or timeout lifecycle is added.
-- Dependency-major upgrades are intentionally excluded from this release.
-- Go and TypeScript native artifacts for all supported platforms must be
-  regenerated from the final tag-target commit before publication.
-
----
 
 _Older releases are archived in `docs/releases/`._

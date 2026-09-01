@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 rust-version = "1.88.0"
 license = "MIT OR Apache-2.0"
@@ -22,11 +22,11 @@ authors = ["3leaps Architecture Council"]
 publish = false
 
 [workspace.dependencies]
-sysprims-core = { version = "0.2.2", path = "crates/sysprims-core" }
-sysprims-timeout = { version = "0.2.2", path = "crates/sysprims-timeout" }
-sysprims-signal = { version = "0.2.2", path = "crates/sysprims-signal" }
-sysprims-proc = { version = "0.2.2", path = "crates/sysprims-proc" }
-sysprims-session = { version = "0.2.2", path = "crates/sysprims-session" }
+sysprims-core = { version = "0.2.3", path = "crates/sysprims-core" }
+sysprims-timeout = { version = "0.2.3", path = "crates/sysprims-timeout" }
+sysprims-signal = { version = "0.2.3", path = "crates/sysprims-signal" }
+sysprims-proc = { version = "0.2.3", path = "crates/sysprims-proc" }
+sysprims-session = { version = "0.2.3", path = "crates/sysprims-session" }
 
 # Fulmen Ecosystem
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental
