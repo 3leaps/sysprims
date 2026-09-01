@@ -96,6 +96,22 @@ path = "src/lib.rs"
   );
   writeFileSync(join(root, "crate", "src", "lib.rs"), "pub fn fixture() {}\n");
   mustRun(root, "cargo", ["generate-lockfile"]);
+  mkdirSync(join(root, "bindings/go/sysprims"), { recursive: true });
+  writeFileSync(
+    join(root, "bindings/go/sysprims/README.md"),
+    `# sysprims Go bindings
+
+\`\`\`bash
+go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.1
+\`\`\`
+
+The Go module resolves \`v0.2.1\` through the repository's path-prefixed
+\`bindings/go/sysprims/v0.2.1\` tag. That tag and the canonical \`v0.2.1\` tag
+identify the same reviewed commit.
+
+v0.1.14 remains part of the historical API notes.
+`,
+  );
 
   const optionalDependencies = Object.fromEntries(
     platformNames.map((name) => [name, "0.2.1"]),
@@ -252,7 +268,35 @@ test("sync updates owned fields and removes only stale resolution evidence", () 
     readFileSync(join(root, "Cargo.toml"), "utf8"),
     /sysprims-fixture = \{ version = "0\.2\.2", path = "crate" \}/,
   );
+  const goReadme = readFileSync(
+    join(root, "bindings/go/sysprims/README.md"),
+    "utf8",
+  );
+  assert.match(
+    goReadme,
+    /go get github\.com\/3leaps\/sysprims\/bindings\/go\/sysprims@v0\.2\.2/,
+  );
+  assert.match(goReadme, /The Go module resolves `v0\.2\.2`/);
+  assert.match(goReadme, /`bindings\/go\/sysprims\/v0\.2\.2` tag/);
+  assert.match(goReadme, /canonical `v0\.2\.2` tag/);
+  assert.match(goReadme, /v0\.1\.14 remains/);
   assert.equal(version(root, "check").status, 0);
+});
+
+test("check fails precisely when the Go README install version is stale", () => {
+  const root = createFixture();
+  const readmePath = join(root, "bindings/go/sysprims/README.md");
+  writeFileSync(
+    readmePath,
+    readFileSync(readmePath, "utf8").replace(
+      /sysprims@v0\.2\.1/,
+      "sysprims@v0.2.0",
+    ),
+  );
+
+  const result = version(root, "check");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Go README install version is 0\.2\.0/);
 });
 
 test("check calls out stale npm resolution evidence without rewriting it", () => {
@@ -281,6 +325,42 @@ test("set canonicalizes VERSION and synchronizes in one command", () => {
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
   assert.equal(readFileSync(join(root, "VERSION"), "utf8"), "0.2.2\n");
   assert.equal(version(root, "check").status, 0);
+});
+
+test("set synchronizes prerelease versions through Go README coordinates", () => {
+  const root = createFixture();
+  const result = version(root, "set", "0.2.2-rc.1");
+  assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
+
+  const goReadme = readFileSync(
+    join(root, "bindings/go/sysprims/README.md"),
+    "utf8",
+  );
+  assert.match(
+    goReadme,
+    /go get github\.com\/3leaps\/sysprims\/bindings\/go\/sysprims@v0\.2\.2-rc\.1/,
+  );
+  assert.match(goReadme, /The Go module resolves `v0\.2\.2-rc\.1`/);
+  assert.match(goReadme, /`bindings\/go\/sysprims\/v0\.2\.2-rc\.1` tag/);
+  assert.match(goReadme, /canonical `v0\.2\.2-rc\.1` tag/);
+  assert.equal(version(root, "check").status, 0);
+});
+
+test("check rejects duplicate Go README release coordinates", () => {
+  const root = createFixture();
+  const readmePath = join(root, "bindings/go/sysprims/README.md");
+  writeFileSync(
+    readmePath,
+    `${readFileSync(readmePath, "utf8")}\n` +
+      "go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.0\n",
+  );
+
+  const result = version(root, "check");
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /Go README install version appears 2 times: 0\.2\.1, 0\.2\.0/,
+  );
 });
 
 test("patch, minor, and major bumps each synchronize the full pack", () => {

@@ -40,6 +40,7 @@ const baseOwnedPaths = [
   "VERSION",
   "Cargo.toml",
   "Cargo.lock",
+  "bindings/go/sysprims/README.md",
   "bindings/typescript/sysprims/package.json",
   "bindings/typescript/sysprims/package-lock.json",
   ...nativeDirectories.map(
@@ -47,8 +48,9 @@ const baseOwnedPaths = [
       `bindings/typescript/sysprims/npm/${directory}/package.json`,
   ),
 ];
-const semverPattern =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+const semverSource =
+  "(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?";
+const semverPattern = new RegExp(`^${semverSource}$`);
 
 function fail(message) {
   throw new Error(message);
@@ -320,6 +322,64 @@ function checkJson(root, expected, errors) {
   }
 }
 
+function extractUniqueRequiredVersion(text, pattern, label, expected, errors) {
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length === 0) {
+    errors.push(`${label} is missing`);
+    return;
+  }
+  if (matches.length !== 1) {
+    const versions = matches.map((match) => match[1]).join(", ");
+    errors.push(`${label} appears ${matches.length} times: ${versions}`);
+    return;
+  }
+  const match = matches[0];
+  if (match[1] !== expected) {
+    errors.push(`${label} is ${match[1]}, expected ${expected}`);
+  }
+}
+
+function checkGoReadme(root, expected, errors) {
+  const readme = readFileSync(
+    join(root, "bindings/go/sysprims/README.md"),
+    "utf8",
+  );
+  extractUniqueRequiredVersion(
+    readme,
+    new RegExp(
+      `go get github\\.com\\/3leaps\\/sysprims\\/bindings\\/go\\/sysprims@v(${semverSource})`,
+      "g",
+    ),
+    "Go README install version",
+    expected,
+    errors,
+  );
+  extractUniqueRequiredVersion(
+    readme,
+    new RegExp(`The Go module resolves \`v(${semverSource})\``, "g"),
+    "Go README module version",
+    expected,
+    errors,
+  );
+  extractUniqueRequiredVersion(
+    readme,
+    new RegExp(
+      `\`bindings\\/go\\/sysprims\\/v(${semverSource})\` tag`,
+      "g",
+    ),
+    "Go README path-prefixed tag version",
+    expected,
+    errors,
+  );
+  extractUniqueRequiredVersion(
+    readme,
+    new RegExp(`canonical \`v(${semverSource})\` tag`, "g"),
+    "Go README canonical tag version",
+    expected,
+    errors,
+  );
+}
+
 function collectErrors(root) {
   const errors = [];
   let expected;
@@ -336,6 +396,11 @@ function collectErrors(root) {
   }
   try {
     checkJson(root, expected, errors);
+  } catch (error) {
+    errors.push(error.message);
+  }
+  try {
+    checkGoReadme(root, expected, errors);
   } catch (error) {
     errors.push(error.message);
   }
@@ -424,6 +489,47 @@ function updateCargoWorkspaceDependencyPins(root, version) {
   writeTextAtomic(cargoPath, cargoToml);
 }
 
+function replaceExactlyOnce(text, pattern, replacement, label) {
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length !== 1) {
+    fail(`expected exactly one ${label} replacement, found ${matches.length}`);
+  }
+  return text.replace(pattern, replacement);
+}
+
+function updateGoReadme(root, version) {
+  const readmePath = join(root, "bindings/go/sysprims/README.md");
+  let readme = readFileSync(readmePath, "utf8");
+  readme = replaceExactlyOnce(
+    readme,
+    new RegExp(
+      `(go get github\\.com\\/3leaps\\/sysprims\\/bindings\\/go\\/sysprims@)v${semverSource}`,
+      "g",
+    ),
+    (_match, prefix) => `${prefix}v${version}`,
+    "Go README install version",
+  );
+  readme = replaceExactlyOnce(
+    readme,
+    new RegExp(`(The Go module resolves \`)v${semverSource}(\`)`, "g"),
+    (_match, prefix, suffix) => `${prefix}v${version}${suffix}`,
+    "Go README module version",
+  );
+  readme = replaceExactlyOnce(
+    readme,
+    new RegExp(`(\`bindings\\/go\\/sysprims\\/)v${semverSource}(\` tag)`, "g"),
+    (_match, prefix, suffix) => `${prefix}v${version}${suffix}`,
+    "Go README path-prefixed tag version",
+  );
+  readme = replaceExactlyOnce(
+    readme,
+    new RegExp(`(canonical \`)v${semverSource}(\` tag)`, "g"),
+    (_match, prefix, suffix) => `${prefix}v${version}${suffix}`,
+    "Go README canonical tag version",
+  );
+  writeTextAtomic(readmePath, readme);
+}
+
 function withRollback(root, paths, operation) {
   const backupRoot = mkdtempSync(join(tmpdir(), "sysprims-version-pack-"));
   try {
@@ -464,6 +570,7 @@ export function synchronize(
     updateCargoWorkspaceDependencyPins(root, version);
     afterCargoSetVersion?.();
     updateJsonSurfaces(root, version);
+    updateGoReadme(root, version);
     check(root, true);
   });
 
@@ -473,7 +580,7 @@ export function synchronize(
 function bump(root, component) {
   const current = readCanonicalVersion(root);
   const match = current.match(semverPattern);
-  if (match[4] || match[5]) {
+  if (current.includes("-") || current.includes("+")) {
     fail(`cannot ${component}-bump prerelease/build version ${current}`);
   }
   let [major, minor, patch] = current.split(".").map(Number);
