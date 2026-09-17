@@ -9,6 +9,15 @@ const MAX_DURATION_MS = 86_400_000;
 const MAX_ARGV_ENTRIES = 256;
 const MAX_ARGV_ENTRY_BYTES = 4096;
 
+const leakBackstop = new FinalizationRegistry<bigint>((token) => {
+  try {
+    const native = loadSysprims();
+    void native.sysprimsContainmentClose(token);
+  } catch {
+    // Finalizer is a leak backstop only.
+  }
+});
+
 export interface ContainedProcessWaitOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -54,6 +63,7 @@ export class ContainedProcess {
   constructor(token: bigint, native: ReturnType<typeof loadSysprims>) {
     this.#token = token;
     this.#native = native;
+    leakBackstop.register(this, token, this);
   }
 
   #requireToken(): bigint {
@@ -126,6 +136,7 @@ export class ContainedProcess {
       return;
     }
     this.#token = null;
+    leakBackstop.unregister(this);
     await callVoidAsync(() => this.#native.sysprimsContainmentClose(token));
   }
 
