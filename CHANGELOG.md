@@ -26,8 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retryable instead of becoming inert. Go and TypeScript keep the wrapper
   token until native close succeeds. Termination signals are range-checked
   before spawn. A native deadline monitor is reserved unarmed before spawn
-  success and armed with the token plus absolute deadline after insertion, so
-  monitor-setup failure cannot leave an unreachable active child. Failed
+  success and armed infallibly with the token plus absolute deadline after
+  insertion, so monitor-setup failure cannot leave an unreachable active
+  child and a returned deadline handle is always armed. Failed
   active Close preserves or re-arms that deadline until a terminal transition
   commits. Go `Wait` rejects negative durations and does not treat a positive
   sub-millisecond timeout as infinite.

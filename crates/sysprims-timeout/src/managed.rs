@@ -551,9 +551,7 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
         }
         if let Some((_, monitor)) = pending_deadline {
             if let Some(deadline) = deadline_at {
-                if let Err(error) = monitor.try_arm(token, deadline) {
-                    return reject_inserted_spawn(token, error);
-                }
+                monitor.arm(token, deadline);
             }
         }
         Ok(token)
@@ -569,15 +567,6 @@ fn abandon_unused_construction(
         monitor.cancel();
     }
     let _ = recycle_unused_slot(slot_index, generation);
-}
-
-/// Close an already-inserted spawn. If cleanup cannot be confirmed, return the
-/// live token instead of dropping the only handle.
-fn reject_inserted_spawn(token: u64, error: SysprimsError) -> SysprimsResult<u64> {
-    match close(token) {
-        Ok(()) => Err(error),
-        Err(_) => Ok(token),
-    }
 }
 
 fn recycle_unused_slot(slot_index: u32, generation: u32) -> SysprimsResult<()> {
@@ -627,17 +616,16 @@ impl DeadlineMonitor {
         self.cancel.store(true, Ordering::SeqCst);
     }
 
-    fn try_arm(&self, token: u64, deadline: Instant) -> SysprimsResult<()> {
-        match self.arm.lock() {
-            Ok(mut armed) => {
-                *armed = Some(DeadlineArm { token, deadline });
-                Ok(())
-            }
-            Err(_) => Err(SysprimsError::internal(
-                "containment deadline arm lock poisoned",
-            )),
-        }
+    /// Arm is infallible: the monitor thread is already reserved, and this
+    /// mutex has no panicking critical section. Recover poison and own the
+    /// arm state so a returned handle always has a deadline.
+    fn arm(&self, token: u64, deadline: Instant) {
+        *lock_arm(&self.arm) = Some(DeadlineArm { token, deadline });
     }
+}
+
+fn lock_arm(arm: &Mutex<Option<DeadlineArm>>) -> MutexGuard<'_, Option<DeadlineArm>> {
+    arm.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn start_unarmed_deadline_monitor() -> SysprimsResult<DeadlineMonitor> {
@@ -674,10 +662,7 @@ fn run_deadline_monitor(arm: Arc<Mutex<Option<DeadlineArm>>>, cancel: Arc<Atomic
         if cancel.load(Ordering::SeqCst) {
             return;
         }
-        let armed = match arm.lock() {
-            Ok(guard) => *guard,
-            Err(_) => return,
-        };
+        let armed = *lock_arm(&arm);
         match armed {
             Some(DeadlineArm { token, deadline }) => {
                 let now = Instant::now();
@@ -1217,21 +1202,28 @@ mod tests {
     fn deadline_monitor_setup_failure_returns_no_handle() {
         let _lock = test_guard();
         let before = occupied_slots();
+        let marker = std::env::temp_dir().join(format!(
+            "sysprims-containment-deadline-setup-{}.marker",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
         inject::FORCE_DEADLINE_THREAD_FAIL.store(true, Ordering::SeqCst);
-        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
-        let mut req = request(vec!["sleep", "30"]);
+        let mut req = request(vec!["touch", marker.to_str().expect("utf8 path")]);
         req.execution_timeout_ms = Some(5_000);
         let result = spawn(req);
         inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
-        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
         assert!(
             result.is_err(),
             "deadline setup failure must not return a handle"
         );
+        assert!(
+            !marker.exists(),
+            "deadline reservation failure must not start argv"
+        );
         assert_eq!(
             occupied_slots(),
             before,
-            "monitor-setup failure plus cleanup-failure injection must not leave an unreachable active slot"
+            "monitor-setup failure before spawn must not occupy a slot"
         );
         let token = spawn(request(vec!["true"])).expect("registry remains usable");
         close(token).expect("close after deadline-setup failure");
