@@ -10,7 +10,7 @@
 #   make fmt        - Format code (cargo fmt + goneat assess format --fix)
 #   make build      - Build all crates and FFI
 
-.PHONY: all help bootstrap bootstrap-force tools check test test-diabolical fmt fmt-check lint typecheck build clean version install
+.PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
@@ -35,8 +35,8 @@ VERSION := $(shell tr -d '\r\n' < VERSION 2>/dev/null || echo "dev")
 BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions for reproducibility
-SFETCH_VERSION := latest
-GONEAT_VERSION ?= v0.5.16
+SFETCH_VERSION := v0.4.9
+GONEAT_VERSION ?= v0.6.0
 GONEAT_FORMAT_FAIL_ON ?= medium
 CONTAINER_RUNTIME ?= docker
 
@@ -264,6 +264,16 @@ tools: ## Verify external tools are available
 # Quality Gates
 # -----------------------------------------------------------------------------
 
+# Print the goneat binary actually on PATH. GONEAT_VERSION uses ?= so a host
+# env can shadow the Makefile pin; the printed version is what gates run.
+goneat-version: ## Print PATH goneat vs Makefile pin
+	@if ! command -v goneat >/dev/null 2>&1; then \
+		echo "[!!] goneat not found (run 'make bootstrap')"; \
+		exit 1; \
+	fi
+	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
+	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
+
 check: fmt-check lint test check-windows deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
 
@@ -320,27 +330,19 @@ fmt: ## Format code (cargo fmt + goneat assess format --fix)
 	fi
 	@echo "[ok] Formatting complete"
 
-fmt-check: ## Check formatting without modifying
+fmt-check: goneat-version ## Check formatting without modifying
 	@echo "Checking Rust formatting..."
 	$(CARGO) fmt --all -- --check
-	@if command -v goneat >/dev/null 2>&1; then \
-		echo "Checking markdown, YAML, JSON formatting (goneat assess format)..."; \
-		goneat assess --categories format --check --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null; \
-	else \
-		echo "[!!] goneat not found — skipping non-Rust format check (run 'make bootstrap')"; \
-	fi
+	@echo "Checking markdown, YAML, JSON formatting (goneat assess format)..."
+	goneat assess --categories format --check --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null
 	@echo "[ok] Formatting check passed"
 
-lint: ## Run linting (cargo clippy + goneat lint)
+lint: goneat-version ## Run linting (cargo clippy + goneat lint)
 	@echo "Linting Rust..."
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 	@bash scripts/check-npm-trusted-publish-runtime.sh
-	@if command -v goneat >/dev/null 2>&1; then \
-		echo "Linting YAML, shell, workflows..."; \
-		goneat assess --categories lint --check --fail-on medium --ci-summary --log-level warn --output /dev/null; \
-	else \
-		echo "[!!] goneat not found — skipping non-Rust linting (run 'make bootstrap')"; \
-	fi
+	@echo "Linting YAML, shell, workflows..."
+	goneat assess --categories lint --check --fail-on medium --ci-summary --log-level warn --output /dev/null
 	@echo "[ok] Linting passed"
 
 typecheck: ## Run TypeScript type checking

@@ -17,24 +17,24 @@ jobs:
     name: Format Check
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
       options: --user root
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Check formatting through Goneat DX
         run: make fmt-check
   lint:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
   planning-hygiene:
     name: Planning Reference Guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: No private planning-plane references in tracked files
         run: bash scripts/check-planning-hygiene.sh
       - name: npm trusted publishing runtime guard
@@ -43,13 +43,13 @@ jobs:
     name: TypeScript API Drift
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: bindings/typescript/sysprims/package-lock.json
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install pinned cbindgen
         run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
       - name: Install TypeScript tooling
@@ -70,8 +70,8 @@ jobs:
     name: Windows Cross-Target Check (no SDK)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-pc-windows-msvc,x86_64-pc-windows-gnu,aarch64-pc-windows-msvc
       # cargo check does type checking only (no linking), so this works without the Windows SDK.
@@ -98,7 +98,7 @@ jobs:
           - os: windows-latest-arm64-s
             target: aarch64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install Rust toolchain
         run: |
           rustup show
@@ -121,13 +121,13 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-gnu
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: ${{ matrix.target }}
       - name: Install MinGW (Windows)
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           msystem: MINGW64
           update: true
@@ -145,7 +145,7 @@ jobs:
     name: Test (Linux musl)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Add musl target
@@ -183,16 +183,16 @@ jobs:
             rust_target: aarch64-pc-windows-gnullvm
             win_toolchain: llvm-mingw
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.22'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: ${{ matrix.rust_target }}
       - name: Install MinGW (Windows x64, msys2)
         if: matrix.win_toolchain == 'msys2'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           msystem: MINGW64
           update: true
@@ -274,10 +274,12 @@ jobs:
     name: License & Dependency Check
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
       options: --user root
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Report Goneat version
+        run: goneat version
       - name: License check
         run: cargo deny check licenses
       - name: Advisory check
@@ -288,7 +290,7 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Security audit
@@ -301,9 +303,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [format, lint, test]  # Only run after basic checks pass
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4
       - name: Build test container
         run: |
           docker build -t sysprims-test-fixture -f Dockerfile.container .
