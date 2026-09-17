@@ -1,6 +1,7 @@
 package sysprims_test
 
 import (
+	"os"
 	"runtime"
 	"sync"
 	"testing"
@@ -137,22 +138,97 @@ func TestSpawnContainedCloseRacesWaitAndTerminate(t *testing.T) {
 	}
 	handle := spawnSleep(t)
 	var wg sync.WaitGroup
+	var closeErr, waitErr, termErr error
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		_, _ = handle.Wait(2 * time.Second)
+		_, waitErr = handle.Wait(2 * time.Second)
 	}()
 	go func() {
 		defer wg.Done()
-		_, _ = handle.Terminate()
+		_, termErr = handle.Terminate()
 	}()
 	go func() {
 		defer wg.Done()
 		time.Sleep(20 * time.Millisecond)
-		_ = handle.Close()
+		closeErr = handle.Close()
 	}()
 	wg.Wait()
-	_ = handle.Close()
+	if closeErr != nil {
+		if _, err := handle.Identity(); err != nil {
+			t.Fatalf("failed close must preserve owner (wait=%v terminate=%v identity=%v)", waitErr, termErr, err)
+		}
+		if err := handle.Close(); err != nil {
+			t.Fatalf("retry close after failure: %v", err)
+		}
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("final close: %v", err)
+	}
+	if _, err := handle.Identity(); err == nil {
+		t.Fatal("closed handle identity must fail")
+	}
+}
+
+func TestSpawnContainedWaitRejectsNegativeAndKeepsSubMillisecondFinite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("managed spawn is unix-only until Job assignment exists")
+	}
+	handle := spawnSleep(t)
+	defer handle.Close()
+	if _, err := handle.Wait(-time.Second); err == nil {
+		t.Fatal("negative wait must fail")
+	}
+	started := time.Now()
+	if _, err := handle.Wait(500 * time.Microsecond); err != nil {
+		t.Fatalf("positive sub-ms wait must stay finite: %v", err)
+	}
+	if time.Since(started) > 3*time.Second {
+		t.Fatal("positive sub-ms wait was treated as infinite")
+	}
+	if _, err := handle.Terminate(); err != nil {
+		t.Fatalf("terminate after sub-ms wait: %v", err)
+	}
+}
+
+func TestSpawnContainedCloseFailureRestoresToken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("managed spawn is unix-only until Job assignment exists")
+	}
+	handle := spawnSleep(t)
+	sysprims.SetNativeCloseForTest(func(uint64) error {
+		return &sysprims.Error{Code: sysprims.ErrInvalidArgument, Message: "forced close failure"}
+	})
+	err := handle.Close()
+	sysprims.SetNativeCloseForTest(nil)
+	if err == nil {
+		t.Fatal("forced native close failure must surface")
+	}
+	if _, idErr := handle.Identity(); idErr != nil {
+		_ = handle.Close()
+		t.Fatalf("failed close must keep the token usable: %v", idErr)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("retry close: %v", err)
+	}
+}
+
+func TestSpawnContainedInvalidHighSignalDoesNotSpawn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("managed spawn is unix-only until Job assignment exists")
+	}
+	marker := t.TempDir() + "/should-not-exist"
+	sig := int32(99)
+	_, err := sysprims.SpawnContained(sysprims.SpawnContainedConfig{
+		Argv:   []string{"touch", marker},
+		Signal: &sig,
+	})
+	if err == nil {
+		t.Fatal("signal 99 must fail before spawn")
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("invalid high signal must not start argv")
+	}
 }
 
 func TestSpawnContainedWindowsUnsupported(t *testing.T) {

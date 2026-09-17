@@ -12,7 +12,9 @@ const MAX_ARGV_ENTRY_BYTES = 4096;
 const leakBackstop = new FinalizationRegistry<bigint>((token) => {
   try {
     const native = loadSysprims();
-    void native.sysprimsContainmentClose(token);
+    void Promise.resolve(native.sysprimsContainmentClose(token)).catch(() => {
+      // Finalizer is a leak backstop only.
+    });
   } catch {
     // Finalizer is a leak backstop only.
   }
@@ -58,12 +60,18 @@ function validateArgv(argv: string[]): void {
 export class ContainedProcess {
   #token: bigint | null;
   readonly #native: ReturnType<typeof loadSysprims>;
+  #state: "open" | "closing" | "closed" = "open";
+  #closeWaiters: Array<() => void> = [];
 
-  /** @internal */
-  constructor(token: bigint, native: ReturnType<typeof loadSysprims>) {
+  private constructor(token: bigint, native: ReturnType<typeof loadSysprims>) {
     this.#token = token;
     this.#native = native;
     leakBackstop.register(this, token, this);
+  }
+
+  /** @internal */
+  static fromNative(token: bigint, native: ReturnType<typeof loadSysprims>): ContainedProcess {
+    return new ContainedProcess(token, native);
   }
 
   #requireToken(): bigint {
@@ -92,6 +100,9 @@ export class ContainedProcess {
 
   async wait(options?: ContainedProcessWaitOptions): Promise<ContainmentSnapshot> {
     const token = this.#requireToken();
+    if (options?.signal?.aborted) {
+      throw new SysprimsError(SysprimsErrorCode.Timeout, "containment wait was cancelled");
+    }
     const timeoutMs =
       options?.timeoutMs == null ? 0 : validateDuration(options.timeoutMs, "timeoutMs", MAX_DURATION_MS);
     const waitPromise = callJsonReturnAsync(() =>
@@ -100,9 +111,6 @@ export class ContainedProcess {
     const abortSignal = options?.signal;
     if (!abortSignal) {
       return waitPromise;
-    }
-    if (abortSignal.aborted) {
-      throw new SysprimsError(SysprimsErrorCode.Timeout, "containment wait was cancelled");
     }
     return await new Promise<ContainmentSnapshot>((resolve, reject) => {
       const onAbort = () => {
@@ -131,13 +139,34 @@ export class ContainedProcess {
   }
 
   async close(): Promise<void> {
-    const token = this.#token;
-    if (token == null) {
-      return;
+    for (;;) {
+      if (this.#state === "closed" || this.#token == null) {
+        return;
+      }
+      if (this.#state === "closing") {
+        await new Promise<void>((resolve) => {
+          this.#closeWaiters.push(resolve);
+        });
+        continue;
+      }
+      this.#state = "closing";
+      const token = this.#token;
+      try {
+        await callVoidAsync(() => this.#native.sysprimsContainmentClose(token));
+        this.#token = null;
+        leakBackstop.unregister(this);
+        this.#state = "closed";
+        return;
+      } catch (error) {
+        this.#state = "open";
+        throw error;
+      } finally {
+        const waiters = this.#closeWaiters.splice(0);
+        for (const waiter of waiters) {
+          waiter();
+        }
+      }
     }
-    this.#token = null;
-    leakBackstop.unregister(this);
-    await callVoidAsync(() => this.#native.sysprimsContainmentClose(token));
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -203,5 +232,5 @@ export async function spawnContained(
   const token = await callTokenReturnAsync(() =>
     native.sysprimsContainmentSpawn(JSON.stringify(wire)),
   );
-  return new ContainedProcess(token, native);
+  return ContainedProcess.fromNative(token, native);
 }

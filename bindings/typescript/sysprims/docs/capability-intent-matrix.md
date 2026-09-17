@@ -32,7 +32,7 @@ or incompatible narrowing or widening is not.
 | N-API runtime functions | 28 | Every function is classified below. |
 | Public TypeScript functions | 23 | All remain public and patch-compatible. |
 | Other public runtime values | 3 | `SysprimsError`, `SysprimsErrorCode`, and `ContainedProcess` remain public. |
-| Explicit package-root type exports | 44 | All remain public and patch-compatible. |
+| Explicit package-root type exports | 43 | All remain public and patch-compatible. |
 
 ## Public Capability Matrix
 
@@ -189,7 +189,7 @@ ABI and retains its existing compatibility contract.
 
 ## Public Type Export Inventory
 
-The emitted package root must continue to export these 44 explicit type names:
+The emitted package root must continue to export these 43 explicit type names:
 
 `AncestorsOptions`, `AncestorsResult`, `BatchKillFailure`, `BatchKillResult`,
 `ContainedProcessWaitOptions`, `ContainmentCompletion`, `ContainmentIdentity`,

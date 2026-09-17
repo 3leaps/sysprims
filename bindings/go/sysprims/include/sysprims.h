@@ -268,9 +268,11 @@ SysprimsErrorCode sysprims_containment_terminate(uint64_t handle, char **result_
 /**
  * Deterministically release the registry entry.
  *
- * Active close performs bounded native guard cleanup. A stale or foreign
- * token fails closed. Language wrappers should treat a second dispose as a
- * no-op by clearing their local token before calling this function.
+ * Active close performs bounded native guard cleanup and recycles the slot
+ * only after the child is confirmed reaped. Cleanup failure keeps the same
+ * generation and active owner so close is retryable. A stale or foreign token
+ * fails closed. Language wrappers must keep their token until this call
+ * succeeds; clear it only after success and restore it on error.
  */
 SysprimsErrorCode sysprims_containment_close(uint64_t handle);
 

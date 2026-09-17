@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reliability and boundary strength. `RunWithTimeout`, `terminateTree`, and
   `spawnInGroup` are unchanged.
 
+### Fixed
+
+- Managed containment close recycles a registry slot only after cleanup
+  confirms the child is reaped. An `exited: false` outcome stays active and
+  retryable instead of becoming inert. Go and TypeScript keep the wrapper
+  token until native close succeeds. Termination signals are range-checked
+  before spawn, and a native deadline monitor that fails to start returns no
+  handle after owned cleanup. Go `Wait` rejects negative durations and does
+  not treat a positive sub-millisecond timeout as infinite.
+
 ## [0.2.3] - 2026-09-01
 
 ### Added

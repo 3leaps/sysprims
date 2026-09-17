@@ -18,8 +18,8 @@ use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
 use crate::{
     spawn_contained, ContainmentBoundaryStrength, ContainmentCompletionEvidence, ContainmentGuard,
-    ContainmentIdentity, ContainmentOutcome, ContainmentSpawnError, TerminateTreeConfig,
-    TreeKillReliability, SIGKILL, SIGTERM,
+    ContainmentIdentity, ContainmentObservation, ContainmentOutcome, ContainmentSpawnError,
+    TerminateTreeConfig, TreeKillReliability, SIGKILL, SIGTERM,
 };
 
 pub const MAX_REGISTRY_SLOTS: usize = 1024;
@@ -281,29 +281,11 @@ pub fn validate_spawn_request(
         config.kill_timeout_ms = kill;
     }
     if let Some(signal) = request.signal {
-        if signal == 0 {
-            return Err(SysprimsError::invalid_argument(
-                "signal 0 is not a valid termination policy",
-            ));
-        }
-        if signal < 0 {
-            return Err(SysprimsError::invalid_argument(
-                "signal must be a positive termination signal",
-            ));
-        }
+        validate_platform_signal(signal, "signal")?;
         config.signal = signal;
     }
     if let Some(kill_signal) = request.kill_signal {
-        if kill_signal == 0 {
-            return Err(SysprimsError::invalid_argument(
-                "kill_signal 0 is not a valid termination policy",
-            ));
-        }
-        if kill_signal < 0 {
-            return Err(SysprimsError::invalid_argument(
-                "kill_signal must be a positive termination signal",
-            ));
-        }
+        validate_platform_signal(kill_signal, "kill_signal")?;
         config.kill_signal = kill_signal;
     }
     if config.signal == 0 {
@@ -315,6 +297,31 @@ pub fn validate_spawn_request(
     Ok(config)
 }
 
+fn platform_max_signal() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        libc::SIGRTMAX()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        31
+    }
+}
+
+fn validate_platform_signal(signal: i32, name: &str) -> SysprimsResult<()> {
+    let max_signal = platform_max_signal();
+    if signal <= 0 || signal > max_signal {
+        return Err(SysprimsError::invalid_argument(format!(
+            "{name} must be between 1 and {max_signal}"
+        )));
+    }
+    Ok(())
+}
+
+fn cleanup_not_confirmed() -> SysprimsError {
+    SysprimsError::invalid_argument("containment cleanup did not confirm child reaped; retry")
+}
+
 fn allocate_slot() -> SysprimsResult<(u32, u32)> {
     let reg = registry();
     let mut free = lock_free(reg)?;
@@ -322,6 +329,10 @@ fn allocate_slot() -> SysprimsResult<(u32, u32)> {
         let slot = &reg.slots[slot_index as usize];
         let data = lock_data(slot)?;
         if data.retired || data.state != SlotState::Empty {
+            debug_assert!(
+                data.retired && data.state == SlotState::Empty,
+                "free list contained a live or inconsistent slot"
+            );
             continue;
         }
         let generation = data.generation;
@@ -333,7 +344,10 @@ fn allocate_slot() -> SysprimsResult<(u32, u32)> {
     ))
 }
 
-fn free_slot_locked(reg: &Registry, slot_index: u32, data: &mut SlotData) -> SysprimsResult<()> {
+/// Reset a slot to Empty and bump generation. Returns whether the index should
+/// be pushed onto the free list. Caller must drop the slot data lock before
+/// taking the free-list lock.
+fn reset_slot_for_reuse(data: &mut SlotData) -> bool {
     data.guard = None;
     data.identity = None;
     data.reliability = None;
@@ -345,17 +359,35 @@ fn free_slot_locked(reg: &Registry, slot_index: u32, data: &mut SlotData) -> Sys
     data.state = SlotState::Empty;
     if data.generation == u32::MAX {
         data.retired = true;
-        return Ok(());
+        return false;
     }
     let next = data.generation.saturating_add(1);
     if next == 0 || next == u32::MAX {
         data.generation = u32::MAX;
         data.retired = true;
-        return Ok(());
+        return false;
     }
     data.generation = next;
-    let mut free = lock_free(reg)?;
+    true
+}
+
+fn push_free_index(slot_index: u32) -> SysprimsResult<()> {
+    let mut free = lock_free(registry())?;
     free.push(slot_index);
+    Ok(())
+}
+
+fn recycle_after_data_unlock(
+    slot: &Slot,
+    slot_index: u32,
+    mut data: MutexGuard<'_, SlotData>,
+) -> SysprimsResult<()> {
+    let should_push = reset_slot_for_reuse(&mut data);
+    slot.cond.notify_all();
+    drop(data);
+    if should_push {
+        push_free_index(slot_index)?;
+    }
     Ok(())
 }
 
@@ -491,10 +523,15 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
             data.outcome = None;
             data.guard = Some(guard);
             data.state = SlotState::Active;
-            if let Some(timeout_ms) = request.execution_timeout_ms {
-                let cancel = Arc::clone(&data.deadline_cancel);
-                drop(data);
-                start_deadline_thread(token, timeout_ms, cancel);
+        }
+        if let Some(timeout_ms) = request.execution_timeout_ms {
+            let cancel = {
+                let data = lock_data(slot)?;
+                Arc::clone(&data.deadline_cancel)
+            };
+            if let Err(error) = start_deadline_thread(token, timeout_ms, cancel) {
+                let _ = close(token);
+                return Err(error);
             }
         }
         Ok(token)
@@ -506,8 +543,8 @@ fn recycle_unused_slot(slot_index: u32, generation: u32) -> SysprimsResult<()> {
     let slot = &reg.slots[slot_index as usize];
     let data = lock_data(slot)?;
     if data.generation == generation && data.state == SlotState::Empty && !data.retired {
-        let mut free = lock_free(reg)?;
-        free.push(slot_index);
+        drop(data);
+        push_free_index(slot_index)?;
     }
     Ok(())
 }
@@ -532,7 +569,17 @@ fn build_command(request: &ManagedSpawnRequest) -> SysprimsResult<Command> {
     Ok(command)
 }
 
-fn start_deadline_thread(token: u64, timeout_ms: u64, cancel: Arc<AtomicBool>) {
+fn start_deadline_thread(
+    token: u64,
+    timeout_ms: u64,
+    cancel: Arc<AtomicBool>,
+) -> SysprimsResult<()> {
+    if test_force_deadline_thread_fail() {
+        return Err(SysprimsError::system(
+            "failed to start containment deadline monitor",
+            0,
+        ));
+    }
     thread::Builder::new()
         .name("sysprims-containment-deadline".into())
         .spawn(move || {
@@ -546,7 +593,71 @@ fn start_deadline_thread(token: u64, timeout_ms: u64, cancel: Arc<AtomicBool>) {
                 thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
             }
         })
-        .ok();
+        .map_err(|error| {
+            SysprimsError::system(
+                format!("failed to start containment deadline monitor: {error}"),
+                error.raw_os_error().unwrap_or(0),
+            )
+        })?;
+    Ok(())
+}
+
+fn test_force_deadline_thread_fail() -> bool {
+    #[cfg(test)]
+    {
+        inject::FORCE_DEADLINE_THREAD_FAIL.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+fn test_force_unreaped() -> bool {
+    #[cfg(test)]
+    {
+        inject::FORCE_UNREAPED.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+#[cfg(test)]
+mod inject {
+    use std::sync::atomic::AtomicBool;
+
+    pub static FORCE_UNREAPED: AtomicBool = AtomicBool::new(false);
+    pub static FORCE_DEADLINE_THREAD_FAIL: AtomicBool = AtomicBool::new(false);
+}
+
+fn unreaped_outcome(data: &SlotData) -> SysprimsResult<ContainmentOutcome> {
+    let identity = data
+        .identity
+        .clone()
+        .ok_or_else(|| SysprimsError::internal("containment identity missing"))?;
+    let reliability = data
+        .reliability
+        .ok_or_else(|| SysprimsError::internal("containment reliability missing"))?;
+    let boundary = data
+        .boundary
+        .ok_or_else(|| SysprimsError::internal("containment boundary missing"))?;
+    Ok(ContainmentOutcome {
+        identity,
+        pgid: None,
+        signal_sent: None,
+        kill_signal: None,
+        escalated: false,
+        exited: false,
+        timed_out: true,
+        tree_kill_reliability: reliability,
+        boundary_strength: boundary,
+        completion: ContainmentCompletionEvidence::Unknown {
+            observation: ContainmentObservation::UnsupportedPlatform,
+        },
+        warnings: vec!["Timed out waiting to reap contained child".to_string()],
+    })
 }
 
 fn wait_for_not_finalizing<'a>(
@@ -652,14 +763,34 @@ pub fn close(token: u64) -> SysprimsResult<()> {
         SlotState::Finalizing => Err(SysprimsError::invalid_argument(
             "containment handle is busy; retry close",
         )),
-        SlotState::Active | SlotState::Inert => {
+        SlotState::Inert => recycle_after_data_unlock(slot, slot_index, data),
+        SlotState::Active => {
             data.state = SlotState::Finalizing;
             data.deadline_cancel.store(true, Ordering::SeqCst);
-            data.guard = None;
-            let reg = registry();
-            free_slot_locked(reg, slot_index, &mut data)?;
-            slot.cond.notify_all();
-            Ok(())
+            let config = data.terminate_config.clone();
+            let result = if test_force_unreaped() {
+                unreaped_outcome(&data).map(Some)
+            } else {
+                let guard = data.guard.as_mut().ok_or_else(|| {
+                    SysprimsError::internal("containment guard missing during close")
+                })?;
+                guard.terminate(config).map(Some)
+            };
+            match result {
+                Ok(Some(outcome)) if outcome.exited => {
+                    recycle_after_data_unlock(slot, slot_index, data)
+                }
+                Ok(_) => {
+                    data.state = SlotState::Active;
+                    slot.cond.notify_all();
+                    Err(cleanup_not_confirmed())
+                }
+                Err(error) => {
+                    data.state = SlotState::Active;
+                    slot.cond.notify_all();
+                    Err(error)
+                }
+            }
         }
     }
 }
@@ -721,14 +852,23 @@ fn operate_inner(
         SlotState::Active => {
             data.state = SlotState::Finalizing;
             let config = data.terminate_config.clone();
-            let result = {
+            let result = if test_force_unreaped() {
+                unreaped_outcome(&data).map(Some)
+            } else {
                 let guard = data.guard.as_mut().ok_or_else(|| {
                     SysprimsError::internal("containment guard missing during operation")
                 })?;
                 op(guard, config)
             };
             match result {
-                Ok(Some(outcome)) => commit_inert(slot, &mut data, outcome, complete_status),
+                Ok(Some(outcome)) if outcome.exited => {
+                    commit_inert(slot, &mut data, outcome, complete_status)
+                }
+                Ok(Some(_outcome)) => {
+                    data.state = SlotState::Active;
+                    slot.cond.notify_all();
+                    Err(cleanup_not_confirmed())
+                }
                 Ok(None) => {
                     data.state = SlotState::Active;
                     slot.cond.notify_all();
@@ -781,6 +921,9 @@ pub struct ManagedSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::thread;
 
     fn request(argv: Vec<&str>) -> ManagedSpawnRequest {
         ManagedSpawnRequest {
@@ -804,6 +947,12 @@ mod tests {
         let mut overflow = request(vec!["true"]);
         overflow.execution_timeout_ms = Some(MAX_DURATION_MS + 1);
         assert!(validate_spawn_request(&overflow).is_err());
+        let mut high = request(vec!["true"]);
+        high.signal = Some(99);
+        assert!(validate_spawn_request(&high).is_err());
+        let mut high_kill = request(vec!["true"]);
+        high_kill.kill_signal = Some(99);
+        assert!(validate_spawn_request(&high_kill).is_err());
     }
 
     #[test]
@@ -889,5 +1038,83 @@ mod tests {
         ]));
         assert!(result.is_err());
         assert!(!marker.exists(), "windows rejection must not start argv");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_high_signal_does_not_spawn() {
+        let marker = std::env::temp_dir().join(format!(
+            "sysprims-containment-high-signal-{}.marker",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let mut req = request(vec!["touch", marker.to_str().expect("utf8 path")]);
+        req.signal = Some(99);
+        assert!(spawn(req).is_err());
+        assert!(!marker.exists(), "invalid high signal must not start argv");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_active_close_preserves_owner_and_unreaped_is_not_inert() {
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn sleep");
+
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        let terminated = terminate(token);
+        assert!(terminated.is_err(), "exited:false must be retryable");
+        let snap = identity(token).expect("owner retained after unreaped terminate");
+        assert_eq!(snap.handle_state, "active");
+
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        assert!(close(token).is_err(), "unconfirmed close must fail");
+        identity(token).expect("failed close must keep the same generation");
+        poll(token).expect("active owner remains usable");
+
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        close(token).expect("retry close after unreaped failure");
+        assert!(identity(token).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deadline_monitor_setup_failure_returns_no_handle() {
+        inject::FORCE_DEADLINE_THREAD_FAIL.store(true, Ordering::SeqCst);
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(5_000);
+        let result = spawn(req);
+        inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
+        assert!(
+            result.is_err(),
+            "deadline setup failure must not return a handle"
+        );
+        let token = spawn(request(vec!["true"])).expect("registry remains usable");
+        close(token).expect("close after deadline-setup failure");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_spawn_and_close_does_not_deadlock() {
+        let (done_tx, done_rx) = mpsc::channel();
+        let workers = 8;
+        let iterations = 20;
+        for _ in 0..workers {
+            let done_tx = done_tx.clone();
+            thread::spawn(move || {
+                for _ in 0..iterations {
+                    if let Ok(token) = spawn(request(vec!["true"])) {
+                        let _ = wait(token, 2_000);
+                        let _ = close(token);
+                    }
+                }
+                let _ = done_tx.send(());
+            });
+        }
+        drop(done_tx);
+        for _ in 0..workers {
+            done_rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("spawn/close worker deadlocked or timed out");
+        }
     }
 }

@@ -69,22 +69,43 @@ type ContainmentSnapshot struct {
 	Warnings            []string               `json:"warnings"`
 }
 
+const (
+	handleOpen uint32 = iota
+	handleClosing
+	handleClosed
+)
+
 // ContainedProcess is a Go projection of a native-owned containment handle.
 //
 // The wrapper stores only the scalar capability token. Close is deterministic;
 // a finalizer is a leak backstop only.
 type ContainedProcess struct {
 	token atomic.Uint64
+	state atomic.Uint32
+}
+
+var nativeCloseFn func(uint64) error
+
+func nativeClose(token uint64) error {
+	if nativeCloseFn != nil {
+		return nativeCloseFn(token)
+	}
+	return callAndCheck(func() C.SysprimsErrorCode {
+		return C.sysprims_containment_close(C.uint64_t(token))
+	})
 }
 
 func containedFinalizer(handle *ContainedProcess) {
-	token := handle.token.Swap(0)
-	if token == 0 {
+	if !handle.state.CompareAndSwap(handleOpen, handleClosing) {
 		return
 	}
-	_ = callAndCheck(func() C.SysprimsErrorCode {
-		return C.sysprims_containment_close(C.uint64_t(token))
-	})
+	token := handle.token.Swap(0)
+	if token == 0 {
+		handle.state.Store(handleClosed)
+		return
+	}
+	_ = nativeClose(token)
+	handle.state.Store(handleClosed)
 }
 
 // SpawnContained asks sysprims to spawn and own a contained child.
@@ -167,15 +188,25 @@ func (h *ContainedProcess) Poll() (*ContainmentSnapshot, error) {
 }
 
 // Wait waits for a terminal outcome or until timeout. A timeout of 0 waits
-// until the native lifecycle finishes. The timeout only ends this wait.
+// until the native lifecycle finishes. Negative timeouts are rejected. A
+// positive sub-millisecond timeout is rounded up to 1ms so it is never sent
+// as 0 (infinite). The timeout only ends this wait.
 func (h *ContainedProcess) Wait(timeout time.Duration) (*ContainmentSnapshot, error) {
 	token, err := h.currentToken()
 	if err != nil {
 		return nil, err
 	}
+	if timeout < 0 {
+		return nil, &Error{Code: ErrInvalidArgument, Message: "wait timeout must not be negative"}
+	}
 	var timeoutMS uint64
 	if timeout > 0 {
-		timeoutMS = uint64(timeout.Milliseconds())
+		ms := timeout.Milliseconds()
+		if ms <= 0 {
+			timeoutMS = 1
+		} else {
+			timeoutMS = uint64(ms)
+		}
 	}
 	return snapshotCall(func(result **C.char) C.SysprimsErrorCode {
 		return C.sysprims_containment_wait(C.uint64_t(token), C.uint64_t(timeoutMS), result)
@@ -194,16 +225,39 @@ func (h *ContainedProcess) Terminate() (*ContainmentSnapshot, error) {
 }
 
 // Close releases the native registry entry. The second call is a no-op.
+// The wrapper token is cleared only after native close succeeds. A failed
+// close restores Open so the caller can retry.
 func (h *ContainedProcess) Close() error {
 	if h == nil {
 		return nil
 	}
-	token := h.token.Swap(0)
+	for {
+		switch h.state.Load() {
+		case handleClosed:
+			return nil
+		case handleClosing:
+			runtime.Gosched()
+		default:
+			if h.state.CompareAndSwap(handleOpen, handleClosing) {
+				return h.finishClose()
+			}
+		}
+	}
+}
+
+func (h *ContainedProcess) finishClose() error {
+	token := h.token.Load()
 	if token == 0 {
+		h.state.Store(handleClosed)
 		return nil
 	}
 	runtime.SetFinalizer(h, nil)
-	return callAndCheck(func() C.SysprimsErrorCode {
-		return C.sysprims_containment_close(C.uint64_t(token))
-	})
+	if err := nativeClose(token); err != nil {
+		runtime.SetFinalizer(h, containedFinalizer)
+		h.state.Store(handleOpen)
+		return err
+	}
+	h.token.Store(0)
+	h.state.Store(handleClosed)
+	return nil
 }
