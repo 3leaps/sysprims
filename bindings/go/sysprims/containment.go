@@ -20,15 +20,15 @@ const containmentSpawnSchemaID = "https://schemas.3leaps.dev/sysprims/timeout/v1
 // Argv is an argument vector, not a shell command string. The constructor is
 // always contained; there is no foreground mode. Windows fails before spawn.
 type SpawnContainedConfig struct {
-	SchemaID            string            `json:"schema_id"`
-	Argv                []string          `json:"argv"`
-	Cwd                 *string           `json:"cwd,omitempty"`
-	Env                 map[string]string `json:"env,omitempty"`
-	ExecutionTimeoutMS  *uint64           `json:"execution_timeout_ms,omitempty"`
-	GraceTimeoutMS      *uint64           `json:"grace_timeout_ms,omitempty"`
-	KillTimeoutMS       *uint64           `json:"kill_timeout_ms,omitempty"`
-	Signal              *int32            `json:"signal,omitempty"`
-	KillSignal          *int32            `json:"kill_signal,omitempty"`
+	SchemaID           string            `json:"schema_id"`
+	Argv               []string          `json:"argv"`
+	Cwd                *string           `json:"cwd,omitempty"`
+	Env                map[string]string `json:"env,omitempty"`
+	ExecutionTimeoutMS *uint64           `json:"execution_timeout_ms,omitempty"`
+	GraceTimeoutMS     *uint64           `json:"grace_timeout_ms,omitempty"`
+	KillTimeoutMS      *uint64           `json:"kill_timeout_ms,omitempty"`
+	Signal             *int32            `json:"signal,omitempty"`
+	KillSignal         *int32            `json:"kill_signal,omitempty"`
 }
 
 // ContainmentIdentity is diagnostic spawn evidence. PID is never authority.
@@ -51,22 +51,22 @@ type ContainmentCompletion struct {
 // Reliability and boundary_strength are immutable from spawn. Completion is
 // independent of both. Survivor PIDs are evidence only.
 type ContainmentSnapshot struct {
-	SchemaID             string                 `json:"schema_id"`
-	Timestamp            string                 `json:"timestamp"`
-	Platform             string                 `json:"platform"`
-	HandleState          string                 `json:"handle_state"`
-	LeaderStatus         string                 `json:"leader_status"`
-	Identity             ContainmentIdentity    `json:"identity"`
-	TreeKillReliability  string                 `json:"tree_kill_reliability"`
-	BoundaryStrength     string                 `json:"boundary_strength"`
-	PGID                 *uint32                `json:"pgid,omitempty"`
-	SignalSent           *int32                 `json:"signal_sent,omitempty"`
-	KillSignal           *int32                 `json:"kill_signal,omitempty"`
-	Escalated            *bool                  `json:"escalated,omitempty"`
-	Exited               *bool                  `json:"exited,omitempty"`
-	TimedOut             *bool                  `json:"timed_out,omitempty"`
-	Completion           *ContainmentCompletion `json:"completion,omitempty"`
-	Warnings             []string               `json:"warnings"`
+	SchemaID            string                 `json:"schema_id"`
+	Timestamp           string                 `json:"timestamp"`
+	Platform            string                 `json:"platform"`
+	HandleState         string                 `json:"handle_state"`
+	LeaderStatus        string                 `json:"leader_status"`
+	Identity            ContainmentIdentity    `json:"identity"`
+	TreeKillReliability string                 `json:"tree_kill_reliability"`
+	BoundaryStrength    string                 `json:"boundary_strength"`
+	PGID                *uint32                `json:"pgid,omitempty"`
+	SignalSent          *int32                 `json:"signal_sent,omitempty"`
+	KillSignal          *int32                 `json:"kill_signal,omitempty"`
+	Escalated           *bool                  `json:"escalated,omitempty"`
+	Exited              *bool                  `json:"exited,omitempty"`
+	TimedOut            *bool                  `json:"timed_out,omitempty"`
+	Completion          *ContainmentCompletion `json:"completion,omitempty"`
+	Warnings            []string               `json:"warnings"`
 }
 
 // ContainedProcess is a Go projection of a native-owned containment handle.
