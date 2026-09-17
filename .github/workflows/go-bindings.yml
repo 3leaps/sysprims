@@ -24,7 +24,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Validate complete version pack
         id: version
         run: |
@@ -42,7 +42,7 @@ jobs:
     name: Build FFI (Linux)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
       options: --user root
     needs: validate
     strategy:
@@ -61,7 +61,7 @@ jobs:
             glibc: ""
             artifact_suffix: linux-arm64-musl
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Build FFI
         shell: bash
         run: |
@@ -115,12 +115,12 @@ jobs:
           TARGET_DIR_SHARED="$(resolve_target libsysprims_ffi.so)"
           cp "target/${TARGET_DIR_SHARED}/release/libsysprims_ffi.so" "dist/ffi-shared/${{ matrix.artifact_suffix }}/"
       - name: Upload FFI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-${{ matrix.artifact_suffix }}
           path: dist/ffi/${{ matrix.artifact_suffix }}
       - name: Upload FFI shared artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-${{ matrix.artifact_suffix }}
           path: dist/ffi-shared/${{ matrix.artifact_suffix }}
@@ -136,17 +136,17 @@ jobs:
           - platform: linux-arm64
             runner: ubuntu-latest-arm64-s
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.22'
       - name: Download staged static library
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-${{ matrix.platform }}
           path: staged-static
       - name: Download staged shared library
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-shared-${{ matrix.platform }}
           path: staged-shared
@@ -171,11 +171,11 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.22'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build FFI (both targets)
@@ -239,22 +239,22 @@ jobs:
             arch -x86_64 "$RUNNER_TEMP/sysprims-shared-amd64.test" \
             -test.run '^TestVersion$'
       - name: Upload FFI artifact (darwin-amd64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-darwin-amd64
           path: dist/ffi/darwin-amd64
       - name: Upload FFI shared artifact (darwin-amd64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-darwin-amd64
           path: dist/ffi-shared/darwin-amd64
       - name: Upload FFI artifact (darwin-arm64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-darwin-arm64
           path: dist/ffi/darwin-arm64
       - name: Upload FFI shared artifact (darwin-arm64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-darwin-arm64
           path: dist/ffi-shared/darwin-arm64
@@ -263,15 +263,15 @@ jobs:
     runs-on: windows-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.22'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-pc-windows-gnu
       - name: Install MinGW
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           msystem: MINGW64
           update: true
@@ -307,12 +307,12 @@ jobs:
           PATH="$PWD/lib-shared/windows-amd64:$PATH" \
             go test -run '^TestVersion$' -tags=sysprims_shared .
       - name: Upload FFI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-windows-amd64
           path: dist/ffi/windows-amd64
       - name: Upload FFI shared artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-windows-amd64
           path: dist/ffi-shared/windows-amd64
@@ -321,8 +321,8 @@ jobs:
     runs-on: windows-latest-arm64-s
     needs: validate
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.22'
       - name: Install llvm-mingw (aarch64 ucrt, pinned)
@@ -341,7 +341,7 @@ jobs:
           $binDir = Join-Path $topDir.FullName 'bin'
           if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: aarch64-pc-windows-gnullvm
       - name: Build FFI (gnullvm target)
@@ -380,12 +380,12 @@ jobs:
             Pop-Location
           }
       - name: Upload FFI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-windows-arm64
           path: dist/ffi/windows-arm64
       - name: Upload FFI shared artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-windows-arm64
           path: dist/ffi-shared/windows-arm64
@@ -396,19 +396,19 @@ jobs:
       image: golang:1.22-alpine
     needs: [validate, build-linux]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install build dependencies
         shell: sh
         run: |
           set -eu
           apk add --no-cache bash build-base
       - name: Download musl artifacts (linux-amd64-musl)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-linux-amd64-musl
           path: ffi-linux-amd64-musl
       - name: Download musl shared artifact (linux-amd64-musl)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-shared-linux-amd64-musl
           path: ffi-shared-linux-amd64-musl
@@ -437,14 +437,14 @@ jobs:
     runs-on: ubuntu-latest-arm64-s
     needs: [validate, build-linux]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Download musl artifacts (linux-arm64-musl)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-linux-arm64-musl
           path: ffi-linux-arm64-musl
       - name: Download musl shared artifact (linux-arm64-musl)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-shared-linux-arm64-musl
           path: ffi-shared-linux-arm64-musl
@@ -478,18 +478,18 @@ jobs:
     name: Generate C Header
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
       options: --user root
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Generate C header
         shell: bash
         run: |
           set -euo pipefail
           cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
       - name: Upload header
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: c-header
           path: sysprims.h
@@ -510,17 +510,17 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Download all FFI artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: ffi-*
           path: ffi-libs
       - name: Download C header
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: c-header
           path: ffi-libs
@@ -557,7 +557,7 @@ jobs:
             ls -la bindings/go/sysprims/lib-shared/*/ || true
           fi
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           base: main

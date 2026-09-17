@@ -8,7 +8,7 @@ jobs:
     name: Validate release tag and versions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
       - name: Guard exact tags and complete version pack
@@ -31,15 +31,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '20'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406  # v2
         with:
           version: 0.12.0
       - name: Install Rust targets
@@ -76,7 +76,7 @@ jobs:
             --target aarch64-unknown-linux-musl --zig
           mv sysprims.linux-arm64-musl.node prebuilds/
       - name: Upload prebuilds
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ts-prebuilds-linux
           path: bindings/typescript/sysprims/prebuilds/*.node
@@ -85,13 +85,13 @@ jobs:
     runs-on: ubuntu-latest-arm64-s
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '20'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
@@ -105,7 +105,7 @@ jobs:
           npx napi build --cargo-cwd native --release --platform --js false --strip
           mv sysprims.linux-arm64-gnu.node prebuilds/
       - name: Upload prebuild
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ts-prebuilds-linux-arm64-gnu-native
           path: bindings/typescript/sysprims/prebuilds/*.node
@@ -114,13 +114,13 @@ jobs:
     runs-on: macos-14
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '20'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
@@ -134,7 +134,7 @@ jobs:
           npx napi build --cargo-cwd native --release --platform --js false --strip
           mv sysprims.darwin-arm64.node prebuilds/
       - name: Upload prebuild
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ts-prebuilds-darwin-arm64
           path: bindings/typescript/sysprims/prebuilds/*.node
@@ -143,13 +143,13 @@ jobs:
     runs-on: windows-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '20'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
@@ -163,7 +163,7 @@ jobs:
           npx napi build --cargo-cwd native --release --platform --js false --strip
           Move-Item sysprims.win32-x64-msvc.node prebuilds/
       - name: Upload prebuild
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ts-prebuilds-win32-x64-msvc
           path: bindings/typescript/sysprims/prebuilds/*.node
@@ -172,13 +172,13 @@ jobs:
     runs-on: windows-latest-arm64-s
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '20'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
@@ -192,7 +192,7 @@ jobs:
           npx napi build --cargo-cwd native --release --platform --js false --strip
           Move-Item sysprims.win32-arm64-msvc.node prebuilds/
       - name: Upload prebuild
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ts-prebuilds-win32-arm64-msvc
           path: bindings/typescript/sysprims/prebuilds/*.node
@@ -201,13 +201,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-linux, build-linux-arm64, build-macos-arm64, build-windows, build-windows-arm64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '20'
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
         run: npm install
@@ -221,7 +221,7 @@ jobs:
           set -euo pipefail
           rm -f dist/native/sysprims.*.node || true
       - name: Download prebuilds
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: ts-prebuilds-*
           path: downloaded-prebuilds
@@ -259,7 +259,7 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: npm run platform-packages:check
       - name: Upload npm dir
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ts-npm-dir
           path: bindings/typescript/sysprims/npm

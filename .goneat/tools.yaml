@@ -92,7 +92,7 @@ tools:
     description: Makefile linter
     kind: go
     detect_command: checkmake -v
-    install_package: github.com/mrtazz/checkmake/cmd/checkmake@latest
+    install_package: github.com/mrtazz/checkmake/cmd/checkmake@v0.3.2
     version_args:
       - -v
     check_args:
@@ -156,7 +156,7 @@ tools:
     description: YAML formatter
     kind: go
     detect_command: yamlfmt --version
-    install_package: github.com/google/yamlfmt/cmd/yamlfmt@latest
+    install_package: github.com/google/yamlfmt/cmd/yamlfmt@v0.21.0
     version_args:
       - --version
     check_args:
@@ -196,7 +196,7 @@ tools:
     description: GitHub Actions workflow linter
     kind: go
     detect_command: actionlint -version
-    install_package: github.com/rhysd/actionlint/cmd/actionlint@latest
+    install_package: github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
     version_args:
       - -version
     check_args:
@@ -342,7 +342,7 @@ tools:
     description: Git secrets scanner
     kind: go
     detect_command: gitleaks version
-    install_package: github.com/zricethezav/gitleaks/v8@latest
+    install_package: github.com/zricethezav/gitleaks/v8@v8.30.1
     version_args:
       - version
     check_args:

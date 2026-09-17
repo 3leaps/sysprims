@@ -22,7 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
       - name: Guard exact tags and complete version pack
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Verify Go module contains prebuilt libs
         run: |
           set -euo pipefail
@@ -82,9 +82,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install Rust 1.88.0
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
         with:
           toolchain: 1.88.0
       - name: Package crates without publishing
@@ -94,7 +94,7 @@ jobs:
     name: Build Linux
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
       options: --user root
     needs: validate-version
     strategy:
@@ -113,7 +113,7 @@ jobs:
             glibc: ""
             artifact_suffix: linux-arm64-musl
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Build CLI
         run: |
           if [ -n "${{ matrix.glibc }}" ]; then
@@ -211,18 +211,18 @@ jobs:
           mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
           cp "target/${TARGET_DIR}/release/libsysprims_ffi.so" dist/ffi-shared/${{ matrix.artifact_suffix }}/
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-${{ matrix.artifact_suffix }}
           path: sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
       - name: Upload FFI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-${{ matrix.artifact_suffix }}
           path: dist/ffi/${{ matrix.artifact_suffix }}
       - name: Upload FFI artifact (shared)
         if: ${{ matrix.glibc != '' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-${{ matrix.artifact_suffix }}
           path: dist/ffi-shared/${{ matrix.artifact_suffix }}
@@ -234,8 +234,8 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build CLI (both targets)
@@ -269,32 +269,32 @@ jobs:
           cp target/x86_64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-amd64/
           cp target/aarch64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-arm64/
       - name: Upload CLI artifact (darwin-amd64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-darwin-amd64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-amd64.tar.gz
       - name: Upload CLI artifact (darwin-arm64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-darwin-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz
       - name: Upload FFI artifact (darwin-amd64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-darwin-amd64
           path: dist/ffi/darwin-amd64
       - name: Upload FFI artifact (shared, darwin-amd64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-darwin-amd64
           path: dist/ffi-shared/darwin-amd64
       - name: Upload FFI artifact (darwin-arm64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-darwin-arm64
           path: dist/ffi/darwin-arm64
       - name: Upload FFI artifact (shared, darwin-arm64)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-darwin-arm64
           path: dist/ffi-shared/darwin-arm64
@@ -305,12 +305,12 @@ jobs:
     runs-on: windows-latest
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-pc-windows-gnu
       - name: Install MinGW
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
         with:
           msystem: MINGW64
           update: true
@@ -335,12 +335,12 @@ jobs:
           mkdir -p dist/ffi/windows-amd64
           cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-windows-amd64
           path: sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip
       - name: Upload FFI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-windows-amd64
           path: dist/ffi/windows-amd64
@@ -354,7 +354,7 @@ jobs:
     runs-on: windows-latest-arm64-s
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install llvm-mingw (aarch64 ucrt, pinned)
         shell: pwsh
         run: |
@@ -371,7 +371,7 @@ jobs:
           $binDir = Join-Path $topDir.FullName 'bin'
           if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: aarch64-pc-windows-msvc,aarch64-pc-windows-gnullvm
       - name: Build CLI (MSVC)
@@ -406,17 +406,17 @@ jobs:
             Copy-Item "$out/libsysprims_ffi.dll.a" dist/ffi-shared/windows-arm64/
           }
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-windows-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-windows-arm64.zip
       - name: Upload FFI artifact (static)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-windows-arm64
           path: dist/ffi/windows-arm64
       - name: Upload FFI artifact (shared)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-windows-arm64
           path: dist/ffi-shared/windows-arm64
@@ -427,8 +427,8 @@ jobs:
     runs-on: windows-latest
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-pc-windows-msvc
       - name: Build FFI (MSVC target)
@@ -449,7 +449,7 @@ jobs:
             Copy-Item target/x86_64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi-shared/windows-amd64/
           }
       - name: Upload FFI artifact (shared)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-shared-windows-amd64
           path: dist/ffi-shared/windows-amd64
@@ -458,16 +458,16 @@ jobs:
     name: Generate C Header
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.2
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
       options: --user root
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Generate C header
         run: |
           cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
       - name: Upload header
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: c-header
           path: sysprims.h
@@ -476,16 +476,16 @@ jobs:
     name: Generate SBOM
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/sbom-tools:latest
+      image: ghcr.io/fulmenhq/sbom-tools@sha256:954267f9aca809b89af42bb97471a3c4d7b93c385c5625829b244b17b252fbde
       options: --user 1001
     needs: validate-version
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Generate SBOM (CycloneDX)
         run: |
           syft dir:. -o cyclonedx-json > sbom-${{ needs.validate-version.outputs.version }}.cdx.json
       - name: Upload SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: sbom
           path: sbom-${{ needs.validate-version.outputs.version }}.cdx.json
@@ -496,7 +496,7 @@ jobs:
     needs: [validate-version, build-linux, build-macos, build-windows-msvc, build-windows-arm64]
     steps:
       - name: Download shared-lib artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: ffi-shared-*
           path: ffi-shared-libs
@@ -547,14 +547,14 @@ jobs:
       - cbindgen
       - verify-ffi-shared-assets
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Download all FFI artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: ffi-*
           path: ffi-libs
       - name: Download C header
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: c-header
           path: ffi-libs
@@ -664,7 +664,7 @@ jobs:
 
           tar -czf sysprims-ffi-${VERSION}-libs.tar.gz -C bundle .
       - name: Upload FFI bundle
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: ffi-bundle
           path: sysprims-ffi-${{ needs.validate-version.outputs.version }}-libs.tar.gz
@@ -688,24 +688,24 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Download all CLI artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: cli-*
           path: release-cli
       - name: Download FFI bundle
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ffi-bundle
           path: release-ffi
       - name: Download C header
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: c-header
           path: release-header
       - name: Download SBOM
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: sbom
           path: release-sbom
@@ -730,7 +730,7 @@ jobs:
 
           ls -la release/
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: release/*
           generate_release_notes: true
