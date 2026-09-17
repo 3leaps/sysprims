@@ -49,10 +49,16 @@ use sysprims_core::time::now_rfc3339;
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 use sysprims_proc::wait_pid;
 
+pub mod managed;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
 mod windows;
+pub use managed::{
+    close as containment_close, identity as containment_identity, poll as containment_poll,
+    spawn as containment_spawn, terminate as containment_terminate, wait as containment_wait,
+    ManagedSnapshot, ManagedSpawnRequest,
+};
 
 // Re-export signal constants for convenience
 pub use sysprims_signal::{SIGKILL, SIGTERM};

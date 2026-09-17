@@ -1,3 +1,4 @@
+import { ContainedProcess, spawnContained } from "./containment";
 import { SysprimsError, SysprimsErrorCode } from "./errors";
 import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
 import type {
@@ -40,12 +41,16 @@ import {
   validateU32,
 } from "./validation";
 
-export { SysprimsError, SysprimsErrorCode };
+export { ContainedProcess, spawnContained, SysprimsError, SysprimsErrorCode };
+export type { ContainedProcessWaitOptions } from "./containment";
 export type {
   AncestorsOptions,
   AncestorsResult,
   BatchKillFailure,
   BatchKillResult,
+  ContainmentCompletion,
+  ContainmentIdentity,
+  ContainmentSnapshot,
   CpuMode,
   DescendantsLevel,
   DescendantsOptions,
@@ -77,6 +82,7 @@ export type {
   SessionSpawnResult,
   SessionSpawnStatus,
   SessionSpawnVerb,
+  SpawnContainedOptions,
   SpawnInGroupConfig,
   SpawnInGroupResult,
   TerminateTreeConfig,

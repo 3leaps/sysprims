@@ -28,11 +28,11 @@ or incompatible narrowing or widening is not.
 
 | Surface | Count | Policy |
 | --- | ---: | --- |
-| C-ABI runtime functions | 35 | Every function is classified below. |
-| N-API runtime functions | 22 | Every function is classified below. |
-| Public TypeScript functions | 22 | All remain public and patch-compatible. |
-| Other public runtime values | 2 | `SysprimsError` and `SysprimsErrorCode` remain public. |
-| Explicit package-root type exports | 38 | All remain public and patch-compatible. |
+| C-ABI runtime functions | 41 | Every function is classified below. |
+| N-API runtime functions | 28 | Every function is classified below. |
+| Public TypeScript functions | 23 | All remain public and patch-compatible. |
+| Other public runtime values | 3 | `SysprimsError`, `SysprimsErrorCode`, and `ContainedProcess` remain public. |
+| Explicit package-root type exports | 44 | All remain public and patch-compatible. |
 
 ## Public Capability Matrix
 
@@ -59,6 +59,8 @@ or incompatible narrowing or widening is not.
 | JavaScript batch signal conveniences | TypeScript composition over native signal operations | none | none | `killMany`, `terminateMany`, `forceKillMany`; `BatchKillFailure`, `BatchKillResult` | exposed | Operations validate and report per-PID failures. They do not add native batch authority. |
 | PID-based tree termination | `sysprims_timeout::terminate_tree` | `sysprims_terminate_tree` | `sysprimsTerminateTree` | `terminateTree`; `TerminateTreeConfig`, `TerminateTreeResult` | exposed | Legacy PID-based operation. Windows has no owned Job handle and is best-effort. |
 | PID-returning grouped spawn | `sysprims_timeout::spawn_in_group` | `sysprims_spawn_in_group` | `sysprimsSpawnInGroup` | `spawnInGroup`; `SpawnInGroupConfig`, `SpawnInGroupResult` | exposed | Unix creates a process group. Windows fails before spawn because a PID cannot retain Job ownership. |
+| Managed contained spawn | `sysprims_timeout::spawn_contained` via the native lifecycle registry | `sysprims_containment_spawn` | `sysprimsContainmentSpawn` | `spawnContained`; `ContainedProcess`, `SpawnContainedOptions` | exposed | Sole constructor. Always contained. Unix success is `guaranteed` plus `cooperative_group`. Windows fails before spawn. Native code owns the child; callers receive a generation-checked token, never a PID. |
+| Managed containment lifecycle | `sysprims_timeout::managed` registry over `ContainmentGuard` | `sysprims_containment_identity`, `sysprims_containment_poll`, `sysprims_containment_wait`, `sysprims_containment_terminate`, `sysprims_containment_close` | `sysprimsContainmentIdentity`, `sysprimsContainmentPoll`, `sysprimsContainmentWait`, `sysprimsContainmentTerminate`, `sysprimsContainmentClose` | `ContainedProcess`; `ContainmentSnapshot`, `ContainmentIdentity`, `ContainmentCompletion`, `ContainedProcessWaitOptions` | exposed | Promise/async-worker off the event loop. Wait cancellation abandons the waiter only. Close is deterministic; a finalizer is a leak backstop. Invalid, stale, foreign, and reused tokens fail closed. |
 | Timeout execution | `sysprims_timeout::run_with_timeout` | `sysprims_timeout_run` | none | none | excluded | A public asynchronous contract needs separately approved native ownership, cancellation, concurrency limits, Node teardown, and guaranteed child cleanup. A blocking N-API projection would stall the JavaScript event loop. |
 | Error values | `sysprims_core::SysprimsError` | C error codes | N-API call result envelopes | `SysprimsError`, `SysprimsErrorCode` | exposed | Public wrappers convert native result envelopes into exceptions. C thread-local error plumbing is not exposed. |
 
@@ -94,6 +96,12 @@ runtime names shown here.
 | `sysprimsRunSetsid` | `sysprims_run_setsid` | `runSetsid` | exposed |  |
 | `sysprimsRunNohup` | `sysprims_run_nohup` | `runNohup` | exposed |  |
 | `sysprimsSpawnInGroup` | `sysprims_spawn_in_group` | `spawnInGroup` | exposed |  |
+| `sysprimsContainmentSpawn` | `sysprims_timeout::containment_spawn` | `spawnContained` | exposed | Native token is a bigint, never a JavaScript number. |
+| `sysprimsContainmentIdentity` | `sysprims_timeout::containment_identity` | `ContainedProcess` | exposed |  |
+| `sysprimsContainmentPoll` | `sysprims_timeout::containment_poll` | `ContainedProcess` | exposed |  |
+| `sysprimsContainmentWait` | `sysprims_timeout::containment_wait` | `ContainedProcess` | exposed | Async worker; abort abandons the waiter only. |
+| `sysprimsContainmentTerminate` | `sysprims_timeout::containment_terminate` | `ContainedProcess` | exposed |  |
+| `sysprimsContainmentClose` | `sysprims_timeout::containment_close` | `ContainedProcess` | exposed |  |
 
 The N-API result objects `SysprimsCallJsonResult`, `SysprimsCallU32Result`, and
 `SysprimsCallVoidResult` are internal transport shapes, not supported public
@@ -147,16 +155,22 @@ ABI and retains its existing compatibility contract.
 | `sysprims_timeout_run` | Timeout execution | excluded from TypeScript | No N-API projection exists. Safe asynchronous ownership, cancellation, teardown, and cleanup semantics require separate design approval. |
 | `sysprims_terminate_tree` | PID-based tree termination | exposed as `terminateTree` |  |
 | `sysprims_spawn_in_group` | PID-returning grouped spawn | exposed as `spawnInGroup` |  |
+| `sysprims_containment_spawn` | Managed contained spawn | exposed as `spawnContained` | Opaque generation-checked token; not a PID or pointer. |
+| `sysprims_containment_identity` | Managed containment lifecycle | exposed as `ContainedProcess` |  |
+| `sysprims_containment_poll` | Managed containment lifecycle | exposed as `ContainedProcess` |  |
+| `sysprims_containment_wait` | Managed containment lifecycle | exposed as `ContainedProcess` |  |
+| `sysprims_containment_terminate` | Managed containment lifecycle | exposed as `ContainedProcess` |  |
+| `sysprims_containment_close` | Managed containment lifecycle | exposed as `ContainedProcess` |  |
 
 ## Pure-Rust Intent and Explicit Exclusions
 
 | Rust capability | C ABI | N-API | Public TypeScript | Disposition | Rationale |
 | --- | --- | --- | --- | --- | --- |
-| `sysprims_timeout::spawn_contained` | none | none | none | excluded | Windows guaranteed spawn fails closed until create-suspended Job assignment exists. Returning only a PID would discard ownership. |
+| `sysprims_timeout::spawn_contained` | `sysprims_containment_spawn` | `sysprimsContainmentSpawn` | `spawnContained` | exposed through the managed handle | Bindings never receive the Rust `Command`/`Child`. The registry performs the owned spawn and returns a capability token. |
 | `sysprims_timeout::adopt_contained` | none | none | none | excluded | Post-spawn adoption is `unproven`; JavaScript cannot transfer a generic owned child and receive it back on acquisition failure. `adoptContained(pid)` is forbidden. |
-| `sysprims_timeout::ContainmentGuard` | none | none | none | excluded | The guard owns the child and process-group or Job capability, has one-shot finalization, retains ownership on failure, and kills on active drop. A PID must never reconstruct or borrow a guard. |
-| `sysprims_timeout::ContainmentOutcome` | none | none | none | excluded | Outcome data is meaningful only with a native-owned guard lifecycle that is intentionally outside this surface. |
-| `sysprims_timeout::ContainmentIdentity` | none | none | none | excluded | PID, start time, and executable are immutable native evidence, not caller-constructible termination authority. |
+| `sysprims_timeout::ContainmentGuard` | none as a raw type; lifecycle projected through the registry | none as a class field | none as a reconstructible object | excluded as a raw type | The guard stays native-owned. A PID must never reconstruct or borrow a guard. |
+| `sysprims_timeout::ContainmentOutcome` | projected by `sysprims_containment_poll` / wait / terminate | projected by the matching N-API tasks | `ContainmentSnapshot` | exposed as snapshot evidence | Outcome data is readable only through the managed handle. |
+| `sysprims_timeout::ContainmentIdentity` | projected through the managed snapshot | projected through the managed snapshot | `ContainmentIdentity` | exposed as read-only evidence | PID, start time, and executable are diagnostic evidence, not caller-constructible termination authority. |
 | `sysprims_timeout::ContainmentChild` | none | none | none | excluded | Rust adapter trait includes platform-specific owned child and raw-handle requirements. |
 | `sysprims_timeout::{run_with_timeout, run_with_timeout_default}` | C exposes only the options-capable operation | none | none | excluded | The default function is a Rust convenience alias. Both remain outside TypeScript until a safe asynchronous lifecycle contract is approved. |
 | `sysprims_proc::GuardRunner` managed loop | C polling handle family | none | none | excluded | Native blocking scheduling and signal integration do not define a safe JavaScript event-loop and disposal contract. Public `guardStep` remains available. |
@@ -175,23 +189,25 @@ ABI and retains its existing compatibility contract.
 
 ## Public Type Export Inventory
 
-The emitted package root must continue to export these 38 explicit type names:
+The emitted package root must continue to export these 44 explicit type names:
 
 `AncestorsOptions`, `AncestorsResult`, `BatchKillFailure`, `BatchKillResult`,
-`CpuMode`, `DescendantsLevel`, `DescendantsOptions`, `DescendantsResult`,
-`FdFilter`, `FdSnapshot`, `GuardAction`, `GuardConfig`, `GuardEvent`, `GuardRule`,
-`KillDescendantsFailure`, `KillDescendantsOptions`, `KillDescendantsResult`,
-`PortBinding`, `PortBindingsSnapshot`, `PortFilter`, `ProcessFilter`,
-`ProcessInfo`, `ProcessOptions`, `ProcessSnapshot`, `ProcessState`, `Protocol`,
-`RunNohupConfig`, `RunSetsidConfig`, `SessionIdentifierProvenance`,
-`SessionKind`, `SessionSpawnResult`, `SessionSpawnStatus`, `SessionSpawnVerb`,
+`ContainedProcessWaitOptions`, `ContainmentCompletion`, `ContainmentIdentity`,
+`ContainmentSnapshot`, `CpuMode`, `DescendantsLevel`, `DescendantsOptions`,
+`DescendantsResult`, `FdFilter`, `FdSnapshot`, `GuardAction`, `GuardConfig`,
+`GuardEvent`, `GuardRule`, `KillDescendantsFailure`, `KillDescendantsOptions`,
+`KillDescendantsResult`, `PortBinding`, `PortBindingsSnapshot`, `PortFilter`,
+`ProcessFilter`, `ProcessInfo`, `ProcessOptions`, `ProcessSnapshot`,
+`ProcessState`, `Protocol`, `RunNohupConfig`, `RunSetsidConfig`,
+`SessionIdentifierProvenance`, `SessionKind`, `SessionSpawnResult`,
+`SessionSpawnStatus`, `SessionSpawnVerb`, `SpawnContainedOptions`,
 `SpawnInGroupConfig`, `SpawnInGroupResult`, `TerminateTreeConfig`,
 `TerminateTreeResult`, and `WaitPidResult`.
 
-`SysprimsError` and `SysprimsErrorCode` also remain available in both the value
-and type namespaces. `FdInfo` and `FdKind` are proposed additive package-root
-type exports because existing public `FdSnapshot` and `FdFilter` declarations
-already reference them.
+`ContainedProcess`, `SysprimsError`, and `SysprimsErrorCode` also remain
+available in both the value and type namespaces. `FdInfo` and `FdKind` remain
+package-root type exports because existing public `FdSnapshot` and `FdFilter`
+declarations already reference them.
 
 ## Projection and Drift Policy
 

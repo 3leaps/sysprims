@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-snapshot.schema.json",
+  "title": "Managed containment snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "timestamp",
+    "platform",
+    "handle_state",
+    "leader_status",
+    "identity",
+    "tree_kill_reliability",
+    "boundary_strength",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-snapshot.schema.json"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "handle_state": {
+      "type": "string",
+      "enum": ["active", "inert"]
+    },
+    "leader_status": {
+      "type": "string",
+      "enum": ["running", "completed", "timed_out", "terminated"]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "start_time_unix_ms", "exe_path"],
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "start_time_unix_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exe_path": {
+          "type": "string"
+        }
+      }
+    },
+    "tree_kill_reliability": {
+      "type": "string",
+      "enum": ["guaranteed", "unproven", "best_effort"]
+    },
+    "boundary_strength": {
+      "type": "string",
+      "enum": ["cooperative_group", "kernel_enforced_job", "unknown"]
+    },
+    "pgid": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "signal_sent": {
+      "type": ["integer", "null"]
+    },
+    "kill_signal": {
+      "type": ["integer", "null"]
+    },
+    "escalated": {
+      "type": ["boolean", "null"]
+    },
+    "exited": {
+      "type": ["boolean", "null"]
+    },
+    "timed_out": {
+      "type": ["boolean", "null"]
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observation"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["empty", "survivors", "unknown"]
+        },
+        "observation": {
+          "type": "string"
+        },
+        "observed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "survivor_pids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

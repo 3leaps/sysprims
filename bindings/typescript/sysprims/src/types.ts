@@ -391,3 +391,45 @@ export interface GuardEvent {
   skipped_safety: number;
   warnings: string[];
 }
+
+export interface SpawnContainedOptions {
+  cwd?: string | null;
+  env?: Record<string, string> | null;
+  executionTimeoutMs?: number;
+  graceTimeoutMs?: number;
+  killTimeoutMs?: number;
+  signal?: number;
+  killSignal?: number;
+}
+
+export interface ContainmentIdentity {
+  pid: number;
+  start_time_unix_ms: number;
+  exe_path: string;
+}
+
+export interface ContainmentCompletion {
+  status: "empty" | "survivors" | "unknown";
+  observation: string;
+  observed_count?: number;
+  survivor_pids?: number[];
+}
+
+export interface ContainmentSnapshot {
+  schema_id: string;
+  timestamp: string;
+  platform: string;
+  handle_state: "active" | "inert";
+  leader_status: "running" | "completed" | "timed_out" | "terminated";
+  identity: ContainmentIdentity;
+  tree_kill_reliability: "guaranteed" | "unproven" | "best_effort";
+  boundary_strength: "cooperative_group" | "kernel_enforced_job" | "unknown";
+  pgid?: number | null;
+  signal_sent?: number | null;
+  kill_signal?: number | null;
+  escalated?: boolean | null;
+  exited?: boolean | null;
+  timed_out?: boolean | null;
+  completion?: ContainmentCompletion;
+  warnings: string[];
+}

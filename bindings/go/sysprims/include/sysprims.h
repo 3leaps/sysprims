@@ -212,6 +212,69 @@ char *sysprims_get_platform(void);
 void sysprims_free_string(char *s);
 
 /**
+ * Spawn a sysprims-owned contained process and return a capability token.
+ *
+ * `handle_out` receives a non-zero generation-checked `uint64_t`. It is not a
+ * PID and must not be treated as a pointer. Failure returns no handle.
+ *
+ * # Safety
+ *
+ * `config_json` and `handle_out` must be valid pointers.
+ */
+SysprimsErrorCode sysprims_containment_spawn(const char *config_json, uint64_t *handle_out);
+
+/**
+ * Return immutable identity and reliability evidence for a live or inert handle.
+ *
+ * # Safety
+ *
+ * `result_json_out` must be a valid pointer. Free with `sysprims_free_string`.
+ */
+SysprimsErrorCode sysprims_containment_identity(uint64_t handle, char **result_json_out);
+
+/**
+ * Non-destructive poll. Completes the lifecycle only when the leader has exited.
+ *
+ * # Safety
+ *
+ * `result_json_out` must be a valid pointer. Free with `sysprims_free_string`.
+ */
+SysprimsErrorCode sysprims_containment_poll(uint64_t handle, char **result_json_out);
+
+/**
+ * Wait until the native lifecycle is inert or `wait_timeout_ms` elapses.
+ *
+ * A timeout of 0 waits until a terminal result. Language wait cancellation
+ * must not be implemented by interrupting this call mid-kill; abandon the
+ * waiter instead.
+ *
+ * # Safety
+ *
+ * `result_json_out` must be a valid pointer. Free with `sysprims_free_string`.
+ */
+SysprimsErrorCode sysprims_containment_wait(uint64_t handle,
+                                            uint64_t wait_timeout_ms,
+                                            char **result_json_out);
+
+/**
+ * Explicitly terminate the owned containment once.
+ *
+ * # Safety
+ *
+ * `result_json_out` must be a valid pointer. Free with `sysprims_free_string`.
+ */
+SysprimsErrorCode sysprims_containment_terminate(uint64_t handle, char **result_json_out);
+
+/**
+ * Deterministically release the registry entry.
+ *
+ * Active close performs bounded native guard cleanup. A stale or foreign
+ * token fails closed. Language wrappers should treat a second dispose as a
+ * no-op by clearing their local token before calling this function.
+ */
+SysprimsErrorCode sysprims_containment_close(uint64_t handle);
+
+/**
  * Get the error code from the last failed operation.
  *
  * Returns `SYSPRIMS_OK` (0) if the last operation succeeded.

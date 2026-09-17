@@ -1,6 +1,7 @@
 {
-  "matrixSha256": "0094175233c44e2b581c4259b4e583d0d9cfc4c66d6ae9ea64f11560550df440",
+  "matrixSha256": "a32d05f3f8e2a75180dccc40183e284d8882fd249ad9cdf103df4b799694e87c",
   "publicValues": {
+    "ContainedProcess": "Managed containment lifecycle",
     "SysprimsError": "Error values",
     "SysprimsErrorCode": "Error values",
     "ancestors": "Ancestor traversal",
@@ -20,6 +21,7 @@
     "selfSID": "Current session",
     "signalSend": "Signal one process",
     "signalSendGroup": "Signal one process group",
+    "spawnContained": "Managed contained spawn",
     "spawnInGroup": "PID-returning grouped spawn",
     "terminate": "Graceful direct termination",
     "terminateMany": "JavaScript batch signal conveniences",
@@ -31,6 +33,11 @@
     "AncestorsResult": "Ancestor traversal",
     "BatchKillFailure": "JavaScript batch signal conveniences",
     "BatchKillResult": "JavaScript batch signal conveniences",
+    "ContainedProcess": "Managed containment lifecycle",
+    "ContainedProcessWaitOptions": "Managed containment lifecycle",
+    "ContainmentCompletion": "Managed containment lifecycle",
+    "ContainmentIdentity": "Managed containment lifecycle",
+    "ContainmentSnapshot": "Managed containment lifecycle",
     "CpuMode": "Descendant traversal",
     "DescendantsLevel": "Descendant traversal",
     "DescendantsOptions": "Descendant traversal",
@@ -62,6 +69,7 @@
     "SessionSpawnResult": "New session spawn",
     "SessionSpawnStatus": "New session spawn",
     "SessionSpawnVerb": "New session spawn",
+    "SpawnContainedOptions": "Managed contained spawn",
     "SpawnInGroupConfig": "PID-returning grouped spawn",
     "SpawnInGroupResult": "PID-returning grouped spawn",
     "SysprimsError": "Error values",
@@ -74,6 +82,30 @@
     "sysprimsAbiVersion": {
       "disposition": "internal-only",
       "public": []
+    },
+    "sysprimsContainmentClose": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprimsContainmentIdentity": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprimsContainmentPoll": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprimsContainmentSpawn": {
+      "disposition": "exposed",
+      "public": ["spawnContained"]
+    },
+    "sysprimsContainmentTerminate": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprimsContainmentWait": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
     },
     "sysprimsForceKill": {
       "disposition": "exposed",
@@ -206,6 +238,30 @@
     "sysprims_clear_error": {
       "disposition": "excluded",
       "public": []
+    },
+    "sysprims_containment_close": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprims_containment_identity": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprims_containment_poll": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprims_containment_spawn": {
+      "disposition": "exposed",
+      "public": ["spawnContained"]
+    },
+    "sysprims_containment_terminate": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
+    },
+    "sysprims_containment_wait": {
+      "disposition": "exposed",
+      "public": ["ContainedProcess"]
     },
     "sysprims_force_kill": {
       "disposition": "exposed",

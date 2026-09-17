@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Managed contained-process handle for Go and TypeScript. sysprims performs
+  the spawn and returns an opaque native-owned capability token. Unix success
+  reports `guaranteed` acquisition with `cooperative_group` boundary strength.
+  Windows fails before spawn. Completion evidence stays distinct from
+  reliability and boundary strength. `RunWithTimeout`, `terminateTree`, and
+  `spawnInGroup` are unchanged.
+
 ## [0.2.3] - 2026-09-01
 
 ### Added

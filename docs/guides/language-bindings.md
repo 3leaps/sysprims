@@ -63,6 +63,15 @@ The GNU-ABI toolchains are GPL-free for our use:
 
 No GPL license toxicity with static linking.
 
+## Managed contained spawn
+
+Go `SpawnContained` and TypeScript `spawnContained` are the only binding
+constructors that return owned containment. They always spawn contained;
+there is no foreground mode. The handle is a generation-checked native
+token, not a PID. Close/dispose is deterministic. Existing `RunWithTimeout`,
+`TerminateTree` / `terminateTree`, and `SpawnInGroup` / `spawnInGroup` stay
+as they are.
+
 ## Go Bindings
 
 For port-to-process mapping (listening ports), see `docs/guides/port-bindings-getting-started.md`.

@@ -158,6 +158,18 @@ pub const SPAWN_IN_GROUP_CONFIG_V1: &str =
 pub const SPAWN_IN_GROUP_RESULT_V1: &str =
     "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json";
 
+/// Schema ID for managed containment spawn config JSON input (v1.0.0).
+///
+/// Schema location: `schemas/timeout/v1.0.0/containment-spawn-config.schema.json`
+pub const CONTAINMENT_SPAWN_CONFIG_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-spawn-config.schema.json";
+
+/// Schema ID for managed containment snapshot JSON output (v1.0.0).
+///
+/// Schema location: `schemas/timeout/v1.0.0/containment-snapshot.schema.json`
+pub const CONTAINMENT_SNAPSHOT_V1: &str =
+    "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-snapshot.schema.json";
+
 /// Schema ID for run-setsid config JSON input (v1.0.0).
 ///
 /// Schema location: `schemas/session/v1.0.0/run-setsid-config.schema.json`
@@ -248,6 +260,8 @@ mod tests {
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.starts_with("https://"));
         assert!(GUARD_EVENT_V1.starts_with("https://"));
         assert!(ANCESTORS_RESULT_V1.starts_with("https://"));
+        assert!(CONTAINMENT_SPAWN_CONFIG_V1.starts_with("https://"));
+        assert!(CONTAINMENT_SNAPSHOT_V1.starts_with("https://"));
     }
 
     #[test]
@@ -367,6 +381,8 @@ mod tests {
         assert!(DESCENDANTS_RESULT_SAMPLED_V1.ends_with(".schema.json"));
         assert!(GUARD_EVENT_V1.ends_with(".schema.json"));
         assert!(ANCESTORS_RESULT_V1.ends_with(".schema.json"));
+        assert!(CONTAINMENT_SPAWN_CONFIG_V1.ends_with(".schema.json"));
+        assert!(CONTAINMENT_SNAPSHOT_V1.ends_with(".schema.json"));
 
         // Process snapshot schemas are v1.1.0 (additive ProcessInfo fields).
         assert!(PROCESS_INFO_V1.contains("/v1.1.0/"));
@@ -392,6 +408,8 @@ mod tests {
         assert!(DESCENDANTS_RESULT_V1.contains("/v1.0.0/"));
         assert!(GUARD_EVENT_V1.contains("/v1.0.0/"));
         assert!(ANCESTORS_RESULT_V1.contains("/v1.0.0/"));
+        assert!(CONTAINMENT_SPAWN_CONFIG_V1.contains("/v1.0.0/"));
+        assert!(CONTAINMENT_SNAPSHOT_V1.contains("/v1.0.0/"));
     }
 
     #[test]
@@ -481,6 +499,14 @@ mod tests {
             ANCESTORS_RESULT_V1.contains("/process/"),
             "ancestors-result schema should have process topic"
         );
+        assert!(
+            CONTAINMENT_SPAWN_CONFIG_V1.contains("/timeout/"),
+            "containment-spawn-config schema should have timeout topic"
+        );
+        assert!(
+            CONTAINMENT_SNAPSHOT_V1.contains("/timeout/"),
+            "containment-snapshot schema should have timeout topic"
+        );
     }
 
     #[test]
@@ -507,6 +533,8 @@ mod tests {
             DESCENDANTS_RESULT_SAMPLED_V1,
             GUARD_EVENT_V1,
             ANCESTORS_RESULT_V1,
+            CONTAINMENT_SPAWN_CONFIG_V1,
+            CONTAINMENT_SNAPSHOT_V1,
         ];
 
         // Check all pairs are different

@@ -31,6 +31,7 @@ function findPackageRoot(startDir: string): string {
 export type SysprimsCallJsonResult = { code: number; json?: string; message?: string };
 export type SysprimsCallU32Result = { code: number; value?: number; message?: string };
 export type SysprimsCallVoidResult = { code: number; message?: string };
+export type SysprimsCallTokenResult = { code: number; token?: bigint; message?: string };
 
 export type SysprimsLib = {
   sysprimsAbiVersion: () => number;
@@ -83,6 +84,13 @@ export type SysprimsLib = {
 
   // Spawn in group
   sysprimsSpawnInGroup: (configJson: string) => SysprimsCallJsonResult;
+
+  sysprimsContainmentSpawn: (configJson: string) => Promise<SysprimsCallTokenResult>;
+  sysprimsContainmentIdentity: (token: bigint) => Promise<SysprimsCallJsonResult>;
+  sysprimsContainmentPoll: (token: bigint) => Promise<SysprimsCallJsonResult>;
+  sysprimsContainmentWait: (token: bigint, waitTimeoutMs: number) => Promise<SysprimsCallJsonResult>;
+  sysprimsContainmentTerminate: (token: bigint) => Promise<SysprimsCallJsonResult>;
+  sysprimsContainmentClose: (token: bigint) => Promise<SysprimsCallVoidResult>;
 };
 
 function raiseSysprimsError(code: number, message?: string): never {
@@ -114,4 +122,34 @@ export function callVoid(fn: () => SysprimsCallVoidResult): void {
   if (r.code !== SysprimsErrorCode.Ok) {
     raiseSysprimsError(r.code, r.message);
   }
+}
+
+export async function callJsonReturnAsync(
+  fn: () => Promise<SysprimsCallJsonResult>,
+): Promise<unknown> {
+  const r = await fn();
+  if (r.code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(r.code, r.message);
+  }
+  return JSON.parse(r.json as string);
+}
+
+export async function callVoidAsync(fn: () => Promise<SysprimsCallVoidResult>): Promise<void> {
+  const r = await fn();
+  if (r.code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(r.code, r.message);
+  }
+}
+
+export async function callTokenReturnAsync(
+  fn: () => Promise<SysprimsCallTokenResult>,
+): Promise<bigint> {
+  const r = await fn();
+  if (r.code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(r.code, r.message);
+  }
+  if (typeof r.token !== "bigint") {
+    raiseSysprimsError(SysprimsErrorCode.Internal, "containment token missing from native result");
+  }
+  return r.token;
 }
