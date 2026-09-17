@@ -85,6 +85,7 @@ struct SlotData {
     outcome: Option<ContainmentOutcome>,
     leader_status: LeaderStatus,
     deadline_cancel: Arc<AtomicBool>,
+    deadline_at: Option<Instant>,
 }
 
 struct Slot {
@@ -118,6 +119,7 @@ fn registry() -> &'static Registry {
                     outcome: None,
                     leader_status: LeaderStatus::Running,
                     deadline_cancel: Arc::new(AtomicBool::new(false)),
+                    deadline_at: None,
                 }),
                 cond: Condvar::new(),
             });
@@ -356,6 +358,7 @@ fn reset_slot_for_reuse(data: &mut SlotData) -> bool {
     data.leader_status = LeaderStatus::Running;
     data.deadline_cancel.store(true, Ordering::SeqCst);
     data.deadline_cancel = Arc::new(AtomicBool::new(false));
+    data.deadline_at = None;
     data.state = SlotState::Empty;
     if data.generation == u32::MAX {
         data.retired = true;
@@ -453,6 +456,7 @@ fn commit_inert(
     outcome: ContainmentOutcome,
     leader_status: LeaderStatus,
 ) -> SysprimsResult<ManagedSnapshot> {
+    data.deadline_cancel.store(true, Ordering::SeqCst);
     data.outcome = Some(outcome);
     data.leader_status = leader_status;
     data.state = SlotState::Inert;
@@ -477,10 +481,21 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
     {
         let (slot_index, generation) = allocate_slot()?;
         let token = pack_token(slot_index, generation);
+        let pending_deadline = match request.execution_timeout_ms {
+            Some(timeout_ms) => match start_unarmed_deadline_monitor() {
+                Ok(monitor) => Some((timeout_ms, monitor)),
+                Err(error) => {
+                    let _ = recycle_unused_slot(slot_index, generation);
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
+
         let command = match build_command(&request) {
             Ok(command) => command,
             Err(error) => {
-                let _ = recycle_unused_slot(slot_index, generation);
+                abandon_unused_construction(slot_index, generation, pending_deadline.as_ref());
                 return Err(error);
             }
         };
@@ -488,7 +503,7 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
         let guard = match spawn_contained(command) {
             Ok(guard) => guard,
             Err(error) => {
-                let _ = recycle_unused_slot(slot_index, generation);
+                abandon_unused_construction(slot_index, generation, pending_deadline.as_ref());
                 return Err(spawn_error(error));
             }
         };
@@ -499,7 +514,7 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
             || boundary != ContainmentBoundaryStrength::CooperativeGroup
         {
             drop(guard);
-            let _ = recycle_unused_slot(slot_index, generation);
+            abandon_unused_construction(slot_index, generation, pending_deadline.as_ref());
             return Err(SysprimsError::internal(
                 "managed spawn produced a non-guaranteed cooperative-group guard",
             ));
@@ -507,10 +522,16 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
 
         let identity = guard.identity().clone();
         let slot = &registry().slots[slot_index as usize];
+        let deadline_at = pending_deadline
+            .as_ref()
+            .map(|(timeout_ms, _)| Instant::now() + Duration::from_millis(*timeout_ms));
         {
             let mut data = lock_data(slot)?;
             if data.generation != generation || data.state != SlotState::Empty {
                 drop(guard);
+                if let Some((_, monitor)) = pending_deadline.as_ref() {
+                    monitor.cancel();
+                }
                 return Err(SysprimsError::internal(
                     "containment slot changed before spawn insert",
                 ));
@@ -521,20 +542,41 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
             data.terminate_config = terminate_config;
             data.leader_status = LeaderStatus::Running;
             data.outcome = None;
+            if let Some((_, monitor)) = pending_deadline.as_ref() {
+                data.deadline_cancel = Arc::clone(&monitor.cancel);
+            }
+            data.deadline_at = deadline_at;
             data.guard = Some(guard);
             data.state = SlotState::Active;
         }
-        if let Some(timeout_ms) = request.execution_timeout_ms {
-            let cancel = {
-                let data = lock_data(slot)?;
-                Arc::clone(&data.deadline_cancel)
-            };
-            if let Err(error) = start_deadline_thread(token, timeout_ms, cancel) {
-                let _ = close(token);
-                return Err(error);
+        if let Some((_, monitor)) = pending_deadline {
+            if let Some(deadline) = deadline_at {
+                if let Err(error) = monitor.try_arm(token, deadline) {
+                    return reject_inserted_spawn(token, error);
+                }
             }
         }
         Ok(token)
+    }
+}
+
+fn abandon_unused_construction(
+    slot_index: u32,
+    generation: u32,
+    pending_deadline: Option<&(u64, DeadlineMonitor)>,
+) {
+    if let Some((_, monitor)) = pending_deadline {
+        monitor.cancel();
+    }
+    let _ = recycle_unused_slot(slot_index, generation);
+}
+
+/// Close an already-inserted spawn. If cleanup cannot be confirmed, return the
+/// live token instead of dropping the only handle.
+fn reject_inserted_spawn(token: u64, error: SysprimsError) -> SysprimsResult<u64> {
+    match close(token) {
+        Ok(()) => Err(error),
+        Err(_) => Ok(token),
     }
 }
 
@@ -569,30 +611,55 @@ fn build_command(request: &ManagedSpawnRequest) -> SysprimsResult<Command> {
     Ok(command)
 }
 
-fn start_deadline_thread(
+#[derive(Clone, Copy)]
+struct DeadlineArm {
     token: u64,
-    timeout_ms: u64,
+    deadline: Instant,
+}
+
+struct DeadlineMonitor {
+    arm: Arc<Mutex<Option<DeadlineArm>>>,
     cancel: Arc<AtomicBool>,
-) -> SysprimsResult<()> {
+}
+
+impl DeadlineMonitor {
+    fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    fn try_arm(&self, token: u64, deadline: Instant) -> SysprimsResult<()> {
+        match self.arm.lock() {
+            Ok(mut armed) => {
+                *armed = Some(DeadlineArm { token, deadline });
+                Ok(())
+            }
+            Err(_) => Err(SysprimsError::internal(
+                "containment deadline arm lock poisoned",
+            )),
+        }
+    }
+}
+
+fn start_unarmed_deadline_monitor() -> SysprimsResult<DeadlineMonitor> {
     if test_force_deadline_thread_fail() {
         return Err(SysprimsError::system(
             "failed to start containment deadline monitor",
             0,
         ));
     }
+    let arm = Arc::new(Mutex::new(None));
+    let cancel = Arc::new(AtomicBool::new(false));
+    spawn_deadline_worker(Arc::clone(&arm), Arc::clone(&cancel))?;
+    Ok(DeadlineMonitor { arm, cancel })
+}
+
+fn spawn_deadline_worker(
+    arm: Arc<Mutex<Option<DeadlineArm>>>,
+    cancel: Arc<AtomicBool>,
+) -> SysprimsResult<()> {
     thread::Builder::new()
         .name("sysprims-containment-deadline".into())
-        .spawn(move || {
-            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            while !cancel.load(Ordering::SeqCst) {
-                let now = Instant::now();
-                if now >= deadline {
-                    let _ = terminate_with_status(token, LeaderStatus::TimedOut);
-                    return;
-                }
-                thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
-            }
-        })
+        .spawn(move || run_deadline_monitor(arm, cancel))
         .map_err(|error| {
             SysprimsError::system(
                 format!("failed to start containment deadline monitor: {error}"),
@@ -600,6 +667,43 @@ fn start_deadline_thread(
             )
         })?;
     Ok(())
+}
+
+fn run_deadline_monitor(arm: Arc<Mutex<Option<DeadlineArm>>>, cancel: Arc<AtomicBool>) {
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return;
+        }
+        let armed = match arm.lock() {
+            Ok(guard) => *guard,
+            Err(_) => return,
+        };
+        match armed {
+            Some(DeadlineArm { token, deadline }) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    let _ = terminate_with_status(token, LeaderStatus::TimedOut);
+                    return;
+                }
+                thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
+            }
+            None => thread::sleep(POLL_INTERVAL),
+        }
+    }
+}
+
+fn restore_deadline_monitor(data: &mut SlotData, token: u64) {
+    let Some(deadline) = data.deadline_at else {
+        return;
+    };
+    if !data.deadline_cancel.load(Ordering::SeqCst) {
+        return;
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let arm = Arc::new(Mutex::new(Some(DeadlineArm { token, deadline })));
+    if spawn_deadline_worker(Arc::clone(&arm), Arc::clone(&cancel)).is_ok() {
+        data.deadline_cancel = cancel;
+    }
 }
 
 fn test_force_deadline_thread_fail() -> bool {
@@ -627,9 +731,11 @@ fn test_force_unreaped() -> bool {
 #[cfg(test)]
 mod inject {
     use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex;
 
     pub static FORCE_UNREAPED: AtomicBool = AtomicBool::new(false);
     pub static FORCE_DEADLINE_THREAD_FAIL: AtomicBool = AtomicBool::new(false);
+    pub static TEST_MUTEX: Mutex<()> = Mutex::new(());
 }
 
 fn unreaped_outcome(data: &SlotData) -> SysprimsResult<ContainmentOutcome> {
@@ -766,7 +872,6 @@ pub fn close(token: u64) -> SysprimsResult<()> {
         SlotState::Inert => recycle_after_data_unlock(slot, slot_index, data),
         SlotState::Active => {
             data.state = SlotState::Finalizing;
-            data.deadline_cancel.store(true, Ordering::SeqCst);
             let config = data.terminate_config.clone();
             let result = if test_force_unreaped() {
                 unreaped_outcome(&data).map(Some)
@@ -782,11 +887,13 @@ pub fn close(token: u64) -> SysprimsResult<()> {
                 }
                 Ok(_) => {
                     data.state = SlotState::Active;
+                    restore_deadline_monitor(&mut data, token);
                     slot.cond.notify_all();
                     Err(cleanup_not_confirmed())
                 }
                 Err(error) => {
                     data.state = SlotState::Active;
+                    restore_deadline_monitor(&mut data, token);
                     slot.cond.notify_all();
                     Err(error)
                 }
@@ -923,7 +1030,29 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     use std::sync::mpsc;
+    use std::sync::MutexGuard;
     use std::thread;
+
+    fn test_guard() -> MutexGuard<'static, ()> {
+        let guard = inject::TEST_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
+        guard
+    }
+
+    fn occupied_slots() -> usize {
+        registry()
+            .slots
+            .iter()
+            .filter(|slot| {
+                lock_data(slot)
+                    .map(|data| data.state != SlotState::Empty)
+                    .unwrap_or(true)
+            })
+            .count()
+    }
 
     fn request(argv: Vec<&str>) -> ManagedSpawnRequest {
         ManagedSpawnRequest {
@@ -940,6 +1069,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_argv_and_signal_zero() {
+        let _lock = test_guard();
         assert!(validate_spawn_request(&request(vec![])).is_err());
         let mut bad = request(vec!["true"]);
         bad.signal = Some(0);
@@ -957,6 +1087,7 @@ mod tests {
 
     #[test]
     fn unpack_rejects_zero_and_malformed_tokens() {
+        let _lock = test_guard();
         assert!(unpack_token(0).is_err());
         assert!(unpack_token(1u64 << 32).is_err());
         assert!(identity(0).is_err());
@@ -968,6 +1099,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_wait_complete_dispose_twice_and_stale_reuse() {
+        let _lock = test_guard();
         let token = spawn(request(vec!["true"])).expect("spawn true");
         let snap = wait(token, 5_000).expect("wait true");
         assert_eq!(snap.leader_status, "completed");
@@ -996,6 +1128,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn terminate_keeps_spawn_reliability_and_linearizes_waiters() {
+        let _lock = test_guard();
         let token = spawn(request(vec!["sleep", "30"])).expect("spawn sleep");
         let identity_before = identity(token).expect("identity");
         let snap = terminate(token).expect("terminate");
@@ -1013,6 +1146,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn native_deadline_times_out_without_language_wait() {
+        let _lock = test_guard();
         let mut req = request(vec!["sleep", "30"]);
         req.execution_timeout_ms = Some(200);
         req.grace_timeout_ms = Some(20);
@@ -1026,6 +1160,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_spawn_fails_before_creating_a_handle() {
+        let _lock = test_guard();
         let marker = std::env::temp_dir().join(format!(
             "sysprims-containment-windows-{}.marker",
             std::process::id()
@@ -1043,6 +1178,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn invalid_high_signal_does_not_spawn() {
+        let _lock = test_guard();
         let marker = std::env::temp_dir().join(format!(
             "sysprims-containment-high-signal-{}.marker",
             std::process::id()
@@ -1057,7 +1193,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn failed_active_close_preserves_owner_and_unreaped_is_not_inert() {
-        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        let _lock = test_guard();
         let token = spawn(request(vec!["sleep", "30"])).expect("spawn sleep");
 
         inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
@@ -1079,14 +1215,23 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn deadline_monitor_setup_failure_returns_no_handle() {
+        let _lock = test_guard();
+        let before = occupied_slots();
         inject::FORCE_DEADLINE_THREAD_FAIL.store(true, Ordering::SeqCst);
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
         let mut req = request(vec!["sleep", "30"]);
         req.execution_timeout_ms = Some(5_000);
         let result = spawn(req);
         inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
         assert!(
             result.is_err(),
             "deadline setup failure must not return a handle"
+        );
+        assert_eq!(
+            occupied_slots(),
+            before,
+            "monitor-setup failure plus cleanup-failure injection must not leave an unreachable active slot"
         );
         let token = spawn(request(vec!["true"])).expect("registry remains usable");
         close(token).expect("close after deadline-setup failure");
@@ -1094,7 +1239,28 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn failed_active_close_keeps_native_deadline_live() {
+        let _lock = test_guard();
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(250);
+        req.grace_timeout_ms = Some(20);
+        let token = spawn(req).expect("spawn with deadline");
+
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        assert!(close(token).is_err(), "unconfirmed close must fail");
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+
+        let snap = identity(token).expect("owner retained after failed close");
+        assert_eq!(snap.handle_state, "active");
+        let snap = wait(token, 5_000).expect("native deadline must still fire");
+        assert_eq!(snap.leader_status, "timed_out");
+        close(token).expect("close after native timeout");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn concurrent_spawn_and_close_does_not_deadlock() {
+        let _lock = test_guard();
         let (done_tx, done_rx) = mpsc::channel();
         let workers = 8;
         let iterations = 20;
