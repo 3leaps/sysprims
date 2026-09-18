@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native containment deadlines retry cleanup errors and unconfirmed reap until
+  finalization or close. Leaders that exited naturally before deadline cleanup
+  report `completed`; deadline enforcement retains `timed_out` across retries.
 - Managed containment close recycles a registry slot only after cleanup
   confirms the child is reaped. An `exited: false` outcome stays active and
   retryable instead of becoming inert. Go and TypeScript keep the wrapper

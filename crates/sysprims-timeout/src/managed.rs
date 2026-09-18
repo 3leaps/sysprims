@@ -83,6 +83,8 @@ struct SlotData {
     boundary: Option<ContainmentBoundaryStrength>,
     terminate_config: TerminateTreeConfig,
     outcome: Option<ContainmentOutcome>,
+    // Also records pending deadline enforcement while cleanup is retryable.
+    // Active snapshots still report Running until reap is confirmed.
     leader_status: LeaderStatus,
     deadline_cancel: Arc<AtomicBool>,
     deadline_at: Option<Instant>,
@@ -667,8 +669,14 @@ fn run_deadline_monitor(arm: Arc<Mutex<Option<DeadlineArm>>>, cancel: Arc<Atomic
             Some(DeadlineArm { token, deadline }) => {
                 let now = Instant::now();
                 if now >= deadline {
-                    let _ = terminate_with_status(token, LeaderStatus::TimedOut);
-                    return;
+                    if terminate_with_status(token, LeaderStatus::TimedOut).is_ok() {
+                        return;
+                    }
+                    // Errors and unconfirmed reap retain the active capability.
+                    // Keep its existing monitor alive until finalization or close
+                    // cancels it; retry against the same generation-bound token.
+                    thread::sleep(POLL_INTERVAL);
+                    continue;
                 }
                 thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
             }
@@ -713,12 +721,24 @@ fn test_force_unreaped() -> bool {
     }
 }
 
+fn test_force_operation_error() -> bool {
+    #[cfg(test)]
+    {
+        inject::FORCE_OPERATION_ERROR.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
 #[cfg(test)]
 mod inject {
     use std::sync::atomic::AtomicBool;
     use std::sync::Mutex;
 
     pub static FORCE_UNREAPED: AtomicBool = AtomicBool::new(false);
+    pub static FORCE_OPERATION_ERROR: AtomicBool = AtomicBool::new(false);
     pub static FORCE_DEADLINE_THREAD_FAIL: AtomicBool = AtomicBool::new(false);
     pub static TEST_MUTEX: Mutex<()> = Mutex::new(());
 }
@@ -911,7 +931,7 @@ fn operate_blocking(
 
 fn operate_inner(
     token: u64,
-    complete_status: LeaderStatus,
+    mut complete_status: LeaderStatus,
     block_for_finalizing: bool,
     op: impl FnOnce(
         &mut ContainmentGuard<ChildAdapter>,
@@ -944,16 +964,41 @@ fn operate_inner(
         SlotState::Active => {
             data.state = SlotState::Finalizing;
             let config = data.terminate_config.clone();
-            let result = if test_force_unreaped() {
-                unreaped_outcome(&data).map(Some)
-            } else {
+            let result = (|| {
+                // Observe natural completion before enforcing the execution
+                // deadline, under the same slot lock as cleanup. Once deadline
+                // enforcement begins, retain that reason through retries, even
+                // if a later poll observes the now-exited leader.
+                if complete_status == LeaderStatus::TimedOut
+                    && data.leader_status != LeaderStatus::TimedOut
+                {
+                    let guard = data.guard.as_mut().ok_or_else(|| {
+                        SysprimsError::internal("containment guard missing during operation")
+                    })?;
+                    if let Some(outcome) = guard.try_complete(config.clone())? {
+                        complete_status = LeaderStatus::Completed;
+                        return Ok(Some(outcome));
+                    }
+                    data.leader_status = LeaderStatus::TimedOut;
+                }
+                if test_force_operation_error() {
+                    return Err(SysprimsError::internal(
+                        "injected containment operation failure",
+                    ));
+                }
+                if test_force_unreaped() {
+                    return unreaped_outcome(&data).map(Some);
+                }
                 let guard = data.guard.as_mut().ok_or_else(|| {
                     SysprimsError::internal("containment guard missing during operation")
                 })?;
                 op(guard, config)
-            };
+            })();
             match result {
                 Ok(Some(outcome)) if outcome.exited => {
+                    if data.leader_status == LeaderStatus::TimedOut {
+                        complete_status = LeaderStatus::TimedOut;
+                    }
                     commit_inert(slot, &mut data, outcome, complete_status)
                 }
                 Ok(Some(_outcome)) => {
@@ -1023,6 +1068,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        inject::FORCE_OPERATION_ERROR.store(false, Ordering::SeqCst);
         inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
         guard
     }
@@ -1140,6 +1186,82 @@ mod tests {
         assert_eq!(snap.leader_status, "timed_out");
         assert_eq!(snap.tree_kill_reliability, "guaranteed");
         close(token).ok();
+    }
+
+    // Observe only cached state: poll/wait would themselves perform cleanup and
+    // could hide a dead monitor. Always dispose before asserting the result.
+    #[cfg(unix)]
+    fn observe_native_finalization(token: u64) -> ManagedSnapshot {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = identity(token).expect("observe native monitor");
+            if snapshot.handle_state == "inert" || Instant::now() >= deadline {
+                close(token).expect("dispose monitor fixture");
+                return snapshot;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_retries_unreaped_cleanup_without_language_wait() {
+        let _lock = test_guard();
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(100);
+        let token = spawn(req).expect("spawn with deadline");
+        let snapshot = observe_native_finalization(token);
+        assert!(!inject::FORCE_UNREAPED.load(Ordering::SeqCst));
+        assert_eq!(snapshot.handle_state, "inert");
+        assert_eq!(snapshot.leader_status, "timed_out");
+        assert_eq!(snapshot.exited, Some(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_retries_operation_error_without_language_wait() {
+        let _lock = test_guard();
+        inject::FORCE_OPERATION_ERROR.store(true, Ordering::SeqCst);
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(100);
+        let token = spawn(req).expect("spawn with deadline");
+        let snapshot = observe_native_finalization(token);
+        assert!(!inject::FORCE_OPERATION_ERROR.load(Ordering::SeqCst));
+        assert_eq!(snapshot.handle_state, "inert");
+        assert_eq!(snapshot.leader_status, "timed_out");
+        assert_eq!(snapshot.exited, Some(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_preserves_unpolled_natural_completion() {
+        let _lock = test_guard();
+        let mut req = request(vec!["true"]);
+        req.execution_timeout_ms = Some(500);
+        let token = spawn(req).expect("spawn short-lived child with deadline");
+        let snapshot = observe_native_finalization(token);
+        assert_eq!(snapshot.handle_state, "inert");
+        assert_eq!(snapshot.leader_status, "completed");
+        assert_eq!(snapshot.exited, Some(true));
+        assert_eq!(snapshot.timed_out, Some(false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deadline_reason_survives_failed_cleanup_and_explicit_retry() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn deadline fixture");
+        inject::FORCE_OPERATION_ERROR.store(true, Ordering::SeqCst);
+        assert!(terminate_with_status(token, LeaderStatus::TimedOut).is_err());
+        let active = identity(token).expect("failed deadline retains owner");
+        let snapshot = terminate(token).expect("explicit retry completes cleanup");
+        let cached = wait(token, 1).expect("wait returns cached outcome");
+        close(token).expect("close finalized fixture");
+        assert_eq!(active.handle_state, "active");
+        assert_eq!(active.leader_status, "running");
+        assert_eq!(snapshot.leader_status, "timed_out");
+        assert_eq!(cached.leader_status, "timed_out");
     }
 
     #[cfg(windows)]
