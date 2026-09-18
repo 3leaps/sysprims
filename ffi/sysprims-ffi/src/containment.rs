@@ -274,6 +274,7 @@ pub extern "C" fn sysprims_containment_close(handle: u64) -> SysprimsErrorCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::sysprims_free_string;
     use std::ptr;
 
