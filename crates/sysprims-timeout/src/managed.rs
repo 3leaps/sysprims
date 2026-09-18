@@ -5,6 +5,7 @@
 //! never a PID, Rust pointer, or reusable proof of spawn.
 
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -17,10 +18,13 @@ use sysprims_core::time::now_rfc3339;
 use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
 
 use crate::{
-    spawn_contained, ContainmentBoundaryStrength, ContainmentCompletionEvidence, ContainmentGuard,
-    ContainmentIdentity, ContainmentObservation, ContainmentOutcome, ContainmentSpawnError,
-    TerminateTreeConfig, TreeKillReliability, SIGKILL, SIGTERM,
+    ContainmentBoundaryStrength, ContainmentCompletionEvidence, ContainmentGuard,
+    ContainmentIdentity, ContainmentObservation, ContainmentOutcome, TerminateTreeConfig,
+    TreeKillReliability, SIGKILL, SIGTERM,
 };
+
+#[cfg(unix)]
+use crate::{spawn_contained, ContainmentSpawnError};
 
 pub const MAX_REGISTRY_SLOTS: usize = 1024;
 pub const MAX_ARGV_ENTRIES: usize = 256;
@@ -146,6 +150,7 @@ fn lock_free(reg: &Registry) -> SysprimsResult<MutexGuard<'_, Vec<u32>>> {
     reg.free.lock().map_err(|_| lock_poisoned())
 }
 
+#[cfg(unix)]
 fn pack_token(slot: u32, generation: u32) -> u64 {
     ((generation as u64) << 32) | (u64::from(slot) + 1)
 }
@@ -177,6 +182,7 @@ fn stale_handle() -> SysprimsError {
     invalid_handle("containment handle is stale or closed")
 }
 
+#[cfg(unix)]
 fn spawn_error(error: ContainmentSpawnError) -> SysprimsError {
     match error {
         ContainmentSpawnError::Spawn(error) | ContainmentSpawnError::Adoption(error) => error,
@@ -326,6 +332,7 @@ fn cleanup_not_confirmed() -> SysprimsError {
     SysprimsError::invalid_argument("containment cleanup did not confirm child reaped; retry")
 }
 
+#[cfg(unix)]
 fn allocate_slot() -> SysprimsResult<(u32, u32)> {
     let reg = registry();
     let mut free = lock_free(reg)?;
@@ -560,6 +567,7 @@ pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
     }
 }
 
+#[cfg(unix)]
 fn abandon_unused_construction(
     slot_index: u32,
     generation: u32,
@@ -571,6 +579,7 @@ fn abandon_unused_construction(
     let _ = recycle_unused_slot(slot_index, generation);
 }
 
+#[cfg(unix)]
 fn recycle_unused_slot(slot_index: u32, generation: u32) -> SysprimsResult<()> {
     let reg = registry();
     let slot = &reg.slots[slot_index as usize];
@@ -582,6 +591,7 @@ fn recycle_unused_slot(slot_index: u32, generation: u32) -> SysprimsResult<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn build_command(request: &ManagedSpawnRequest) -> SysprimsResult<Command> {
     let mut command = Command::new(&request.argv[0]);
     if request.argv.len() > 1 {
@@ -608,11 +618,13 @@ struct DeadlineArm {
     deadline: Instant,
 }
 
+#[cfg(unix)]
 struct DeadlineMonitor {
     arm: Arc<Mutex<Option<DeadlineArm>>>,
     cancel: Arc<AtomicBool>,
 }
 
+#[cfg(unix)]
 impl DeadlineMonitor {
     fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
@@ -630,6 +642,7 @@ fn lock_arm(arm: &Mutex<Option<DeadlineArm>>) -> MutexGuard<'_, Option<DeadlineA
     arm.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[cfg(unix)]
 fn start_unarmed_deadline_monitor() -> SysprimsResult<DeadlineMonitor> {
     if test_force_deadline_thread_fail() {
         return Err(SysprimsError::system(
@@ -699,6 +712,7 @@ fn restore_deadline_monitor(data: &mut SlotData, token: u64) {
     }
 }
 
+#[cfg(unix)]
 fn test_force_deadline_thread_fail() -> bool {
     #[cfg(test)]
     {
@@ -1077,8 +1091,10 @@ pub struct ManagedSnapshot {
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+    #[cfg(unix)]
     use std::sync::mpsc;
     use std::sync::MutexGuard;
+    #[cfg(unix)]
     use std::thread;
 
     fn test_guard() -> MutexGuard<'static, ()> {
@@ -1091,6 +1107,7 @@ mod tests {
         guard
     }
 
+    #[cfg(unix)]
     fn occupied_slots() -> usize {
         registry()
             .slots

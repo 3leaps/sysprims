@@ -88,7 +88,10 @@ export type SysprimsLib = {
   sysprimsContainmentSpawn: (configJson: string) => Promise<SysprimsCallTokenResult>;
   sysprimsContainmentIdentity: (token: bigint) => Promise<SysprimsCallJsonResult>;
   sysprimsContainmentPoll: (token: bigint) => Promise<SysprimsCallJsonResult>;
-  sysprimsContainmentWait: (token: bigint, waitTimeoutMs: number) => Promise<SysprimsCallJsonResult>;
+  sysprimsContainmentWait: (
+    token: bigint,
+    waitTimeoutMs: number,
+  ) => Promise<SysprimsCallJsonResult>;
   sysprimsContainmentTerminate: (token: bigint) => Promise<SysprimsCallJsonResult>;
   sysprimsContainmentClose: (token: bigint) => Promise<SysprimsCallVoidResult>;
 };

@@ -104,7 +104,9 @@ export class ContainedProcess {
       throw new SysprimsError(SysprimsErrorCode.Timeout, "containment wait was cancelled");
     }
     const timeoutMs =
-      options?.timeoutMs == null ? 0 : validateDuration(options.timeoutMs, "timeoutMs", MAX_DURATION_MS);
+      options?.timeoutMs == null
+        ? 0
+        : validateDuration(options.timeoutMs, "timeoutMs", MAX_DURATION_MS);
     const waitPromise = callJsonReturnAsync(() =>
       this.#native.sysprimsContainmentWait(token, timeoutMs),
     ) as Promise<ContainmentSnapshot>;

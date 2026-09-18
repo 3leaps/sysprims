@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { setTimeout as delay } from "node:timers/promises";
-import test from "node:test";
-
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { loadSysprims } from "../src/ffi";
-import { ContainedProcess, spawnContained, SysprimsError, SysprimsErrorCode } from "../src/index";
+import { ContainedProcess, SysprimsError, SysprimsErrorCode, spawnContained } from "../src/index";
+
+const unixTest = os.platform() === "win32" ? test.skip : test;
+const windowsTest = os.platform() === "win32" ? test : test.skip;
 
 function isInvalid(error: unknown): boolean {
   return error instanceof SysprimsError && error.code === SysprimsErrorCode.InvalidArgument;
@@ -19,12 +21,7 @@ test("spawnContained rejects empty argv and signal 0", async () => {
   await assert.rejects(() => spawnContained(["true"], { signal: 0 }), isInvalid);
 });
 
-test("spawnContained happy path, dispose twice, and stale reuse", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("managed spawn is unix-only until Job assignment exists");
-    return;
-  }
-
+unixTest("spawnContained happy path, dispose twice, and stale reuse", async () => {
   const first = await spawnContained(["true"], { graceTimeoutMs: 50, killTimeoutMs: 200 });
   const snap = await first.wait({ timeoutMs: 5000 });
   assert.equal(snap.leader_status, "completed");
@@ -40,12 +37,7 @@ test("spawnContained happy path, dispose twice, and stale reuse", async (t) => {
   await second.close();
 });
 
-test("terminate keeps spawn reliability and second call is inert", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("managed spawn is unix-only until Job assignment exists");
-    return;
-  }
-
+unixTest("terminate keeps spawn reliability and second call is inert", async () => {
   const handle = await spawnContained(["sleep", "30"], {
     graceTimeoutMs: 50,
     killTimeoutMs: 500,
@@ -59,12 +51,7 @@ test("terminate keeps spawn reliability and second call is inert", async (t) => 
   await handle.close();
 });
 
-test("cancel wait during terminate leaves native owned or inert", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("managed spawn is unix-only until Job assignment exists");
-    return;
-  }
-
+unixTest("cancel wait during terminate leaves native owned or inert", async () => {
   const handle = await spawnContained(["sleep", "30"], {
     graceTimeoutMs: 80,
     killTimeoutMs: 500,
@@ -86,12 +73,7 @@ test("cancel wait during terminate leaves native owned or inert", async (t) => {
   await handle.close();
 });
 
-test("close races wait and terminate", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("managed spawn is unix-only until Job assignment exists");
-    return;
-  }
-
+unixTest("close races wait and terminate", async () => {
   const handle = await spawnContained(["sleep", "30"], {
     graceTimeoutMs: 50,
     killTimeoutMs: 500,
@@ -122,12 +104,7 @@ test("close races wait and terminate", async (t) => {
   }
 });
 
-test("failed close keeps the token retryable", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("managed spawn is unix-only until Job assignment exists");
-    return;
-  }
-
+unixTest("failed close keeps the token retryable", async () => {
   const handle = await spawnContained(["sleep", "30"], {
     graceTimeoutMs: 50,
     killTimeoutMs: 500,
@@ -148,12 +125,7 @@ test("failed close keeps the token retryable", async (t) => {
   await assert.rejects(() => handle.identity(), isInvalid);
 });
 
-test("already-aborted wait does not launch after abort", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("managed spawn is unix-only until Job assignment exists");
-    return;
-  }
-
+unixTest("already-aborted wait does not launch after abort", async () => {
   const handle = await spawnContained(["true"], { graceTimeoutMs: 50, killTimeoutMs: 200 });
   const controller = new AbortController();
   controller.abort();
@@ -175,19 +147,18 @@ test("invalid high signal does not spawn", async () => {
   assert.equal(fs.existsSync(marker), false);
 });
 
-test("windows managed spawn fails before spawn", async (t) => {
-  if (os.platform() !== "win32") {
-    t.skip("windows-only rejection fixture");
-    return;
-  }
+windowsTest("windows managed spawn fails before spawn", async () => {
   const marker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sysprims-no-spawn-")), "marker");
-  t.after(() => fs.rmSync(path.dirname(marker), { recursive: true, force: true }));
-  await assert.rejects(
-    () => spawnContained(["cmd", "/C", `echo spawned>"${marker}"`]),
-    (error: unknown) =>
-      error instanceof SysprimsError && error.code === SysprimsErrorCode.NotSupported,
-  );
-  assert.equal(fs.existsSync(marker), false);
+  try {
+    await assert.rejects(
+      () => spawnContained(["cmd", "/C", `echo spawned>"${marker}"`]),
+      (error: unknown) =>
+        error instanceof SysprimsError && error.code === SysprimsErrorCode.NotSupported,
+    );
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
+    fs.rmSync(path.dirname(marker), { recursive: true, force: true });
+  }
 });
 
 test("ContainedProcess is a class", () => {
@@ -198,11 +169,7 @@ for (const [name, argv, expected] of [
   ["long-lived", ["sleep", "30"], "timed_out"],
   ["fast", ["true"], "completed"],
 ] as const) {
-  test(`native deadline with delayed first observation: ${name}`, async (t) => {
-    if (os.platform() === "win32") {
-      t.skip("Unix containment");
-      return;
-    }
+  unixTest(`native deadline with delayed first observation: ${name}`, async () => {
     const handle = await spawnContained([...argv], {
       executionTimeoutMs: 200,
       graceTimeoutMs: 20,
@@ -226,11 +193,7 @@ for (const [name, argv, expected] of [
   });
 }
 
-test("bounded wait returns while another operation finalizes", async (t) => {
-  if (os.platform() === "win32") {
-    t.skip("Unix containment");
-    return;
-  }
+unixTest("bounded wait returns while another operation finalizes", async () => {
   const handle = await spawnContained(["sleep", "30"], { graceTimeoutMs: 800, killTimeoutMs: 200 });
   const terminating = handle.terminate();
   try {
@@ -248,11 +211,7 @@ test("bounded wait returns while another operation finalizes", async (t) => {
   }
 });
 
-test("explicit close unregisters finalizer and never closes twice", (t) => {
-  if (os.platform() === "win32") {
-    t.skip("Unix containment");
-    return;
-  }
+unixTest("explicit close unregisters finalizer and never closes twice", () => {
   // Isolate a deterministic FinalizationRegistry scheduler from the suite.
   // Flushing it represents a GC finalization turn after explicit close.
   execFileSync(
