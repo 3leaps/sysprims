@@ -67,6 +67,46 @@ fresh C header for comparison with current Rust exports.
 
 ## API
 
+### Managed contained spawn (unreleased)
+
+`spawnContained(argv, options?)` returns a `ContainedProcess` with async
+`identity()`, `poll()`, `wait()`, `terminate()`, and `close()` methods, plus
+`Symbol.asyncDispose`. `wait({ timeoutMs: 0 })` (or an omitted timeout) is
+unbounded. An `AbortSignal` cancels the JavaScript wait, not the native process
+or its cleanup; the native wait task can continue until its wait ends.
+
+```typescript
+import { spawnContained } from "@3leaps/sysprims";
+
+const handle = await spawnContained(["sleep", "30"], {
+  executionTimeoutMs: 5000,
+  graceTimeoutMs: 100,
+  killTimeoutMs: 500,
+});
+try {
+  const snapshot = await handle.wait({ timeoutMs: 6000 });
+  console.log(snapshot.leader_status);
+} finally {
+  await handle.close(); // A rejected close leaves the handle retryable.
+}
+```
+
+Unix success reports `guaranteed` spawn-time acquisition and
+`cooperative_group` boundary strength. This is a cooperative process group;
+descendants that leave it are outside the boundary. Windows rejects managed
+spawn before argv runs. The handle owns native lifecycle authority; its PID
+fields are diagnostic only.
+
+The execution deadline runs natively without polling. A bounded wait returns an
+active/running snapshot on timeout, including while another caller cleans up;
+it does not terminate the process. A wait that itself owns cleanup may take the
+configured grace/kill window to finish. A fast child first observed after its
+deadline remains `completed`. `leader_status == timed_out` records execution
+deadline enforcement; the separate `timed_out` field records cleanup reap timeout.
+
+Successful close is idempotent. A failed close preserves the handle for retry.
+Finalizers are a leak backstop; close explicitly for deterministic disposal.
+
 ### Process Inspection
 
 - `procGet(pid, options?)`

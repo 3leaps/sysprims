@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Managed contained-process handle for Go and TypeScript. sysprims performs
+  the spawn and returns an opaque native-owned capability token. Unix success
+  reports `guaranteed` acquisition with `cooperative_group` boundary strength.
+  Windows fails before spawn. Completion evidence stays distinct from
+  reliability and boundary strength. `RunWithTimeout`, `terminateTree`, and
+  `spawnInGroup` are unchanged.
+
+### Fixed
+
+- Bounded containment waits return while another caller owns cleanup. Native
+  finalization retains exclusive guard ownership without holding the slot state
+  lock through cleanup. Go containment methods retain their wrapper through
+  native calls with `runtime.KeepAlive`.
+- Go and TypeScript managed-containment documentation now covers deadlines,
+  lifecycle operations, platform boundaries, and explicit disposal.
+- Native containment deadlines retry cleanup errors and unconfirmed reap until
+  finalization or close. Leaders that exited naturally before deadline cleanup
+  report `completed`; deadline enforcement retains `timed_out` across retries.
+- Managed containment close recycles a registry slot only after cleanup
+  confirms the child is reaped. An `exited: false` outcome stays active and
+  retryable instead of becoming inert. Go and TypeScript keep the wrapper
+  token until native close succeeds. Termination signals are range-checked
+  before spawn. A native deadline monitor is reserved unarmed before spawn
+  success and armed infallibly with the token plus absolute deadline after
+  insertion, so monitor-setup failure cannot leave an unreachable active
+  child and a returned deadline handle is always armed. Failed
+  active Close preserves or re-arms that deadline until a terminal transition
+  commits. Go `Wait` rejects negative durations and does not treat a positive
+  sub-millisecond timeout as infinite.
+
 ## [0.2.3] - 2026-09-01
 
 ### Added

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-spawn-config.schema.json",
+  "title": "Managed containment spawn config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "argv"],
+  "properties": {
+    "schema_id": {
+      "const": "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-spawn-config.schema.json"
+    },
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    },
+    "cwd": {
+      "type": ["string", "null"],
+      "maxLength": 4096
+    },
+    "env": {
+      "type": ["object", "null"],
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "execution_timeout_ms": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 86400000
+    },
+    "grace_timeout_ms": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 86400000
+    },
+    "kill_timeout_ms": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 86400000
+    },
+    "signal": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "kill_signal": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 2147483647
+    }
+  }
+}

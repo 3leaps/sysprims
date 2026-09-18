@@ -1,0 +1,1503 @@
+//! Native-owned managed containment lifecycle for language bindings.
+//!
+//! One registry owns every [`ContainmentGuard<Child>`] used by C/Go and N-API
+//! projections. Callers receive a generation-checked `u64` capability token,
+//! never a PID, Rust pointer, or reusable proof of spawn.
+
+use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use sysprims_core::schema::CONTAINMENT_SNAPSHOT_V1;
+use sysprims_core::time::now_rfc3339;
+use sysprims_core::{get_platform, SysprimsError, SysprimsResult};
+
+use crate::{
+    ContainmentBoundaryStrength, ContainmentCompletionEvidence, ContainmentGuard,
+    ContainmentIdentity, ContainmentObservation, ContainmentOutcome, TerminateTreeConfig,
+    TreeKillReliability, SIGKILL, SIGTERM,
+};
+
+#[cfg(unix)]
+use crate::{spawn_contained, ContainmentSpawnError};
+
+pub const MAX_REGISTRY_SLOTS: usize = 1024;
+pub const MAX_ARGV_ENTRIES: usize = 256;
+pub const MAX_ARGV_ENTRY_BYTES: usize = 4096;
+pub const MAX_ARGV_TOTAL_BYTES: usize = 65_536;
+pub const MAX_ENV_ENTRIES: usize = 256;
+pub const MAX_ENV_KEY_BYTES: usize = 1024;
+pub const MAX_ENV_VALUE_BYTES: usize = 4096;
+pub const MAX_ENV_TOTAL_BYTES: usize = 65_536;
+pub const MAX_CWD_BYTES: usize = 4096;
+pub const MAX_DURATION_MS: u64 = 86_400_000;
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[derive(Debug, Clone)]
+pub struct ManagedSpawnRequest {
+    pub argv: Vec<String>,
+    pub cwd: Option<String>,
+    pub env: Option<BTreeMap<String, String>>,
+    pub execution_timeout_ms: Option<u64>,
+    pub grace_timeout_ms: Option<u64>,
+    pub kill_timeout_ms: Option<u64>,
+    pub signal: Option<i32>,
+    pub kill_signal: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlotState {
+    Empty,
+    Active,
+    Finalizing,
+    Inert,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeaderStatus {
+    Running,
+    Completed,
+    TimedOut,
+    Terminated,
+}
+
+impl LeaderStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::TimedOut => "timed_out",
+            Self::Terminated => "terminated",
+        }
+    }
+}
+
+struct SlotData {
+    generation: u32,
+    retired: bool,
+    state: SlotState,
+    guard: Option<ContainmentGuard<ChildAdapter>>,
+    identity: Option<ContainmentIdentity>,
+    reliability: Option<TreeKillReliability>,
+    boundary: Option<ContainmentBoundaryStrength>,
+    terminate_config: TerminateTreeConfig,
+    outcome: Option<ContainmentOutcome>,
+    // Also records pending deadline enforcement while cleanup is retryable.
+    // Active snapshots still report Running until reap is confirmed.
+    leader_status: LeaderStatus,
+    deadline_cancel: Arc<AtomicBool>,
+    deadline_at: Option<Instant>,
+}
+
+struct Slot {
+    data: Mutex<SlotData>,
+    cond: Condvar,
+}
+
+struct Registry {
+    slots: Vec<Slot>,
+    free: Mutex<Vec<u32>>,
+}
+
+type ChildAdapter = std::process::Child;
+
+fn registry() -> &'static Registry {
+    static REGISTRY: OnceLock<Registry> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let mut slots = Vec::with_capacity(MAX_REGISTRY_SLOTS);
+        let mut free = Vec::with_capacity(MAX_REGISTRY_SLOTS);
+        for index in 0..MAX_REGISTRY_SLOTS {
+            slots.push(Slot {
+                data: Mutex::new(SlotData {
+                    generation: 1,
+                    retired: false,
+                    state: SlotState::Empty,
+                    guard: None,
+                    identity: None,
+                    reliability: None,
+                    boundary: None,
+                    terminate_config: TerminateTreeConfig::default(),
+                    outcome: None,
+                    leader_status: LeaderStatus::Running,
+                    deadline_cancel: Arc::new(AtomicBool::new(false)),
+                    deadline_at: None,
+                }),
+                cond: Condvar::new(),
+            });
+            free.push(index as u32);
+        }
+        Registry {
+            slots,
+            free: Mutex::new(free),
+        }
+    })
+}
+
+fn lock_poisoned() -> SysprimsError {
+    SysprimsError::internal("containment registry lock poisoned")
+}
+
+fn lock_data(slot: &Slot) -> SysprimsResult<MutexGuard<'_, SlotData>> {
+    slot.data.lock().map_err(|_| lock_poisoned())
+}
+
+fn lock_free(reg: &Registry) -> SysprimsResult<MutexGuard<'_, Vec<u32>>> {
+    reg.free.lock().map_err(|_| lock_poisoned())
+}
+
+#[cfg(unix)]
+fn pack_token(slot: u32, generation: u32) -> u64 {
+    ((generation as u64) << 32) | (u64::from(slot) + 1)
+}
+
+fn unpack_token(token: u64) -> SysprimsResult<(u32, u32)> {
+    if token == 0 {
+        return Err(invalid_handle("containment handle is invalid"));
+    }
+    let slot_plus_one = token & 0xffff_ffff;
+    if slot_plus_one == 0 {
+        return Err(invalid_handle("containment handle is invalid"));
+    }
+    let slot = slot_plus_one - 1;
+    if slot >= MAX_REGISTRY_SLOTS as u64 {
+        return Err(invalid_handle("containment handle is invalid"));
+    }
+    let generation = (token >> 32) as u32;
+    if generation == 0 {
+        return Err(invalid_handle("containment handle is invalid"));
+    }
+    Ok((slot as u32, generation))
+}
+
+fn invalid_handle(message: &str) -> SysprimsError {
+    SysprimsError::invalid_argument(message)
+}
+
+fn stale_handle() -> SysprimsError {
+    invalid_handle("containment handle is stale or closed")
+}
+
+#[cfg(unix)]
+fn spawn_error(error: ContainmentSpawnError) -> SysprimsError {
+    match error {
+        ContainmentSpawnError::Spawn(error) | ContainmentSpawnError::Adoption(error) => error,
+    }
+}
+
+pub fn validate_spawn_request(
+    request: &ManagedSpawnRequest,
+) -> SysprimsResult<TerminateTreeConfig> {
+    if request.argv.is_empty() {
+        return Err(SysprimsError::invalid_argument("argv must not be empty"));
+    }
+    if request.argv.len() > MAX_ARGV_ENTRIES {
+        return Err(SysprimsError::invalid_argument(format!(
+            "argv exceeds maximum of {MAX_ARGV_ENTRIES} entries"
+        )));
+    }
+    let mut argv_bytes = 0usize;
+    for (index, arg) in request.argv.iter().enumerate() {
+        if arg.is_empty() {
+            return Err(SysprimsError::invalid_argument(format!(
+                "argv[{index}] must not be empty"
+            )));
+        }
+        if arg.len() > MAX_ARGV_ENTRY_BYTES {
+            return Err(SysprimsError::invalid_argument(format!(
+                "argv[{index}] exceeds maximum of {MAX_ARGV_ENTRY_BYTES} bytes"
+            )));
+        }
+        argv_bytes = argv_bytes.saturating_add(arg.len());
+        if argv_bytes > MAX_ARGV_TOTAL_BYTES {
+            return Err(SysprimsError::invalid_argument(format!(
+                "argv exceeds maximum of {MAX_ARGV_TOTAL_BYTES} bytes"
+            )));
+        }
+    }
+
+    if let Some(cwd) = request.cwd.as_deref() {
+        if cwd.is_empty() {
+            return Err(SysprimsError::invalid_argument("cwd must not be empty"));
+        }
+        if cwd.len() > MAX_CWD_BYTES {
+            return Err(SysprimsError::invalid_argument(format!(
+                "cwd exceeds maximum of {MAX_CWD_BYTES} bytes"
+            )));
+        }
+    }
+
+    if let Some(env) = request.env.as_ref() {
+        if env.len() > MAX_ENV_ENTRIES {
+            return Err(SysprimsError::invalid_argument(format!(
+                "env exceeds maximum of {MAX_ENV_ENTRIES} entries"
+            )));
+        }
+        let mut env_bytes = 0usize;
+        for (key, value) in env {
+            if key.is_empty() {
+                return Err(SysprimsError::invalid_argument(
+                    "env keys must not be empty",
+                ));
+            }
+            if key.len() > MAX_ENV_KEY_BYTES {
+                return Err(SysprimsError::invalid_argument(format!(
+                    "env key exceeds maximum of {MAX_ENV_KEY_BYTES} bytes"
+                )));
+            }
+            if value.len() > MAX_ENV_VALUE_BYTES {
+                return Err(SysprimsError::invalid_argument(format!(
+                    "env value exceeds maximum of {MAX_ENV_VALUE_BYTES} bytes"
+                )));
+            }
+            env_bytes = env_bytes
+                .saturating_add(key.len())
+                .saturating_add(value.len());
+            if env_bytes > MAX_ENV_TOTAL_BYTES {
+                return Err(SysprimsError::invalid_argument(format!(
+                    "env exceeds maximum of {MAX_ENV_TOTAL_BYTES} bytes"
+                )));
+            }
+        }
+    }
+
+    if let Some(timeout) = request.execution_timeout_ms {
+        if timeout == 0 || timeout > MAX_DURATION_MS {
+            return Err(SysprimsError::invalid_argument(format!(
+                "execution_timeout_ms must be between 1 and {MAX_DURATION_MS}"
+            )));
+        }
+    }
+
+    let mut config = TerminateTreeConfig::default();
+    if let Some(grace) = request.grace_timeout_ms {
+        if grace > MAX_DURATION_MS {
+            return Err(SysprimsError::invalid_argument(format!(
+                "grace_timeout_ms exceeds maximum of {MAX_DURATION_MS}"
+            )));
+        }
+        config.grace_timeout_ms = grace;
+    }
+    if let Some(kill) = request.kill_timeout_ms {
+        if kill > MAX_DURATION_MS {
+            return Err(SysprimsError::invalid_argument(format!(
+                "kill_timeout_ms exceeds maximum of {MAX_DURATION_MS}"
+            )));
+        }
+        config.kill_timeout_ms = kill;
+    }
+    if let Some(signal) = request.signal {
+        validate_platform_signal(signal, "signal")?;
+        config.signal = signal;
+    }
+    if let Some(kill_signal) = request.kill_signal {
+        validate_platform_signal(kill_signal, "kill_signal")?;
+        config.kill_signal = kill_signal;
+    }
+    if config.signal == 0 {
+        config.signal = SIGTERM;
+    }
+    if config.kill_signal == 0 {
+        config.kill_signal = SIGKILL;
+    }
+    Ok(config)
+}
+
+fn platform_max_signal() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        libc::SIGRTMAX()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        31
+    }
+}
+
+fn validate_platform_signal(signal: i32, name: &str) -> SysprimsResult<()> {
+    let max_signal = platform_max_signal();
+    if signal <= 0 || signal > max_signal {
+        return Err(SysprimsError::invalid_argument(format!(
+            "{name} must be between 1 and {max_signal}"
+        )));
+    }
+    Ok(())
+}
+
+fn cleanup_not_confirmed() -> SysprimsError {
+    SysprimsError::invalid_argument("containment cleanup did not confirm child reaped; retry")
+}
+
+#[cfg(unix)]
+fn allocate_slot() -> SysprimsResult<(u32, u32)> {
+    let reg = registry();
+    let mut free = lock_free(reg)?;
+    while let Some(slot_index) = free.pop() {
+        let slot = &reg.slots[slot_index as usize];
+        let data = lock_data(slot)?;
+        if data.retired || data.state != SlotState::Empty {
+            debug_assert!(
+                data.retired && data.state == SlotState::Empty,
+                "free list contained a live or inconsistent slot"
+            );
+            continue;
+        }
+        let generation = data.generation;
+        drop(data);
+        return Ok((slot_index, generation));
+    }
+    Err(SysprimsError::invalid_argument(
+        "containment registry has no free slots",
+    ))
+}
+
+/// Reset a slot to Empty and bump generation. Returns whether the index should
+/// be pushed onto the free list. Caller must drop the slot data lock before
+/// taking the free-list lock.
+fn reset_slot_for_reuse(data: &mut SlotData) -> bool {
+    data.guard = None;
+    data.identity = None;
+    data.reliability = None;
+    data.boundary = None;
+    data.outcome = None;
+    data.leader_status = LeaderStatus::Running;
+    data.deadline_cancel.store(true, Ordering::SeqCst);
+    data.deadline_cancel = Arc::new(AtomicBool::new(false));
+    data.deadline_at = None;
+    data.state = SlotState::Empty;
+    if data.generation == u32::MAX {
+        data.retired = true;
+        return false;
+    }
+    let next = data.generation.saturating_add(1);
+    if next == 0 || next == u32::MAX {
+        data.generation = u32::MAX;
+        data.retired = true;
+        return false;
+    }
+    data.generation = next;
+    true
+}
+
+fn push_free_index(slot_index: u32) -> SysprimsResult<()> {
+    let mut free = lock_free(registry())?;
+    free.push(slot_index);
+    Ok(())
+}
+
+fn recycle_after_data_unlock(
+    slot: &Slot,
+    slot_index: u32,
+    mut data: MutexGuard<'_, SlotData>,
+) -> SysprimsResult<()> {
+    let should_push = reset_slot_for_reuse(&mut data);
+    slot.cond.notify_all();
+    drop(data);
+    if should_push {
+        push_free_index(slot_index)?;
+    }
+    Ok(())
+}
+
+fn lookup<'a>(token: u64) -> SysprimsResult<(u32, u32, &'a Slot)> {
+    let (slot_index, generation) = unpack_token(token)?;
+    let slot = &registry().slots[slot_index as usize];
+    Ok((slot_index, generation, slot))
+}
+
+fn snapshot_from(
+    data: &SlotData,
+    handle_state: &'static str,
+    leader_status: LeaderStatus,
+) -> SysprimsResult<ManagedSnapshot> {
+    let identity = data
+        .identity
+        .as_ref()
+        .ok_or_else(|| SysprimsError::internal("containment identity missing"))?;
+    let reliability = data
+        .reliability
+        .ok_or_else(|| SysprimsError::internal("containment reliability missing"))?;
+    let boundary = data
+        .boundary
+        .ok_or_else(|| SysprimsError::internal("containment boundary missing"))?;
+    let mut snapshot = ManagedSnapshot {
+        schema_id: CONTAINMENT_SNAPSHOT_V1,
+        timestamp: now_rfc3339(),
+        platform: get_platform(),
+        handle_state,
+        leader_status: leader_status.as_str(),
+        identity: ManagedIdentity {
+            pid: identity.pid,
+            start_time_unix_ms: identity.start_time_unix_ms,
+            exe_path: identity.exe_path.clone(),
+        },
+        tree_kill_reliability: reliability.as_str(),
+        boundary_strength: boundary.as_str(),
+        pgid: None,
+        signal_sent: None,
+        kill_signal: None,
+        escalated: None,
+        exited: None,
+        timed_out: None,
+        completion: None,
+        warnings: Vec::new(),
+    };
+    if let Some(outcome) = data.outcome.as_ref() {
+        snapshot.pgid = outcome.pgid;
+        snapshot.signal_sent = outcome.signal_sent;
+        snapshot.kill_signal = outcome.kill_signal;
+        snapshot.escalated = Some(outcome.escalated);
+        snapshot.exited = Some(outcome.exited);
+        snapshot.timed_out = Some(outcome.timed_out);
+        snapshot.completion = Some(outcome.completion.clone());
+        snapshot.warnings = outcome.warnings.clone();
+    }
+    Ok(snapshot)
+}
+
+fn commit_inert(
+    slot: &Slot,
+    data: &mut SlotData,
+    outcome: ContainmentOutcome,
+    leader_status: LeaderStatus,
+) -> SysprimsResult<ManagedSnapshot> {
+    data.deadline_cancel.store(true, Ordering::SeqCst);
+    data.outcome = Some(outcome);
+    data.leader_status = leader_status;
+    data.state = SlotState::Inert;
+    slot.cond.notify_all();
+    snapshot_from(data, "inert", leader_status)
+}
+
+/// Spawn a sysprims-owned contained child and return a capability token.
+pub fn spawn(request: ManagedSpawnRequest) -> SysprimsResult<u64> {
+    let terminate_config = validate_spawn_request(&request)?;
+
+    #[cfg(windows)]
+    {
+        let _ = terminate_config;
+        return Err(SysprimsError::not_supported(
+            "managed containment spawn without create-suspended Job assignment",
+            "windows",
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        let (slot_index, generation) = allocate_slot()?;
+        let token = pack_token(slot_index, generation);
+        let pending_deadline = match request.execution_timeout_ms {
+            Some(timeout_ms) => match start_unarmed_deadline_monitor() {
+                Ok(monitor) => Some((timeout_ms, monitor)),
+                Err(error) => {
+                    let _ = recycle_unused_slot(slot_index, generation);
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
+
+        let command = match build_command(&request) {
+            Ok(command) => command,
+            Err(error) => {
+                abandon_unused_construction(slot_index, generation, pending_deadline.as_ref());
+                return Err(error);
+            }
+        };
+
+        let guard = match spawn_contained(command) {
+            Ok(guard) => guard,
+            Err(error) => {
+                abandon_unused_construction(slot_index, generation, pending_deadline.as_ref());
+                return Err(spawn_error(error));
+            }
+        };
+
+        let reliability = guard.tree_kill_reliability();
+        let boundary = guard.boundary_strength();
+        if reliability != TreeKillReliability::Guaranteed
+            || boundary != ContainmentBoundaryStrength::CooperativeGroup
+        {
+            drop(guard);
+            abandon_unused_construction(slot_index, generation, pending_deadline.as_ref());
+            return Err(SysprimsError::internal(
+                "managed spawn produced a non-guaranteed cooperative-group guard",
+            ));
+        }
+
+        let identity = guard.identity().clone();
+        let slot = &registry().slots[slot_index as usize];
+        let deadline_at = pending_deadline
+            .as_ref()
+            .map(|(timeout_ms, _)| Instant::now() + Duration::from_millis(*timeout_ms));
+        {
+            let mut data = lock_data(slot)?;
+            if data.generation != generation || data.state != SlotState::Empty {
+                drop(guard);
+                if let Some((_, monitor)) = pending_deadline.as_ref() {
+                    monitor.cancel();
+                }
+                return Err(SysprimsError::internal(
+                    "containment slot changed before spawn insert",
+                ));
+            }
+            data.identity = Some(identity);
+            data.reliability = Some(reliability);
+            data.boundary = Some(boundary);
+            data.terminate_config = terminate_config;
+            data.leader_status = LeaderStatus::Running;
+            data.outcome = None;
+            if let Some((_, monitor)) = pending_deadline.as_ref() {
+                data.deadline_cancel = Arc::clone(&monitor.cancel);
+            }
+            data.deadline_at = deadline_at;
+            data.guard = Some(guard);
+            data.state = SlotState::Active;
+        }
+        if let Some((_, monitor)) = pending_deadline {
+            if let Some(deadline) = deadline_at {
+                monitor.arm(token, deadline);
+            }
+        }
+        Ok(token)
+    }
+}
+
+#[cfg(unix)]
+fn abandon_unused_construction(
+    slot_index: u32,
+    generation: u32,
+    pending_deadline: Option<&(u64, DeadlineMonitor)>,
+) {
+    if let Some((_, monitor)) = pending_deadline {
+        monitor.cancel();
+    }
+    let _ = recycle_unused_slot(slot_index, generation);
+}
+
+#[cfg(unix)]
+fn recycle_unused_slot(slot_index: u32, generation: u32) -> SysprimsResult<()> {
+    let reg = registry();
+    let slot = &reg.slots[slot_index as usize];
+    let data = lock_data(slot)?;
+    if data.generation == generation && data.state == SlotState::Empty && !data.retired {
+        drop(data);
+        push_free_index(slot_index)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn build_command(request: &ManagedSpawnRequest) -> SysprimsResult<Command> {
+    let mut command = Command::new(&request.argv[0]);
+    if request.argv.len() > 1 {
+        command.args(&request.argv[1..]);
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(cwd) = request.cwd.as_deref() {
+        command.current_dir(cwd);
+    }
+    if let Some(env) = request.env.as_ref() {
+        for (key, value) in env {
+            command.env(key, value);
+        }
+    }
+    Ok(command)
+}
+
+#[derive(Clone, Copy)]
+struct DeadlineArm {
+    token: u64,
+    deadline: Instant,
+}
+
+#[cfg(unix)]
+struct DeadlineMonitor {
+    arm: Arc<Mutex<Option<DeadlineArm>>>,
+    cancel: Arc<AtomicBool>,
+}
+
+#[cfg(unix)]
+impl DeadlineMonitor {
+    fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    /// Arm is infallible: the monitor thread is already reserved, and this
+    /// mutex has no panicking critical section. Recover poison and own the
+    /// arm state so a returned handle always has a deadline.
+    fn arm(&self, token: u64, deadline: Instant) {
+        *lock_arm(&self.arm) = Some(DeadlineArm { token, deadline });
+    }
+}
+
+fn lock_arm(arm: &Mutex<Option<DeadlineArm>>) -> MutexGuard<'_, Option<DeadlineArm>> {
+    arm.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(unix)]
+fn start_unarmed_deadline_monitor() -> SysprimsResult<DeadlineMonitor> {
+    if test_force_deadline_thread_fail() {
+        return Err(SysprimsError::system(
+            "failed to start containment deadline monitor",
+            0,
+        ));
+    }
+    let arm = Arc::new(Mutex::new(None));
+    let cancel = Arc::new(AtomicBool::new(false));
+    spawn_deadline_worker(Arc::clone(&arm), Arc::clone(&cancel))?;
+    Ok(DeadlineMonitor { arm, cancel })
+}
+
+fn spawn_deadline_worker(
+    arm: Arc<Mutex<Option<DeadlineArm>>>,
+    cancel: Arc<AtomicBool>,
+) -> SysprimsResult<()> {
+    thread::Builder::new()
+        .name("sysprims-containment-deadline".into())
+        .spawn(move || run_deadline_monitor(arm, cancel))
+        .map_err(|error| {
+            SysprimsError::system(
+                format!("failed to start containment deadline monitor: {error}"),
+                error.raw_os_error().unwrap_or(0),
+            )
+        })?;
+    Ok(())
+}
+
+fn run_deadline_monitor(arm: Arc<Mutex<Option<DeadlineArm>>>, cancel: Arc<AtomicBool>) {
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return;
+        }
+        let armed = *lock_arm(&arm);
+        match armed {
+            Some(DeadlineArm { token, deadline }) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    if terminate_with_status(token, LeaderStatus::TimedOut).is_ok() {
+                        return;
+                    }
+                    // Errors and unconfirmed reap retain the active capability.
+                    // Keep its existing monitor alive until finalization or close
+                    // cancels it; retry against the same generation-bound token.
+                    thread::sleep(POLL_INTERVAL);
+                    continue;
+                }
+                thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
+            }
+            None => thread::sleep(POLL_INTERVAL),
+        }
+    }
+}
+
+fn restore_deadline_monitor(data: &mut SlotData, token: u64) {
+    let Some(deadline) = data.deadline_at else {
+        return;
+    };
+    if !data.deadline_cancel.load(Ordering::SeqCst) {
+        return;
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let arm = Arc::new(Mutex::new(Some(DeadlineArm { token, deadline })));
+    if spawn_deadline_worker(Arc::clone(&arm), Arc::clone(&cancel)).is_ok() {
+        data.deadline_cancel = cancel;
+    }
+}
+
+#[cfg(unix)]
+fn test_force_deadline_thread_fail() -> bool {
+    #[cfg(test)]
+    {
+        inject::FORCE_DEADLINE_THREAD_FAIL.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+fn test_force_unreaped() -> bool {
+    #[cfg(test)]
+    {
+        inject::FORCE_UNREAPED.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+fn test_force_operation_error() -> bool {
+    #[cfg(test)]
+    {
+        inject::FORCE_OPERATION_ERROR.swap(false, Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
+}
+
+#[cfg(test)]
+mod inject {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex;
+
+    pub static FORCE_UNREAPED: AtomicBool = AtomicBool::new(false);
+    pub static FORCE_OPERATION_ERROR: AtomicBool = AtomicBool::new(false);
+    pub static FORCE_DEADLINE_THREAD_FAIL: AtomicBool = AtomicBool::new(false);
+    pub static TEST_MUTEX: Mutex<()> = Mutex::new(());
+}
+
+fn unreaped_outcome(data: &SlotData) -> SysprimsResult<ContainmentOutcome> {
+    let identity = data
+        .identity
+        .clone()
+        .ok_or_else(|| SysprimsError::internal("containment identity missing"))?;
+    let reliability = data
+        .reliability
+        .ok_or_else(|| SysprimsError::internal("containment reliability missing"))?;
+    let boundary = data
+        .boundary
+        .ok_or_else(|| SysprimsError::internal("containment boundary missing"))?;
+    Ok(ContainmentOutcome {
+        identity,
+        pgid: None,
+        signal_sent: None,
+        kill_signal: None,
+        escalated: false,
+        exited: false,
+        timed_out: true,
+        tree_kill_reliability: reliability,
+        boundary_strength: boundary,
+        completion: ContainmentCompletionEvidence::Unknown {
+            observation: ContainmentObservation::UnsupportedPlatform,
+        },
+        warnings: vec!["Timed out waiting to reap contained child".to_string()],
+    })
+}
+
+fn wait_for_not_finalizing<'a>(
+    slot: &'a Slot,
+    mut data: MutexGuard<'a, SlotData>,
+    wait_deadline: Option<Instant>,
+) -> SysprimsResult<MutexGuard<'a, SlotData>> {
+    let generation = data.generation;
+    while data.state == SlotState::Finalizing && data.generation == generation {
+        if let Some(deadline) = wait_deadline {
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(data);
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            let (guard, _) = slot
+                .cond
+                .wait_timeout(data, remaining)
+                .map_err(|_| lock_poisoned())?;
+            data = guard;
+        } else {
+            data = slot.cond.wait(data).map_err(|_| lock_poisoned())?;
+        }
+    }
+    Ok(data)
+}
+
+pub fn identity(token: u64) -> SysprimsResult<ManagedSnapshot> {
+    let (_slot_index, generation, slot) = lookup(token)?;
+    let data = lock_data(slot)?;
+    if data.generation != generation || data.retired {
+        return Err(stale_handle());
+    }
+    match data.state {
+        SlotState::Empty => Err(stale_handle()),
+        SlotState::Active | SlotState::Finalizing => {
+            snapshot_from(&data, "active", LeaderStatus::Running)
+        }
+        SlotState::Inert => snapshot_from(&data, "inert", data.leader_status),
+    }
+}
+
+pub fn poll(token: u64) -> SysprimsResult<ManagedSnapshot> {
+    operate_non_blocking(
+        token,
+        LeaderStatus::Completed,
+        Some(Instant::now()),
+        |guard, config| guard.try_complete(config),
+    )
+}
+
+pub fn wait(token: u64, wait_timeout_ms: u64) -> SysprimsResult<ManagedSnapshot> {
+    if wait_timeout_ms > MAX_DURATION_MS {
+        return Err(SysprimsError::invalid_argument(format!(
+            "wait timeout exceeds maximum of {MAX_DURATION_MS}"
+        )));
+    }
+    let wait_deadline = if wait_timeout_ms == 0 {
+        None
+    } else {
+        Some(Instant::now() + Duration::from_millis(wait_timeout_ms))
+    };
+
+    loop {
+        match operate_non_blocking(
+            token,
+            LeaderStatus::Completed,
+            wait_deadline,
+            |guard, config| guard.try_complete(config),
+        ) {
+            Ok(snapshot) if snapshot.leader_status != "running" => return Ok(snapshot),
+            Ok(snapshot) => {
+                if let Some(deadline) = wait_deadline {
+                    if Instant::now() >= deadline {
+                        return Ok(snapshot);
+                    }
+                }
+                let remaining = wait_deadline
+                    .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+                thread::sleep(
+                    remaining.map_or(POLL_INTERVAL, |remaining| POLL_INTERVAL.min(remaining)),
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+pub fn terminate(token: u64) -> SysprimsResult<ManagedSnapshot> {
+    terminate_with_status(token, LeaderStatus::Terminated)
+}
+
+fn terminate_with_status(
+    token: u64,
+    leader_status: LeaderStatus,
+) -> SysprimsResult<ManagedSnapshot> {
+    operate_blocking(token, leader_status, |guard, config| {
+        guard.terminate(config).map(Some)
+    })
+}
+
+pub fn close(token: u64) -> SysprimsResult<()> {
+    let (slot_index, generation, slot) = lookup(token)?;
+    let mut data = lock_data(slot)?;
+    if data.generation != generation || data.retired {
+        return Err(stale_handle());
+    }
+    data = wait_for_not_finalizing(slot, data, Some(Instant::now() + Duration::from_secs(120)))?;
+    if data.generation != generation {
+        return Err(stale_handle());
+    }
+    match data.state {
+        SlotState::Empty => Err(stale_handle()),
+        SlotState::Finalizing => Err(SysprimsError::invalid_argument(
+            "containment handle is busy; retry close",
+        )),
+        SlotState::Inert => recycle_after_data_unlock(slot, slot_index, data),
+        SlotState::Active => {
+            let mut guard = data
+                .guard
+                .take()
+                .ok_or_else(|| SysprimsError::internal("containment guard missing during close"))?;
+            let config = data.terminate_config.clone();
+            let forced = test_force_unreaped().then(|| unreaped_outcome(&data));
+            data.state = SlotState::Finalizing;
+            drop(data);
+            // Finalizing reserves this generation; only this owner holds the
+            // guard. Release the state lock so bounded waiters can observe it.
+            let result = match forced {
+                Some(outcome) => outcome.map(Some),
+                None => guard.terminate(config).map(Some),
+            };
+            let mut data = lock_data(slot)?;
+            data.guard = Some(guard);
+            match result {
+                Ok(Some(outcome)) if outcome.exited => {
+                    recycle_after_data_unlock(slot, slot_index, data)
+                }
+                Ok(_) => {
+                    data.state = SlotState::Active;
+                    restore_deadline_monitor(&mut data, token);
+                    slot.cond.notify_all();
+                    Err(cleanup_not_confirmed())
+                }
+                Err(error) => {
+                    data.state = SlotState::Active;
+                    restore_deadline_monitor(&mut data, token);
+                    slot.cond.notify_all();
+                    Err(error)
+                }
+            }
+        }
+    }
+}
+
+fn operate_non_blocking(
+    token: u64,
+    complete_status: LeaderStatus,
+    wait_deadline: Option<Instant>,
+    op: impl FnOnce(
+        &mut ContainmentGuard<ChildAdapter>,
+        TerminateTreeConfig,
+    ) -> SysprimsResult<Option<ContainmentOutcome>>,
+) -> SysprimsResult<ManagedSnapshot> {
+    operate_inner(token, complete_status, wait_deadline, op)
+}
+
+fn operate_blocking(
+    token: u64,
+    complete_status: LeaderStatus,
+    op: impl FnOnce(
+        &mut ContainmentGuard<ChildAdapter>,
+        TerminateTreeConfig,
+    ) -> SysprimsResult<Option<ContainmentOutcome>>,
+) -> SysprimsResult<ManagedSnapshot> {
+    operate_inner(token, complete_status, None, op)
+}
+
+fn operate_inner(
+    token: u64,
+    mut complete_status: LeaderStatus,
+    wait_deadline: Option<Instant>,
+    op: impl FnOnce(
+        &mut ContainmentGuard<ChildAdapter>,
+        TerminateTreeConfig,
+    ) -> SysprimsResult<Option<ContainmentOutcome>>,
+) -> SysprimsResult<ManagedSnapshot> {
+    let (_slot_index, generation, slot) = lookup(token)?;
+    let mut data = lock_data(slot)?;
+    if data.generation != generation || data.retired {
+        return Err(stale_handle());
+    }
+    let waited_for_owner = data.state == SlotState::Finalizing;
+    data = wait_for_not_finalizing(slot, data, wait_deadline)?;
+    if data.generation != generation {
+        return Err(stale_handle());
+    }
+    // A failed owner may restore Active as this wait expires. Do not acquire
+    // cleanup ownership after spending the caller's budget waiting for it.
+    if waited_for_owner
+        && data.state == SlotState::Active
+        && wait_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+    {
+        return snapshot_from(&data, "active", LeaderStatus::Running);
+    }
+    match data.state {
+        SlotState::Empty => Err(stale_handle()),
+        SlotState::Finalizing => snapshot_from(&data, "active", LeaderStatus::Running),
+        SlotState::Inert => snapshot_from(&data, "inert", data.leader_status),
+        SlotState::Active => {
+            let mut guard = data.guard.take().ok_or_else(|| {
+                SysprimsError::internal("containment guard missing during operation")
+            })?;
+            let config = data.terminate_config.clone();
+            let forced = test_force_unreaped().then(|| unreaped_outcome(&data));
+            let mut pending_status = data.leader_status;
+            data.state = SlotState::Finalizing;
+            drop(data);
+            // This owner exclusively holds the guard until it restores the
+            // slot. Other operations may observe/wait, but cannot recycle it.
+            let result = (|| {
+                if complete_status == LeaderStatus::TimedOut
+                    && pending_status != LeaderStatus::TimedOut
+                {
+                    if let Some(outcome) = guard.try_complete(config.clone())? {
+                        complete_status = LeaderStatus::Completed;
+                        return Ok(Some(outcome));
+                    }
+                    pending_status = LeaderStatus::TimedOut;
+                }
+                if test_force_operation_error() {
+                    return Err(SysprimsError::internal(
+                        "injected containment operation failure",
+                    ));
+                }
+                if let Some(outcome) = forced {
+                    return outcome.map(Some);
+                }
+                op(&mut guard, config)
+            })();
+            let mut data = lock_data(slot)?;
+            data.guard = Some(guard);
+            data.leader_status = pending_status;
+            match result {
+                Ok(Some(outcome)) if outcome.exited => {
+                    if data.leader_status == LeaderStatus::TimedOut {
+                        complete_status = LeaderStatus::TimedOut;
+                    }
+                    commit_inert(slot, &mut data, outcome, complete_status)
+                }
+                Ok(Some(_outcome)) => {
+                    data.state = SlotState::Active;
+                    slot.cond.notify_all();
+                    Err(cleanup_not_confirmed())
+                }
+                Ok(None) => {
+                    data.state = SlotState::Active;
+                    slot.cond.notify_all();
+                    snapshot_from(&data, "active", LeaderStatus::Running)
+                }
+                Err(error) => {
+                    data.state = SlotState::Active;
+                    slot.cond.notify_all();
+                    Err(error)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ManagedIdentity {
+    pub pid: u32,
+    pub start_time_unix_ms: u64,
+    pub exe_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ManagedSnapshot {
+    pub schema_id: &'static str,
+    pub timestamp: String,
+    pub platform: &'static str,
+    pub handle_state: &'static str,
+    pub leader_status: &'static str,
+    pub identity: ManagedIdentity,
+    pub tree_kill_reliability: &'static str,
+    pub boundary_strength: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pgid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal_sent: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kill_signal: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub escalated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exited: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion: Option<ContainmentCompletionEvidence>,
+    pub warnings: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+    #[cfg(unix)]
+    use std::sync::mpsc;
+    use std::sync::MutexGuard;
+    #[cfg(unix)]
+    use std::thread;
+
+    fn test_guard() -> MutexGuard<'static, ()> {
+        let guard = inject::TEST_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        inject::FORCE_OPERATION_ERROR.store(false, Ordering::SeqCst);
+        inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
+        guard
+    }
+
+    #[cfg(unix)]
+    fn occupied_slots() -> usize {
+        registry()
+            .slots
+            .iter()
+            .filter(|slot| {
+                lock_data(slot)
+                    .map(|data| data.state != SlotState::Empty)
+                    .unwrap_or(true)
+            })
+            .count()
+    }
+
+    fn request(argv: Vec<&str>) -> ManagedSpawnRequest {
+        ManagedSpawnRequest {
+            argv: argv.into_iter().map(str::to_string).collect(),
+            cwd: None,
+            env: None,
+            execution_timeout_ms: None,
+            grace_timeout_ms: Some(50),
+            kill_timeout_ms: Some(200),
+            signal: None,
+            kill_signal: None,
+        }
+    }
+
+    #[test]
+    fn rejects_empty_argv_and_signal_zero() {
+        let _lock = test_guard();
+        assert!(validate_spawn_request(&request(vec![])).is_err());
+        let mut bad = request(vec!["true"]);
+        bad.signal = Some(0);
+        assert!(validate_spawn_request(&bad).is_err());
+        let mut overflow = request(vec!["true"]);
+        overflow.execution_timeout_ms = Some(MAX_DURATION_MS + 1);
+        assert!(validate_spawn_request(&overflow).is_err());
+        let mut high = request(vec!["true"]);
+        high.signal = Some(99);
+        assert!(validate_spawn_request(&high).is_err());
+        let mut high_kill = request(vec!["true"]);
+        high_kill.kill_signal = Some(99);
+        assert!(validate_spawn_request(&high_kill).is_err());
+    }
+
+    #[test]
+    fn unpack_rejects_zero_and_malformed_tokens() {
+        let _lock = test_guard();
+        assert!(unpack_token(0).is_err());
+        assert!(unpack_token(1u64 << 32).is_err());
+        assert!(identity(0).is_err());
+        assert!(identity(1).is_err());
+        assert!(identity(u64::MAX).is_err());
+        assert!(close(0).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_wait_complete_dispose_twice_and_stale_reuse() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["true"])).expect("spawn true");
+        let snap = wait(token, 5_000).expect("wait true");
+        assert_eq!(snap.leader_status, "completed");
+        assert_eq!(snap.tree_kill_reliability, "guaranteed");
+        assert_eq!(snap.boundary_strength, "cooperative_group");
+        assert_eq!(snap.handle_state, "inert");
+        match snap.completion {
+            Some(ContainmentCompletionEvidence::Empty { .. })
+            | Some(ContainmentCompletionEvidence::Unknown { .. }) => {}
+            other => panic!("unexpected completion: {other:?}"),
+        }
+        close(token).expect("close");
+        assert!(
+            close(token).is_err(),
+            "closed token must fail closed at FFI"
+        );
+        let token2 = spawn(request(vec!["true"])).expect("reuse slot");
+        assert_ne!(token, token2);
+        assert!(
+            identity(token).is_err(),
+            "stale token must not follow slot reuse"
+        );
+        close(token2).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_keeps_spawn_reliability_and_linearizes_waiters() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn sleep");
+        let identity_before = identity(token).expect("identity");
+        let snap = terminate(token).expect("terminate");
+        assert_eq!(snap.leader_status, "terminated");
+        assert_eq!(
+            snap.tree_kill_reliability,
+            identity_before.tree_kill_reliability
+        );
+        let again = terminate(token).expect("inert terminate");
+        assert_eq!(again.handle_state, "inert");
+        assert_eq!(again.leader_status, "terminated");
+        close(token).expect("close after terminate");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_times_out_without_language_wait() {
+        let _lock = test_guard();
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(200);
+        req.grace_timeout_ms = Some(20);
+        let token = spawn(req).expect("spawn with deadline");
+        let snap = wait(token, 5_000).expect("wait for native deadline");
+        assert_eq!(snap.leader_status, "timed_out");
+        assert_eq!(snap.tree_kill_reliability, "guaranteed");
+        close(token).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_wait_does_not_wait_for_finalizing_owner() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn owned child");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let owner = thread::spawn(move || {
+            operate_blocking(token, LeaderStatus::Terminated, |guard, config| {
+                entered_tx.send(()).unwrap();
+                // Bound the fixture even if the waiter regresses and blocks.
+                let _ = release_rx.recv_timeout(Duration::from_secs(1));
+                guard.terminate(config).map(Some)
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let started = Instant::now();
+        let result = wait(token, 10);
+        let elapsed = started.elapsed();
+        let observed = identity(token);
+        let polled = poll(token);
+        let _ = release_tx.send(());
+        let terminal = owner.join().unwrap().expect("owner completes");
+        close(token).expect("dispose");
+        let snapshot = result.expect("bounded wait");
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "wait took {elapsed:?}"
+        );
+        assert_eq!(snapshot.handle_state, "active");
+        assert_eq!(snapshot.leader_status, "running");
+        assert_eq!(observed.unwrap().handle_state, "active");
+        assert_eq!(polled.unwrap().handle_state, "active");
+        assert_eq!(terminal.leader_status, "terminated");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_wait_during_active_close_preserves_close_owner() {
+        let _lock = test_guard();
+        let mut req = request(vec!["sleep", "30"]);
+        req.grace_timeout_ms = Some(800);
+        let token = spawn(req).expect("spawn owned child");
+        let owner = thread::spawn(move || close(token));
+        let (_, _, slot) = lookup(token).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let state = lock_data(slot).unwrap().state;
+            if state != SlotState::Active || Instant::now() >= deadline {
+                break;
+            }
+            thread::yield_now();
+        }
+        let started = Instant::now();
+        let result = wait(token, 10);
+        let elapsed = started.elapsed();
+        owner.join().unwrap().expect("close owner completes");
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "wait took {elapsed:?}"
+        );
+        assert_eq!(result.unwrap().handle_state, "active");
+        assert!(
+            identity(token).is_err(),
+            "close must recycle only after cleanup"
+        );
+    }
+
+    // Observe only cached state: poll/wait would themselves perform cleanup and
+    // could hide a dead monitor. Always dispose before asserting the result.
+    #[cfg(unix)]
+    fn observe_native_finalization(token: u64) -> ManagedSnapshot {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = identity(token).expect("observe native monitor");
+            if snapshot.handle_state == "inert" || Instant::now() >= deadline {
+                close(token).expect("dispose monitor fixture");
+                return snapshot;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_retries_unreaped_cleanup_without_language_wait() {
+        let _lock = test_guard();
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(100);
+        let token = spawn(req).expect("spawn with deadline");
+        let snapshot = observe_native_finalization(token);
+        assert!(!inject::FORCE_UNREAPED.load(Ordering::SeqCst));
+        assert_eq!(snapshot.handle_state, "inert");
+        assert_eq!(snapshot.leader_status, "timed_out");
+        assert_eq!(snapshot.exited, Some(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_retries_operation_error_without_language_wait() {
+        let _lock = test_guard();
+        inject::FORCE_OPERATION_ERROR.store(true, Ordering::SeqCst);
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(100);
+        let token = spawn(req).expect("spawn with deadline");
+        let snapshot = observe_native_finalization(token);
+        assert!(!inject::FORCE_OPERATION_ERROR.load(Ordering::SeqCst));
+        assert_eq!(snapshot.handle_state, "inert");
+        assert_eq!(snapshot.leader_status, "timed_out");
+        assert_eq!(snapshot.exited, Some(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_deadline_preserves_unpolled_natural_completion() {
+        let _lock = test_guard();
+        let mut req = request(vec!["true"]);
+        req.execution_timeout_ms = Some(500);
+        let token = spawn(req).expect("spawn short-lived child with deadline");
+        let snapshot = observe_native_finalization(token);
+        assert_eq!(snapshot.handle_state, "inert");
+        assert_eq!(snapshot.leader_status, "completed");
+        assert_eq!(snapshot.exited, Some(true));
+        assert_eq!(snapshot.timed_out, Some(false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deadline_reason_survives_failed_cleanup_and_explicit_retry() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn deadline fixture");
+        inject::FORCE_OPERATION_ERROR.store(true, Ordering::SeqCst);
+        assert!(terminate_with_status(token, LeaderStatus::TimedOut).is_err());
+        let active = identity(token).expect("failed deadline retains owner");
+        let snapshot = terminate(token).expect("explicit retry completes cleanup");
+        let cached = wait(token, 1).expect("wait returns cached outcome");
+        close(token).expect("close finalized fixture");
+        assert_eq!(active.handle_state, "active");
+        assert_eq!(active.leader_status, "running");
+        assert_eq!(snapshot.leader_status, "timed_out");
+        assert_eq!(cached.leader_status, "timed_out");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_spawn_fails_before_creating_a_handle() {
+        let _lock = test_guard();
+        let marker = std::env::temp_dir().join(format!(
+            "sysprims-containment-windows-{}.marker",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let result = spawn(request(vec![
+            "cmd",
+            "/C",
+            &format!("echo spawned>{}", marker.display()),
+        ]));
+        assert!(result.is_err());
+        assert!(!marker.exists(), "windows rejection must not start argv");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_high_signal_does_not_spawn() {
+        let _lock = test_guard();
+        let marker = std::env::temp_dir().join(format!(
+            "sysprims-containment-high-signal-{}.marker",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let mut req = request(vec!["touch", marker.to_str().expect("utf8 path")]);
+        req.signal = Some(99);
+        assert!(spawn(req).is_err());
+        assert!(!marker.exists(), "invalid high signal must not start argv");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_active_close_preserves_owner_and_unreaped_is_not_inert() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn sleep");
+
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        let terminated = terminate(token);
+        assert!(terminated.is_err(), "exited:false must be retryable");
+        let snap = identity(token).expect("owner retained after unreaped terminate");
+        assert_eq!(snap.handle_state, "active");
+
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        assert!(close(token).is_err(), "unconfirmed close must fail");
+        identity(token).expect("failed close must keep the same generation");
+        poll(token).expect("active owner remains usable");
+
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+        close(token).expect("retry close after unreaped failure");
+        assert!(identity(token).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deadline_monitor_setup_failure_returns_no_handle() {
+        let _lock = test_guard();
+        let before = occupied_slots();
+        let marker = std::env::temp_dir().join(format!(
+            "sysprims-containment-deadline-setup-{}.marker",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        inject::FORCE_DEADLINE_THREAD_FAIL.store(true, Ordering::SeqCst);
+        let mut req = request(vec!["touch", marker.to_str().expect("utf8 path")]);
+        req.execution_timeout_ms = Some(5_000);
+        let result = spawn(req);
+        inject::FORCE_DEADLINE_THREAD_FAIL.store(false, Ordering::SeqCst);
+        assert!(
+            result.is_err(),
+            "deadline setup failure must not return a handle"
+        );
+        assert!(
+            !marker.exists(),
+            "deadline reservation failure must not start argv"
+        );
+        assert_eq!(
+            occupied_slots(),
+            before,
+            "monitor-setup failure before spawn must not occupy a slot"
+        );
+        let token = spawn(request(vec!["true"])).expect("registry remains usable");
+        close(token).expect("close after deadline-setup failure");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_active_close_keeps_native_deadline_live() {
+        let _lock = test_guard();
+        let mut req = request(vec!["sleep", "30"]);
+        req.execution_timeout_ms = Some(250);
+        req.grace_timeout_ms = Some(20);
+        let token = spawn(req).expect("spawn with deadline");
+
+        inject::FORCE_UNREAPED.store(true, Ordering::SeqCst);
+        assert!(close(token).is_err(), "unconfirmed close must fail");
+        inject::FORCE_UNREAPED.store(false, Ordering::SeqCst);
+
+        let snap = identity(token).expect("owner retained after failed close");
+        assert_eq!(snap.handle_state, "active");
+        let snap = wait(token, 5_000).expect("native deadline must still fire");
+        assert_eq!(snap.leader_status, "timed_out");
+        close(token).expect("close after native timeout");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_spawn_and_close_does_not_deadlock() {
+        let _lock = test_guard();
+        let (done_tx, done_rx) = mpsc::channel();
+        let workers = 8;
+        let iterations = 20;
+        for _ in 0..workers {
+            let done_tx = done_tx.clone();
+            thread::spawn(move || {
+                for _ in 0..iterations {
+                    if let Ok(token) = spawn(request(vec!["true"])) {
+                        let _ = wait(token, 2_000);
+                        let _ = close(token);
+                    }
+                }
+                let _ = done_tx.send(());
+            });
+        }
+        drop(done_tx);
+        for _ in 0..workers {
+            done_rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("spawn/close worker deadlocked or timed out");
+        }
+    }
+}

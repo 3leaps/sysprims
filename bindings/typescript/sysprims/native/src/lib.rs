@@ -2,6 +2,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use napi_derive::napi;
+
+mod containment;
+pub use containment::{
+    sysprims_containment_close, sysprims_containment_identity, sysprims_containment_poll,
+    sysprims_containment_spawn, sysprims_containment_terminate, sysprims_containment_wait,
+};
 use sysprims_core::schema::{
     RUN_NOHUP_CONFIG_V1, RUN_SETSID_CONFIG_V1, SESSION_SPAWN_RESULT_V1, SPAWN_IN_GROUP_CONFIG_V1,
     TERMINATE_TREE_CONFIG_V1,
@@ -66,7 +72,7 @@ pub struct SysprimsCallVoidResult {
     pub message: Option<String>,
 }
 
-fn ok_json(json: String) -> SysprimsCallJsonResult {
+pub(crate) fn ok_json(json: String) -> SysprimsCallJsonResult {
     SysprimsCallJsonResult {
         code: SysprimsErrorCode::Ok as i32,
         json: Some(json),
@@ -74,7 +80,7 @@ fn ok_json(json: String) -> SysprimsCallJsonResult {
     }
 }
 
-fn err_json(err: SysprimsError) -> SysprimsCallJsonResult {
+pub(crate) fn err_json(err: SysprimsError) -> SysprimsCallJsonResult {
     SysprimsCallJsonResult {
         code: SysprimsErrorCode::from(&err) as i32,
         json: None,
@@ -99,14 +105,14 @@ fn err_u32(err: SysprimsError) -> SysprimsCallU32Result {
     }
 }
 
-fn ok_void() -> SysprimsCallVoidResult {
+pub(crate) fn ok_void() -> SysprimsCallVoidResult {
     SysprimsCallVoidResult {
         code: SysprimsErrorCode::Ok as i32,
         message: None,
     }
 }
 
-fn err_void(err: SysprimsError) -> SysprimsCallVoidResult {
+pub(crate) fn err_void(err: SysprimsError) -> SysprimsCallVoidResult {
     SysprimsCallVoidResult {
         code: SysprimsErrorCode::from(&err) as i32,
         message: Some(err.to_string()),

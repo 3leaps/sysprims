@@ -4,10 +4,11 @@
 
 This document is generated from emitted package declarations and the reviewed native surface contract. See [Capability Intent Matrix](capability-intent-matrix.md) for policy and lifecycle rationale.
 
-Summary: 24 public values, 42 public types, 22 N-API callables, and 35 C-ABI functions.
+Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI functions.
 
 ## Public Values
 
+- `ContainedProcess`: `class` (Managed containment lifecycle)
 - `SysprimsError`: `class` (Error values)
 - `SysprimsErrorCode`: `{ readonly Ok: 0; readonly InvalidArgument: 1; readonly SpawnFailed: 2; readonly Timeout: 3; readonly PermissionDenied: 4; readonly NotFound: 5; readonly NotSupported: 6; readonly GroupCreationFailed: 7; readonly System: 8; readonly Internal: 99; }` (Error values)
 - `ancestors`: `(pid: number, options?: AncestorsOptions): AncestorsResult` (Ancestor traversal)
@@ -27,6 +28,7 @@ Summary: 24 public values, 42 public types, 22 N-API callables, and 35 C-ABI fun
 - `selfSID`: `(): number` (Current session)
 - `signalSend`: `(pid: number, signal: number): void` (Signal one process)
 - `signalSendGroup`: `(pgid: number, signal: number): void` (Signal one process group)
+- `spawnContained`: `(argv: string[], options?: SpawnContainedOptions): Promise<ContainedProcess>` (Managed contained spawn)
 - `spawnInGroup`: `(config: SpawnInGroupConfig): SpawnInGroupResult` (PID-returning grouped spawn)
 - `terminate`: `(pid: number): void` (Graceful direct termination)
 - `terminateMany`: `(pids: number[]): BatchKillResult` (JavaScript batch signal conveniences)
@@ -39,6 +41,11 @@ Summary: 24 public values, 42 public types, 22 N-API callables, and 35 C-ABI fun
 - `AncestorsResult`: export interface AncestorsResult { schema_id: string; timestamp: string; platform: string; pid: number; chain: ProcessInfo[]; warnings: string[]; } (Ancestor traversal)
 - `BatchKillFailure`: export interface BatchKillFailure { pid: number; error: string; } (JavaScript batch signal conveniences)
 - `BatchKillResult`: export interface BatchKillResult { succeeded: number[]; failed: BatchKillFailure[]; } (JavaScript batch signal conveniences)
+- `ContainedProcess`: export declare class ContainedProcess { #private; private constructor(); identity(): Promise<ContainmentSnapshot>; poll(): Promise<ContainmentSnapshot>; wait(options?: ContainedProcessWaitOptions): Promise<ContainmentSnapshot>; terminate(): Promise<ContainmentSnapshot>; close(): Promise<void>; [Symbol.asyncDispose](): Promise<void>; } (Managed containment lifecycle)
+- `ContainedProcessWaitOptions`: export interface ContainedProcessWaitOptions { timeoutMs?: number; signal?: AbortSignal; } (Managed containment lifecycle)
+- `ContainmentCompletion`: export interface ContainmentCompletion { status: "empty" | "survivors" | "unknown"; observation: string; observed_count?: number; survivor_pids?: number[]; } (Managed containment lifecycle)
+- `ContainmentIdentity`: export interface ContainmentIdentity { pid: number; start_time_unix_ms: number; exe_path: string; } (Managed containment lifecycle)
+- `ContainmentSnapshot`: export interface ContainmentSnapshot { schema_id: string; timestamp: string; platform: string; handle_state: "active" | "inert"; leader_status: "running" | "completed" | "timed_out" | "terminated"; identity: ContainmentIdentity; tree_kill_reliability: "guaranteed" | "unproven" | "best_effort"; boundary_strength: "cooperative_group" | "kernel_enforced_job" | "unknown"; pgid?: number | null; signal_sent?: number | null; kill_signal?: number | null; escalated?: boolean | null; exited?: boolean | null; timed_out?: boolean | null; completion?: ContainmentCompletion; warnings: string[]; } (Managed containment lifecycle)
 - `CpuMode`: export type CpuMode = "lifetime" | "monitor"; (Descendant traversal)
 - `DescendantsLevel`: export interface DescendantsLevel { level: number; processes: ProcessInfo[]; } (Descendant traversal)
 - `DescendantsOptions`: export interface DescendantsOptions extends ProcessOptions { maxLevels?: number; filter?: ProcessFilter; cpuMode?: CpuMode; sampleDurationMs?: number; } (Descendant traversal)
@@ -70,6 +77,7 @@ Summary: 24 public values, 42 public types, 22 N-API callables, and 35 C-ABI fun
 - `SessionSpawnResult`: export interface SessionSpawnResult { schema_id: string; timestamp: string; platform: string; verb: SessionSpawnVerb; status: SessionSpawnStatus; pid: number | null; sid: number | null; pgid: number | null; session_kind: SessionKind; identifier_provenance: SessionIdentifierProvenance; exit_code: number | null; signal: number | null; output_file: string | null; warnings: string[]; } (New session spawn)
 - `SessionSpawnStatus`: export type SessionSpawnStatus = "spawned" | "completed"; (New session spawn)
 - `SessionSpawnVerb`: export type SessionSpawnVerb = "setsid" | "nohup"; (New session spawn)
+- `SpawnContainedOptions`: export interface SpawnContainedOptions { cwd?: string | null; env?: Record<string, string> | null; executionTimeoutMs?: number; graceTimeoutMs?: number; killTimeoutMs?: number; signal?: number; killSignal?: number; } (Managed contained spawn)
 - `SpawnInGroupConfig`: export interface SpawnInGroupConfig { schema_id?: string; argv: string[]; cwd?: string | null; env?: Record<string, string> | null; } (PID-returning grouped spawn)
 - `SpawnInGroupResult`: export interface SpawnInGroupResult { schema_id: string; timestamp: string; platform: string; pid: number; pgid?: number | null; tree_kill_reliability: "guaranteed" | "best_effort"; warnings: string[]; } (PID-returning grouped spawn)
 - `SysprimsError`: export declare class SysprimsError extends Error { readonly code: SysprimsErrorCode; readonly codeName: string; constructor(code: SysprimsErrorCode, message: string); } (Error values)
@@ -81,6 +89,12 @@ Summary: 24 public values, 42 public types, 22 N-API callables, and 35 C-ABI fun
 ## N-API Runtime Callables
 
 - `sysprimsAbiVersion`: internal-only; public mapping: none
+- `sysprimsContainmentClose`: exposed; public mapping: `ContainedProcess`
+- `sysprimsContainmentIdentity`: exposed; public mapping: `ContainedProcess`
+- `sysprimsContainmentPoll`: exposed; public mapping: `ContainedProcess`
+- `sysprimsContainmentSpawn`: exposed; public mapping: `spawnContained`
+- `sysprimsContainmentTerminate`: exposed; public mapping: `ContainedProcess`
+- `sysprimsContainmentWait`: exposed; public mapping: `ContainedProcess`
 - `sysprimsForceKill`: exposed; public mapping: `forceKill`
 - `sysprimsProcAncestors`: exposed; public mapping: `ancestors`
 - `sysprimsProcDescendants`: exposed; public mapping: `descendants`
@@ -107,6 +121,12 @@ Summary: 24 public values, 42 public types, 22 N-API callables, and 35 C-ABI fun
 
 - `sysprims_abi_version`: excluded; public mapping: none
 - `sysprims_clear_error`: excluded; public mapping: none
+- `sysprims_containment_close`: exposed; public mapping: `ContainedProcess`
+- `sysprims_containment_identity`: exposed; public mapping: `ContainedProcess`
+- `sysprims_containment_poll`: exposed; public mapping: `ContainedProcess`
+- `sysprims_containment_spawn`: exposed; public mapping: `spawnContained`
+- `sysprims_containment_terminate`: exposed; public mapping: `ContainedProcess`
+- `sysprims_containment_wait`: exposed; public mapping: `ContainedProcess`
 - `sysprims_force_kill`: exposed; public mapping: `forceKill`
 - `sysprims_free_string`: excluded; public mapping: none
 - `sysprims_get_platform`: excluded; public mapping: none

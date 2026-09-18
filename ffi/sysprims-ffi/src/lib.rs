@@ -28,6 +28,7 @@ use std::os::raw::c_char;
 use sysprims_core::get_platform;
 
 // Modules
+mod containment;
 mod error;
 mod proc;
 mod session;
@@ -39,6 +40,10 @@ mod timeout;
 pub use error::SysprimsErrorCode;
 
 // Re-export FFI functions from submodules
+pub use containment::{
+    sysprims_containment_close, sysprims_containment_identity, sysprims_containment_poll,
+    sysprims_containment_spawn, sysprims_containment_terminate, sysprims_containment_wait,
+};
 pub use error::{sysprims_clear_error, sysprims_last_error, sysprims_last_error_code};
 pub use proc::{
     sysprims_proc_ancestors, sysprims_proc_descendants, sysprims_proc_descendants_ex,

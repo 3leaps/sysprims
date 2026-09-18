@@ -31,10 +31,10 @@ See [Platform Support Matrix](../standards/platform-support.md) for the canonica
 
 **Important**: Go bindings on Windows use a GNU-ABI C toolchain, not MSVC. Which GNU toolchain depends on the architecture:
 
-| Arch   | Rust target                   | Toolchain                                | Consumer install                                                      |
-| ------ | ----------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
-| x86_64 | `x86_64-pc-windows-gnu`       | msys2/MinGW-w64 (`mingw-w64-x86_64-gcc`) | `pacman -S mingw-w64-x86_64-gcc` in msys2                             |
-| arm64  | `aarch64-pc-windows-gnullvm`  | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-gcc`) | Download `*-ucrt-aarch64.zip` release, add `bin/` to PATH (since v0.1.16) |
+| Arch   | Rust target                  | Toolchain                                                                        | Consumer install                                                          |
+| ------ | ---------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| x86_64 | `x86_64-pc-windows-gnu`      | msys2/MinGW-w64 (`mingw-w64-x86_64-gcc`)                                         | `pacman -S mingw-w64-x86_64-gcc` in msys2                                 |
+| arm64  | `aarch64-pc-windows-gnullvm` | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-gcc`) | Download `*-ucrt-aarch64.zip` release, add `bin/` to PATH (since v0.1.16) |
 
 ### Why a GNU toolchain for Go?
 
@@ -62,6 +62,37 @@ The GNU-ABI toolchains are GPL-free for our use:
 | GCC / clang compiler      | GPL / Apache 2.0          | ✅ Output not covered       |
 
 No GPL license toxicity with static linking.
+
+## Managed contained spawn
+
+Go `SpawnContained` and TypeScript `spawnContained` are the only binding
+constructors that return owned containment. They always spawn contained;
+there is no foreground mode. The handle is a generation-checked native
+token, not a PID. Close/dispose is deterministic. Existing `RunWithTimeout`,
+`TerminateTree` / `terminateTree`, and `SpawnInGroup` / `spawnInGroup` stay
+as they are.
+
+Unix success reports `guaranteed` spawn-time acquisition and a
+`cooperative_group` boundary: descendants that leave the group are outside that
+boundary. Windows rejects this constructor before executing argv. The same
+handle provides identity, poll, wait, terminate, and close methods; PID fields
+are diagnostic evidence, never a transferable ownership capability.
+
+Execution deadlines belong to the native owner and run without language-side
+polling. A wait timeout returns an active/running snapshot and does not terminate
+the child or cancel another operation's cleanup. Zero means an unbounded wait.
+A waiter that itself acquires cleanup ownership may also spend the configured
+cleanup window completing it. An already-exited leader remains `completed` when
+first observed after its execution deadline. `leader_status == timed_out` means
+execution-deadline enforcement; the separate `timed_out` flag describes cleanup
+reap timeout.
+
+Always close explicitly (`defer` in Go, `try/finally` or async disposal in
+TypeScript). Successful close is idempotent; failed close retains the token for
+retry. Finalizers are leak backstops, not deterministic disposal. TypeScript
+wait cancellation ends the caller's wait, not native ownership or cleanup.
+See the [Go README](../../bindings/go/sysprims/README.md) and
+[TypeScript README](../../bindings/typescript/sysprims/README.md) for examples.
 
 ## Go Bindings
 
@@ -237,35 +268,37 @@ and the generated [public API reference](../../bindings/typescript/sysprims/docs
 CI checks emitted declarations, N-API exports, the public C comparison surface,
 and generated documentation for drift.
 
-| Function                            | Description                                                          |
-| ----------------------------------- | -------------------------------------------------------------------- |
-| `procGet(pid, options?)`            | Get process info by PID with opt-in details                          |
-| `processList(filter?, options?)`    | List processes with filtering and opt-in details                     |
-| `ancestors(pid, options?)`          | Walk process ancestry                                                |
-| `descendants(pid, options?)`        | Walk descendants with default-off environment/thread enrichment     |
-| `listFds(pid, filter?)`             | List process file descriptors                                       |
-| `listeningPorts(filter?)`           | Map listening ports to processes                                    |
-| `waitPID(pid, timeoutMs)`           | Wait for process exit with timeout                                  |
-| `guardStep(config)`                 | Run one guard observation/remediation step                           |
-| `killDescendants(pid, signal?, options?)` | Signal matching descendants with per-target results                  |
-| `terminateTree(pid, config?)`       | Graceful-then-kill tree termination                                 |
-| `signalSend(pid, signal)`           | Send a signal to a process                                          |
-| `signalSendGroup(pgid, signal)`     | Send a signal to a process group on Unix                            |
-| `terminate(pid)`                    | Graceful termination                                                 |
-| `forceKill(pid)`                    | Immediate kill                                                       |
-| `killMany(pids, signal)`            | Signal multiple processes with per-PID results                       |
-| `terminateMany(pids)`               | Gracefully terminate multiple processes                              |
-| `forceKillMany(pids)`               | Force-kill multiple processes                                        |
-| `spawnInGroup(config)`              | Spawn in a new Unix process group; unsupported on Windows            |
-| `runSetsid(config)`                 | Spawn a command in a new POSIX session                               |
-| `runNohup(config)`                  | Spawn a SIGHUP-ignoring command on Unix                               |
-| `selfPGID()`                        | Get the current process group ID on Unix                             |
-| `selfSID()`                         | Get the current session ID on Unix                                   |
+| Function                                  | Description                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| `procGet(pid, options?)`                  | Get process info by PID with opt-in details                        |
+| `processList(filter?, options?)`          | List processes with filtering and opt-in details                   |
+| `ancestors(pid, options?)`                | Walk process ancestry                                              |
+| `descendants(pid, options?)`              | Walk descendants with default-off environment/thread enrichment    |
+| `listFds(pid, filter?)`                   | List process file descriptors                                      |
+| `listeningPorts(filter?)`                 | Map listening ports to processes                                   |
+| `waitPID(pid, timeoutMs)`                 | Wait for process exit with timeout                                 |
+| `guardStep(config)`                       | Run one guard observation/remediation step                         |
+| `killDescendants(pid, signal?, options?)` | Signal matching descendants with per-target results                |
+| `terminateTree(pid, config?)`             | Graceful-then-kill tree termination                                |
+| `signalSend(pid, signal)`                 | Send a signal to a process                                         |
+| `signalSendGroup(pgid, signal)`           | Send a signal to a process group on Unix                           |
+| `terminate(pid)`                          | Graceful termination                                               |
+| `forceKill(pid)`                          | Immediate kill                                                     |
+| `killMany(pids, signal)`                  | Signal multiple processes with per-PID results                     |
+| `terminateMany(pids)`                     | Gracefully terminate multiple processes                            |
+| `forceKillMany(pids)`                     | Force-kill multiple processes                                      |
+| `spawnContained(argv, options?)`          | Spawn an owned contained process with native deadline and disposal |
+| `spawnInGroup(config)`                    | Spawn in a new Unix process group; unsupported on Windows          |
+| `runSetsid(config)`                       | Spawn a command in a new POSIX session                             |
+| `runNohup(config)`                        | Spawn a SIGHUP-ignoring command on Unix                            |
+| `selfPGID()`                              | Get the current process group ID on Unix                           |
+| `selfSID()`                               | Get the current session ID on Unix                                 |
 
 Numeric PID, process-group, signal, depth, duration, port, and filter inputs
 are validated before JavaScript coercion or native loading and revalidated at
-the N-API boundary. The TypeScript package excludes owned containment and
-timeout execution and does not reconstruct lifecycle ownership from a PID.
+the N-API boundary. Owned containment is available through `spawnContained`,
+including its native execution deadline. TypeScript does not project the legacy
+Rust timeout runner or adopt lifecycle ownership from a PID.
 
 ### Filter Conventions
 
