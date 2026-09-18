@@ -86,6 +86,9 @@ type ContainedProcess struct {
 
 var nativeCloseFn func(uint64) error
 
+// Test seam for exercising wrapper reachability across snapshot calls.
+var beforeSnapshotCallForTest func()
+
 func nativeClose(token uint64) error {
 	if nativeCloseFn != nil {
 		return nativeCloseFn(token)
@@ -149,6 +152,9 @@ func (h *ContainedProcess) currentToken() (uint64, error) {
 }
 
 func snapshotCall(call func(result **C.char) C.SysprimsErrorCode) (*ContainmentSnapshot, error) {
+	if beforeSnapshotCallForTest != nil {
+		beforeSnapshotCallForTest()
+	}
 	var resultCStr *C.char
 	if err := callAndCheck(func() C.SysprimsErrorCode {
 		return call(&resultCStr)
@@ -170,9 +176,11 @@ func (h *ContainedProcess) Identity() (*ContainmentSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return snapshotCall(func(result **C.char) C.SysprimsErrorCode {
+	snapshot, err := snapshotCall(func(result **C.char) C.SysprimsErrorCode {
 		return C.sysprims_containment_identity(C.uint64_t(token), result)
 	})
+	runtime.KeepAlive(h)
+	return snapshot, err
 }
 
 // Poll is non-destructive while the leader is running. If the leader has
@@ -182,9 +190,11 @@ func (h *ContainedProcess) Poll() (*ContainmentSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return snapshotCall(func(result **C.char) C.SysprimsErrorCode {
+	snapshot, err := snapshotCall(func(result **C.char) C.SysprimsErrorCode {
 		return C.sysprims_containment_poll(C.uint64_t(token), result)
 	})
+	runtime.KeepAlive(h)
+	return snapshot, err
 }
 
 // Wait waits for a terminal outcome or until timeout. A timeout of 0 waits
@@ -208,9 +218,11 @@ func (h *ContainedProcess) Wait(timeout time.Duration) (*ContainmentSnapshot, er
 			timeoutMS = uint64(ms)
 		}
 	}
-	return snapshotCall(func(result **C.char) C.SysprimsErrorCode {
+	snapshot, err := snapshotCall(func(result **C.char) C.SysprimsErrorCode {
 		return C.sysprims_containment_wait(C.uint64_t(token), C.uint64_t(timeoutMS), result)
 	})
+	runtime.KeepAlive(h)
+	return snapshot, err
 }
 
 // Terminate sends the configured grace/escalate policy once.
@@ -219,9 +231,11 @@ func (h *ContainedProcess) Terminate() (*ContainmentSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return snapshotCall(func(result **C.char) C.SysprimsErrorCode {
+	snapshot, err := snapshotCall(func(result **C.char) C.SysprimsErrorCode {
 		return C.sysprims_containment_terminate(C.uint64_t(token), result)
 	})
+	runtime.KeepAlive(h)
+	return snapshot, err
 }
 
 // Close releases the native registry entry. The second call is a no-op.

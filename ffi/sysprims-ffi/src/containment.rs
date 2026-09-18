@@ -309,6 +309,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_malformed_wire_and_null_outputs() {
+        for wire in [
+            "{",
+            r#"{"schema_id":"wrong","argv":["true"]}"#,
+            &format!(
+                r#"{{"schema_id":"{CONTAINMENT_SPAWN_CONFIG_V1}","argv":["true"],"unexpected":true}}"#
+            ),
+        ] {
+            let config = CString::new(wire).unwrap();
+            let mut handle = 99;
+            assert_eq!(
+                unsafe { sysprims_containment_spawn(config.as_ptr(), &mut handle) },
+                SysprimsErrorCode::InvalidArgument
+            );
+            assert_eq!(handle, 0, "wire rejection must return no capability");
+        }
+        let config = spawn_cfg(&["true"]);
+        assert_eq!(
+            unsafe { sysprims_containment_spawn(config.as_ptr(), ptr::null_mut()) },
+            SysprimsErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { sysprims_containment_identity(0, ptr::null_mut()) },
+            SysprimsErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { sysprims_containment_poll(0, ptr::null_mut()) },
+            SysprimsErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { sysprims_containment_wait(0, 10, ptr::null_mut()) },
+            SysprimsErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { sysprims_containment_terminate(0, ptr::null_mut()) },
+            SysprimsErrorCode::InvalidArgument
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn null_snapshot_outputs_preserve_a_valid_handle() {
+        let config = spawn_cfg(&["sleep", "30"]);
+        let mut handle = 0;
+        assert_eq!(
+            unsafe { sysprims_containment_spawn(config.as_ptr(), &mut handle) },
+            SysprimsErrorCode::Ok
+        );
+        let codes = unsafe {
+            [
+                sysprims_containment_identity(handle, ptr::null_mut()),
+                sysprims_containment_poll(handle, ptr::null_mut()),
+                sysprims_containment_wait(handle, 10, ptr::null_mut()),
+                sysprims_containment_terminate(handle, ptr::null_mut()),
+            ]
+        };
+        let snapshot = containment_identity(handle);
+        assert_eq!(sysprims_containment_close(handle), SysprimsErrorCode::Ok);
+        assert!(codes
+            .iter()
+            .all(|code| *code == SysprimsErrorCode::InvalidArgument));
+        assert_eq!(snapshot.unwrap().handle_state, "active");
+    }
+
     #[cfg(unix)]
     #[test]
     fn spawn_wait_close_and_stale_token() {

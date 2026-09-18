@@ -25,6 +25,50 @@ Go cgo on Windows requires a GNU-ABI C compiler driver. Install the one for your
 
 Linux and macOS consumers need no extra toolchain beyond the platform default.
 
+## Managed contained spawn (unreleased)
+
+`SpawnContained(SpawnContainedConfig)` spawns from an argv vector and returns
+`*ContainedProcess`. Its methods are `Identity`, `Poll`, `Wait`, `Terminate`, and
+`Close`. `Wait(0)` is unbounded; negative durations are rejected. Positive
+sub-millisecond durations are rounded up to 1ms.
+
+```go
+executionMS := uint64(5000)
+h, err := sysprims.SpawnContained(sysprims.SpawnContainedConfig{
+    Argv: []string{"sleep", "30"},
+    ExecutionTimeoutMS: &executionMS,
+})
+if err != nil {
+    return err
+}
+defer h.Close() // Always arrange cleanup, including on earlier errors.
+
+snapshot, err := h.Wait(6 * time.Second)
+if err != nil {
+    return err
+}
+_ = snapshot.LeaderStatus
+if err := h.Close(); err != nil {
+    return err // The handle remains usable for a cleanup retry.
+}
+```
+
+Unix success reports `guaranteed` spawn-time acquisition and
+`cooperative_group` boundary strength. This is a cooperative process group;
+descendants that leave it are outside the boundary. Windows rejects managed
+spawn before argv runs. The handle owns native lifecycle authority; its PID
+fields are diagnostic only.
+
+The execution deadline runs natively without polling. A bounded wait returns an
+active/running snapshot on timeout, including while another caller cleans up;
+it does not terminate the process. A wait that itself owns cleanup may take the
+configured grace/kill window to finish. A fast child first observed after its
+deadline remains `completed`. `leader_status == timed_out` records execution
+deadline enforcement; the separate `timed_out` field records cleanup reap timeout.
+
+Successful close is idempotent. A failed close preserves the handle for retry.
+Finalizers are a leak backstop; close explicitly for deterministic disposal.
+
 ## Replacing shell-outs
 
 v0.1.14 expands the process-intelligence API so common shell-outs can be replaced directly.

@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bounded containment waits return while another caller owns cleanup. Native
+  finalization retains exclusive guard ownership without holding the slot state
+  lock through cleanup. Go containment methods retain their wrapper through
+  native calls with `runtime.KeepAlive`.
+- Go and TypeScript managed-containment documentation now covers deadlines,
+  lifecycle operations, platform boundaries, and explicit disposal.
 - Native containment deadlines retry cleanup errors and unconfirmed reap until
   finalization or close. Leaders that exited naturally before deadline cleanup
   report `completed`; deadline enforcement retains `timed_out` across retries.

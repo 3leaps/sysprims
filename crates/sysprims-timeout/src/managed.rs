@@ -776,7 +776,8 @@ fn wait_for_not_finalizing<'a>(
     mut data: MutexGuard<'a, SlotData>,
     wait_deadline: Option<Instant>,
 ) -> SysprimsResult<MutexGuard<'a, SlotData>> {
-    while data.state == SlotState::Finalizing {
+    let generation = data.generation;
+    while data.state == SlotState::Finalizing && data.generation == generation {
         if let Some(deadline) = wait_deadline {
             let now = Instant::now();
             if now >= deadline {
@@ -811,9 +812,12 @@ pub fn identity(token: u64) -> SysprimsResult<ManagedSnapshot> {
 }
 
 pub fn poll(token: u64) -> SysprimsResult<ManagedSnapshot> {
-    operate_non_blocking(token, LeaderStatus::Completed, |guard, config| {
-        guard.try_complete(config)
-    })
+    operate_non_blocking(
+        token,
+        LeaderStatus::Completed,
+        Some(Instant::now()),
+        |guard, config| guard.try_complete(config),
+    )
 }
 
 pub fn wait(token: u64, wait_timeout_ms: u64) -> SysprimsResult<ManagedSnapshot> {
@@ -829,9 +833,12 @@ pub fn wait(token: u64, wait_timeout_ms: u64) -> SysprimsResult<ManagedSnapshot>
     };
 
     loop {
-        match operate_non_blocking(token, LeaderStatus::Completed, |guard, config| {
-            guard.try_complete(config)
-        }) {
+        match operate_non_blocking(
+            token,
+            LeaderStatus::Completed,
+            wait_deadline,
+            |guard, config| guard.try_complete(config),
+        ) {
             Ok(snapshot) if snapshot.leader_status != "running" => return Ok(snapshot),
             Ok(snapshot) => {
                 if let Some(deadline) = wait_deadline {
@@ -839,7 +846,11 @@ pub fn wait(token: u64, wait_timeout_ms: u64) -> SysprimsResult<ManagedSnapshot>
                         return Ok(snapshot);
                     }
                 }
-                thread::sleep(POLL_INTERVAL);
+                let remaining = wait_deadline
+                    .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+                thread::sleep(
+                    remaining.map_or(POLL_INTERVAL, |remaining| POLL_INTERVAL.min(remaining)),
+                );
             }
             Err(error) => return Err(error),
         }
@@ -876,16 +887,22 @@ pub fn close(token: u64) -> SysprimsResult<()> {
         )),
         SlotState::Inert => recycle_after_data_unlock(slot, slot_index, data),
         SlotState::Active => {
-            data.state = SlotState::Finalizing;
+            let mut guard = data
+                .guard
+                .take()
+                .ok_or_else(|| SysprimsError::internal("containment guard missing during close"))?;
             let config = data.terminate_config.clone();
-            let result = if test_force_unreaped() {
-                unreaped_outcome(&data).map(Some)
-            } else {
-                let guard = data.guard.as_mut().ok_or_else(|| {
-                    SysprimsError::internal("containment guard missing during close")
-                })?;
-                guard.terminate(config).map(Some)
+            let forced = test_force_unreaped().then(|| unreaped_outcome(&data));
+            data.state = SlotState::Finalizing;
+            drop(data);
+            // Finalizing reserves this generation; only this owner holds the
+            // guard. Release the state lock so bounded waiters can observe it.
+            let result = match forced {
+                Some(outcome) => outcome.map(Some),
+                None => guard.terminate(config).map(Some),
             };
+            let mut data = lock_data(slot)?;
+            data.guard = Some(guard);
             match result {
                 Ok(Some(outcome)) if outcome.exited => {
                     recycle_after_data_unlock(slot, slot_index, data)
@@ -910,12 +927,13 @@ pub fn close(token: u64) -> SysprimsResult<()> {
 fn operate_non_blocking(
     token: u64,
     complete_status: LeaderStatus,
+    wait_deadline: Option<Instant>,
     op: impl FnOnce(
         &mut ContainmentGuard<ChildAdapter>,
         TerminateTreeConfig,
     ) -> SysprimsResult<Option<ContainmentOutcome>>,
 ) -> SysprimsResult<ManagedSnapshot> {
-    operate_inner(token, complete_status, false, op)
+    operate_inner(token, complete_status, wait_deadline, op)
 }
 
 fn operate_blocking(
@@ -926,13 +944,13 @@ fn operate_blocking(
         TerminateTreeConfig,
     ) -> SysprimsResult<Option<ContainmentOutcome>>,
 ) -> SysprimsResult<ManagedSnapshot> {
-    operate_inner(token, complete_status, true, op)
+    operate_inner(token, complete_status, None, op)
 }
 
 fn operate_inner(
     token: u64,
     mut complete_status: LeaderStatus,
-    block_for_finalizing: bool,
+    wait_deadline: Option<Instant>,
     op: impl FnOnce(
         &mut ContainmentGuard<ChildAdapter>,
         TerminateTreeConfig,
@@ -943,57 +961,57 @@ fn operate_inner(
     if data.generation != generation || data.retired {
         return Err(stale_handle());
     }
-    if block_for_finalizing {
-        data = wait_for_not_finalizing(slot, data, None)?;
-        if data.generation != generation {
-            return Err(stale_handle());
-        }
-    } else if data.state == SlotState::Finalizing {
-        data =
-            wait_for_not_finalizing(slot, data, Some(Instant::now() + Duration::from_secs(120)))?;
-        if data.generation != generation {
-            return Err(stale_handle());
-        }
+    let waited_for_owner = data.state == SlotState::Finalizing;
+    data = wait_for_not_finalizing(slot, data, wait_deadline)?;
+    if data.generation != generation {
+        return Err(stale_handle());
+    }
+    // A failed owner may restore Active as this wait expires. Do not acquire
+    // cleanup ownership after spending the caller's budget waiting for it.
+    if waited_for_owner
+        && data.state == SlotState::Active
+        && wait_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+    {
+        return snapshot_from(&data, "active", LeaderStatus::Running);
     }
     match data.state {
         SlotState::Empty => Err(stale_handle()),
-        SlotState::Finalizing => Err(SysprimsError::invalid_argument(
-            "containment handle is busy",
-        )),
+        SlotState::Finalizing => snapshot_from(&data, "active", LeaderStatus::Running),
         SlotState::Inert => snapshot_from(&data, "inert", data.leader_status),
         SlotState::Active => {
-            data.state = SlotState::Finalizing;
+            let mut guard = data.guard.take().ok_or_else(|| {
+                SysprimsError::internal("containment guard missing during operation")
+            })?;
             let config = data.terminate_config.clone();
+            let forced = test_force_unreaped().then(|| unreaped_outcome(&data));
+            let mut pending_status = data.leader_status;
+            data.state = SlotState::Finalizing;
+            drop(data);
+            // This owner exclusively holds the guard until it restores the
+            // slot. Other operations may observe/wait, but cannot recycle it.
             let result = (|| {
-                // Observe natural completion before enforcing the execution
-                // deadline, under the same slot lock as cleanup. Once deadline
-                // enforcement begins, retain that reason through retries, even
-                // if a later poll observes the now-exited leader.
                 if complete_status == LeaderStatus::TimedOut
-                    && data.leader_status != LeaderStatus::TimedOut
+                    && pending_status != LeaderStatus::TimedOut
                 {
-                    let guard = data.guard.as_mut().ok_or_else(|| {
-                        SysprimsError::internal("containment guard missing during operation")
-                    })?;
                     if let Some(outcome) = guard.try_complete(config.clone())? {
                         complete_status = LeaderStatus::Completed;
                         return Ok(Some(outcome));
                     }
-                    data.leader_status = LeaderStatus::TimedOut;
+                    pending_status = LeaderStatus::TimedOut;
                 }
                 if test_force_operation_error() {
                     return Err(SysprimsError::internal(
                         "injected containment operation failure",
                     ));
                 }
-                if test_force_unreaped() {
-                    return unreaped_outcome(&data).map(Some);
+                if let Some(outcome) = forced {
+                    return outcome.map(Some);
                 }
-                let guard = data.guard.as_mut().ok_or_else(|| {
-                    SysprimsError::internal("containment guard missing during operation")
-                })?;
-                op(guard, config)
+                op(&mut guard, config)
             })();
+            let mut data = lock_data(slot)?;
+            data.guard = Some(guard);
+            data.leader_status = pending_status;
             match result {
                 Ok(Some(outcome)) if outcome.exited => {
                     if data.leader_status == LeaderStatus::TimedOut {
@@ -1186,6 +1204,74 @@ mod tests {
         assert_eq!(snap.leader_status, "timed_out");
         assert_eq!(snap.tree_kill_reliability, "guaranteed");
         close(token).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_wait_does_not_wait_for_finalizing_owner() {
+        let _lock = test_guard();
+        let token = spawn(request(vec!["sleep", "30"])).expect("spawn owned child");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let owner = thread::spawn(move || {
+            operate_blocking(token, LeaderStatus::Terminated, |guard, config| {
+                entered_tx.send(()).unwrap();
+                // Bound the fixture even if the waiter regresses and blocks.
+                let _ = release_rx.recv_timeout(Duration::from_secs(1));
+                guard.terminate(config).map(Some)
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let started = Instant::now();
+        let result = wait(token, 10);
+        let elapsed = started.elapsed();
+        let observed = identity(token);
+        let polled = poll(token);
+        let _ = release_tx.send(());
+        let terminal = owner.join().unwrap().expect("owner completes");
+        close(token).expect("dispose");
+        let snapshot = result.expect("bounded wait");
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "wait took {elapsed:?}"
+        );
+        assert_eq!(snapshot.handle_state, "active");
+        assert_eq!(snapshot.leader_status, "running");
+        assert_eq!(observed.unwrap().handle_state, "active");
+        assert_eq!(polled.unwrap().handle_state, "active");
+        assert_eq!(terminal.leader_status, "terminated");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_wait_during_active_close_preserves_close_owner() {
+        let _lock = test_guard();
+        let mut req = request(vec!["sleep", "30"]);
+        req.grace_timeout_ms = Some(800);
+        let token = spawn(req).expect("spawn owned child");
+        let owner = thread::spawn(move || close(token));
+        let (_, _, slot) = lookup(token).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let state = lock_data(slot).unwrap().state;
+            if state != SlotState::Active || Instant::now() >= deadline {
+                break;
+            }
+            thread::yield_now();
+        }
+        let started = Instant::now();
+        let result = wait(token, 10);
+        let elapsed = started.elapsed();
+        owner.join().unwrap().expect("close owner completes");
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "wait took {elapsed:?}"
+        );
+        assert_eq!(result.unwrap().handle_state, "active");
+        assert!(
+            identity(token).is_err(),
+            "close must recycle only after cleanup"
+        );
     }
 
     // Observe only cached state: poll/wait would themselves perform cleanup and
