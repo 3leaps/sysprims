@@ -835,7 +835,7 @@ release-plan-check: ## Validate the machine-readable release surface plan
 	@node scripts/version-pack.mjs plan-check
 
 version-tooling-test: ## Run isolated version and tag-guard controls
-	@node --test scripts/version-pack.test.mjs scripts/release-integrity.test.mjs scripts/npm-release.test.mjs
+	@node --test scripts/version-pack.test.mjs scripts/release-integrity.test.mjs scripts/npm-release.test.mjs scripts/generate-go-prebuilt-manifest.test.mjs
 
 MODE ?= pre-tag
 release-guard-tag-version: ## Validate the explicit release tag against VERSION

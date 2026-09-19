@@ -63,6 +63,13 @@ export function verifyStage(stageDirectory, expectedTag, expectedCommit) {
   return manifest;
 }
 
+export function parseRegistryMetadata(value, label = "npm package") {
+  const tarball = value?.dist?.tarball ?? value?.["dist.tarball"];
+  const integrity = value?.dist?.integrity ?? value?.["dist.integrity"];
+  if (!tarball || !integrity) fail(`npm registry metadata is incomplete for ${label}`);
+  return { tarball, integrity };
+}
+
 function registryState(entry, registryDirectory) {
   if (registryDirectory) {
     const path = join(registryDirectory, entry.filename);
@@ -75,8 +82,8 @@ function registryState(entry, registryDirectory) {
     fail(`npm registry query failed for ${entry.name}@${entry.version}: ${viewed.stderr}${viewed.stdout}`);
   }
   const metadata = JSON.parse(viewed.stdout);
-  if (!metadata.tarball || !metadata.integrity) fail(`npm registry metadata is incomplete for ${entry.name}@${entry.version}`);
-  return { state: "present", sri: metadata.integrity, tarball: metadata.tarball };
+  const parsed = parseRegistryMetadata(metadata, `${entry.name}@${entry.version}`);
+  return { state: "present", sri: parsed.integrity, tarball: parsed.tarball };
 }
 
 function assertPresentIdentical(entry, state, stageDirectory) {

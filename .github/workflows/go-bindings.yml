@@ -164,6 +164,13 @@ jobs:
           go test -run '^TestVersion$' .
           LD_LIBRARY_PATH="$PWD/lib-shared/${platform}" \
             go test -run '^TestVersion$' -tags=sysprims_shared .
+          SYSPRIMS_PROBE_PLATFORM="$platform" \
+            go run ./cmd/version-probe > "$RUNNER_TEMP/${platform}.json"
+      - name: Upload observed runtime evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-${{ matrix.platform }}
+          path: ${{ runner.temp }}/${{ matrix.platform }}.json
   build-macos:
     name: Build FFI (macOS)
     runs-on: macos-15
@@ -215,6 +222,8 @@ jobs:
           cd bindings/go/sysprims
 
           go test -run '^TestVersion$' .
+          SYSPRIMS_PROBE_PLATFORM=darwin-arm64 \
+            go run ./cmd/version-probe > "$RUNNER_TEMP/darwin-arm64.json"
           DYLD_LIBRARY_PATH="$PWD/lib-shared/darwin-arm64" \
             go test -run '^TestVersion$' -tags=sysprims_shared .
 
@@ -231,6 +240,12 @@ jobs:
             go test -c -o "$RUNNER_TEMP/sysprims-static-amd64.test" .
           arch -x86_64 "$RUNNER_TEMP/sysprims-static-amd64.test" \
             -test.run '^TestVersion$'
+          CGO_ENABLED=1 GOARCH=amd64 CC="$RUNNER_TEMP/clang-x86_64" \
+            go build -o "$RUNNER_TEMP/sysprims-version-probe-amd64" \
+            ./cmd/version-probe
+          SYSPRIMS_PROBE_PLATFORM=darwin-amd64 \
+            arch -x86_64 "$RUNNER_TEMP/sysprims-version-probe-amd64" \
+            > "$RUNNER_TEMP/darwin-amd64.json"
 
           CGO_ENABLED=1 GOARCH=amd64 CC="$RUNNER_TEMP/clang-x86_64" \
             go test -c -tags=sysprims_shared \
@@ -238,6 +253,16 @@ jobs:
           DYLD_LIBRARY_PATH="$PWD/lib-shared/darwin-amd64" \
             arch -x86_64 "$RUNNER_TEMP/sysprims-shared-amd64.test" \
             -test.run '^TestVersion$'
+      - name: Upload observed runtime evidence (darwin-amd64)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-darwin-amd64
+          path: ${{ runner.temp }}/darwin-amd64.json
+      - name: Upload observed runtime evidence (darwin-arm64)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-darwin-arm64
+          path: ${{ runner.temp }}/darwin-arm64.json
       - name: Upload FFI artifact (darwin-amd64)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -304,8 +329,15 @@ jobs:
           cp dist/ffi-shared/windows-amd64/* bindings/go/sysprims/lib-shared/windows-amd64/
           cd bindings/go/sysprims
           go test -run '^TestVersion$' .
+          SYSPRIMS_PROBE_PLATFORM=windows-amd64 \
+            go run ./cmd/version-probe > "$RUNNER_TEMP/windows-amd64.json"
           PATH="$PWD/lib-shared/windows-amd64:$PATH" \
             go test -run '^TestVersion$' -tags=sysprims_shared .
+      - name: Upload observed runtime evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-windows-amd64
+          path: ${{ runner.temp }}/windows-amd64.json
       - name: Upload FFI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -374,11 +406,18 @@ jobs:
           Push-Location bindings/go/sysprims
           try {
             go test -run '^TestVersion$' .
+            $env:SYSPRIMS_PROBE_PLATFORM = 'windows-arm64'
+            go run ./cmd/version-probe | Out-File -Encoding utf8 "$env:RUNNER_TEMP/windows-arm64.json"
             $env:PATH = "$(Resolve-Path lib-shared/windows-arm64);$env:PATH"
             go test -run '^TestVersion$' -tags=sysprims_shared .
           } finally {
             Pop-Location
           }
+      - name: Upload observed runtime evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-windows-arm64
+          path: ${{ runner.temp }}/windows-arm64.json
       - name: Upload FFI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -430,8 +469,15 @@ jobs:
           set -eu
           go version
           go test -run '^TestVersion$' -tags=musl .
+          SYSPRIMS_PROBE_PLATFORM=linux-amd64-musl \
+            go run -tags=musl ./cmd/version-probe > "$RUNNER_TEMP/linux-amd64-musl.json"
           LD_LIBRARY_PATH="$PWD/lib-shared/linux-amd64-musl" \
             go test -run '^TestVersion$' -tags="musl,sysprims_shared" .
+      - name: Upload observed runtime evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-linux-amd64-musl
+          path: ${{ runner.temp }}/linux-amd64-musl.json
   test-musl-shared-go-arm64:
     name: Smoke Go Runtime (linux-arm64-musl, static + shared)
     runs-on: ubuntu-latest-arm64-s
@@ -474,6 +520,20 @@ jobs:
               LD_LIBRARY_PATH="$PWD/lib-shared/linux-arm64-musl" \
                 go test -run "^TestVersion$" -tags="musl,sysprims_shared" .
             '
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace/bindings/go/sysprims \
+            -e CGO_ENABLED=1 \
+            -e SYSPRIMS_EXPECT_VERSION \
+            -e SYSPRIMS_PROBE_PLATFORM=linux-arm64-musl \
+            golang:1.22-alpine \
+            sh -eu -c 'apk add --no-cache build-base >/dev/null && go run -tags=musl ./cmd/version-probe' \
+            > "$RUNNER_TEMP/linux-arm64-musl.json"
+      - name: Upload observed runtime evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-smoke-linux-arm64-musl
+          path: ${{ runner.temp }}/linux-arm64-musl.json
   cbindgen:
     name: Generate C Header
     runs-on: ubuntu-latest
@@ -524,6 +584,12 @@ jobs:
         with:
           name: c-header
           path: ffi-libs
+      - name: Download observed Go runtime evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          pattern: go-smoke-*
+          path: go-smoke-evidence
+          merge-multiple: true
       - name: Update Go bindings directory
         run: |
           set -euo pipefail
@@ -558,7 +624,8 @@ jobs:
           fi
       - name: Generate and validate Go prebuilt manifest
         run: |
-          node scripts/generate-go-prebuilt-manifest.mjs
+          node scripts/generate-go-prebuilt-manifest.mjs \
+            --evidence-dir go-smoke-evidence
           make release-plan-check version-check
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8
