@@ -150,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generic adapter contract.
 - No portable-PTY companion crate or consumer integration is included.
 
-## [0.2.0] - Pending
+## [0.2.0] - 2026-08-26
 
 ### Added
 

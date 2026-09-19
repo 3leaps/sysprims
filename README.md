@@ -87,7 +87,7 @@ workflows run from the verified core tag.
 | Rust workspace | Repository tag `v0.2.3` |
 | Go module | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.3` |
 | TypeScript | `npm install @3leaps/sysprims@0.2.3` |
-| PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release tag that pins core v0.2.3 |
+| PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release; use the core revision recorded by that companion release |
 
 The canonical `v0.2.3` and path-prefixed
 `bindings/go/sysprims/v0.2.3` tags identify the same core commit.
@@ -95,6 +95,11 @@ The canonical `v0.2.3` and path-prefixed
 in the core tag. Only the five Rust library crates are published to crates.io;
 the CLI, C FFI crate, and TypeScript N-API crate are release-built but not
 published as Rust crates.
+
+Managed contained spawn for Go (`SpawnContained`) and TypeScript
+(`spawnContained`) is available on `main`. It is not part of the published
+`v0.2.3` Go or npm packages; use the coordinates above for the current tagged
+surfaces.
 
 ### As a Rust Library
 

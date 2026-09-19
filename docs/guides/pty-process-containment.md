@@ -46,8 +46,8 @@ mismatch all fail closed without a reusable receipt.
 The separately versioned
 [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) companion exposes this
 replacement slot while preserving the `portable-pty` API shape. Use the
-companion release that pins the immutable sysprims `v0.2.2` source revision.
-The companion tag is independent from the core tag.
+core revision recorded by the companion release. The companion version and tag
+are independent from the sysprims core tag.
 
 Adapters without a prepared-spawn slot can still keep their child handle and
 move it into a small adapter for `adopt_contained`. The guard verifies the live
