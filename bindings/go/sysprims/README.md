@@ -25,7 +25,7 @@ Go cgo on Windows requires a GNU-ABI C compiler driver. Install the one for your
 
 Linux and macOS consumers need no extra toolchain beyond the platform default.
 
-## Managed contained spawn (unreleased)
+## Managed contained spawn (on `main`; unreleased)
 
 `SpawnContained(SpawnContainedConfig)` spawns from an argv vector and returns
 `*ContainedProcess`. Its methods are `Identity`, `Poll`, `Wait`, `Terminate`, and
@@ -53,11 +53,12 @@ if err := h.Close(); err != nil {
 }
 ```
 
-Unix success reports `guaranteed` spawn-time acquisition and
-`cooperative_group` boundary strength. This is a cooperative process group;
-descendants that leave it are outside the boundary. Windows rejects managed
-spawn before argv runs. The handle owns native lifecycle authority; its PID
-fields are diagnostic only.
+Unix success reports `guaranteed` race-free acquisition and retained
+group-signaling eligibility with `cooperative_group` boundary strength. This is
+a cooperative process group; descendants that leave it are outside the
+boundary, so `guaranteed` does not mean OS-enforced non-escape. Windows rejects
+managed spawn before argv runs. The handle owns native lifecycle authority; its
+PID fields are diagnostic only.
 
 The execution deadline runs natively without polling. A bounded wait returns an
 active/running snapshot on timeout, including while another caller cleans up;

@@ -67,7 +67,7 @@ fresh C header for comparison with current Rust exports.
 
 ## API
 
-### Managed contained spawn (unreleased)
+### Managed contained spawn (on `main`; unreleased)
 
 `spawnContained(argv, options?)` returns a `ContainedProcess` with async
 `identity()`, `poll()`, `wait()`, `terminate()`, and `close()` methods, plus
@@ -91,11 +91,12 @@ try {
 }
 ```
 
-Unix success reports `guaranteed` spawn-time acquisition and
-`cooperative_group` boundary strength. This is a cooperative process group;
-descendants that leave it are outside the boundary. Windows rejects managed
-spawn before argv runs. The handle owns native lifecycle authority; its PID
-fields are diagnostic only.
+Unix success reports `guaranteed` race-free acquisition and retained
+group-signaling eligibility with `cooperative_group` boundary strength. This is
+a cooperative process group; descendants that leave it are outside the
+boundary, so `guaranteed` does not mean OS-enforced non-escape. Windows rejects
+managed spawn before argv runs. The handle owns native lifecycle authority; its
+PID fields are diagnostic only.
 
 The execution deadline runs natively without polling. A bounded wait returns an
 active/running snapshot on timeout, including while another caller cleans up;

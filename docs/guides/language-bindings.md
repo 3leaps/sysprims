@@ -72,11 +72,12 @@ token, not a PID. Close/dispose is deterministic. Existing `RunWithTimeout`,
 `TerminateTree` / `terminateTree`, and `SpawnInGroup` / `spawnInGroup` stay
 as they are.
 
-Unix success reports `guaranteed` spawn-time acquisition and a
-`cooperative_group` boundary: descendants that leave the group are outside that
-boundary. Windows rejects this constructor before executing argv. The same
-handle provides identity, poll, wait, terminate, and close methods; PID fields
-are diagnostic evidence, never a transferable ownership capability.
+Unix success reports `guaranteed` race-free acquisition and retained
+group-signaling eligibility with a `cooperative_group` boundary. Descendants
+that leave the group are outside that boundary, so `guaranteed` does not mean
+OS-enforced non-escape. Windows rejects this constructor before executing argv.
+The same handle provides identity, poll, wait, terminate, and close methods;
+PID fields are diagnostic evidence, never a transferable ownership capability.
 
 Execution deadlines belong to the native owner and run without language-side
 polling. A wait timeout returns an active/running snapshot and does not terminate
