@@ -1,0 +1,70 @@
+{
+  "schema": "sysprims-go-prebuilt-manifest/v1",
+  "module": "github.com/3leaps/sysprims/bindings/go/sysprims",
+  "release_version": "0.2.3",
+  "ffi_abi_version": 1,
+  "required_platforms": [
+    "darwin-amd64",
+    "darwin-arm64",
+    "linux-amd64",
+    "linux-amd64-musl",
+    "linux-arm64",
+    "linux-arm64-musl",
+    "windows-amd64",
+    "windows-arm64"
+  ],
+  "header": {
+    "path": "include/sysprims.h",
+    "sha256": "5179ceddf786c3db8e0211f3e751339d9c9a5cc4b359764b28eeea28212ca5e5"
+  },
+  "platforms": [
+    {
+      "platform": "darwin-amd64",
+      "path": "lib/darwin-amd64/libsysprims_ffi.a",
+      "sha256": "bc67df3214353ecc8b44a70c9e1a4495f0e3552389e07fdcdba9bda6e7390bea",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "darwin-arm64",
+      "path": "lib/darwin-arm64/libsysprims_ffi.a",
+      "sha256": "23bd5cb61406d5e7ee85e72b9b1630a5689a95e61a9a156a31ac8a569e65304c",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "linux-amd64",
+      "path": "lib/linux-amd64/libsysprims_ffi.a",
+      "sha256": "b5551ff716985a2000e2f7456c975affcfb28bc541025aae4ca0109ebc1d4b44",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "linux-amd64-musl",
+      "path": "lib/linux-amd64-musl/libsysprims_ffi.a",
+      "sha256": "6b557057b5ef8afe8d98039947d6f56ca953e7a83c1c932da447d4ca70856f44",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "linux-arm64",
+      "path": "lib/linux-arm64/libsysprims_ffi.a",
+      "sha256": "e6f8b717b5a1c406ad6a9ee09f5b94dfe7809496c9d65f66e04445bf608ce14b",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "linux-arm64-musl",
+      "path": "lib/linux-arm64-musl/libsysprims_ffi.a",
+      "sha256": "169fbad558f5ae2aa15fb8b7b61b530263c4baebd69bb94ca9eacb79a6d9c0d6",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "windows-amd64",
+      "path": "lib/windows-amd64/libsysprims_ffi.a",
+      "sha256": "2ce248d548354b51189b81ce4c994126e0c9c67d99e4634fe2811ea51987ca2e",
+      "reported_version": "0.2.3"
+    },
+    {
+      "platform": "windows-arm64",
+      "path": "lib/windows-arm64/libsysprims_ffi.a",
+      "sha256": "8eeddf258ccfacbc26284c74dccdf21f0ffc665695cfbb94f50fbb0611a0700f",
+      "reported_version": "0.2.3"
+    }
+  ]
+}

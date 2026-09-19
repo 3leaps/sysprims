@@ -36,7 +36,7 @@ jobs:
             echo "Update VERSION first, or rerun with the correct input."
             exit 1
           fi
-          node scripts/version-pack.mjs check
+          make release-plan-check version-check
           echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
   build-linux:
     name: Build FFI (Linux)
@@ -556,6 +556,10 @@ jobs:
           if [ -d bindings/go/sysprims/lib-shared ]; then
             ls -la bindings/go/sysprims/lib-shared/*/ || true
           fi
+      - name: Generate and validate Go prebuilt manifest
+        run: |
+          node scripts/generate-go-prebuilt-manifest.mjs
+          make release-plan-check version-check
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8
         with:

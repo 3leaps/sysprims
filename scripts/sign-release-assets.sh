@@ -42,6 +42,7 @@ echo "=== Minisign Signatures ==="
 for manifest in SHA256SUMS SHA512SUMS; do
 	if [ -f "$manifest" ]; then
 		echo "Signing $manifest with minisign..."
+		rm -f "${manifest}.minisig"
 		minisign -S -s "$SYSPRIMS_MINISIGN_KEY" \
 			-m "$manifest" \
 			-t "sysprims $TAG - $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -63,6 +64,7 @@ if [ -n "${SYSPRIMS_PGP_KEY_ID:-}" ]; then
 	for manifest in SHA256SUMS SHA512SUMS; do
 		if [ -f "$manifest" ]; then
 			echo "Signing $manifest with PGP..."
+			rm -f "${manifest}.asc"
 			gpg "${GPG_OPTS[@]}" \
 				--armor \
 				--detach-sign \

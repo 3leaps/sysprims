@@ -12,6 +12,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,12 +42,25 @@ const baseOwnedPaths = [
   "Cargo.toml",
   "Cargo.lock",
   "bindings/go/sysprims/README.md",
+  "bindings/go/sysprims/go.mod",
+  "bindings/go/sysprims/prebuilt-manifest.json",
   "bindings/typescript/sysprims/package.json",
   "bindings/typescript/sysprims/package-lock.json",
   ...nativeDirectories.map(
     (directory) =>
       `bindings/typescript/sysprims/npm/${directory}/package.json`,
   ),
+];
+const goModulePath = "github.com/3leaps/sysprims/bindings/go/sysprims";
+const goPlatforms = [
+  "darwin-amd64",
+  "darwin-arm64",
+  "linux-amd64",
+  "linux-amd64-musl",
+  "linux-arm64",
+  "linux-arm64-musl",
+  "windows-amd64",
+  "windows-arm64",
 ];
 const semverSource =
   "(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?";
@@ -81,6 +95,66 @@ function readJson(path) {
   } catch (error) {
     fail(`cannot parse JSON ${path}: ${error.message}`);
   }
+}
+
+function sha256(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+export function readReleasePlan(root, version = readCanonicalVersion(root)) {
+  const relativePath = `docs/releases/v${version}.json`;
+  const path = join(root, relativePath);
+  if (!existsSync(path)) fail(`release plan is missing: ${relativePath}`);
+  const plan = readJson(path);
+  const errors = [];
+  if (plan.schema !== "sysprims-release-plan/v1") errors.push("unknown release plan schema");
+  if (plan.version !== version) errors.push(`release plan version is ${JSON.stringify(plan.version)}, expected ${version}`);
+  if (plan.provenance_policy !== "commit_footer") errors.push("release plan provenance_policy must be commit_footer");
+  const surfaces = plan.surfaces;
+  if (!surfaces || typeof surfaces !== "object" || Array.isArray(surfaces)) {
+    errors.push("release plan surfaces object is missing");
+  } else {
+    const expectedSurfaceNames = ["cli", "ffi", "go", "rust", "typescript"];
+    const actualSurfaceNames = Object.keys(surfaces).sort();
+    if (JSON.stringify(actualSurfaceNames) !== JSON.stringify(expectedSurfaceNames)) {
+      errors.push(`release plan surface set must be exactly ${expectedSurfaceNames.join(", ")}`);
+    }
+    for (const name of ["rust", "cli", "ffi"]) {
+      if (surfaces[name]?.disposition !== "publish") errors.push(`${name} disposition must be publish`);
+    }
+    for (const name of ["go", "typescript"]) {
+      const surface = surfaces[name];
+      if (!surface || !["publish", "skip"].includes(surface.disposition)) {
+        errors.push(`${name} disposition must be publish or skip`);
+        continue;
+      }
+      if (surface.disposition === "skip") {
+        try { validateSemver(surface.retained_version, `${name} retained_version`); }
+        catch (error) { errors.push(error.message); }
+        if (surface.retained_version === version) errors.push(`${name} skip retained_version must differ from the release version`);
+      } else if ("retained_version" in surface) {
+        errors.push(`${name} retained_version is only valid for skip`);
+      }
+    }
+    if (surfaces.go && !["pre_build", "resolved"].includes(surfaces.go.lock_phase)) {
+      errors.push("go lock_phase must be pre_build or resolved");
+    }
+    if (surfaces.go?.disposition === "skip" && surfaces.go.lock_phase !== "resolved") {
+      errors.push("skipped go surface must use resolved lock_phase");
+    }
+    if (surfaces.typescript && !["resolved", "pre_registry"].includes(surfaces.typescript.lock_phase)) {
+      errors.push("typescript lock_phase must be resolved or pre_registry");
+    }
+    if (surfaces.typescript?.disposition === "skip" && surfaces.typescript.lock_phase !== "resolved") {
+      errors.push("skipped typescript surface must use resolved lock_phase");
+    }
+  }
+  if (errors.length) fail(errors.join("; "));
+  return { plan, path, relativePath };
+}
+
+function plannedVersion(surface, releaseVersion) {
+  return surface.disposition === "publish" ? releaseVersion : surface.retained_version;
 }
 
 function writeJsonAtomic(path, value) {
@@ -223,21 +297,29 @@ function checkOptionalPins(value, expected, label, errors) {
   }
 }
 
-function checkJson(root, expected, errors) {
+function validSha512Sri(value) {
+  const match = typeof value === "string" && value.match(/^sha512-([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) return false;
+  try { return Buffer.from(match[1], "base64").length === 64; }
+  catch { return false; }
+}
+
+function checkJson(root, expected, plan, errors) {
+  const typescriptVersion = plannedVersion(plan.surfaces.typescript, expected);
   const rootPackage = readJson(
     join(root, "bindings/typescript/sysprims/package.json"),
   );
   if (rootPackage.name !== "@3leaps/sysprims") {
     errors.push("TypeScript root package name is not @3leaps/sysprims");
   }
-  if (rootPackage.version !== expected) {
+  if (rootPackage.version !== typescriptVersion) {
     errors.push(
-      `TypeScript root package is ${rootPackage.version}, expected ${expected}`,
+      `TypeScript root package is ${rootPackage.version}, expected ${typescriptVersion}`,
     );
   }
   checkOptionalPins(
     rootPackage.optionalDependencies,
-    expected,
+    typescriptVersion,
     "TypeScript root optionalDependencies",
     errors,
   );
@@ -258,9 +340,9 @@ function checkJson(root, expected, errors) {
         `TypeScript native package ${directory} is named ${JSON.stringify(nativePackage.name)}, expected ${expectedName}`,
       );
     }
-    if (nativePackage.version !== expected) {
+    if (nativePackage.version !== typescriptVersion) {
       errors.push(
-        `TypeScript native package ${expectedName} is ${nativePackage.version}, expected ${expected}`,
+        `TypeScript native package ${expectedName} is ${nativePackage.version}, expected ${typescriptVersion}`,
       );
     }
   }
@@ -271,9 +353,9 @@ function checkJson(root, expected, errors) {
   if (lock.name !== "@3leaps/sysprims") {
     errors.push("package-lock root name is not @3leaps/sysprims");
   }
-  if (lock.version !== expected) {
+  if (lock.version !== typescriptVersion) {
     errors.push(
-      `package-lock authored root version is ${lock.version}, expected ${expected}`,
+      `package-lock authored root version is ${lock.version}, expected ${typescriptVersion}`,
     );
   }
   const lockRoot = lock.packages?.[""];
@@ -283,14 +365,14 @@ function checkJson(root, expected, errors) {
     if (lockRoot.name !== "@3leaps/sysprims") {
       errors.push('package-lock packages[""] name is not @3leaps/sysprims');
     }
-    if (lockRoot.version !== expected) {
+    if (lockRoot.version !== typescriptVersion) {
       errors.push(
-        `package-lock packages[""] version is ${lockRoot.version}, expected ${expected}`,
+        `package-lock packages[""] version is ${lockRoot.version}, expected ${typescriptVersion}`,
       );
     }
     checkOptionalPins(
       lockRoot.optionalDependencies,
-      expected,
+      typescriptVersion,
       'package-lock packages[""].optionalDependencies',
       errors,
     );
@@ -299,26 +381,66 @@ function checkJson(root, expected, errors) {
   for (const packageName of platformNames) {
     const resolution = lock.packages?.[`node_modules/${packageName}`];
     if (!resolution) {
+      if (plan.surfaces.typescript.lock_phase === "resolved") errors.push(`resolved npm platform node is missing for ${packageName}`);
       continue;
     }
-    if (resolution.version !== expected) {
+    if (resolution.version !== typescriptVersion) {
       errors.push(
-        `stale npm platform resolution evidence for ${packageName}: resolved version ${resolution.version}, authored version ${expected}; refresh from real staged tarballs or remove the stale node`,
+        `stale npm platform resolution evidence for ${packageName}: resolved version ${resolution.version}, authored version ${typescriptVersion}`,
       );
       continue;
     }
     const encodedName = packageName.replace("@3leaps/", "");
-    const expectedSuffix = `/${encodedName}-${expected}.tgz`;
+    const expectedSuffix = `/${encodedName}-${typescriptVersion}.tgz`;
     if (
       typeof resolution.resolved !== "string" ||
       !resolution.resolved.endsWith(expectedSuffix) ||
-      typeof resolution.integrity !== "string" ||
-      resolution.integrity.length === 0
+      !validSha512Sri(resolution.integrity)
     ) {
       errors.push(
-        `invalid npm platform resolution evidence for ${packageName}@${expected}; regenerate it from the real published tarball`,
+        `invalid npm platform resolution evidence for ${packageName}@${typescriptVersion}`,
       );
     }
+    if (plan.surfaces.typescript.lock_phase === "pre_registry") {
+      errors.push(`pre_registry plan must not contain registry resolution evidence for ${packageName}`);
+    }
+  }
+}
+
+function checkGo(root, expected, plan, errors) {
+  const goVersion = plannedVersion(plan.surfaces.go, expected);
+  const goMod = readFileSync(join(root, "bindings/go/sysprims/go.mod"), "utf8");
+  const moduleLines = goMod.match(/^module\s+(.+)$/gm) ?? [];
+  if (moduleLines.length !== 1 || moduleLines[0] !== `module ${goModulePath}`) {
+    errors.push(`Go module path must be exactly ${goModulePath}`);
+  }
+  checkGoReadme(root, goVersion, errors);
+  const path = join(root, "bindings/go/sysprims/prebuilt-manifest.json");
+  const manifest = readJson(path);
+  if (manifest.schema !== "sysprims-go-prebuilt-manifest/v1") errors.push("unknown Go prebuilt manifest schema");
+  if (manifest.module !== goModulePath) errors.push("Go prebuilt manifest module path mismatch");
+  const preBuild = plan.surfaces.go.disposition === "publish" && plan.surfaces.go.lock_phase === "pre_build";
+  if (!preBuild && manifest.release_version !== goVersion) errors.push(`Go prebuilt manifest release_version is ${manifest.release_version}, expected ${goVersion}`);
+  if (preBuild && manifest.release_version === expected) errors.push("Go pre_build manifest must describe the prior committed native version, not claim VERSION");
+  try { validateSemver(manifest.release_version, "Go prebuilt manifest release_version"); }
+  catch (error) { errors.push(error.message); }
+  if (!Number.isInteger(manifest.ffi_abi_version) || manifest.ffi_abi_version < 1) errors.push("Go prebuilt manifest ffi_abi_version must be a positive integer");
+  if (JSON.stringify(manifest.required_platforms) !== JSON.stringify(goPlatforms)) errors.push("Go prebuilt manifest required_platforms is incomplete or out of order");
+  if (manifest.header?.path !== "include/sysprims.h") errors.push("Go prebuilt manifest header path mismatch");
+  else if (manifest.header.sha256 !== sha256(join(root, "bindings/go/sysprims", manifest.header.path))) errors.push("Go prebuilt header hash mismatch");
+  const builds = Array.isArray(manifest.platforms) ? manifest.platforms : [];
+  if (builds.length !== goPlatforms.length || builds.some((entry) => !goPlatforms.includes(entry.platform))) {
+    errors.push("Go prebuilt manifest platform entries must equal the exact required platform set");
+  }
+  for (const platform of goPlatforms) {
+    const entries = builds.filter((entry) => entry.platform === platform);
+    if (entries.length !== 1) { errors.push(`Go prebuilt manifest requires one ${platform} entry`); continue; }
+    const entry = entries[0];
+    const wantedPath = `lib/${platform}/libsysprims_ffi.a`;
+    if (entry.path !== wantedPath) errors.push(`Go prebuilt ${platform} path is ${entry.path}, expected ${wantedPath}`);
+    else if (entry.sha256 !== sha256(join(root, "bindings/go/sysprims", entry.path))) errors.push(`Go prebuilt ${platform} hash mismatch`);
+    const nativeVersion = preBuild ? manifest.release_version : goVersion;
+    if (entry.reported_version !== nativeVersion) errors.push(`Go prebuilt ${platform} reported_version is ${entry.reported_version}, expected ${nativeVersion}`);
   }
 }
 
@@ -390,17 +512,10 @@ function collectErrors(root) {
   }
 
   try {
+    const { plan } = readReleasePlan(root, expected);
     checkCargo(root, expected, errors);
-  } catch (error) {
-    errors.push(error.message);
-  }
-  try {
-    checkJson(root, expected, errors);
-  } catch (error) {
-    errors.push(error.message);
-  }
-  try {
-    checkGoReadme(root, expected, errors);
+    checkJson(root, expected, plan, errors);
+    checkGo(root, expected, plan, errors);
   } catch (error) {
     errors.push(error.message);
   }
@@ -421,6 +536,8 @@ function check(root, quiet = false) {
 }
 
 function updateJsonSurfaces(root, version) {
+  const { plan } = readReleasePlan(root, version);
+  if (plan.surfaces.typescript.disposition === "skip") return;
   const rootPath = join(root, "bindings/typescript/sysprims/package.json");
   const rootPackage = readJson(rootPath);
   rootPackage.version = version;
@@ -462,7 +579,11 @@ function updateJsonSurfaces(root, version) {
     lock.packages[""].optionalDependencies[packageName] = version;
     const resolutionKey = `node_modules/${packageName}`;
     const resolution = lock.packages[resolutionKey];
-    if (resolution && resolution.version !== version) {
+    if (
+      resolution &&
+      (plan.surfaces.typescript.lock_phase === "pre_registry" ||
+        resolution.version !== version)
+    ) {
       delete lock.packages[resolutionKey];
     }
   }
@@ -498,6 +619,8 @@ function replaceExactlyOnce(text, pattern, replacement, label) {
 }
 
 function updateGoReadme(root, version) {
+  const { plan } = readReleasePlan(root, version);
+  if (plan.surfaces.go.disposition === "skip") return;
   const readmePath = join(root, "bindings/go/sysprims/README.md");
   let readme = readFileSync(readmePath, "utf8");
   readme = replaceExactlyOnce(
@@ -602,6 +725,11 @@ function bump(root, component) {
 function main() {
   const { command, root, values } = parseArguments(process.argv.slice(2));
   switch (command) {
+    case "plan-check":
+      if (values.length !== 0) fail("plan-check takes no positional arguments");
+      readReleasePlan(root);
+      console.log(`[ok] Release plan is valid at ${readCanonicalVersion(root)}`);
+      break;
     case "check":
       if (values.length !== 0) fail("check takes no positional arguments");
       check(root);
@@ -628,7 +756,7 @@ function main() {
       break;
     default:
       fail(
-        "usage: version-pack.mjs <check|sync|set VERSION|bump patch|minor|major|owned-paths> [--root PATH]",
+        "usage: version-pack.mjs <plan-check|check|sync|set VERSION|bump patch|minor|major|owned-paths> [--root PATH]",
       );
   }
 }
