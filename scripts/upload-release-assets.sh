@@ -2,7 +2,8 @@
 # Upload signed release assets to GitHub
 # Usage: upload-release-assets.sh <tag> [dir]
 #
-# Uploads checksum files, signatures, public keys, and release notes
+# Uploads checksum files, signatures, public keys, and release notes.
+# The release remains a draft; only `make release-publish` may promote it.
 # Requires: gh CLI authenticated with write permissions
 set -euo pipefail
 
@@ -25,6 +26,10 @@ REQUIRED_FILES=(
 	"SHA512SUMS"
 	"SHA512SUMS.minisig"
 	"sysprims-minisign.pub"
+	"SHA256SUMS.asc"
+	"SHA512SUMS.asc"
+	"sysprims-release-signing-key.asc"
+	"release-notes-${TAG}.md"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -47,12 +52,7 @@ UPLOAD_FILES=(
 	"sysprims-minisign.pub"
 )
 
-# Add optional PGP files if present
-for optional in "SHA256SUMS.asc" "SHA512SUMS.asc" "sysprims-release-signing-key.asc"; do
-	if [ -f "$optional" ]; then
-		UPLOAD_FILES+=("$optional")
-	fi
-done
+UPLOAD_FILES+=("SHA256SUMS.asc" "SHA512SUMS.asc" "sysprims-release-signing-key.asc")
 
 # Add release notes if present
 RELEASE_NOTES="release-notes-${TAG}.md"
@@ -74,11 +74,6 @@ if [ -f "$RELEASE_NOTES" ]; then
 	gh release edit "$TAG" --notes-file "$RELEASE_NOTES"
 fi
 
-# Publish the release (it was created as draft)
 echo ""
-echo "Publishing release..."
-gh release edit "$TAG" --draft=false
-
-echo ""
-echo "[ok] Release $TAG published"
+echo "[ok] Release $TAG assets uploaded; draft state unchanged"
 echo "View at: https://github.com/3leaps/sysprims/releases/tag/$TAG"

@@ -15,12 +15,17 @@
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
-.PHONY: release-check release-clean release-download release-checksums release-sign
+.PHONY: release release-check release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-verify-keys release-notes release-upload release-preflight
-.PHONY: release-guard-tag-version release-guard-tag-version-post
+.PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
+.PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
+.PHONY: release-guard-uploaded release-guard-remote release-publish
+.PHONY: release-require-checksummed
 .PHONY: version-patch version-minor version-major version-set version-sync
 .PHONY: version-check version-tooling-test
+
+.NOTPARALLEL: release release-download release-notes release-checksums release-sign release-export-keys release-verify release-upload release-publish
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -103,6 +108,7 @@ help: ## Show available targets
 	@echo "  release-export-keys   Export public signing keys"
 	@echo "  release-verify        Verify checksums, signatures, and keys"
 	@echo "  release-upload        Upload signed artifacts to GitHub"
+	@echo "  release-publish       Verify remote state and publish the draft"
 	@echo "  release               Full release workflow (all of the above)"
 	@echo ""
 	@echo "Version management:"
@@ -597,7 +603,7 @@ precommit: ## Run pre-commit checks (fast)
 
 prepush: ## Run pre-push checks (thorough)
 	@$(MAKE) GONEAT_FORMAT_FAIL_ON=medium check
-	@$(MAKE) version-check version-tooling-test
+	@$(MAKE) release-plan-check version-check version-tooling-test
 	@echo "[ok] Pre-push checks passed"
 
 pr-final: prepush ## Final PR merge-readiness gate
@@ -631,11 +637,12 @@ version: ## Print current version
 #
 # 1. CI creates draft release on tag push
 # 2. Download artifacts: make release-download
-# 3. Generate checksums: make release-checksums
-# 4. Sign checksums: make release-sign (requires SYSPRIMS_MINISIGN_KEY)
-# 5. Export public keys: make release-export-keys
-# 6. Verify everything: make release-verify
-# 7. Upload signed artifacts: make release-upload
+# 3. Copy tagged notes: make release-notes
+# 4. Generate checksums: make release-checksums
+# 5. Sign checksums: make release-sign (requires SYSPRIMS_MINISIGN_KEY)
+# 6. Export public keys: make release-export-keys
+# 7. Verify everything: make release-verify
+# 8. Upload signed artifacts (draft remains): make release-upload
 
 DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
@@ -658,17 +665,18 @@ dist-local-clean: ## Remove dist/local contents
 	rm -rf $(DIST_LOCAL)
 	@echo "[ok] Local dist directory cleaned"
 
-release-download: release-guard-tag-version-post ## Download release assets from GitHub
+release-download: release-guard-tag-version-post release-guard-provenance ## Download release assets from GitHub
 	@if [ -z "$(SYSPRIMS_RELEASE_TAG)" ] || [ "$(SYSPRIMS_RELEASE_TAG)" = "v" ]; then \
 		echo "Error: No release tag found. Set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; \
 		exit 1; \
 	fi
 	./scripts/download-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
-release-checksums: ## Generate SHA256SUMS and SHA512SUMS
-	./scripts/generate-checksums.sh $(DIST_RELEASE)
+release-checksums: release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
+	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)
+	@$(MAKE) release-guard-checksummed --silent
 
-release-sign: release-guard-tag-version-post ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
+release-sign: release-require-checksummed ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
 	@if [ -z "$(SYSPRIMS_MINISIGN_KEY)" ]; then \
 		echo "Error: SYSPRIMS_MINISIGN_KEY not set"; \
 		echo ""; \
@@ -681,7 +689,7 @@ release-sign: release-guard-tag-version-post ## Sign checksum manifests (require
 	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
 	./scripts/sign-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
-release-export-keys: ## Export public signing keys
+release-export-keys: release-require-checksummed ## Export public signing keys
 	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
 	SYSPRIMS_MINISIGN_PUB=$(SYSPRIMS_MINISIGN_PUB) \
 	SYSPRIMS_PGP_KEY_ID=$(SYSPRIMS_PGP_KEY_ID) \
@@ -699,7 +707,7 @@ release-verify-signatures: ## Verify minisign/PGP signatures
 release-verify-keys: ## Verify exported keys are public-only
 	./scripts/verify-public-keys.sh $(DIST_RELEASE)
 
-release-verify: release-verify-checksums release-verify-signatures release-verify-keys ## Run all release verification
+release-verify: release-guard-signed ## Run all release verification
 	@echo "[ok] All release verifications passed"
 
 release-check: version-check ## Version consistency + package check (does not publish)
@@ -720,13 +728,19 @@ release-notes: ## Copy release notes to dist
 		cp "$$src" "$(DIST_RELEASE)/release-notes-$(SYSPRIMS_RELEASE_TAG).md"; \
 		echo "[ok] Copied release notes"; \
 	else \
-		echo "[--] No release notes found at $$src"; \
+		echo "[!!] No release notes found at $$src"; \
+		exit 1; \
 	fi
+	@$(MAKE) release-guard-downloaded --silent
 
-release-upload: release-guard-tag-version-post release-verify release-notes ## Upload signed artifacts to GitHub release
+release-upload: release-guard-tag-version-post release-guard-provenance release-guard-signed ## Upload signed artifacts to GitHub release
 	./scripts/upload-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
+	@$(MAKE) release-guard-uploaded --silent
 
-release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
+release-publish: release-guard-tag-version-post release-guard-provenance release-guard-remote ## Publish the verified draft release
+	@node scripts/release-integrity.mjs publish --dir $(DIST_RELEASE)
+
+release-preflight: release-plan-check version-check ## Verify all pre-tag requirements (REQUIRED before tagging)
 	@echo "Running release preflight checks..."
 	@echo ""
 	@# Check 1: Working tree must be clean
@@ -738,6 +752,7 @@ release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
 	@echo "[ok] Working tree is clean"
 	@# Check 2: Explicit intended tag and complete authored version pack
 	@$(MAKE) release-guard-tag-version MODE=pre-tag --silent
+	@$(MAKE) release-guard-provenance --silent
 	@# Check 3: Prepush quality gates
 	@$(MAKE) prepush --silent
 	@echo "[ok] Prepush checks passed"
@@ -768,8 +783,16 @@ release-preflight: ## Verify all pre-tag requirements (REQUIRED before tagging)
 	echo "[ok] All preflight checks passed - ready to tag"; \
 	echo "    Next: git tag \"v$$version_file\" -m \"Release $$version_file\""
 
-release: release-clean release-download release-checksums release-sign release-export-keys release-upload ## Full release workflow (after CI build)
-	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) complete"
+release: ## Prepare and upload signed assets; release remains draft
+	@$(MAKE) release-clean
+	@$(MAKE) release-download
+	@$(MAKE) release-notes
+	@$(MAKE) release-checksums
+	@$(MAKE) release-sign
+	@$(MAKE) release-export-keys
+	@$(MAKE) release-verify
+	@$(MAKE) release-upload
+	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) assets uploaded; draft remains unpublished"
 
 # -----------------------------------------------------------------------------
 # Version Management
@@ -808,8 +831,11 @@ version-sync: ## Sync VERSION to every authored Rust/TypeScript coordinate
 version-check: ## Validate the complete authored version pack
 	@node scripts/version-pack.mjs check
 
+release-plan-check: ## Validate the machine-readable release surface plan
+	@node scripts/version-pack.mjs plan-check
+
 version-tooling-test: ## Run isolated version and tag-guard controls
-	@node --test scripts/version-pack.test.mjs
+	@node --test scripts/version-pack.test.mjs scripts/release-integrity.test.mjs scripts/npm-release.test.mjs scripts/generate-go-prebuilt-manifest.test.mjs
 
 MODE ?= pre-tag
 release-guard-tag-version: ## Validate the explicit release tag against VERSION
@@ -821,3 +847,24 @@ release-guard-tag-version-post: ## Require exact annotated canonical/Go tags on 
 	@SYSPRIMS_TAG_GUARD_MODE=post-tag \
 		SYSPRIMS_RELEASE_TAG="$(SYSPRIMS_RELEASE_TAG)" \
 		bash scripts/release-guard-tag-version.sh
+
+release-guard-provenance: ## Require attribution and bind stored tag messages when tags exist
+	@node scripts/release-integrity.mjs provenance
+
+release-guard-downloaded: ## Verify the exact downloaded draft payload inventory
+	@node scripts/release-integrity.mjs downloaded --dir $(DIST_RELEASE)
+
+release-guard-checksummed: ## Verify both checksum manifests cover the exact payload
+	@node scripts/release-integrity.mjs checksummed --dir $(DIST_RELEASE)
+
+release-require-checksummed: ## Internal prerequisite allowing known later-phase files during recovery
+	@node scripts/release-integrity.mjs require-checksummed --dir $(DIST_RELEASE)
+
+release-guard-signed: ## Verify exact signatures, public keys, and any prior remote assets
+	@node scripts/release-integrity.mjs signed --dir $(DIST_RELEASE)
+
+release-guard-uploaded: ## Verify a fresh copy of the complete remote draft
+	@node scripts/release-integrity.mjs uploaded --dir $(DIST_RELEASE)
+
+release-guard-remote: ## Verify remote registries/modules and native runtime before publish
+	@node scripts/release-integrity.mjs remote --dir $(DIST_RELEASE)

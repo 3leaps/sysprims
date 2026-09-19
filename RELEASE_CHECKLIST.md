@@ -36,6 +36,11 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 ### Version & Documentation
 
 - [ ] Update `VERSION` file with new semver (e.g., `0.1.1`)
+- [ ] Create `docs/releases/vX.Y.Z.json` with the exact publish/skip decision for
+  Rust, CLI, FFI, Go, and TypeScript, retained versions for skipped surfaces,
+  `provenance_policy: commit_footer`, and both lock phases. A new Go publish
+  starts at `go.lock_phase: pre_build`; Go Bindings Prep changes it to
+  `resolved` atomically with rebuilt libraries, header, hashes, and smokes.
 - [ ] Sync version to Cargo.toml: `make version-sync`
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
 - [ ] **Advance CHANGELOG footer compare-links** (reference-style definitions at the bottom of
@@ -44,30 +49,39 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   `[x.y.z]:` footer definition. A missing definition renders as an undefined link, and `goneat`
   / `make` do not flag it. Backfill prior-release gaps while here.
 - [ ] Create release notes: `docs/releases/vX.Y.Z.md`
+- [ ] Run `make release-plan-check version-check`. Do not tag a cut whose
+  plan, manifests, lock evidence, or Go prebuilt hashes disagree.
 
 ### Scope Control (Recommended)
 
 - [ ] Confirm release scope is intentional and minimal.
   - For v0.1.7: keep scope to TypeScript Node-API bindings rollout only (no extra refactors).
 
-### Pre-Tag Verification
+### Release Pack Verification
 
-- [ ] **Run preflight checks**: `make release-preflight`
-  - Validates: working tree clean, prepush checks pass, version synced, release notes exist, local/remote sync
-  - **Must pass before tagging**
+- [ ] Run `make pr-final`. At this point a Go publish plan may truthfully remain
+  `pre_build`; full version checking validates the prior committed native
+  manifest without allowing it to claim the new version.
+- [ ] Do not run the final `make release-preflight` until Go Bindings Prep is
+  merged and `go.lock_phase` is `resolved`.
 
 ### Commit & Tag
 
-- [ ] Commit changes:
+- [ ] Before merging the release pack PR, prepare the exact squash subject and
+  body in a file. The body must contain the complete standard attribution
+  footer. Pass that file to the merge command/UI; do not assume GitHub will
+  inherit the branch-tip body.
+- [ ] Merge the release pack with that exact squash message.
+- [ ] After merge, pull `main` and verify the stored commit body before any
+  workflow or tag:
   ```bash
-  git add -A
-  git commit -m "release: prepare vX.Y.Z"
+  git log -1 --format=%B
+  make release-guard-provenance
   ```
-- [ ] Push to main:
-
-  ```bash
-  git push origin main
-  ```
+  A missing footer is blocking. Do not rewrite public `main` and do not add an
+  empty attribution commit. Escalate to the maintainer. The only exception path
+  is an out-of-band signed provenance receipt bound to the version, final
+  40-character commit, every required tag, and each complete tag-message hash.
 
 - [ ] **Verify local/remote sync** (required before running workflows):
       Before running any release workflows, confirm local and remote are in sync:
@@ -100,10 +114,22 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     ```
   - Confirm the PR actually adds the platform libs before merging:
     - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
+    - `bindings/go/sysprims/prebuilt-manifest.json` with exact hashes and
+      per-platform runtime version results
   - Note: the workflow also regenerates `bindings/go/sysprims/include/sysprims.h`; it may not
     appear in the PR diff when the regenerated header is byte-identical to `main`.
-  - Merge the PR so the prebuilt libs are present on `main` before tagging.
-  - After merge: ensure `main` is green again (this merge commit is what will be tagged).
+  - Prepare and use an exact squash message whose body contains the complete
+    standard attribution footer. Merge the PR so the prebuilt libs are present
+    on `main` before tagging.
+  - After merge: inspect `git log -1 --format=%B` and run
+    `make release-guard-provenance`. This merge commit is the tag target; a
+    missing footer is blocking and must follow the signed receipt exception
+    path rather than rewriting public `main`.
+  - Ensure `main` is green again.
+  - Run `make release-preflight` on this synchronized final `main`. It requires
+    `go.lock_phase: resolved`, exact prebuilt hashes/smokes, clean local/remote
+    state, the complete commit attribution footer (or approved signed receipt),
+    and all normal gates. **It must pass before tagging.**
 
 - [ ] TypeScript bindings validation (recommended):
   - After the Go bindings PR is merged (and `main` is green), run the TypeScript workflow on `main`.
@@ -117,7 +143,18 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     validation jobs back to `npm ci` unless the release process also changes how
     platform optional dependencies are staged.
 
-- [ ] Create and push tags (must point to the SAME commit):
+- [ ] Create the complete annotation message files. Each must contain the
+  intended release text and, when an approved provenance exception is in use,
+  the complete standard attribution footer whose exact bytes are bound by the
+  signed receipt. Store them in one directory as `v${VERSION}.txt` and
+  `bindings__go__sysprims__v${VERSION}.txt`, then export that directory for the
+  normal post-tag byte check:
+
+  ```bash
+  export SYSPRIMS_TAG_MESSAGE_DIR="/path/to/tag-messages"
+  ```
+- [ ] Create and push tags (both must be annotated, use the message files, and
+  point to the same commit):
 
   ```bash
   VERSION=$(cat VERSION)
@@ -126,13 +163,17 @@ This document walks maintainers through the build/sign/upload flow for each sysp
    # Ensure you're tagging the current main HEAD.
 
   # Canonical repo tag (drives .github/workflows/release.yml)
-  git tag -a "v${VERSION}" -m "v${VERSION}: <brief description>"
+  git tag -a "v${VERSION}" --cleanup=verbatim -F "/path/to/v${VERSION}.txt"
 
   # Go submodule tag (required so Go resolves semver for subdir module)
-  git tag -a "bindings/go/sysprims/v${VERSION}" -m "bindings/go/sysprims/v${VERSION}"
+  git tag -a "bindings/go/sysprims/v${VERSION}" --cleanup=verbatim -F "/path/to/bindings-go-sysprims-v${VERSION}.txt"
 
   # Push both tags
   git push origin "v${VERSION}" "bindings/go/sysprims/v${VERSION}"
+
+  # Fetch remote tag objects, then verify exact names, object types, messages,
+  # version plan, and common peeled target. Nearest older tags are never used.
+  make release-guard-tag-version-post
   ```
 
 Notes:
@@ -147,8 +188,12 @@ After both tags are pushed, keep release execution in this order:
 
 1. Verify the tag-triggered release workflow and optional validation workflow.
 2. Publish the five crates.io library crates in dependency order.
-3. Download, checksum, sign, verify, upload, and publish the GitHub release assets.
-4. Run TypeScript N-API prebuilds and npm publication from the verified tag.
+3. Download, copy tagged notes, checksum, sign, verify, and upload the GitHub
+   release assets. Upload leaves the release as a draft.
+4. When the plan marks TypeScript `publish`, run N-API prebuilds and resumable
+   npm publication from the verified tag while the GitHub release stays draft.
+5. Run `make release-guard-remote`, then use the separately maintainer-cued
+   `make release-publish` target as the only public promotion.
 
 If any step fails or produces unexpected artifacts, pause before moving to the
 next step.
@@ -163,7 +208,9 @@ next step.
   gh workflow run "Validate Release" -f tag="v${VERSION}"
   ```
 - [ ] Check draft release has all expected artifacts:
-  - CLI binaries (darwin-arm64, linux-amd64, linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64, windows-arm64)
+  - Eight CLI archives (darwin-amd64, darwin-arm64, linux-amd64,
+    linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64,
+    windows-arm64)
   - FFI library tarball
   - C header (sysprims.h)
   - SBOM (sysprims-X.Y.Z.cdx.json)
@@ -290,20 +337,25 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
    make release-download
    ```
 
-3. **Generate checksum manifests**
+3. **Copy and verify tagged release notes**
+
+   ```bash
+   make release-notes
+   make release-guard-downloaded
+   ```
+
+   The copied note must be byte-identical to `docs/releases/vX.Y.Z.md` in the
+   immutable tag tree. It is part of both signed checksum manifests.
+
+4. **Generate exact checksum manifests**
 
    ```bash
    make release-checksums
    ```
 
-   Produces: `SHA256SUMS`, `SHA512SUMS`
+   Unexpected, foreign-version, or leftover files are blocking.
 
-   Notes:
-   - Release assets are expected to be flat at the top-level of `dist/release/` (matching GitHub release assets).
-   - The checksum manifests intentionally include archives, standalone headers (e.g. `sysprims.h`), any standalone libs,
-     SBOM/metadata JSON, licenses, and copied release notes.
-
-4. **Sign checksum manifests** (minisign + PGP)
+5. **Sign checksum manifests** (minisign + PGP)
 
    ```bash
    make release-sign
@@ -311,7 +363,7 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
 
    Produces: `.minisig` and `.asc` signatures for both checksum files
 
-5. **Export public keys**
+6. **Export public keys**
 
    ```bash
    make release-export-keys
@@ -319,7 +371,7 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
 
    Produces: `sysprims-minisign.pub`, `sysprims-release-signing-key.asc`
 
-6. **Verify everything before upload**
+7. **Verify everything before upload**
 
    ```bash
    make release-verify
@@ -330,31 +382,24 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
    - Signatures verify correctly
    - Exported keys are public-only (no secret key material)
 
-7. **Copy release notes**
-
-   ```bash
-   make release-notes
-   ```
-
-   Copies `docs/releases/vX.Y.Z.md` to `dist/release/release-notes-vX.Y.Z.md`
-
-8. **Upload signed artifacts to GitHub**
+8. **Upload signed artifacts to the draft GitHub release**
 
    ```bash
    make release-upload
    ```
 
-   > **Note:** Uses `--clobber` to overwrite existing assets. Safe to rerun.
+   > **Note:** Uses `--clobber` to overwrite identical/reviewed assets. The
+   > uploaded guard downloads a fresh copy and requires exact digest parity.
+   > The release remains a draft.
 
-9. **Publish the release**
-   ```bash
-   gh release edit v$(cat VERSION) --draft=false
-   ```
+9. **Keep the GitHub release draft** while completing every planned registry
+   publication below. Do not invoke `gh release edit --draft=false` directly.
 
-### TypeScript bindings publication (after signing/upload)
+### TypeScript bindings publication (after signed draft upload)
 
 Run these only after crates.io publication is complete and the signed GitHub
-release assets have been uploaded and published.
+release assets have been uploaded. Keep the GitHub release draft until npm
+publication and `make release-guard-remote` both pass.
 
 1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
 
@@ -372,7 +417,15 @@ release assets have been uploaded and published.
    gh workflow run "TypeScript npm Publish" --ref "v${VERSION}"
    ```
 
-   The workflow validates:
+The workflow first stages all eight packages outside the protected environment
+and without OIDC. It records package name/version, tarball filename, SHA-256,
+SRI, and content manifest in a tag-and-commit-bound artifact. A dry run ends
+after staging and registry comparison. The protected publish job receives only
+that artifact and publishes each absent package or verifies an already-present
+package is byte-identical. All seven native packages must be present and exact
+before the root package can publish; a same-version mismatch is blocking.
+
+The workflow validates:
    - Running from a `v*` tag ref (required for OIDC and environment protection)
    - Node.js >= 22.14.0 and npm >= 11.5.1 for npm trusted publishing
    - VERSION file and package.json match the tag
@@ -382,6 +435,14 @@ Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow must
 run from a tag ref to satisfy the `publish-npm` environment protection rules,
 and the publish job intentionally uses Node.js 24 even though
 validation/prebuild jobs remain on Node.js 20.
+
+3. After every planned registry/module surface resolves exactly, verify the
+   fresh remote draft and publish through the sole promotion target:
+
+   ```bash
+   make release-guard-remote
+   make release-publish
+   ```
 
 ## 3. Post-Release Verification
 
@@ -426,14 +487,17 @@ git push origin main
 | -------------------------- | ------------------------------------------------------------------------------ |
 | `make release-preflight`   | **REQUIRED**: Verify pre-tag requirements (tree, checks, version, notes, sync) |
 | `make release-clean`       | Remove dist/release contents                                                   |
-| `make release-download`    | Download CI artifacts from GitHub                                              |
+| `make release-plan-check`  | Validate the machine-readable per-cut surface plan                             |
+| `make release-download`    | Download the exact CI payload from the draft                                   |
 | `make release-checksums`   | Generate SHA256SUMS and SHA512SUMS                                             |
 | `make release-sign`        | Sign checksums with minisign + PGP                                             |
 | `make release-export-keys` | Export public signing keys                                                     |
 | `make release-verify`      | Verify checksums, signatures, and keys                                         |
 | `make release-notes`       | Copy release notes to dist                                                     |
-| `make release-upload`      | Upload signed artifacts to GitHub                                              |
-| `make release`             | Full workflow (clean → upload)                                                 |
+| `make release-upload`      | Upload signed artifacts; keep the GitHub release draft                         |
+| `make release-guard-remote`| Verify the fresh remote draft, registries/modules, and native runtime           |
+| `make release-publish`     | Sole maintainer-cued draft → public promotion                                  |
+| `make release`             | Full preparation workflow (clean → upload; remains draft)                      |
 
 ## Troubleshooting
 

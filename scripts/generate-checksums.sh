@@ -1,73 +1,46 @@
 #!/usr/bin/env bash
-# Generate SHA256SUMS and SHA512SUMS checksum manifests
-# Usage: generate-checksums.sh [dir]
-#
-# Creates checksums for all release artifacts (excludes signatures and checksum files)
+# Generate exact SHA256/SHA512 manifests for one immutable release payload.
 set -euo pipefail
 
 DIR=${1:-dist/release}
-
-if [ ! -d "$DIR" ]; then
-	echo "Error: Directory $DIR does not exist"
+TAG=${2:-${SYSPRIMS_RELEASE_TAG:-}}
+[ -d "$DIR" ] || {
+	echo "Error: Directory $DIR does not exist" >&2
 	exit 1
-fi
-
+}
+[ -n "$TAG" ] && [ "$TAG" != v ] || {
+	echo "Error: release tag is required" >&2
+	exit 1
+}
+VERSION=${TAG#v}
 cd "$DIR"
 
-echo "Generating checksums in $DIR..."
-
-# Files to checksum: archives, headers, libraries, SBOM/metadata, licenses, release notes
-# Exclude: checksum files, signatures, public keys
-CHECKSUM_PATTERNS=(
-	'*.tar.gz'
-	'*.zip'
-
-	# Standalone headers
-	'*.h'
-
-	# Standalone libraries (rare; usually shipped inside archives)
-	'*.a'
-	'*.lib'
-	'*.so'
-	'*.dylib'
-	'*.dll'
-
-	# Metadata
-	'*.json'
-	'LICENSE-*'
-
-	# Human-readable release notes (when copied into dist/release)
-	'release-notes-*.md'
+EXPECTED=(
+	LICENSE-APACHE LICENSE-MIT
+	"release-notes-${TAG}.md"
+	"sbom-${VERSION}.cdx.json"
+	"sysprims-${VERSION}-darwin-amd64.tar.gz"
+	"sysprims-${VERSION}-darwin-arm64.tar.gz"
+	"sysprims-${VERSION}-linux-amd64-musl.tar.gz"
+	"sysprims-${VERSION}-linux-amd64.tar.gz"
+	"sysprims-${VERSION}-linux-arm64-musl.tar.gz"
+	"sysprims-${VERSION}-linux-arm64.tar.gz"
+	"sysprims-${VERSION}-windows-amd64.zip"
+	"sysprims-${VERSION}-windows-arm64.zip"
+	"sysprims-ffi-${VERSION}-libs.tar.gz"
+	sysprims.h
 )
-
-# Build find patterns
-FIND_ARGS=()
-for pattern in "${CHECKSUM_PATTERNS[@]}"; do
-	if [ ${#FIND_ARGS[@]} -gt 0 ]; then
-		FIND_ARGS+=("-o")
-	fi
-	FIND_ARGS+=("-name" "$pattern")
-done
-
-# Generate SHA256SUMS
-find . -maxdepth 1 -type f \( "${FIND_ARGS[@]}" \) \
-	! -name 'SHA*' \
-	! -name '*.minisig' \
-	! -name '*.asc' \
-	! -name '*.pub' \
-	-print0 | sort -z | xargs -0 shasum -a 256 >SHA256SUMS
-
-echo "Generated SHA256SUMS:"
-cat SHA256SUMS
-
-# Generate SHA512SUMS
-find . -maxdepth 1 -type f \( "${FIND_ARGS[@]}" \) \
-	! -name 'SHA*' \
-	! -name '*.minisig' \
-	! -name '*.asc' \
-	! -name '*.pub' \
-	-print0 | sort -z | xargs -0 shasum -a 512 >SHA512SUMS
-
-echo ""
-echo "Generated SHA512SUMS"
-echo "[ok] Checksums generated"
+printf '%s\n' "${EXPECTED[@]}" | LC_ALL=C sort >.expected-release-files
+find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%f\n' 2>/dev/null | LC_ALL=C sort >.actual-release-files || {
+	find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -exec basename {} \; | LC_ALL=C sort >.actual-release-files
+}
+if ! cmp -s .expected-release-files .actual-release-files; then
+	echo "Error: release payload inventory is incomplete or contains leftovers" >&2
+	diff -u .expected-release-files .actual-release-files >&2 || true
+	rm -f .expected-release-files .actual-release-files
+	exit 1
+fi
+rm -f .expected-release-files .actual-release-files
+printf '%s\n' "${EXPECTED[@]}" | LC_ALL=C sort | xargs shasum -a 256 >SHA256SUMS
+printf '%s\n' "${EXPECTED[@]}" | LC_ALL=C sort | xargs shasum -a 512 >SHA512SUMS
+printf '%s\n' "[ok] Exact checksum manifests generated for ${TAG}"

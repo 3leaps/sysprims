@@ -67,13 +67,18 @@ This ensures only OIDC-authenticated workflows can publish.
 
 ## Workflow Configuration
 
-The publish workflow (`typescript-npm-publish.yml`) requires:
+Only the protected `publish` job in `typescript-npm-publish.yml` receives:
 
 ```yaml
 permissions:
   id-token: write # Required for OIDC
   contents: read
 ```
+
+The preceding `stage` job has no environment and no `id-token` permission. It
+validates the exact tag and surface plan, downloads same-commit prebuilds,
+packs all eight packages, and uploads a tag-and-commit-bound manifest containing
+the package names, versions, tarball filenames, SHA-256, SRI, and content lists.
 
 Key points:
 
@@ -95,20 +100,19 @@ gh workflow run typescript-npm-publish.yml
 
 The workflow:
 
-1. Validates release tag exists
-2. Downloads prebuild artifacts
-3. Publishes platform packages via OIDC
-4. Publishes root package via OIDC
+1. Validates the exact remote annotated tags, surface plan, and provenance
+2. Downloads prebuild artifacts produced from the same commit
+3. Packs and attests all packages outside the protected environment
+4. Compares every exact package/version with the registry; dry-run stops here
+5. Enters `publish-npm` only for a real publication
+6. Skips an already-present package only when its registry tarball is identical
+7. Publishes/verifies all seven native packages before the root package
 
-### Manual Fallback
+The sequence is resumable after any partial native publication. A same-version
+registry package with different bytes or integrity stops the run.
 
-If automated publishing fails:
-
-```bash
-cd bindings/typescript/sysprims
-npm login  # Authenticate with OTP
-npm publish --access public
-```
+Rerun the same workflow after an interruption. Do not replace the attested
+staging artifact with locally packed bytes.
 
 ## Troubleshooting
 

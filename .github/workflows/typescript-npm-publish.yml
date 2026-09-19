@@ -1,289 +1,172 @@
 name: TypeScript npm Publish
-# Publishes TypeScript bindings to npm using OIDC trusted publishing.
-# See docs/ops/npm-publishing.md for setup instructions.
-#
-# Prerequisites:
-# - Package must already exist on npm (first publish is manual)
-# - Trusted publisher configured on npmjs.com for this workflow
-# - Prebuilds workflow must have completed successfully
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (must match the workflow ref, e.g. v0.1.8)"
+        description: "Release tag (must match the selected vX.Y.Z ref)"
         required: false
         type: string
       prebuilds_run_id:
-        description: "Prebuilds workflow run ID (leave empty for latest successful)"
+        description: "Prebuild workflow run ID (empty selects the latest successful same-SHA run)"
         required: false
         type: string
       dry_run:
-        description: "Dry run (validate but don't publish)"
+        description: "Stage and compare without entering the protected publish job"
         required: false
         type: boolean
         default: false
 permissions:
-  id-token: write  # Required for OIDC trusted publishing
   contents: read
-  actions: read  # Required to download artifacts from other runs
+  actions: read
 jobs:
-  publish:
-    name: Publish to npm
+  stage:
+    name: Validate and stage npm packages
     runs-on: ubuntu-latest
-    environment: publish-npm  # Required for npm OIDC trusted publishing
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      commit: ${{ steps.identity.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
-      - name: Setup Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - name: Ensure npm trusted publishing runtime
+      - name: Guard release plan, exact remote tags, and provenance
+        id: identity
+        shell: bash
         env:
-          MIN_TRUSTED_PUBLISH_NODE: '22.14.0'
-          MIN_TRUSTED_PUBLISH_NPM: '11.5.1'
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          echo "node: $(node --version)"
-          echo "npm (before): $(npm --version)"
-          # Trusted publishing requires Node >= 22.14.0 and npm >= 11.5.1.
-          npm install -g "npm@${MIN_TRUSTED_PUBLISH_NPM}"
-          echo "npm (after): $(npm --version)"
-
-          # shellcheck disable=SC2016
-          node -e '
-            const min = process.env.MIN_TRUSTED_PUBLISH_NODE.split(".").map(Number);
-            const got = process.versions.node.split(".").map(Number);
-            const ok = got[0] > min[0] ||
-              (got[0] === min[0] && (got[1] > min[1] ||
-              (got[1] === min[1] && got[2] >= min[2])));
-            if (!ok) {
-              console.error(
-                `Node ${process.versions.node} is below trusted publishing minimum ` +
-                process.env.MIN_TRUSTED_PUBLISH_NODE
-              );
-              process.exit(1);
-            }
-          '
-
-          # shellcheck disable=SC2016
-          NPM_VERSION="$(npm --version)" node -e '
-            const min = process.env.MIN_TRUSTED_PUBLISH_NPM.split(".").map(Number);
-            const got = process.env.NPM_VERSION.split(".").map(Number);
-            const ok = got[0] > min[0] ||
-              (got[0] === min[0] && (got[1] > min[1] ||
-              (got[1] === min[1] && got[2] >= min[2])));
-            if (!ok) {
-              console.error(
-                `npm ${process.env.NPM_VERSION} is below trusted publishing minimum ` +
-                process.env.MIN_TRUSTED_PUBLISH_NPM
-              );
-              process.exit(1);
-            }
-          '
-      - name: Validate running from a tag ref
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_REF_TYPE:-}" != "tag" ]; then
-            echo "::error::This workflow must run from a tag ref (refs/tags/vX.Y.Z)."
-            echo "Re-run it selecting the release tag in the GitHub UI, or trigger it by pushing a v* tag."
+          if [ "$GITHUB_REF_TYPE" != tag ] || [[ "$GITHUB_REF_NAME" != v* ]]; then
+            echo "::error::Select the canonical vX.Y.Z tag ref"
             exit 1
           fi
-      - name: Validate release tag and versions
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          if [ -n "${{ inputs.tag }}" ] && [ "${{ inputs.tag }}" != "$TAG" ]; then
-            echo "::error::Input tag does not match workflow ref"
-            echo "input.tag=${{ inputs.tag }}"
-            echo "ref.tag=${TAG}"
+          if [ -n "$INPUT_TAG" ] && [ "$INPUT_TAG" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Input tag does not match selected ref"
             exit 1
           fi
+          make release-plan-check version-check
           SYSPRIMS_TAG_GUARD_MODE=post-tag \
-            SYSPRIMS_RELEASE_TAG="$TAG" \
+            SYSPRIMS_RELEASE_TAG="$GITHUB_REF_NAME" \
             bash scripts/release-guard-tag-version.sh
-
-          {
-            echo "version=${TAG#v}"
-            echo "tag=${TAG}"
-            echo "head_sha=$(git rev-parse HEAD)"
-          } >> "$GITHUB_ENV"
-          echo "Validated tag/version: ${TAG}"
-      - name: Find prebuilds run
-        id: find-run
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse 'HEAD^{commit}')" >> "$GITHUB_OUTPUT"
+      - name: Locate same-commit prebuild run
+        id: prebuild
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-
-          if [ -n "${{ inputs.prebuilds_run_id }}" ]; then
-            RUN_ID="${{ inputs.prebuilds_run_id }}"
-            echo "Using specified run ID: ${RUN_ID}"
-
-            RUN_SHA=$(gh run view "${RUN_ID}" --json headSha --jq '.headSha')
-            if [ -z "$RUN_SHA" ] || [ "$RUN_SHA" = "null" ]; then
-              echo "::error::Could not determine headSha for run ${RUN_ID}"
-              exit 1
-            fi
-            if [ "$RUN_SHA" != "${{ env.head_sha }}" ]; then
-              echo "::error::Prebuild run ${RUN_ID} was built from ${RUN_SHA}, expected ${{ env.head_sha }}"
-              echo "Use a prebuilds run from the tagged commit, or omit prebuilds_run_id to auto-select."
+          expected="${{ steps.identity.outputs.commit }}"
+          run_id="${{ inputs.prebuilds_run_id }}"
+          if [ -n "$run_id" ]; then
+            actual=$(gh run view "$run_id" --json headSha --jq .headSha)
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::Prebuild run SHA $actual != $expected"
               exit 1
             fi
           else
-            echo "Finding latest successful prebuilds run..."
-            RUN_ID=$(gh run list \
+            run_id=$(gh run list \
               --workflow=typescript-napi-prebuilds.yml \
               --status=success \
               --limit=50 \
               --json databaseId,headSha \
-              --jq '.[] | select(.headSha == "${{ env.head_sha }}") | .databaseId' \
-              | head -n 1)
-
-            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-              echo "::error::No successful prebuilds run found for commit ${{ env.head_sha }}"
-              echo "Run the TypeScript N-API Prebuilds workflow on the tagged commit, or pass prebuilds_run_id."
-              exit 1
-            fi
-            echo "Found run ID: ${RUN_ID}"
+              --jq ".[] | select(.headSha == \"$expected\") | .databaseId" \
+              | head -n1)
           fi
-
-          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-      - name: Download npm directory artifact
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful same-commit prebuild run"
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - name: Download same-commit native packages
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          RUN_ID="${{ steps.find-run.outputs.run_id }}"
-
-          echo "Downloading ts-npm-dir artifact from run ${RUN_ID}..."
-          # GitHub-hosted runners occasionally hit transient network errors to api.github.com.
-          # Retry here to avoid burning a full workflow rerun on a short blip.
-          for attempt in 1 2 3 4 5; do
-            if gh run download "${RUN_ID}" --name ts-npm-dir --dir npm-packages; then
-              break
-            fi
-            rc=$?
-            echo "::warning::Artifact download failed (attempt ${attempt}/5, rc=${rc}). Retrying..."
-            sleep $((attempt * attempt))
-          done
-
-          if [ ! -d "npm-packages" ] || [ -z "$(ls -A npm-packages 2>/dev/null)" ]; then
-            echo "::error::Failed to download ts-npm-dir artifact from run ${RUN_ID} after retries"
-            exit 1
-          fi
-
-          echo "Downloaded packages:"
-          ls -la npm-packages/
-      - name: Verify packages
-        run: |
-          set -euo pipefail
-
-          VERSION="${{ env.version }}"
-
-          # Expected platform packages
-          PLATFORMS=(
-            "linux-x64-gnu"
-            "linux-x64-musl"
-            "linux-arm64-gnu"
-            "linux-arm64-musl"
-            "darwin-arm64"
-            "win32-x64-msvc"
-            "win32-arm64-msvc"
-          )
-
-          echo "Verifying platform packages..."
-          for plat in "${PLATFORMS[@]}"; do
-            if [ ! -d "npm-packages/${plat}" ]; then
-              echo "::error::Missing platform package: ${plat}"
-              exit 1
-            fi
-            if [ ! -f "npm-packages/${plat}/sysprims.${plat}.node" ]; then
-              echo "::error::Missing .node file in ${plat}"
-              exit 1
-            fi
-
-            PKG_JSON="npm-packages/${plat}/package.json"
-            if [ ! -f "$PKG_JSON" ]; then
-              echo "::error::Missing package.json in ${plat}"
-              exit 1
-            fi
-            PKG_VERSION=$(node -p "require('./' + process.argv[1]).version" "$PKG_JSON")
-            if [ "$PKG_VERSION" != "$VERSION" ]; then
-              echo "::error::Version mismatch in ${plat} package.json (${PKG_VERSION} != ${VERSION})"
-              exit 1
-            fi
-            echo "  ${plat}: OK"
-          done
-
-          echo "All platform packages verified"
+          gh run download "${{ steps.prebuild.outputs.run_id }}" \
+            --name ts-npm-dir \
+            --dir npm-packages
       - name: Build root package
         working-directory: bindings/typescript/sysprims
         run: |
-          set -euo pipefail
-          # Use npm install instead of npm ci because:
-          # 1. Optional dependencies (platform packages) are being published in this workflow
-          # 2. They don't exist yet when we build the root package
-          # 3. We only need devDependencies for TypeScript compilation
           npm install --omit=optional
           npm run build
-      - name: Publish (dry run)
-        if: ${{ inputs.dry_run }}
-        working-directory: bindings/typescript/sysprims
+      - name: Pack and attest all eight packages
         run: |
-          set -euo pipefail
-          echo "=== DRY RUN - No packages will be published ==="
-
-          # Force OIDC mode: do not allow token auth to interfere.
+          node scripts/npm-release.mjs stage \
+            --stage dist/npm-stage \
+            --native-dir npm-packages \
+            --root-package bindings/typescript/sysprims \
+            --tag "${{ steps.identity.outputs.tag }}" \
+            --commit "${{ steps.identity.outputs.commit }}"
+          node scripts/npm-release.mjs compare \
+            --stage dist/npm-stage \
+            --tag "${{ steps.identity.outputs.tag }}" \
+            --commit "${{ steps.identity.outputs.commit }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: npm-stage-${{ steps.identity.outputs.commit }}
+          path: dist/npm-stage
+          if-no-files-found: error
+  publish:
+    name: Publish attested npm packages
+    if: ${{ !inputs.dry_run }}
+    needs: stage
+    runs-on: ubuntu-latest
+    environment: publish-npm
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ needs.stage.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Ensure trusted publishing npm runtime
+        env:
+          MIN_TRUSTED_PUBLISH_NODE: '22.14.0'
+          MIN_TRUSTED_PUBLISH_NPM: '11.5.1'
+        run: |
+          npm install -g "npm@${MIN_TRUSTED_PUBLISH_NPM}"
+          node -e '
+            const got = process.versions.node.split(".").map(Number);
+            const min = process.env.MIN_TRUSTED_PUBLISH_NODE.split(".").map(Number);
+            if (got[0] < min[0] ||
+                (got[0] === min[0] && (got[1] < min[1] ||
+                (got[1] === min[1] && got[2] < min[2])))) process.exit(1);
+          '
+          NPM_VERSION="$(npm --version)" node -e '
+            const got = process.env.NPM_VERSION.split(".").map(Number);
+            const min = process.env.MIN_TRUSTED_PUBLISH_NPM.split(".").map(Number);
+            if (got[0] < min[0] ||
+                (got[0] === min[0] && (got[1] < min[1] ||
+                (got[1] === min[1] && got[2] < min[2])))) process.exit(1);
+          '
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: npm-stage-${{ needs.stage.outputs.commit }}
+          path: dist/npm-stage
+      - name: Verify and resumably publish attested bytes
+        run: |
           unset NODE_AUTH_TOKEN NPM_TOKEN
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
-          printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
-
-          echo "Platform packages:"
-          for dir in ../../../npm-packages/*/; do
-            (cd "$dir" && npm publish --access public --dry-run)
-          done
-
-          echo "Root package:"
-          npm publish --access public --dry-run
-      - name: Publish platform packages
-        if: ${{ !inputs.dry_run }}
-        run: |
-          set -euo pipefail
-
-          # Force OIDC mode: do not allow token auth to interfere.
-          unset NODE_AUTH_TOKEN NPM_TOKEN
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
-          printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
-
-          echo "Publishing platform packages..."
-          for dir in npm-packages/*/; do
-            pkg=$(basename "$dir")
-            echo "Publishing @3leaps/sysprims-${pkg}..."
-            (cd "$dir" && npm publish --access public)
-          done
-      - name: Publish root package
-        if: ${{ !inputs.dry_run }}
-        working-directory: bindings/typescript/sysprims
-        run: |
-          set -euo pipefail
-          unset NODE_AUTH_TOKEN NPM_TOKEN
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
-          printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
-          echo "Publishing @3leaps/sysprims..."
-          npm publish --access public
-      - name: Verify publication
-        if: ${{ !inputs.dry_run }}
-        run: |
-          set -euo pipefail
-          VERSION="${{ env.version }}"
-
-          echo "Waiting for npm to index packages..."
-          sleep 10
-
-          echo "Verifying @3leaps/sysprims@${VERSION}..."
-          npm view "@3leaps/sysprims@${VERSION}" version || {
-            echo "::warning::Package not yet visible on npm (may take a few minutes)"
-          }
+          printf '%s\n' \
+            'registry=https://registry.npmjs.org/' \
+            'always-auth=false' \
+            > "$NPM_CONFIG_USERCONFIG"
+          node scripts/npm-release.mjs verify \
+            --stage dist/npm-stage \
+            --tag "${{ needs.stage.outputs.tag }}" \
+            --commit "${{ needs.stage.outputs.commit }}"
+          node scripts/npm-release.mjs publish \
+            --stage dist/npm-stage \
+            --tag "${{ needs.stage.outputs.tag }}" \
+            --commit "${{ needs.stage.outputs.commit }}"
