@@ -146,7 +146,13 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 - [ ] Create the complete annotation message files. Each must contain the
   intended release text and, when an approved provenance exception is in use,
   the complete standard attribution footer whose exact bytes are bound by the
-  signed receipt.
+  signed receipt. Store them in one directory as `v${VERSION}.txt` and
+  `bindings__go__sysprims__v${VERSION}.txt`, then export that directory for the
+  normal post-tag byte check:
+
+  ```bash
+  export SYSPRIMS_TAG_MESSAGE_DIR="/path/to/tag-messages"
+  ```
 - [ ] Create and push tags (both must be annotated, use the message files, and
   point to the same commit):
 

@@ -47,6 +47,9 @@ Replace every placeholder before review.
 - [ ] Final `main` is synchronized and green.
 - [ ] `make release-preflight` passes with Go `resolved`.
 - [ ] Canonical and Go annotation message files are reviewed byte for byte.
+- [ ] `SYSPRIMS_TAG_MESSAGE_DIR` points to those reviewed files, named
+      `vX.Y.Z.txt` and `bindings__go__sysprims__vX.Y.Z.txt`, for the post-tag
+      stored-message comparison.
 - [ ] Both tags will be annotated, use those files, and peel to the same commit.
 
 ## Post-tag order

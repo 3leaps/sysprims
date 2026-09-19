@@ -848,7 +848,7 @@ release-guard-tag-version-post: ## Require exact annotated canonical/Go tags on 
 		SYSPRIMS_RELEASE_TAG="$(SYSPRIMS_RELEASE_TAG)" \
 		bash scripts/release-guard-tag-version.sh
 
-release-guard-provenance: ## Require commit footer or a signed, fully bound exception receipt
+release-guard-provenance: ## Require attribution and bind stored tag messages when tags exist
 	@node scripts/release-integrity.mjs provenance
 
 release-guard-downloaded: ## Verify the exact downloaded draft payload inventory

@@ -244,6 +244,15 @@ function guard(root, mode, extraEnv = {}) {
   });
 }
 
+function tagMessageDirectory(root, messages) {
+  const directory = join(root, "tag-messages");
+  mkdirSync(directory);
+  for (const [tag, message] of Object.entries(messages)) {
+    writeFileSync(join(directory, `${tag.replaceAll("/", "__")}.txt`), message);
+  }
+  return directory;
+}
+
 test("check accepts a coherent pack and ignores unrelated semvers", () => {
   const root = createFixture();
   const result = version(root, "check");
@@ -617,7 +626,18 @@ test("post-tag guard requires exact annotated and co-peeled tags", () => {
     "-m",
     "go",
   ]);
-  const coherent = guard(coherentRoot, "post-tag");
+  const missingMessages = guard(coherentRoot, "post-tag");
+  assert.notEqual(missingMessages.status, 0);
+  assert.match(missingMessages.stderr, /SYSPRIMS_TAG_MESSAGE_DIR was not supplied/);
+  const wrongMessages = tagMessageDirectory(coherentRoot, {
+    "v0.2.1": "wrong canonical\n",
+    "bindings/go/sysprims/v0.2.1": "go\n",
+  });
+  const wrongMessage = guard(coherentRoot, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: wrongMessages });
+  assert.notEqual(wrongMessage.status, 0);
+  assert.match(wrongMessage.stderr, /tag message does not match the intended bytes for v0\.2\.1/);
+  writeFileSync(join(wrongMessages, "v0.2.1.txt"), "canonical\n");
+  const coherent = guard(coherentRoot, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: wrongMessages });
   assert.equal(coherent.status, 0, `${coherent.stderr}${coherent.stdout}`);
 });
 
@@ -645,6 +665,7 @@ test("Go skip tag guard requires retained tag and forbids current path tag", () 
 
   const coherent = skippedRoot();
   mustRun(coherent, "git", ["tag", "-a", "bindings/go/sysprims/v0.2.1", "-m", "retained"]);
-  const coherentResult = guard(coherent, "post-tag");
+  const messages = tagMessageDirectory(coherent, { "v0.2.2": "canonical\n" });
+  const coherentResult = guard(coherent, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: messages });
   assert.equal(coherentResult.status, 0, `${coherentResult.stderr}${coherentResult.stdout}`);
 });
