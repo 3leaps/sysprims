@@ -14,7 +14,7 @@
     },
     "go": {
       "disposition": "publish",
-      "lock_phase": "pre_build"
+      "lock_phase": "resolved"
     },
     "typescript": {
       "disposition": "publish",
