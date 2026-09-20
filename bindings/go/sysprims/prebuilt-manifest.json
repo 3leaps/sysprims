@@ -1,7 +1,7 @@
 {
   "schema": "sysprims-go-prebuilt-manifest/v1",
   "module": "github.com/3leaps/sysprims/bindings/go/sysprims",
-  "release_version": "0.2.3",
+  "release_version": "0.2.4",
   "ffi_abi_version": 1,
   "required_platforms": [
     "darwin-amd64",
@@ -21,50 +21,50 @@
     {
       "platform": "darwin-amd64",
       "path": "lib/darwin-amd64/libsysprims_ffi.a",
-      "sha256": "bc67df3214353ecc8b44a70c9e1a4495f0e3552389e07fdcdba9bda6e7390bea",
-      "reported_version": "0.2.3"
+      "sha256": "c34b5652e7628828c928be9c384ea8000e97057391d6591d4bb44f4726746fcc",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "darwin-arm64",
       "path": "lib/darwin-arm64/libsysprims_ffi.a",
-      "sha256": "23bd5cb61406d5e7ee85e72b9b1630a5689a95e61a9a156a31ac8a569e65304c",
-      "reported_version": "0.2.3"
+      "sha256": "90d6fb864612a71e49551b07310c7b19dc870354763b025c9b54a35cb8b5a07d",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "linux-amd64",
       "path": "lib/linux-amd64/libsysprims_ffi.a",
-      "sha256": "b5551ff716985a2000e2f7456c975affcfb28bc541025aae4ca0109ebc1d4b44",
-      "reported_version": "0.2.3"
+      "sha256": "2848c5c5910c792b167ed54ddcb8d5b40add365707c339eca7f5339f31cb2704",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "linux-amd64-musl",
       "path": "lib/linux-amd64-musl/libsysprims_ffi.a",
-      "sha256": "6b557057b5ef8afe8d98039947d6f56ca953e7a83c1c932da447d4ca70856f44",
-      "reported_version": "0.2.3"
+      "sha256": "746c1c9c23737a5f4dc15b09367cf507da9dbe5a5131bd9611f1940cc63d21c5",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "linux-arm64",
       "path": "lib/linux-arm64/libsysprims_ffi.a",
-      "sha256": "e6f8b717b5a1c406ad6a9ee09f5b94dfe7809496c9d65f66e04445bf608ce14b",
-      "reported_version": "0.2.3"
+      "sha256": "7a230eca2dafe20df6cff3f2dd16401df6d205ead6c0d4da1c6483e15e555ec5",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "linux-arm64-musl",
       "path": "lib/linux-arm64-musl/libsysprims_ffi.a",
-      "sha256": "169fbad558f5ae2aa15fb8b7b61b530263c4baebd69bb94ca9eacb79a6d9c0d6",
-      "reported_version": "0.2.3"
+      "sha256": "a02b05c863b2e6d6dd0e2c9b92549231124c4b6072d6b33c63e1f4711e54a52c",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "windows-amd64",
       "path": "lib/windows-amd64/libsysprims_ffi.a",
-      "sha256": "2ce248d548354b51189b81ce4c994126e0c9c67d99e4634fe2811ea51987ca2e",
-      "reported_version": "0.2.3"
+      "sha256": "d57da94ccef1939a5d08b741eb0dcfe9c61cb2884d078816cf8adb13d6755f34",
+      "reported_version": "0.2.4"
     },
     {
       "platform": "windows-arm64",
       "path": "lib/windows-arm64/libsysprims_ffi.a",
-      "sha256": "8eeddf258ccfacbc26284c74dccdf21f0ffc665695cfbb94f50fbb0611a0700f",
-      "reported_version": "0.2.3"
+      "sha256": "3eb06c5460bcd924d2bd320b212bfa206a651085c378a9390d875bc3b2d4f5f0",
+      "reported_version": "0.2.4"
     }
   ]
 }
