@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-09-19
+
 ### Added
 
 - Managed contained-process handle for Go and TypeScript. sysprims performs
@@ -18,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Windows fails before spawn. Completion evidence stays distinct from
   reliability and boundary strength. `RunWithTimeout`, `terminateTree`, and
   `spawnInGroup` are unchanged.
+- Machine-readable release surface plans and integrity guards for provenance,
+  coordinated tags, generated bindings, downloaded artifacts, checksums,
+  signatures, remote draft contents, and publication state.
+
+### Changed
+
+- Development and CI tool pins now use goneat v0.6.0 and the v0.5.6 tools
+  runner, with compatible dependency refreshes.
+- The locked `smallvec` dependency is updated to 1.16.1.
 
 ### Fixed
 
@@ -796,7 +807,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/3leaps/sysprims/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/3leaps/sysprims/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/3leaps/sysprims/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/3leaps/sysprims/compare/v0.2.0...v0.2.1

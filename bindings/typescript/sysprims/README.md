@@ -18,11 +18,11 @@ Runtime support:
 ## Installation
 
 ```bash
-npm install @3leaps/sysprims@0.2.3
+npm install @3leaps/sysprims@0.2.4
 ```
 
 The package and its platform-specific native packages are published from the
-verified `v0.2.3` repository tag.
+verified `v0.2.4` repository tag.
 
 For local development from this repository:
 
@@ -67,7 +67,7 @@ fresh C header for comparison with current Rust exports.
 
 ## API
 
-### Managed contained spawn (on `main`; unreleased)
+### Managed contained spawn
 
 `spawnContained(argv, options?)` returns a `ContainedProcess` with async
 `identity()`, `poll()`, `wait()`, `terminate()`, and `close()` methods, plus
