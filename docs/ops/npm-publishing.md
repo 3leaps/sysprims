@@ -88,6 +88,30 @@ Key points:
   below 22.14.0 or npm is below 11.5.1.
 - Run on GitHub-hosted runners only (e.g., `ubuntu-latest`)
 
+### Environment protection (`publish-npm`)
+
+The protected `publish` job deploys to the `publish-npm` environment. Its
+deployment ref policies allow only:
+
+| Ref | Type | Pattern |
+| --- | ---- | ------- |
+| Release tag | tag | `v*` |
+| Recovery policy branch | branch | `bindings/typescript/sysprims/v*` |
+
+`main` is deliberately not allowlisted — do not add it. Normal publication
+dispatches from the release tag ref:
+
+```bash
+VERSION=$(cat VERSION)
+gh workflow run "TypeScript npm Publish" --ref "v${VERSION}" \
+  -f tag="v${VERSION}" -f prebuilds_run_id=<prebuilds-run-id>
+```
+
+If the workflow revision on the release tag cannot be used, create a
+short-lived policy branch at the workflow-revision SHA whose name matches
+`bindings/typescript/sysprims/v*`, dispatch the workflow from that branch, then
+delete the branch.
+
 ## Publishing Process
 
 ### Automated (Preferred)
@@ -95,7 +119,9 @@ Key points:
 After prebuilds complete successfully:
 
 ```bash
-gh workflow run typescript-npm-publish.yml
+VERSION=$(cat VERSION)
+gh workflow run "TypeScript npm Publish" --ref "v${VERSION}" \
+  -f tag="v${VERSION}" -f prebuilds_run_id=<prebuilds-run-id>
 ```
 
 The workflow:
@@ -130,6 +156,13 @@ npm could not match workflow to trusted publisher configuration:
 - Check organization name matches GitHub URL exactly (case-sensitive)
 - Verify `package.json` has correct `repository.url`
 - Confirm workflow file exists at `.github/workflows/typescript-npm-publish.yml`
+
+### Publish job denied by environment protection
+
+The run's ref is not on the `publish-npm` allowlist (for example, a dispatch
+from `main`). Dispatch from the release tag ref, or from a short-lived
+`bindings/typescript/sysprims/v*` policy branch created at the
+workflow-revision SHA — then delete the branch.
 
 ### Provenance not generated
 

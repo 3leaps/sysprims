@@ -71,6 +71,11 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   body in a file. The body must contain the complete standard attribution
   footer. Pass that file to the merge command/UI; do not assume GitHub will
   inherit the branch-tip body.
+  - Prefer `gh pr merge --squash --body-file <file>` with the exact subject.
+    The footer must sit after a blank line, and the stored message must end at
+    `Committer-of-Record: @3leapsdave` with nothing after it: the provenance
+    guard anchors on trailing whitespace (`\s*$`), and GitHub's UI merge can
+    append an extra `Co-authored-by: 3leapsdave` trailer that fails the check.
 - [ ] Merge the release pack with that exact squash message.
 - [ ] After merge, pull `main` and verify the stored commit body before any
   workflow or tag:
@@ -146,12 +151,15 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 - [ ] Create the complete annotation message files. Each must contain the
   intended release text and, when an approved provenance exception is in use,
   the complete standard attribution footer whose exact bytes are bound by the
-  signed receipt. Store them in one directory as `v${VERSION}.txt` and
-  `bindings__go__sysprims__v${VERSION}.txt`, then export that directory for the
-  normal post-tag byte check:
+  signed receipt. Store them in the per-release tag-message directory — not a
+  `/tmp` or other scratch path — as `v${VERSION}.txt` and
+  `bindings__go__sysprims__v${VERSION}.txt`. The post-tag guards compare these
+  stored bytes against the messages of the pushed annotated tags. The devsecops
+  loader already resolves the directory for the release tag:
 
   ```bash
-  export SYSPRIMS_TAG_MESSAGE_DIR="/path/to/tag-messages"
+  source ~/devsecops/vars/3leaps-sysprims-cicd.sh
+  # SYSPRIMS_TAG_MESSAGE_DIR=$HOME/devsecops/vars/sysprims-tag-messages/$SYSPRIMS_RELEASE_TAG
   ```
 - [ ] Create and push tags (both must be annotated, use the message files, and
   point to the same commit):
@@ -159,8 +167,9 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   ```bash
   VERSION=$(cat VERSION)
 
-   # IMPORTANT: tags must point to the commit that includes the merged Go bindings PR.
-   # Ensure you're tagging the current main HEAD.
+   # IMPORTANT: both tags point at the merge SHA of the Go Bindings Prep PR
+   # (the release's provenance-anchored commit) and peel to that one commit.
+   # Later main recuts never move the tags — do not retarget them onto a newer main HEAD.
 
   # Canonical repo tag (drives .github/workflows/release.yml)
   git tag -a "v${VERSION}" --cleanup=verbatim -F "/path/to/v${VERSION}.txt"
@@ -184,16 +193,28 @@ Notes:
 
 ### Required Post-Tag Execution Order
 
+Post-tag release execution runs from the immutable tag checkout, never `main`
+(later recuts can move `main`, and the `release-*` guards require the exact tags
+on HEAD):
+
+```bash
+VERSION=$(cat VERSION)
+git switch --detach "v${VERSION}"
+```
+
 After both tags are pushed, keep release execution in this order:
 
 1. Verify the tag-triggered release workflow and optional validation workflow.
-2. Publish the five crates.io library crates in dependency order.
+2. Publish the five crates.io library crates in dependency order (from this
+   detached tag checkout).
 3. Download, copy tagged notes, checksum, sign, verify, and upload the GitHub
-   release assets. Upload leaves the release as a draft.
+   release assets (`make release-download` / `release-sign` / `release-upload`
+   run from this detached tag checkout). Upload leaves the release as a draft.
 4. When the plan marks TypeScript `publish`, run N-API prebuilds and resumable
    npm publication from the verified tag while the GitHub release stays draft.
 5. Run `make release-guard-remote`, then use the separately maintainer-cued
-   `make release-publish` target as the only public promotion.
+   `make release-publish` target as the only public promotion — also from the
+   detached tag checkout.
 
 If any step fails or produces unexpected artifacts, pause before moving to the
 next step.
@@ -268,11 +289,11 @@ Use a crates.io token scoped to the five library crate names. First upload of a
 crate name requires `publish-new` and `publish-update`; later releases should
 use update-only scope. Never store the token in this repository.
 
-Publish from a clean checkout of the tag:
+Publish from a clean detached checkout of the tag:
 
 ```bash
 VERSION=$(cat VERSION)
-git checkout "v${VERSION}"
+git switch --detach "v${VERSION}"
 cargo publish --dry-run -p sysprims-core
 cargo publish -p sysprims-core
 cargo info --registry crates-io "sysprims-core@${VERSION}"
@@ -324,6 +345,10 @@ export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
 ```
 
 ### Signing Steps
+
+Everything below runs from the detached release tag (`git switch --detach
+"v$(cat VERSION)"`), never `main`; the `release-*` guards require the exact tags
+on HEAD.
 
 1. **Clean previous release artifacts**
 
@@ -431,13 +456,18 @@ The workflow validates:
    - VERSION file and package.json match the tag
    - Prebuilds were built from the same commit as the tag
 
-Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow must
-run from a tag ref to satisfy the `publish-npm` environment protection rules,
-and the publish job intentionally uses Node.js 24 even though
-validation/prebuild jobs remain on Node.js 20.
+Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The `publish-npm`
+environment only allows deployments from `v*` tag refs and
+`bindings/typescript/sysprims/v*` branch refs — `main` is deliberately **not**
+allowlisted; do not add it. If the workflow revision on the release tag cannot
+be used, create a short-lived policy branch matching
+`bindings/typescript/sysprims/v*` at the workflow-revision SHA, dispatch from
+that branch, then delete it. The publish job intentionally uses Node.js 24 even
+though validation/prebuild jobs remain on Node.js 20.
 
 3. After every planned registry/module surface resolves exactly, verify the
-   fresh remote draft and publish through the sole promotion target:
+   fresh remote draft and publish through the sole promotion target — from the
+   detached tag checkout:
 
    ```bash
    make release-guard-remote

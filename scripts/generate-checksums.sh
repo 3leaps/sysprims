@@ -31,8 +31,8 @@ EXPECTED=(
 	sysprims.h
 )
 printf '%s\n' "${EXPECTED[@]}" | LC_ALL=C sort >.expected-release-files
-find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%f\n' 2>/dev/null | LC_ALL=C sort >.actual-release-files || {
-	find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -exec basename {} \; | LC_ALL=C sort >.actual-release-files
+find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name '.actual-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%f\n' 2>/dev/null | LC_ALL=C sort >.actual-release-files || {
+	find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name '.actual-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -exec basename {} \; | LC_ALL=C sort >.actual-release-files
 }
 if ! cmp -s .expected-release-files .actual-release-files; then
 	echo "Error: release payload inventory is incomplete or contains leftovers" >&2
