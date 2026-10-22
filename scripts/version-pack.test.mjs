@@ -5,11 +5,12 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkManifestPlatformDeps, platformLockEntries, synchronize } from "./version-pack.mjs";
@@ -453,7 +454,9 @@ test("root specs accept every npm registry range form and refuse other sources",
   const bad = ["https://registry.npmjs.org/x/-/x-1.0.0.tgz", "file:../x", "git+https://e.example/x.git",
     "github:a/b", "a/b", "x@1.0.0", "link:../x", "npm:x@file:../y",
     ".", "..", ".hidden", "foo.tgz", "foo.tar.gz", "addon.tar", "*.tgz", " foo.tgz", "1.2.3.tgz",
-    "npm:left-pad@..", "npm:left-pad@foo.tgz", "^^1.2.3", "1.2.3-..", "1 ||", "- 1.2.3"];
+    "npm:left-pad@..", "npm:left-pad@foo.tgz", "^^1.2.3", "1.2.3-..", "1 ||", "- 1.2.3",
+    "1.2.3-beta.1.tgz", "~1.2.3-beta.1.tgz", "2.3-foo.tar.gz", "1.2.3+bfoo.tar.gz", "1.2.3-x.TAR",
+    "npm:left-pad@1.2.3-beta.1.tgz"];
   for (const spec of good) {
     const errors = [];
     checkManifestPlatformDeps({ dependencies: { left: spec } }, "m", errors);
@@ -944,4 +947,29 @@ test("Go skip tag guard requires retained tag and forbids current path tag", () 
   const messages = tagMessageDirectory(coherent, { "v0.2.2": "canonical\n" });
   const coherentResult = guard(coherent, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: messages });
   assert.equal(coherentResult.status, 0, `${coherentResult.stderr}${coherentResult.stdout}`);
+});
+
+// Every npm install or pack in CI and release tooling must skip lifecycle
+// scripts; a new invocation without the flag fails here.
+test("CI and release npm installs and packs pass --ignore-scripts", () => {
+  const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const files = [
+    ...readdirSync(join(repo, ".github/workflows")).filter((f) => f.endsWith(".yml")).map((f) => join(repo, ".github/workflows", f)),
+    join(repo, "Makefile"),
+    ...readdirSync(join(repo, "scripts")).filter((f) => /\.(m?js|sh)$/.test(f) && !f.endsWith(".test.mjs")).map((f) => join(repo, "scripts", f)),
+  ];
+  const offenders = [];
+  for (const file of files) {
+    readFileSync(file, "utf8").split("\n").forEach((line, index) => {
+      const code = line.replace(/^\s*(?:#|\/\/).*$/, "").replace(/\s#.*$/, "");
+      // A shell command (start of line, after run:, or after && ; |) or a
+      // spawn-style ["npm", ["ci", ...]] call.
+      const invokes = /(?:^|run:|&&|;|\|)\s*(?:npx\s+)?npm\s+(?:ci|install|i|pack|update)\b/.test(code) ||
+        /["']npm["'],\s*\[\s*["'](?:ci|install|i|pack|update)["']/.test(code);
+      if (invokes && !/-g\b|--global\b/.test(code) && !code.includes("--ignore-scripts")) {
+        offenders.push(`${file.slice(repo.length + 1)}:${index + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, []);
 });

@@ -309,9 +309,10 @@ function checkNoOptionalPins(value, label, errors) {
 // dependency specs are limited to semver ranges and npm: aliases of
 // well-formed names.
 const registryTarballPrefix = "https://registry.npmjs.org/";
-// npm names: lowercase; an unscoped name may not start with "." or "_";
 // Legacy mixed-case registry names (JSONStream, Base64) and inBundle entries
 // without a resolved tarball are refused by design; none is in this tree.
+
+// npm names: lowercase; an unscoped name may not start with "." or "_";
 // scope and scoped package parts may start with "_". No part ends with a dot.
 const unscopedSegment = "[a-z0-9~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
 const scopedSegment = "[a-z0-9_~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
@@ -327,15 +328,20 @@ const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d
 // Root dependency specs must be a registry range or a dist-tag. A range is
 // "||"-separated sets of space-separated comparators or hyphen ranges over
 // partial versions (x, X and * wildcards, optional leading v). A tag is an
-// identifier with no dot, so local paths and tarballs (".", "..", "a.tgz")
-// never match either form.
+// identifier with no dot. npm reads a spec ending in .tgz, .tar.gz or .tar
+// as a local tarball even when it looks like a version (1.2.3-beta.1.tgz),
+// so those are refused separately. The lock binding is the primary control;
+// this keeps the manifest from naming a non-registry source at all.
 const dotIdentifiers = "[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*";
 const partialVersion = `v?(?:[0-9]+|[xX*])(?:\\.(?:[0-9]+|[xX*])){0,2}(?:-${dotIdentifiers})?(?:\\+${dotIdentifiers})?`;
 const comparator = `(?:[<>]=?|=|\\^|~)?\\s*${partialVersion}`;
 const rangeSet = `(?:${partialVersion}\\s+-\\s+${partialVersion}|${comparator}(?:\\s+${comparator})*)`;
 const registryRangeRe = new RegExp(`^\\s*${rangeSet}(?:\\s*\\|\\|\\s*${rangeSet})*\\s*$`);
 const distTagRe = /^[A-Za-z][A-Za-z0-9_-]*$/;
-const isRegistrySpec = (spec) => spec === "" || registryRangeRe.test(spec) || distTagRe.test(spec);
+const tarballSuffixRe = /\.(?:tgz|tar\.gz|tar)\s*$/i;
+const isRegistrySpec = (spec) =>
+  !tarballSuffixRe.test(spec) &&
+  (spec === "" || registryRangeRe.test(spec) || distTagRe.test(spec));
 
 // Keys are validated against installPathRe first, so components are
 // separated by "/node_modules/" and the first one follows "node_modules/".
