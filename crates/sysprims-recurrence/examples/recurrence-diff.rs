@@ -1,11 +1,20 @@
 //! Differential driver: reads one JSON rule per stdin line and prints one
 //! result line per rule (refusal reason, or canonical digest plus a fixed
-//! set of queries). The Go twin has a matching driver; CI diffs the outputs.
+//! set of queries). The Go module has a matching driver; CI diffs the
+//! outputs. Errors print as stable codes so wording never differs.
 
 use std::io::{self, BufRead, Write};
 use std::num::NonZeroU32;
 
-use sysprims_recurrence::{Instant, RecurrenceRule};
+use sysprims_recurrence::{Instant, QueryError, RecurrenceRule};
+
+fn code(e: &QueryError) -> &'static str {
+    match e {
+        QueryError::ReversedRange => "error:reversed_range",
+        QueryError::SearchLimitExceeded => "error:search_limit",
+        _ => "error:other",
+    }
+}
 
 fn main() {
     let stdin = io::stdin();
@@ -37,14 +46,14 @@ fn main() {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(","),
-                Err(e) => format!("error:{e:?}"),
+                Err(e) => code(&e).to_owned(),
             });
         }
         let next = rule.next_after(Instant::parse("2026-06-15T12:00:00Z").unwrap());
         parts.push(match next {
             Ok(Some(i)) => i.to_string(),
             Ok(None) => "none".into(),
-            Err(e) => format!("error:{e:?}"),
+            Err(e) => code(&e).to_owned(),
         });
         writeln!(out, "{}", parts.join(" ")).unwrap();
     }

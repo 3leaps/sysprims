@@ -4,12 +4,24 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/3leaps/sysprims/go/recurrence"
 )
+
+// code prints query errors as stable codes so wording never differs.
+func code(err error) string {
+	switch {
+	case errors.Is(err, recurrence.ErrReversedRange):
+		return "error:reversed_range"
+	case errors.Is(err, recurrence.ErrSearchLimit):
+		return "error:search_limit"
+	}
+	return "error:other"
+}
 
 func main() {
 	in := bufio.NewScanner(os.Stdin)
@@ -36,7 +48,7 @@ func main() {
 			to, _ := recurrence.ParseInstant(w.to)
 			got, err := r.Expand(from, to, w.limit)
 			if err != nil {
-				parts = append(parts, "error:"+err.Error())
+				parts = append(parts, code(err))
 				continue
 			}
 			s := make([]string, len(got))
@@ -49,7 +61,7 @@ func main() {
 		next, found, err := r.NextAfter(after)
 		switch {
 		case err != nil:
-			parts = append(parts, "error:"+err.Error())
+			parts = append(parts, code(err))
 		case found:
 			parts = append(parts, recurrence.FormatInstant(next))
 		default:

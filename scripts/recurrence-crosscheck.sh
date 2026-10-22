@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Byte-for-byte agreement between the Rust recurrence crate and the Go twin.
+# Byte-for-byte agreement between the Rust recurrence crate and the Go module.
 #
 # 1. Both tzdb bundle copies equal each other and their sha256 pin.
 # 2. Both corpus harnesses emit one NDJSON line per vector (canonical bytes,
@@ -34,12 +34,22 @@ if ! cmp -s "${work}/rust.ndjson" "${work}/go.ndjson"; then
 fi
 echo "[ok] corpus NDJSON identical ($(wc -l <"${work}/rust.ndjson" | tr -d ' ') lines)"
 
-python3 scripts/recurrence-gen-rules.py "${RECURRENCE_XCHECK_SEED:-20261022}" "${RECURRENCE_XCHECK_RULES:-5000}" >"${work}/rules.jsonl"
-cargo run -q --release -p sysprims-recurrence --example recurrence-diff <"${work}/rules.jsonl" >"${work}/rust.out"
-(cd go/recurrence && GOWORK=off CGO_ENABLED=0 go run ./internal/difftool) <"${work}/rules.jsonl" >"${work}/go.out"
-if ! cmp -s "${work}/rust.out" "${work}/go.out"; then
-	echo "error: generated-rule outputs differ between Rust and Go" >&2
-	diff <(paste -d'\t' "${work}/rules.jsonl" "${work}/rust.out") <(paste -d'\t' "${work}/rules.jsonl" "${work}/go.out") | head -10 >&2
-	exit 1
-fi
-echo "[ok] generated rules identical ($(wc -l <"${work}/rules.jsonl" | tr -d ' ') rules, $(grep -vc '^refused' "${work}/rust.out" || true) expanded)"
+# Two fixed seeds (override with RECURRENCE_XCHECK_SEEDS="a b ...").
+rust_diff="$(cargo build -q --release -p sysprims-recurrence --example recurrence-diff --message-format=json |
+	python3 -c 'import json,sys
+for l in sys.stdin:
+    m = json.loads(l)
+    if m.get("reason") == "compiler-artifact" and m["target"]["name"] == "recurrence-diff" and m.get("executable"):
+        print(m["executable"])')"
+(cd go/recurrence && GOWORK=off CGO_ENABLED=0 go build -o "${work}/go-diff" ./internal/difftool)
+for seed in ${RECURRENCE_XCHECK_SEEDS:-20261022 20261023}; do
+	python3 scripts/recurrence-gen-rules.py "$seed" "${RECURRENCE_XCHECK_RULES:-5000}" >"${work}/rules.jsonl"
+	"$rust_diff" <"${work}/rules.jsonl" >"${work}/rust.out"
+	"${work}/go-diff" <"${work}/rules.jsonl" >"${work}/go.out"
+	if ! cmp -s "${work}/rust.out" "${work}/go.out"; then
+		echo "error: generated-rule outputs differ between Rust and Go (seed ${seed})" >&2
+		diff <(paste -d'\t' "${work}/rules.jsonl" "${work}/rust.out") <(paste -d'\t' "${work}/rules.jsonl" "${work}/go.out") | head -10 >&2
+		exit 1
+	fi
+	echo "[ok] seed ${seed}: generated rules identical ($(wc -l <"${work}/rules.jsonl" | tr -d ' ') rules, $(grep -vc '^refused' "${work}/rust.out" || true) expanded)"
+done
