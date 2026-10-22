@@ -298,58 +298,78 @@ function checkNoOptionalPins(value, label, errors) {
 }
 
 // The committed TypeScript lock must stay in the exact shape npm writes for a
-// registry-only tree: canonical lowercase node_modules keys, no links or
-// local packages, and a registry tarball plus integrity on every entry. Any
-// other shape is refused outright rather than interpreted, so alternative
-// spellings of a key (separators, dot segments, case) cannot smuggle a
-// platform package in. Platform identities are then matched against each
-// entry's folder name and real (alias) name, case-insensitively.
+// registry-only tree, and every entry is bound to what npm will download:
+//   - keys follow the install-path grammar node_modules/<name>(/node_modules/<name>)*
+//   - <name> is a lowercase npm package name (whole scope, no trailing dot)
+//   - resolved is exactly the registry tarball URL for the entry's real name
+//     (entry.name for an alias, else the folder) and version
+//   - integrity is a single full SHA-512 digest; links are not allowed
+// Platform packages are then refused by the name npm actually fetches, so
+// no alternative spelling, alias or tarball URL can bring one in. Root
+// dependency specs are limited to semver ranges and npm: aliases of
+// well-formed names.
 const registryTarballPrefix = "https://registry.npmjs.org/";
+const nameSegment = "[a-z0-9~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
+const packageNamePattern = `(?:@${nameSegment}/)?${nameSegment}`;
+const packageNameRe = new RegExp(`^${packageNamePattern}$`);
+const installPathRe = new RegExp(
+  `^node_modules/${packageNamePattern}(?:/node_modules/${packageNamePattern})*$`,
+);
+const sha512Re = /^sha512-[A-Za-z0-9+/]{86}==$/;
+const semverRangeRe = /^[\^~<>=]{0,2}\s*\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 function lockFolderName(key) {
-  const parts = key.split("/");
-  const last = parts.at(-1);
-  const scope = parts.at(-2);
-  return scope?.startsWith("@") ? `${scope}/${last}` : last;
+  return key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length);
+}
+
+function registryTarballUrl(name, version) {
+  return `${registryTarballPrefix}${name}/-/${name.split("/").at(-1)}-${version}.tgz`;
 }
 
 function lockShapeErrors(packages) {
   const errors = [];
   for (const [key, entry] of Object.entries(packages ?? {})) {
     if (key === "") continue;
-    const canonical =
-      key.startsWith("node_modules/") &&
-      !key.includes("\\") &&
-      posix.normalize(key) === key &&
-      key === key.toLowerCase() &&
-      lockFolderName(key) !== "";
-    if (!canonical) {
+    if (!installPathRe.test(key)) {
       errors.push(`package-lock key ${JSON.stringify(key)} is not a canonical registry install path`);
       continue;
     }
-    if (entry?.link === true) {
-      errors.push(`package-lock entry ${key} is a link; only registry packages are allowed`);
-    } else if (
-      typeof entry?.resolved !== "string" ||
-      !entry.resolved.startsWith(registryTarballPrefix) ||
-      typeof entry?.integrity !== "string" ||
-      !entry.integrity.startsWith("sha512-")
+    if (entry === null || typeof entry !== "object" || Object.hasOwn(entry, "link")) {
+      errors.push(`package-lock entry ${key} is a link or malformed; only registry packages are allowed`);
+      continue;
+    }
+    const realName = entry.name ?? lockFolderName(key);
+    if (typeof realName !== "string" || !packageNameRe.test(realName)) {
+      errors.push(`package-lock entry ${key} has an invalid package name ${JSON.stringify(entry.name)}`);
+      continue;
+    }
+    if (
+      typeof entry.version !== "string" ||
+      entry.resolved !== registryTarballUrl(realName, entry.version) ||
+      typeof entry.integrity !== "string" ||
+      !sha512Re.test(entry.integrity)
     ) {
-      errors.push(`package-lock entry ${key} lacks a registry tarball and sha512 integrity`);
+      errors.push(`package-lock entry ${key} lacks a registry tarball and sha512 integrity matching ${realName}`);
+      continue;
     }
   }
   return errors;
 }
 
-function platformLockEntries(packages) {
+export function platformLockEntries(packages) {
   const platformSet = new Set(platformNames);
   const hits = [];
   for (const [key, entry] of Object.entries(packages ?? {})) {
     if (key === "") continue;
-    const identities = [lockFolderName(posix.normalize(key.replaceAll("\\", "/")).replace(/\/+$/, ""))];
-    if (typeof entry?.name === "string") identities.push(entry.name);
-    for (const identity of identities) {
-      if (platformSet.has(identity.toLowerCase())) hits.push([key, identity]);
+    const candidates = [lockFolderName(key)];
+    if (typeof entry?.name === "string") candidates.push(entry.name);
+    if (typeof entry?.resolved === "string" && entry.resolved.startsWith(registryTarballPrefix)) {
+      const path = entry.resolved.slice(registryTarballPrefix.length).split("/-/")[0];
+      try { candidates.push(decodeURIComponent(path)); } catch { candidates.push(path); }
+    }
+    for (const candidate of candidates) {
+      const normalized = candidate.toLowerCase().replace(/\.+$/, "");
+      if (platformSet.has(normalized)) hits.push([key, candidate]);
     }
   }
   return hits;
@@ -364,25 +384,44 @@ const manifestDependencyFields = [
   "bundledDependencies",
 ];
 
-// A root manifest may not name a platform package in any dependency field,
-// directly or through an `npm:` alias (any case).
-function checkManifestPlatformDeps(manifest, label, errors) {
+// Root manifest dependency specs: a semver range, or npm:<name>@<range>. A
+// platform package may not be named either way.
+export function checkManifestPlatformDeps(manifest, label, errors) {
   const platformSet = new Set(platformNames);
+  const isPlatform = (name) => platformSet.has(name.toLowerCase().replace(/\.+$/, ""));
   for (const field of manifestDependencyFields) {
     const deps = manifest?.[field];
-    if (!deps || typeof deps !== "object") continue;
-    const entries = Array.isArray(deps)
-      ? deps.map((name) => [name, ""])
-      : Object.entries(deps);
-    for (const [name, spec] of entries) {
-      const aliasTarget = typeof spec === "string" && /^npm:/i.test(spec)
-        ? spec.slice(4).replace(/@[^@/]*$/, "")
-        : null;
-      const hit = [name, aliasTarget].find(
-        (candidate) => typeof candidate === "string" && platformSet.has(candidate.toLowerCase()),
-      );
-      if (hit) {
-        errors.push(`${label}.${field} must not name platform package ${hit}`);
+    if (deps === undefined) continue;
+    if (Array.isArray(deps)) {
+      for (const name of deps) {
+        if (typeof name !== "string" || isPlatform(name)) {
+          errors.push(`${label}.${field} must not name platform package ${name}`);
+        }
+      }
+      continue;
+    }
+    if (deps === null || typeof deps !== "object") {
+      errors.push(`${label}.${field} is malformed`);
+      continue;
+    }
+    for (const [name, spec] of Object.entries(deps)) {
+      if (isPlatform(name)) {
+        errors.push(`${label}.${field} must not name platform package ${name}`);
+        continue;
+      }
+      if (typeof spec !== "string") {
+        errors.push(`${label}.${field}.${name} has a non-string spec`);
+        continue;
+      }
+      const alias = spec.match(/^npm:(.+)@([^@]+)$/i);
+      if (alias) {
+        if (isPlatform(alias[1])) {
+          errors.push(`${label}.${field} must not name platform package ${alias[1]}`);
+        } else if (!packageNameRe.test(alias[1]) || !semverRangeRe.test(alias[2])) {
+          errors.push(`${label}.${field}.${name} has an unsupported alias spec ${JSON.stringify(spec)}`);
+        }
+      } else if (/^npm:/i.test(spec) || !semverRangeRe.test(spec)) {
+        errors.push(`${label}.${field}.${name} has an unsupported spec ${JSON.stringify(spec)}; use a registry semver range`);
       }
     }
   }

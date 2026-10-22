@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { synchronize } from "./version-pack.mjs";
+import { checkManifestPlatformDeps, platformLockEntries, synchronize } from "./version-pack.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const versionScript = join(scriptDir, "version-pack.mjs");
@@ -346,6 +346,16 @@ test("check rejects platform packages and every non-canonical lock shape", () =>
     "lock root dependency": (_pk, lock) => { lock.packages[""].dependencies = { [p[5]]: "0.2.1" }; },
     "lock root dev alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `npm:${p[6]}@0.2.1` }; },
     "lock root upper-case alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `NPM:${p[6]}@0.2.1` }; },
+    "platform tarball under an innocent folder": (pk) => {
+      pk["node_modules/once"] = { ...registryEntry("once", "0.2.4"), resolved: registryEntry(p[0], "0.2.4").resolved };
+    },
+    "encoded-scope platform tarball": (pk) => {
+      pk["node_modules/once"] = { ...registryEntry("once", "0.2.4"), resolved: registryEntry(p[0], "0.2.4").resolved.replace("@3leaps/", "@3leaps%2f") };
+    },
+    "trailing-dot platform key": (pk) => { pk[`node_modules/${p[1]}.`] = registryEntry(`${p[1]}.`, "0.2.1"); },
+    "trailing-dot platform alias": (pk) => { pk["node_modules/innocent"] = { ...registryEntry(`${p[2]}.`, "0.2.1"), name: `${p[2]}.` }; },
+    "lock root trailing-dot alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `npm:${p[3]}.@0.2.1` }; },
+    "lock root direct URL": (_pk, lock) => { lock.packages[""].dependencies = { innocent: registryEntry(p[4], "0.2.1").resolved }; },
     "lock root case-variant name": (_pk, lock) => { lock.packages[""].dependencies = { [upper]: "0.2.1" }; },
   };
   for (const [label, mutate] of Object.entries(cases)) {
@@ -353,7 +363,7 @@ test("check rejects platform packages and every non-canonical lock shape", () =>
     assert.notEqual(result.status, 0, label);
     assert.match(
       result.stderr,
-      /must not (resolve|name) platform package|not a canonical registry install path|is a link|lacks a registry tarball/,
+      /must not (resolve|name) platform package|not a canonical registry install path|is a link|lacks a registry tarball|unsupported (alias )?spec/,
       label,
     );
   }
@@ -372,12 +382,53 @@ test("each lock shape rule rejects on its own", () => {
     ["link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: true }; }, /is a link/],
     ["foreign tarball", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://evil.example/left-pad-1.0.0.tgz" }; }, /lacks a registry tarball/],
     ["weak integrity", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: "sha1-AAAA" }; }, /lacks a registry tarball/],
+    ["truncated sha512", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: "sha512-AAAA" }; }, /lacks a registry tarball/],
+    ["sha512 then sha1 downgrade", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: `sha512- sha1-${"A".repeat(27)}=` }; }, /lacks a registry tarball/],
+    ["truthy non-boolean link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: 1 }; }, /is a link or malformed/],
+    ["string link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: "true" }; }, /is a link or malformed/],
+    ["false link field", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: false }; }, /is a link or malformed/],
+    ["half scope", (pk) => { pk["node_modules/@benign/"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["vendor segment", (pk) => { pk["node_modules/a/vendor/left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["trailing dot name", (pk) => { pk["node_modules/left-pad."] = e("left-pad."); }, /not a canonical registry install path/],
+    ["tarball for another package", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/right-pad/-/right-pad-1.0.0.tgz" }; }, /lacks a registry tarball/],
+    ["tarball for another version", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/left-pad/-/left-pad-9.9.9.tgz" }; }, /lacks a registry tarball/],
+    ["traversal in tarball URL", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/../../node_modules/left-pad" }; }, /lacks a registry tarball/],
+    ["invalid alias name", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), name: "Left Pad" }; }, /invalid package name/],
   ];
   for (const [label, mutate, expected] of cases) {
     const result = version(lockFixtureWith(mutate), "check");
     assert.match(result.stderr, expected, label);
     assert.doesNotMatch(result.stderr, /platform package/, `${label}: must fail on shape, not identity`);
   }
+});
+
+// Defence-in-depth layers that the full check also covers through other
+// rules; these tests exercise each one directly.
+test("platform identity decodes encoded registry tarball paths", () => {
+  const hits = platformLockEntries({
+    "node_modules/once": {
+      version: "0.2.4",
+      resolved: `https://registry.npmjs.org/${platformNames[0].replace("/", "%2f")}/-/x-0.2.4.tgz`,
+    },
+  });
+  assert.equal(hits.length, 1);
+});
+
+test("platform identity ignores trailing dots on names", () => {
+  const errors = [];
+  checkManifestPlatformDeps({ dependencies: { [`${platformNames[0]}.`]: "0.2.1" } }, "m", errors);
+  assert.match(errors.join("\n"), /must not name platform package/);
+});
+
+test("root alias specs require a well-formed name and a semver range", () => {
+  for (const spec of ["npm:Not A Name@1.0.0", "npm:left-pad@latest", "npm:left-pad@https://evil.example/x.tgz"]) {
+    const errors = [];
+    checkManifestPlatformDeps({ devDependencies: { x: spec } }, "m", errors);
+    assert.match(errors.join("\n"), /unsupported (alias )?spec/, spec);
+  }
+  const errors = [];
+  checkManifestPlatformDeps({ devDependencies: { "typescript-api": "npm:typescript@6.0.3", y: "^1.2.3" } }, "m", errors);
+  assert.deepEqual(errors, []);
 });
 
 test("check rejects platform packages in any root manifest dependency field", () => {
