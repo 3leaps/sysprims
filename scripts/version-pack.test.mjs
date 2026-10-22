@@ -107,6 +107,13 @@ function writeGoFixture(root, version) {
   });
 }
 
+const sri = `sha512-${Buffer.alloc(64, 1).toString("base64")}`;
+
+function registryEntry(name, version, extra = {}) {
+  const bare = name.split("/").at(-1);
+  return { version, resolved: `https://registry.npmjs.org/${name}/-/${bare}-${version}.tgz`, integrity: sri, ...extra };
+}
+
 function createFixture() {
   const root = mkdtempSync(join(tmpdir(), "sysprims-version-pack-test-"));
   roots.push(root);
@@ -191,6 +198,7 @@ v0.1.14 remains part of the historical API notes.
         typescript: "0.2.1",
       },
     },
+    "node_modules/typescript": registryEntry("typescript", "0.2.1"),
   };
   writeJson(join(root, "bindings/typescript/sysprims/package-lock.json"), {
     name: "@3leaps/sysprims",
@@ -300,43 +308,76 @@ function lockFixtureWith(mutate) {
   return root;
 }
 
-test("check rejects platform packages under every npm-equivalent lock key", () => {
+test("check rejects platform packages and every non-canonical lock shape", () => {
   const p = platformNames;
+  const upper = p[0].replace("@3leaps", "@3Leaps");
+  const e = (name) => registryEntry(name, "0.2.1");
   const cases = {
-    "nested path": (pk) => { pk[`node_modules/dep/node_modules/${p[0]}`] = { version: "0.2.1" }; },
-    "root alias": (pk) => { pk["node_modules/innocent"] = { name: p[1], version: "0.2.1" }; },
-    "nested alias": (pk) => { pk["node_modules/a/node_modules/innocent"] = { name: p[2], version: "0.2.1" }; },
-    "trailing slash": (pk) => { pk[`node_modules/${p[3]}/`] = { version: "0.2.1" }; },
-    "dot segment": (pk) => { pk[`node_modules/./${p[4]}`] = { version: "0.2.1" }; },
-    "trailing dot": (pk) => { pk[`node_modules/${p[5]}/.`] = { version: "0.2.1" }; },
-    "double slash": (pk) => { pk[`node_modules//${p[6]}`] = { version: "0.2.1" }; },
-    "dotdot into scope": (pk) => { pk[`node_modules/@3leaps/foo/../${p[0].split("/")[1]}`] = { version: "0.2.1" }; },
-    "dotdot after extra": (pk) => { pk[`node_modules/${p[1]}/extra/..`] = { version: "0.2.1" }; },
-    "nested scoped dot": (pk) => { pk[`node_modules/dep/node_modules/./${p[2]}`] = { version: "0.2.1" }; },
-    "link to unnamed platform target": (pk) => {
+    // registry-shaped entries that resolve a platform package
+    "canonical root": (pk) => { pk[`node_modules/${p[0]}`] = e(p[0]); },
+    "nested path": (pk) => { pk[`node_modules/dep/node_modules/${p[1]}`] = e(p[1]); },
+    "root alias": (pk) => { pk["node_modules/innocent"] = { ...e(p[2]), name: p[2] }; },
+    "nested alias": (pk) => { pk["node_modules/a/node_modules/innocent"] = { ...e(p[3]), name: p[3] }; },
+    "alias name, other case": (pk) => { pk["node_modules/innocent"] = { ...e(p[4]), name: p[4].toUpperCase() }; },
+    // non-canonical keys, refused on shape alone
+    "trailing slash": (pk) => { pk[`node_modules/${p[3]}/`] = e(p[3]); },
+    "dot segment": (pk) => { pk[`node_modules/./${p[4]}`] = e(p[4]); },
+    "trailing dot": (pk) => { pk[`node_modules/${p[5]}/.`] = e(p[5]); },
+    "double slash": (pk) => { pk[`node_modules//${p[6]}`] = e(p[6]); },
+    "dotdot into scope": (pk) => { pk[`node_modules/@3leaps/foo/../${p[0].split("/")[1]}`] = e(p[0]); },
+    "dotdot after extra": (pk) => { pk[`node_modules/${p[1]}/extra/..`] = e(p[1]); },
+    "backslash separators": (pk) => { pk[`node_modules\\${p[2].replace("/", "\\")}`] = e(p[2]); },
+    "nested backslash": (pk) => { pk[`node_modules/helper/node_modules\\${p[2].replace("/", "\\")}`] = e(p[2]); },
+    "case-variant key": (pk) => { pk[`node_modules/${upper}`] = e(upper); },
+    "above lock root": (pk) => { pk[`node_modules/../node_modules/${p[3]}`] = e(p[3]); },
+    // links and local packages, refused regardless of their target
+    "link to platform target": (pk) => {
       pk[`packages/${p[3]}`] = { version: "0.2.1" };
       pk["node_modules/alias"] = { resolved: `packages/${p[3]}`, link: true };
     },
-    "link to named platform target": (pk) => {
-      pk["vendor/thing"] = { name: p[4], version: "0.2.1" };
+    "link to innocently named local": (pk) => {
+      pk["vendor/thing"] = { name: "thing", version: "0.2.1" };
       pk["node_modules/thing"] = { resolved: "vendor/thing", link: true };
     },
+    "local workspace": (pk) => { pk["packages/tool"] = { name: "tool", version: "1.0.0" }; },
+    "non-registry tarball": (pk) => { pk["node_modules/x"] = { version: "1.0.0", resolved: "https://evil.example/x.tgz", integrity: sri }; },
+    "missing integrity": (pk) => { pk["node_modules/x"] = { version: "1.0.0", resolved: "https://registry.npmjs.org/x/-/x-1.0.0.tgz" }; },
+    // root manifest dependency fields
     "lock root dependency": (_pk, lock) => { lock.packages[""].dependencies = { [p[5]]: "0.2.1" }; },
     "lock root dev alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `npm:${p[6]}@0.2.1` }; },
+    "lock root upper-case alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `NPM:${p[6]}@0.2.1` }; },
+    "lock root case-variant name": (_pk, lock) => { lock.packages[""].dependencies = { [upper]: "0.2.1" }; },
   };
   for (const [label, mutate] of Object.entries(cases)) {
     const result = version(lockFixtureWith(mutate), "check");
     assert.notEqual(result.status, 0, label);
-    assert.match(result.stderr, /must not (resolve|name) platform package/, label);
+    assert.match(
+      result.stderr,
+      /must not (resolve|name) platform package|not a canonical registry install path|is a link|lacks a registry tarball/,
+      label,
+    );
   }
 });
 
-test("check reports a link alias itself, not only its platform target", () => {
-  const root = lockFixtureWith((pk) => {
-    pk[`packages/${platformNames[3]}`] = { version: "0.2.1" };
-    pk["node_modules/alias"] = { resolved: `packages/${platformNames[3]}`, link: true };
-  });
-  assert.match(version(root, "check").stderr, /\(at node_modules\/alias\)/);
+// Each shape rule must hold on its own. These entries name no platform
+// package, so only the named rule can reject them.
+test("each lock shape rule rejects on its own", () => {
+  const e = (name) => registryEntry(name, "1.0.0");
+  const cases = [
+    ["outside node_modules", (pk) => { pk["vendor/left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["backslash", (pk) => { pk["node_modules/a\\left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["trailing slash", (pk) => { pk["node_modules/left-pad/"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["dot segment", (pk) => { pk["node_modules/./left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["upper case", (pk) => { pk["node_modules/Left-Pad"] = e("Left-Pad"); }, /not a canonical registry install path/],
+    ["link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: true }; }, /is a link/],
+    ["foreign tarball", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://evil.example/left-pad-1.0.0.tgz" }; }, /lacks a registry tarball/],
+    ["weak integrity", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: "sha1-AAAA" }; }, /lacks a registry tarball/],
+  ];
+  for (const [label, mutate, expected] of cases) {
+    const result = version(lockFixtureWith(mutate), "check");
+    assert.match(result.stderr, expected, label);
+    assert.doesNotMatch(result.stderr, /platform package/, `${label}: must fail on shape, not identity`);
+  }
 });
 
 test("check rejects platform packages in any root manifest dependency field", () => {
@@ -350,14 +391,18 @@ test("check rejects platform packages in any root manifest dependency field", ()
   }
 });
 
-test("lock guard ignores legitimate lookalike and local packages", () => {
+test("lock guard accepts canonical registry packages, including lookalikes", () => {
   const cases = {
-    "lookalike name": (pk) => { pk["node_modules/@3leaps/sysprims-linux-x64-gnu-extra"] = { version: "1.0.0" }; },
-    "local dir named like a platform, different package": (pk) => {
-      pk["third-party/@3leaps/sysprims-linux-x64-gnu"] = { name: "other", version: "1.0.0" };
-      pk["node_modules/other"] = { resolved: "third-party/@3leaps/sysprims-linux-x64-gnu", link: true };
+    "lookalike name": (pk) => {
+      pk["node_modules/@3leaps/sysprims-linux-x64-gnu-extra"] = registryEntry("@3leaps/sysprims-linux-x64-gnu-extra", "1.0.0");
     },
-    "unrelated workspace": (pk) => { pk["packages/tool"] = { name: "tool", version: "1.0.0" }; },
+    "nested registry dependency": (pk) => {
+      pk["node_modules/a/node_modules/b"] = registryEntry("b", "1.0.0");
+    },
+    "registry alias to a non-platform package": (pk, lock) => {
+      pk["node_modules/typescript-api"] = { ...registryEntry("typescript", "6.0.3"), name: "typescript" };
+      lock.packages[""].devDependencies["typescript-api"] = "npm:typescript@6.0.3";
+    },
   };
   for (const [label, mutate] of Object.entries(cases)) {
     const result = version(lockFixtureWith(mutate), "check");
@@ -365,17 +410,17 @@ test("lock guard ignores legitimate lookalike and local packages", () => {
   }
 });
 
-test("sync removes platform entries under any npm-equivalent key", () => {
+test("sync removes canonical platform entries", () => {
   const root = lockFixtureWith((pk) => {
-    pk[`node_modules/./${platformNames[0]}`] = { version: "0.2.1" };
-    pk["node_modules/innocent"] = { name: platformNames[1], version: "0.2.1" };
+    pk[`node_modules/${platformNames[0]}`] = registryEntry(platformNames[0], "0.2.1");
+    pk["node_modules/innocent"] = { ...registryEntry(platformNames[1], "0.2.1"), name: platformNames[1] };
   });
   writeFileSync(join(root, "VERSION"), "0.2.2\n");
   writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   const result = version(root, "sync");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
   const lock = readJson(join(root, "bindings/typescript/sysprims/package-lock.json"));
-  assert.equal(lock.packages[`node_modules/./${platformNames[0]}`], undefined);
+  assert.equal(lock.packages[`node_modules/${platformNames[0]}`], undefined);
   assert.equal(lock.packages["node_modules/innocent"], undefined);
 });
 

@@ -297,44 +297,48 @@ function checkNoOptionalPins(value, label, errors) {
   }
 }
 
-// The package identities npm can assign to a lock entry. Keys are normalized
-// the way npm normalizes them (`./`, `//`, `..`, trailing `/`). Under
-// node_modules the folder name is what require() resolves, and entry.name is
-// the real package behind an alias; elsewhere (workspaces, local paths) npm
-// uses entry.name and falls back to the folder name. Link entries also carry
-// the identity of their target.
-function lockFolderName(normalizedKey) {
-  const parts = normalizedKey.split("/");
+// The committed TypeScript lock must stay in the exact shape npm writes for a
+// registry-only tree: canonical lowercase node_modules keys, no links or
+// local packages, and a registry tarball plus integrity on every entry. Any
+// other shape is refused outright rather than interpreted, so alternative
+// spellings of a key (separators, dot segments, case) cannot smuggle a
+// platform package in. Platform identities are then matched against each
+// entry's folder name and real (alias) name, case-insensitively.
+const registryTarballPrefix = "https://registry.npmjs.org/";
+
+function lockFolderName(key) {
+  const parts = key.split("/");
   const last = parts.at(-1);
   const scope = parts.at(-2);
   return scope?.startsWith("@") ? `${scope}/${last}` : last;
 }
 
-function lockEntryIdentities(key, entry, packages, seen = new Set()) {
-  const normalized = posix.normalize(key).replace(/\/+$/, "");
-  const identities = new Set();
-  if (seen.has(normalized)) return identities;
-  seen.add(normalized);
-  const folder = lockFolderName(normalized);
-  const underNodeModules = normalized === "node_modules" ||
-    normalized.startsWith("node_modules/") ||
-    normalized.includes("/node_modules/");
-  if (underNodeModules) {
-    identities.add(folder);
-    if (typeof entry?.name === "string") identities.add(entry.name);
-  } else {
-    identities.add(typeof entry?.name === "string" ? entry.name : folder);
-  }
-  if (entry?.link === true && typeof entry.resolved === "string") {
-    const target = posix.normalize(entry.resolved).replace(/\/+$/, "");
-    const targetEntry = Object.entries(packages).find(
-      ([candidate]) => posix.normalize(candidate).replace(/\/+$/, "") === target,
-    )?.[1];
-    for (const identity of lockEntryIdentities(target, targetEntry, packages, seen)) {
-      identities.add(identity);
+function lockShapeErrors(packages) {
+  const errors = [];
+  for (const [key, entry] of Object.entries(packages ?? {})) {
+    if (key === "") continue;
+    const canonical =
+      key.startsWith("node_modules/") &&
+      !key.includes("\\") &&
+      posix.normalize(key) === key &&
+      key === key.toLowerCase() &&
+      lockFolderName(key) !== "";
+    if (!canonical) {
+      errors.push(`package-lock key ${JSON.stringify(key)} is not a canonical registry install path`);
+      continue;
+    }
+    if (entry?.link === true) {
+      errors.push(`package-lock entry ${key} is a link; only registry packages are allowed`);
+    } else if (
+      typeof entry?.resolved !== "string" ||
+      !entry.resolved.startsWith(registryTarballPrefix) ||
+      typeof entry?.integrity !== "string" ||
+      !entry.integrity.startsWith("sha512-")
+    ) {
+      errors.push(`package-lock entry ${key} lacks a registry tarball and sha512 integrity`);
     }
   }
-  return identities;
+  return errors;
 }
 
 function platformLockEntries(packages) {
@@ -342,8 +346,10 @@ function platformLockEntries(packages) {
   const hits = [];
   for (const [key, entry] of Object.entries(packages ?? {})) {
     if (key === "") continue;
-    for (const identity of lockEntryIdentities(key, entry, packages)) {
-      if (platformSet.has(identity)) hits.push([key, identity]);
+    const identities = [lockFolderName(posix.normalize(key.replaceAll("\\", "/")).replace(/\/+$/, ""))];
+    if (typeof entry?.name === "string") identities.push(entry.name);
+    for (const identity of identities) {
+      if (platformSet.has(identity.toLowerCase())) hits.push([key, identity]);
     }
   }
   return hits;
@@ -359,7 +365,7 @@ const manifestDependencyFields = [
 ];
 
 // A root manifest may not name a platform package in any dependency field,
-// directly or through an `npm:` alias.
+// directly or through an `npm:` alias (any case).
 function checkManifestPlatformDeps(manifest, label, errors) {
   const platformSet = new Set(platformNames);
   for (const field of manifestDependencyFields) {
@@ -369,11 +375,14 @@ function checkManifestPlatformDeps(manifest, label, errors) {
       ? deps.map((name) => [name, ""])
       : Object.entries(deps);
     for (const [name, spec] of entries) {
-      const aliasTarget = typeof spec === "string" && spec.startsWith("npm:")
+      const aliasTarget = typeof spec === "string" && /^npm:/i.test(spec)
         ? spec.slice(4).replace(/@[^@/]*$/, "")
         : null;
-      if (platformSet.has(name) || platformSet.has(aliasTarget)) {
-        errors.push(`${label}.${field} must not name platform package ${platformSet.has(name) ? name : aliasTarget}`);
+      const hit = [name, aliasTarget].find(
+        (candidate) => typeof candidate === "string" && platformSet.has(candidate.toLowerCase()),
+      );
+      if (hit) {
+        errors.push(`${label}.${field} must not name platform package ${hit}`);
       }
     }
   }
@@ -453,6 +462,7 @@ function checkJson(root, expected, plan, errors) {
   }
 
   checkManifestPlatformDeps(lockRoot, 'package-lock packages[""]', errors);
+  errors.push(...lockShapeErrors(lock.packages));
   for (const [key, identity] of platformLockEntries(lock.packages)) {
     errors.push(
       `package-lock must not resolve platform package ${identity} (at ${key}); platform pins are injected at publish time`,
