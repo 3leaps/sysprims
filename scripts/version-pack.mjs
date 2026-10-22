@@ -309,17 +309,29 @@ function checkNoOptionalPins(value, label, errors) {
 // dependency specs are limited to semver ranges and npm: aliases of
 // well-formed names.
 const registryTarballPrefix = "https://registry.npmjs.org/";
-const nameSegment = "[a-z0-9~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
-const packageNamePattern = `(?:@${nameSegment}/)?${nameSegment}`;
+// npm names: lowercase; an unscoped name may not start with "." or "_";
+// scope and scoped package parts may start with "_". No part ends with a dot.
+const unscopedSegment = "[a-z0-9~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
+const scopedSegment = "[a-z0-9_~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
+const packageNamePattern = `(?:@${scopedSegment}/${scopedSegment}|${unscopedSegment})`;
 const packageNameRe = new RegExp(`^${packageNamePattern}$`);
 const installPathRe = new RegExp(
   `^node_modules/${packageNamePattern}(?:/node_modules/${packageNamePattern})*$`,
 );
 const sha512Re = /^sha512-[A-Za-z0-9+/]{86}==$/;
-const semverRangeRe = /^[\^~<>=]{0,2}\s*\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+// Strict SemVer 2.0 (semver.org). It cannot contain "/", so a version can
+// never alter the path of the tarball URL built from it.
+const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+// Root dependency specs: anything npm reads as a registry range or tag, and
+// nothing that can name another source (no ":", "/" or "@").
+const registrySpecRe = /^[0-9A-Za-z.*^~<>=| +-]+$/;
 
+// Keys are validated against installPathRe first, so components are
+// separated by "/node_modules/" and the first one follows "node_modules/".
 function lockFolderName(key) {
-  return key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length);
+  const rest = key.startsWith("node_modules/") ? key.slice("node_modules/".length) : key;
+  const separator = rest.lastIndexOf("/node_modules/");
+  return separator < 0 ? rest : rest.slice(separator + "/node_modules/".length);
 }
 
 function registryTarballUrl(name, version) {
@@ -343,9 +355,12 @@ function lockShapeErrors(packages) {
       errors.push(`package-lock entry ${key} has an invalid package name ${JSON.stringify(entry.name)}`);
       continue;
     }
+    const expectedUrl = typeof entry.version === "string" && semverRe.test(entry.version)
+      ? registryTarballUrl(realName, entry.version)
+      : null;
     if (
-      typeof entry.version !== "string" ||
-      entry.resolved !== registryTarballUrl(realName, entry.version) ||
+      expectedUrl === null ||
+      entry.resolved !== expectedUrl ||
       typeof entry.integrity !== "string" ||
       !sha512Re.test(entry.integrity)
     ) {
@@ -375,33 +390,41 @@ export function platformLockEntries(packages) {
   return hits;
 }
 
-const manifestDependencyFields = [
+// Root manifest dependency specs must stay on the registry: a range or tag
+// for the named package, or npm:<name>@<range> for an alias. Bundle fields
+// may be a boolean or a list of names. overrides is not allowed.
+const dependencyMapFields = [
   "dependencies",
   "devDependencies",
   "peerDependencies",
   "optionalDependencies",
-  "bundleDependencies",
-  "bundledDependencies",
 ];
+const bundleFields = ["bundleDependencies", "bundledDependencies"];
 
-// Root manifest dependency specs: a semver range, or npm:<name>@<range>. A
-// platform package may not be named either way.
 export function checkManifestPlatformDeps(manifest, label, errors) {
   const platformSet = new Set(platformNames);
   const isPlatform = (name) => platformSet.has(name.toLowerCase().replace(/\.+$/, ""));
-  for (const field of manifestDependencyFields) {
-    const deps = manifest?.[field];
-    if (deps === undefined) continue;
-    if (Array.isArray(deps)) {
-      for (const name of deps) {
-        if (typeof name !== "string" || isPlatform(name)) {
-          errors.push(`${label}.${field} must not name platform package ${name}`);
-        }
-      }
+  if (manifest && Object.hasOwn(manifest, "overrides")) {
+    errors.push(`${label}.overrides is not allowed`);
+  }
+  for (const field of bundleFields) {
+    const value = manifest?.[field];
+    if (value === undefined || typeof value === "boolean") continue;
+    if (!Array.isArray(value)) {
+      errors.push(`${label}.${field} must be a boolean or a list of names`);
       continue;
     }
-    if (deps === null || typeof deps !== "object") {
-      errors.push(`${label}.${field} is malformed`);
+    for (const name of value) {
+      if (typeof name !== "string" || !packageNameRe.test(name) || isPlatform(name)) {
+        errors.push(`${label}.${field} must not name platform package ${name}`);
+      }
+    }
+  }
+  for (const field of dependencyMapFields) {
+    const deps = manifest?.[field];
+    if (deps === undefined) continue;
+    if (deps === null || typeof deps !== "object" || Array.isArray(deps)) {
+      errors.push(`${label}.${field} is malformed; expected a name-to-spec map`);
       continue;
     }
     for (const [name, spec] of Object.entries(deps)) {
@@ -417,11 +440,11 @@ export function checkManifestPlatformDeps(manifest, label, errors) {
       if (alias) {
         if (isPlatform(alias[1])) {
           errors.push(`${label}.${field} must not name platform package ${alias[1]}`);
-        } else if (!packageNameRe.test(alias[1]) || !semverRangeRe.test(alias[2])) {
+        } else if (!packageNameRe.test(alias[1]) || !registrySpecRe.test(alias[2])) {
           errors.push(`${label}.${field}.${name} has an unsupported alias spec ${JSON.stringify(spec)}`);
         }
-      } else if (/^npm:/i.test(spec) || !semverRangeRe.test(spec)) {
-        errors.push(`${label}.${field}.${name} has an unsupported spec ${JSON.stringify(spec)}; use a registry semver range`);
+      } else if (!registrySpecRe.test(spec)) {
+        errors.push(`${label}.${field}.${name} has an unsupported spec ${JSON.stringify(spec)}; use a registry range`);
       }
     }
   }

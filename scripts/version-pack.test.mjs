@@ -394,6 +394,21 @@ test("each lock shape rule rejects on its own", () => {
     ["tarball for another version", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/left-pad/-/left-pad-9.9.9.tgz" }; }, /lacks a registry tarball/],
     ["traversal in tarball URL", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/../../node_modules/left-pad" }; }, /lacks a registry tarball/],
     ["invalid alias name", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), name: "Left Pad" }; }, /invalid package name/],
+    ["traversal in version", (pk) => {
+      const version = "1.0.0/../../../right-pad/-/right-pad-1.0.0";
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${version}.tgz` };
+    }, /lacks a registry tarball/],
+    ["encoded traversal in version", (pk) => {
+      const version = "1.0.0%2f%2e%2e%2fright-pad";
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${version}.tgz` };
+    }, /lacks a registry tarball/],
+    ["backslash in version", (pk) => {
+      const version = "1.0.0\\..\\right-pad";
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${version}.tgz` };
+    }, /lacks a registry tarball/],
+    ["non-semver version", (pk) => {
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version: "1.0", resolved: "https://registry.npmjs.org/left-pad/-/left-pad-1.0.tgz" };
+    }, /lacks a registry tarball/],
   ];
   for (const [label, mutate, expected] of cases) {
     const result = version(lockFixtureWith(mutate), "check");
@@ -420,8 +435,8 @@ test("platform identity ignores trailing dots on names", () => {
   assert.match(errors.join("\n"), /must not name platform package/);
 });
 
-test("root alias specs require a well-formed name and a semver range", () => {
-  for (const spec of ["npm:Not A Name@1.0.0", "npm:left-pad@latest", "npm:left-pad@https://evil.example/x.tgz"]) {
+test("root alias specs require a well-formed name and a registry range", () => {
+  for (const spec of ["npm:Not A Name@1.0.0", "npm:left-pad@https://evil.example/x.tgz", "npm:left-pad@github:a/b"]) {
     const errors = [];
     checkManifestPlatformDeps({ devDependencies: { x: spec } }, "m", errors);
     assert.match(errors.join("\n"), /unsupported (alias )?spec/, spec);
@@ -429,6 +444,43 @@ test("root alias specs require a well-formed name and a semver range", () => {
   const errors = [];
   checkManifestPlatformDeps({ devDependencies: { "typescript-api": "npm:typescript@6.0.3", y: "^1.2.3" } }, "m", errors);
   assert.deepEqual(errors, []);
+});
+
+test("root specs accept every npm registry range form and refuse other sources", () => {
+  const good = ["*", "1.x", "1.2.*", ">=1 <2", "^1 || ^2", "1.0.0 - 2.0.0", "v1.2.3", "latest",
+    ">= 2.1.2 < 3.0.0", "^1.7.1 || ^2.0.0-alpha.4", "3.10.8", "npm:typescript@^6", "npm:@scope/_pkg@1.x"];
+  const bad = ["https://registry.npmjs.org/x/-/x-1.0.0.tgz", "file:../x", "git+https://e.example/x.git",
+    "github:a/b", "a/b", "x@1.0.0", "link:../x", "npm:x@file:../y"];
+  for (const spec of good) {
+    const errors = [];
+    checkManifestPlatformDeps({ dependencies: { left: spec } }, "m", errors);
+    assert.deepEqual(errors, [], spec);
+  }
+  for (const spec of bad) {
+    const errors = [];
+    checkManifestPlatformDeps({ dependencies: { left: spec } }, "m", errors);
+    assert.match(errors.join("\n"), /unsupported (alias )?spec/, spec);
+  }
+});
+
+test("root manifest shape: arrays, bundle booleans and overrides", () => {
+  const cases = [
+    [{ dependencies: [`innocent@npm:${platformNames[0]}@0.2.4`] }, /malformed; expected a name-to-spec map/],
+    [{ devDependencies: ["https://registry.npmjs.org/x/-/x-1.0.0.tgz"] }, /malformed; expected a name-to-spec map/],
+    [{ overrides: { once: `npm:${platformNames[0]}@0.2.4` } }, /overrides is not allowed/],
+    [{ bundleDependencies: [platformNames[1]] }, /must not name platform package/],
+    [{ bundledDependencies: "yes" }, /must be a boolean or a list/],
+  ];
+  for (const [manifest, expected] of cases) {
+    const errors = [];
+    checkManifestPlatformDeps(manifest, "m", errors);
+    assert.match(errors.join("\n"), expected, JSON.stringify(manifest));
+  }
+  for (const manifest of [{ bundleDependencies: true }, { bundledDependencies: false }, { bundleDependencies: ["left-pad"] }]) {
+    const errors = [];
+    checkManifestPlatformDeps(manifest, "m", errors);
+    assert.deepEqual(errors, [], JSON.stringify(manifest));
+  }
 });
 
 test("check rejects platform packages in any root manifest dependency field", () => {
@@ -449,6 +501,18 @@ test("lock guard accepts canonical registry packages, including lookalikes", () 
     },
     "nested registry dependency": (pk) => {
       pk["node_modules/a/node_modules/b"] = registryEntry("b", "1.0.0");
+    },
+    "underscore scoped names": (pk) => {
+      pk["node_modules/@scope/_pkg"] = registryEntry("@scope/_pkg", "1.0.0");
+      pk["node_modules/@_scope/pkg"] = registryEntry("@_scope/pkg", "1.0.0");
+    },
+    "scope that contains node_modules": (pk) => {
+      pk["node_modules/@foo_node_modules/pkg"] = registryEntry("@foo_node_modules/pkg", "1.0.0");
+      pk["node_modules/@node_modules/left-pad"] = registryEntry("@node_modules/left-pad", "1.0.0");
+    },
+    "prerelease and build metadata": (pk) => {
+      pk["node_modules/clip"] = registryEntry("clip", "4.0.0-rc.4");
+      pk["node_modules/meta"] = registryEntry("meta", "1.0.0+build.7");
     },
     "registry alias to a non-platform package": (pk, lock) => {
       pk["node_modules/typescript-api"] = { ...registryEntry("typescript", "6.0.3"), name: "typescript" };
