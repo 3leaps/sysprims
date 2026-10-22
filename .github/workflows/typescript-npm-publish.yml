@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
       - name: Verify and materialize tag messages
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -136,8 +136,13 @@ jobs:
       - name: Build root package
         working-directory: bindings/typescript/sysprims
         run: |
-          npm install --omit=optional
+          npm ci --ignore-scripts
           npm run build
+      - name: Point the root package at the same-commit platform packages
+        working-directory: bindings/typescript/sysprims
+        # Fails unless npm-packages holds exactly one package per napi target,
+        # each with its addon, at the root version.
+        run: node scripts/set-platform-packages.js ../../../npm-packages
       - name: Pack and attest all eight packages
         run: |
           node scripts/npm-release.mjs stage \
@@ -172,7 +177,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           registry-url: https://registry.npmjs.org
       - name: Ensure trusted publishing npm runtime
         env:

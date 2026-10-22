@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -142,11 +142,15 @@ export function readReleasePlan(root, version = readCanonicalVersion(root)) {
     if (surfaces.go?.disposition === "skip" && surfaces.go.lock_phase !== "resolved") {
       errors.push("skipped go surface must use resolved lock_phase");
     }
-    if (surfaces.typescript && !["resolved", "pre_registry"].includes(surfaces.typescript.lock_phase)) {
-      errors.push("typescript lock_phase must be resolved or pre_registry");
-    }
-    if (surfaces.typescript?.disposition === "skip" && surfaces.typescript.lock_phase !== "resolved") {
-      errors.push("skipped typescript surface must use resolved lock_phase");
+    // TypeScript platform pins are injected at publish time, so the lock never
+    // carries registry evidence and no TypeScript lock phase applies. Plans
+    // from v0.2.x carry the retired field; it is accepted only with its old
+    // values and otherwise ignored.
+    if (
+      surfaces.typescript?.lock_phase !== undefined &&
+      !["resolved", "pre_registry"].includes(surfaces.typescript.lock_phase)
+    ) {
+      errors.push("typescript lock_phase is retired; omit it");
     }
   }
   if (errors.length) fail(errors.join("; "));
@@ -283,25 +287,225 @@ function checkCargo(root, expected, errors) {
   }
 }
 
-function checkOptionalPins(value, expected, label, errors) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    errors.push(`${label} is missing`);
-    return;
+// Platform optionalDependencies are injected at publish time
+// (bindings/typescript/sysprims/scripts/set-platform-packages.js) so `npm ci`
+// works before same-version platform packages exist in the registry. The
+// committed manifests must not carry them.
+function checkNoOptionalPins(value, label, errors) {
+  if (value !== undefined) {
+    errors.push(`${label} must be absent; platform pins are injected at publish time`);
   }
-  for (const packageName of platformNames) {
-    if (value[packageName] !== expected) {
-      errors.push(
-        `${label}[${packageName}] is ${JSON.stringify(value[packageName])}, expected ${expected}`,
-      );
+}
+
+// The committed TypeScript lock must stay in the exact shape npm writes for a
+// registry-only tree, and every entry is bound to what npm will download:
+//   - keys follow the install-path grammar node_modules/<name>(/node_modules/<name>)*
+//   - <name> is a lowercase npm package name (whole scope, no trailing dot)
+//   - resolved is exactly the registry tarball URL for the entry's real name
+//     (entry.name for an alias, else the folder) and version
+//   - integrity is a single full SHA-512 digest; links are not allowed
+// Platform packages are then refused by the name npm actually fetches, so
+// no alternative spelling, alias or tarball URL can bring one in. Root
+// dependency specs are limited to semver ranges and npm: aliases of
+// well-formed names.
+const registryTarballPrefix = "https://registry.npmjs.org/";
+// Legacy mixed-case registry names (JSONStream, Base64) and inBundle entries
+// without a resolved tarball are refused by design; none is in this tree.
+
+// npm names: lowercase; an unscoped name may not start with "." or "_";
+// scope and scoped package parts may start with "_". No part ends with a dot.
+const unscopedSegment = "[a-z0-9~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
+const scopedSegment = "[a-z0-9_~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
+const packageNamePattern = `(?:@${scopedSegment}/${scopedSegment}|${unscopedSegment})`;
+const packageNameRe = new RegExp(`^${packageNamePattern}$`);
+const installPathRe = new RegExp(
+  `^node_modules/${packageNamePattern}(?:/node_modules/${packageNamePattern})*$`,
+);
+const sha512Re = /^sha512-[A-Za-z0-9+/]{86}==$/;
+// Strict SemVer 2.0 (semver.org). It cannot contain "/", so a version can
+// never alter the path of the tarball URL built from it.
+const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+// Root dependency specs must be a registry range or a dist-tag. A range is
+// "||"-separated sets of space-separated comparators or hyphen ranges over
+// partial versions (x, X and * wildcards, optional leading v). A tag is an
+// identifier with no dot. npm reads a spec ending in .tgz, .tar.gz or .tar
+// as a local tarball even when it looks like a version (1.2.3-beta.1.tgz),
+// so those are refused separately. The lock binding is the primary control;
+// this keeps the manifest from naming a non-registry source at all.
+const dotIdentifiers = "[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*";
+const partialVersion = `v?(?:[0-9]+|[xX*])(?:\\.(?:[0-9]+|[xX*])){0,2}(?:-${dotIdentifiers})?(?:\\+${dotIdentifiers})?`;
+const comparator = `(?:[<>]=?|=|\\^|~)?\\s*${partialVersion}`;
+const rangeSet = `(?:${partialVersion}\\s+-\\s+${partialVersion}|${comparator}(?:\\s+${comparator})*)`;
+const registryRangeRe = new RegExp(`^\\s*${rangeSet}(?:\\s*\\|\\|\\s*${rangeSet})*\\s*$`);
+const distTagRe = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const tarballSuffixRe = /\.(?:tgz|tar\.gz|tar)\s*$/i;
+const isRegistrySpec = (spec) =>
+  !tarballSuffixRe.test(spec) &&
+  (spec === "" || registryRangeRe.test(spec) || distTagRe.test(spec));
+
+// Keys are validated against installPathRe first, so components are
+// separated by "/node_modules/" and the first one follows "node_modules/".
+function lockFolderName(key) {
+  const rest = key.startsWith("node_modules/") ? key.slice("node_modules/".length) : key;
+  const separator = rest.lastIndexOf("/node_modules/");
+  return separator < 0 ? rest : rest.slice(separator + "/node_modules/".length);
+}
+
+function registryTarballUrl(name, version) {
+  return `${registryTarballPrefix}${name}/-/${name.split("/").at(-1)}-${version}.tgz`;
+}
+
+function lockShapeErrors(packages) {
+  const errors = [];
+  for (const [key, entry] of Object.entries(packages ?? {})) {
+    if (key === "") continue;
+    if (!installPathRe.test(key)) {
+      errors.push(`package-lock key ${JSON.stringify(key)} is not a canonical registry install path`);
+      continue;
+    }
+    if (entry === null || typeof entry !== "object" || Object.hasOwn(entry, "link")) {
+      errors.push(`package-lock entry ${key} is a link or malformed; only registry packages are allowed`);
+      continue;
+    }
+    const realName = entry.name ?? lockFolderName(key);
+    if (typeof realName !== "string" || !packageNameRe.test(realName)) {
+      errors.push(`package-lock entry ${key} has an invalid package name ${JSON.stringify(entry.name)}`);
+      continue;
+    }
+    const expectedUrl = typeof entry.version === "string" && semverRe.test(entry.version)
+      ? registryTarballUrl(realName, entry.version)
+      : null;
+    if (
+      expectedUrl === null ||
+      entry.resolved !== expectedUrl ||
+      typeof entry.integrity !== "string" ||
+      !sha512Re.test(entry.integrity)
+    ) {
+      errors.push(`package-lock entry ${key} lacks a registry tarball and sha512 integrity matching ${realName}`);
+      continue;
+    }
+  }
+  return errors;
+}
+
+export function platformLockEntries(packages) {
+  const platformSet = new Set(platformNames);
+  const hits = [];
+  for (const [key, entry] of Object.entries(packages ?? {})) {
+    if (key === "") continue;
+    const candidates = [lockFolderName(key)];
+    if (typeof entry?.name === "string") candidates.push(entry.name);
+    if (typeof entry?.resolved === "string" && entry.resolved.startsWith(registryTarballPrefix)) {
+      const path = entry.resolved.slice(registryTarballPrefix.length).split("/-/")[0];
+      try { candidates.push(decodeURIComponent(path)); } catch { candidates.push(path); }
+    }
+    for (const candidate of candidates) {
+      const normalized = candidate.toLowerCase().replace(/\.+$/, "");
+      if (platformSet.has(normalized)) hits.push([key, candidate]);
+    }
+  }
+  return hits;
+}
+
+// Root manifest dependency specs must stay on the registry: a range or tag
+// for the named package, or npm:<name>@<range> for an alias. Bundle fields
+// may be a boolean or a list of names. overrides is not allowed.
+const dependencyMapFields = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+];
+const bundleFields = ["bundleDependencies", "bundledDependencies"];
+
+export function checkManifestPlatformDeps(manifest, label, errors) {
+  const platformSet = new Set(platformNames);
+  const isPlatform = (name) => platformSet.has(name.toLowerCase().replace(/\.+$/, ""));
+  if (manifest && Object.hasOwn(manifest, "overrides")) {
+    errors.push(`${label}.overrides is not allowed`);
+  }
+  for (const field of bundleFields) {
+    const value = manifest?.[field];
+    if (value === undefined || typeof value === "boolean") continue;
+    if (!Array.isArray(value)) {
+      errors.push(`${label}.${field} must be a boolean or a list of names`);
+      continue;
+    }
+    for (const name of value) {
+      if (typeof name !== "string" || !packageNameRe.test(name) || isPlatform(name)) {
+        errors.push(`${label}.${field} must not name platform package ${name}`);
+      }
+    }
+  }
+  for (const field of dependencyMapFields) {
+    const deps = manifest?.[field];
+    if (deps === undefined) continue;
+    if (deps === null || typeof deps !== "object" || Array.isArray(deps)) {
+      errors.push(`${label}.${field} is malformed; expected a name-to-spec map`);
+      continue;
+    }
+    for (const [name, spec] of Object.entries(deps)) {
+      if (isPlatform(name)) {
+        errors.push(`${label}.${field} must not name platform package ${name}`);
+        continue;
+      }
+      if (typeof spec !== "string") {
+        errors.push(`${label}.${field}.${name} has a non-string spec`);
+        continue;
+      }
+      const alias = spec.match(/^npm:(.+)@([^@]+)$/i);
+      if (alias) {
+        if (isPlatform(alias[1])) {
+          errors.push(`${label}.${field} must not name platform package ${alias[1]}`);
+        } else if (!packageNameRe.test(alias[1]) || !isRegistrySpec(alias[2])) {
+          errors.push(`${label}.${field}.${name} has an unsupported alias spec ${JSON.stringify(spec)}`);
+        }
+      } else if (!isRegistrySpec(spec)) {
+        errors.push(`${label}.${field}.${name} has an unsupported spec ${JSON.stringify(spec)}; use a registry range`);
+      }
     }
   }
 }
 
-function validSha512Sri(value) {
-  const match = typeof value === "string" && value.match(/^sha512-([A-Za-z0-9+/]+={0,2})$/);
-  if (!match) return false;
-  try { return Buffer.from(match[1], "base64").length === 64; }
-  catch { return false; }
+// Files and scripts that change what `npm ci` installs or runs without
+// touching package-lock.json: a shrinkwrap (npm prefers it), a package-level
+// .npmrc (it can point the registry elsewhere), a binding.gyp (npm runs an
+// implicit node-gyp rebuild), and install or publish lifecycle scripts. CI
+// also passes --ignore-scripts to every npm ci.
+const npmInstallOverrideFiles = ["npm-shrinkwrap.json", ".npmrc", "binding.gyp"];
+const npmInstallLifecycleScripts = [
+  "preinstall",
+  "install",
+  "postinstall",
+  "dependencies",
+  "preprepare",
+  "prepare",
+  "postprepare",
+  "prepublish",
+  // Publish-time hooks run inside the trusted-publish job.
+  "prepublishOnly",
+  "publish",
+  "postpublish",
+  "prepack",
+  "postpack",
+];
+
+export function checkNpmInstallSurface(packageDir, manifest, errors) {
+  for (const file of npmInstallOverrideFiles) {
+    if (existsSync(join(packageDir, file))) {
+      errors.push(`TypeScript package must not contain ${file}`);
+    }
+  }
+  const scripts = manifest?.scripts;
+  if (scripts !== undefined && (scripts === null || typeof scripts !== "object" || Array.isArray(scripts))) {
+    errors.push("TypeScript root package scripts is malformed");
+    return;
+  }
+  for (const name of npmInstallLifecycleScripts) {
+    if (scripts && Object.hasOwn(scripts, name)) {
+      errors.push(`TypeScript root package must not define the ${name} install lifecycle script`);
+    }
+  }
 }
 
 function checkJson(root, expected, plan, errors) {
@@ -317,10 +521,15 @@ function checkJson(root, expected, plan, errors) {
       `TypeScript root package is ${rootPackage.version}, expected ${typescriptVersion}`,
     );
   }
-  checkOptionalPins(
+  checkNoOptionalPins(
     rootPackage.optionalDependencies,
-    typescriptVersion,
     "TypeScript root optionalDependencies",
+    errors,
+  );
+  checkManifestPlatformDeps(rootPackage, "TypeScript root package", errors);
+  checkNpmInstallSurface(
+    join(root, "bindings/typescript/sysprims"),
+    rootPackage,
     errors,
   );
 
@@ -370,40 +579,19 @@ function checkJson(root, expected, plan, errors) {
         `package-lock packages[""] version is ${lockRoot.version}, expected ${typescriptVersion}`,
       );
     }
-    checkOptionalPins(
+    checkNoOptionalPins(
       lockRoot.optionalDependencies,
-      typescriptVersion,
       'package-lock packages[""].optionalDependencies',
       errors,
     );
   }
 
-  for (const packageName of platformNames) {
-    const resolution = lock.packages?.[`node_modules/${packageName}`];
-    if (!resolution) {
-      if (plan.surfaces.typescript.lock_phase === "resolved") errors.push(`resolved npm platform node is missing for ${packageName}`);
-      continue;
-    }
-    if (resolution.version !== typescriptVersion) {
-      errors.push(
-        `stale npm platform resolution evidence for ${packageName}: resolved version ${resolution.version}, authored version ${typescriptVersion}`,
-      );
-      continue;
-    }
-    const encodedName = packageName.replace("@3leaps/", "");
-    const expectedSuffix = `/${encodedName}-${typescriptVersion}.tgz`;
-    if (
-      typeof resolution.resolved !== "string" ||
-      !resolution.resolved.endsWith(expectedSuffix) ||
-      !validSha512Sri(resolution.integrity)
-    ) {
-      errors.push(
-        `invalid npm platform resolution evidence for ${packageName}@${typescriptVersion}`,
-      );
-    }
-    if (plan.surfaces.typescript.lock_phase === "pre_registry") {
-      errors.push(`pre_registry plan must not contain registry resolution evidence for ${packageName}`);
-    }
+  checkManifestPlatformDeps(lockRoot, 'package-lock packages[""]', errors);
+  errors.push(...lockShapeErrors(lock.packages));
+  for (const [key, identity] of platformLockEntries(lock.packages)) {
+    errors.push(
+      `package-lock must not resolve platform package ${identity} (at ${key}); platform pins are injected at publish time`,
+    );
   }
 }
 
@@ -541,10 +729,6 @@ function updateJsonSurfaces(root, version) {
   const rootPath = join(root, "bindings/typescript/sysprims/package.json");
   const rootPackage = readJson(rootPath);
   rootPackage.version = version;
-  rootPackage.optionalDependencies ??= {};
-  for (const packageName of platformNames) {
-    rootPackage.optionalDependencies[packageName] = version;
-  }
   writeJsonAtomic(rootPath, rootPackage);
 
   for (let index = 0; index < nativeDirectories.length; index += 1) {
@@ -574,18 +758,8 @@ function updateJsonSurfaces(root, version) {
   }
   lock.version = version;
   lock.packages[""].version = version;
-  lock.packages[""].optionalDependencies ??= {};
-  for (const packageName of platformNames) {
-    lock.packages[""].optionalDependencies[packageName] = version;
-    const resolutionKey = `node_modules/${packageName}`;
-    const resolution = lock.packages[resolutionKey];
-    if (
-      resolution &&
-      (plan.surfaces.typescript.lock_phase === "pre_registry" ||
-        resolution.version !== version)
-    ) {
-      delete lock.packages[resolutionKey];
-    }
+  for (const [key] of platformLockEntries(lock.packages)) {
+    delete lock.packages[key];
   }
   writeJsonAtomic(lockPath, lock);
 }

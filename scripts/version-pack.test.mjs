@@ -5,14 +5,15 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { synchronize } from "./version-pack.mjs";
+import { checkManifestPlatformDeps, platformLockEntries, synchronize } from "./version-pack.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const versionScript = join(scriptDir, "version-pack.mjs");
@@ -64,7 +65,7 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", retained = "0.2.1", lockPhase = "resolved" } = {}) {
+function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", retained = "0.2.1" } = {}) {
   writeJson(join(root, `docs/releases/v${version}.json`), {
     schema: "sysprims-release-plan/v1",
     version,
@@ -74,7 +75,7 @@ function writePlan(root, version, { go = "publish", goLockPhase = "resolved", ty
       cli: { disposition: "publish" },
       ffi: { disposition: "publish" },
       go: go === "publish" ? { disposition: "publish", lock_phase: goLockPhase } : { disposition: "skip", retained_version: retained, lock_phase: "resolved" },
-      typescript: typescript === "publish" ? { disposition: "publish", lock_phase: lockPhase } : { disposition: "skip", retained_version: retained, lock_phase: lockPhase },
+      typescript: typescript === "publish" ? { disposition: "publish" } : { disposition: "skip", retained_version: retained },
     },
   });
 }
@@ -105,6 +106,13 @@ function writeGoFixture(root, version) {
     header: { path: "include/sysprims.h", sha256: fileHash(join(base, "include/sysprims.h")) },
     platforms: entries,
   });
+}
+
+const sri = `sha512-${Buffer.alloc(64, 1).toString("base64")}`;
+
+function registryEntry(name, version, extra = {}) {
+  const bare = name.split("/").at(-1);
+  return { version, resolved: `https://registry.npmjs.org/${name}/-/${bare}-${version}.tgz`, integrity: sri, ...extra };
 }
 
 function createFixture() {
@@ -159,13 +167,9 @@ v0.1.14 remains part of the historical API notes.
   );
   writeGoFixture(root, "0.2.1");
 
-  const optionalDependencies = Object.fromEntries(
-    platformNames.map((name) => [name, "0.2.1"]),
-  );
   writeJson(join(root, "bindings/typescript/sysprims/package.json"), {
     name: "@3leaps/sysprims",
     version: "0.2.1",
-    optionalDependencies,
     devDependencies: {
       typescript: "0.2.1",
     },
@@ -191,21 +195,12 @@ v0.1.14 remains part of the historical API notes.
     "": {
       name: "@3leaps/sysprims",
       version: "0.2.1",
-      optionalDependencies,
       devDependencies: {
         typescript: "0.2.1",
       },
     },
+    "node_modules/typescript": registryEntry("typescript", "0.2.1"),
   };
-  for (const name of platformNames) {
-    const bareName = name.replace("@3leaps/", "");
-    packages[`node_modules/${name}`] = {
-      version: "0.2.1",
-      resolved: `https://registry.npmjs.org/${name}/-/${bareName}-0.2.1.tgz`,
-      integrity: `sha512-${Buffer.alloc(64, 1).toString("base64")}`,
-      optional: true,
-    };
-  }
   writeJson(join(root, "bindings/typescript/sysprims/package-lock.json"), {
     name: "@3leaps/sysprims",
     version: "0.2.1",
@@ -280,9 +275,9 @@ test("check rejects Rust, TypeScript pin, and Go prebuilt evidence drift", () =>
   const typescript = createFixture();
   const packagePath = join(typescript, "bindings/typescript/sysprims/package.json");
   const pkg = readJson(packagePath);
-  pkg.optionalDependencies[platformNames[0]] = "0.2.0";
+  pkg.optionalDependencies = { [platformNames[0]]: "0.2.1" };
   writeJson(packagePath, pkg);
-  assert.match(version(typescript, "check").stderr, /optionalDependencies/);
+  assert.match(version(typescript, "check").stderr, /optionalDependencies must be absent/);
 
   const goHash = createFixture();
   writeFileSync(join(goHash, "bindings/go/sysprims/lib/linux-amd64/libsysprims_ffi.a"), "drift\n");
@@ -296,27 +291,313 @@ test("check rejects Rust, TypeScript pin, and Go prebuilt evidence drift", () =>
   assert.match(version(goVersion, "check").stderr, /reported_version/);
 });
 
-test("pre_registry is explicit and rejects stale registry evidence", () => {
-  const root = createFixture();
-  const path = join(root, "docs/releases/v0.2.1.json");
-  const plan = readJson(path);
-  plan.surfaces.typescript.lock_phase = "pre_registry";
-  writeJson(path, plan);
-  assert.match(version(root, "check").stderr, /pre_registry plan must not contain registry resolution evidence/);
-});
-
-test("resolved TypeScript lock rejects placeholder SRI", () => {
+test("check rejects committed npm platform resolution", () => {
   const root = createFixture();
   const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
   const lock = readJson(lockPath);
-  lock.packages[`node_modules/${platformNames[0]}`].integrity = "sha512-placeholder";
+  lock.packages[`node_modules/${platformNames[0]}`] = { version: "0.2.1", optional: true };
   writeJson(lockPath, lock);
-  assert.match(version(root, "check").stderr, /invalid npm platform resolution evidence/);
+  assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/);
+});
+
+function lockFixtureWith(mutate) {
+  const root = createFixture();
+  const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
+  const lock = readJson(lockPath);
+  mutate(lock.packages, lock);
+  writeJson(lockPath, lock);
+  return root;
+}
+
+test("check rejects platform packages and every non-canonical lock shape", () => {
+  const p = platformNames;
+  const upper = p[0].replace("@3leaps", "@3Leaps");
+  const e = (name) => registryEntry(name, "0.2.1");
+  const cases = {
+    // registry-shaped entries that resolve a platform package
+    "canonical root": (pk) => { pk[`node_modules/${p[0]}`] = e(p[0]); },
+    "nested path": (pk) => { pk[`node_modules/dep/node_modules/${p[1]}`] = e(p[1]); },
+    "root alias": (pk) => { pk["node_modules/innocent"] = { ...e(p[2]), name: p[2] }; },
+    "nested alias": (pk) => { pk["node_modules/a/node_modules/innocent"] = { ...e(p[3]), name: p[3] }; },
+    "alias name, other case": (pk) => { pk["node_modules/innocent"] = { ...e(p[4]), name: p[4].toUpperCase() }; },
+    // non-canonical keys, refused on shape alone
+    "trailing slash": (pk) => { pk[`node_modules/${p[3]}/`] = e(p[3]); },
+    "dot segment": (pk) => { pk[`node_modules/./${p[4]}`] = e(p[4]); },
+    "trailing dot": (pk) => { pk[`node_modules/${p[5]}/.`] = e(p[5]); },
+    "double slash": (pk) => { pk[`node_modules//${p[6]}`] = e(p[6]); },
+    "dotdot into scope": (pk) => { pk[`node_modules/@3leaps/foo/../${p[0].split("/")[1]}`] = e(p[0]); },
+    "dotdot after extra": (pk) => { pk[`node_modules/${p[1]}/extra/..`] = e(p[1]); },
+    "backslash separators": (pk) => { pk[`node_modules\\${p[2].replace("/", "\\")}`] = e(p[2]); },
+    "nested backslash": (pk) => { pk[`node_modules/helper/node_modules\\${p[2].replace("/", "\\")}`] = e(p[2]); },
+    "case-variant key": (pk) => { pk[`node_modules/${upper}`] = e(upper); },
+    "above lock root": (pk) => { pk[`node_modules/../node_modules/${p[3]}`] = e(p[3]); },
+    // links and local packages, refused regardless of their target
+    "link to platform target": (pk) => {
+      pk[`packages/${p[3]}`] = { version: "0.2.1" };
+      pk["node_modules/alias"] = { resolved: `packages/${p[3]}`, link: true };
+    },
+    "link to innocently named local": (pk) => {
+      pk["vendor/thing"] = { name: "thing", version: "0.2.1" };
+      pk["node_modules/thing"] = { resolved: "vendor/thing", link: true };
+    },
+    "local workspace": (pk) => { pk["packages/tool"] = { name: "tool", version: "1.0.0" }; },
+    "non-registry tarball": (pk) => { pk["node_modules/x"] = { version: "1.0.0", resolved: "https://evil.example/x.tgz", integrity: sri }; },
+    "missing integrity": (pk) => { pk["node_modules/x"] = { version: "1.0.0", resolved: "https://registry.npmjs.org/x/-/x-1.0.0.tgz" }; },
+    // root manifest dependency fields
+    "lock root dependency": (_pk, lock) => { lock.packages[""].dependencies = { [p[5]]: "0.2.1" }; },
+    "lock root dev alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `npm:${p[6]}@0.2.1` }; },
+    "lock root upper-case alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `NPM:${p[6]}@0.2.1` }; },
+    "platform tarball under an innocent folder": (pk) => {
+      pk["node_modules/once"] = { ...registryEntry("once", "0.2.4"), resolved: registryEntry(p[0], "0.2.4").resolved };
+    },
+    "encoded-scope platform tarball": (pk) => {
+      pk["node_modules/once"] = { ...registryEntry("once", "0.2.4"), resolved: registryEntry(p[0], "0.2.4").resolved.replace("@3leaps/", "@3leaps%2f") };
+    },
+    "trailing-dot platform key": (pk) => { pk[`node_modules/${p[1]}.`] = registryEntry(`${p[1]}.`, "0.2.1"); },
+    "trailing-dot platform alias": (pk) => { pk["node_modules/innocent"] = { ...registryEntry(`${p[2]}.`, "0.2.1"), name: `${p[2]}.` }; },
+    "lock root trailing-dot alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `npm:${p[3]}.@0.2.1` }; },
+    "lock root direct URL": (_pk, lock) => { lock.packages[""].dependencies = { innocent: registryEntry(p[4], "0.2.1").resolved }; },
+    "lock root case-variant name": (_pk, lock) => { lock.packages[""].dependencies = { [upper]: "0.2.1" }; },
+  };
+  for (const [label, mutate] of Object.entries(cases)) {
+    const result = version(lockFixtureWith(mutate), "check");
+    assert.notEqual(result.status, 0, label);
+    assert.match(
+      result.stderr,
+      /must not (resolve|name) platform package|not a canonical registry install path|is a link|lacks a registry tarball|unsupported (alias )?spec/,
+      label,
+    );
+  }
+});
+
+// Each shape rule must hold on its own. These entries name no platform
+// package, so only the named rule can reject them.
+test("each lock shape rule rejects on its own", () => {
+  const e = (name) => registryEntry(name, "1.0.0");
+  const cases = [
+    ["outside node_modules", (pk) => { pk["vendor/left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["backslash", (pk) => { pk["node_modules/a\\left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["trailing slash", (pk) => { pk["node_modules/left-pad/"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["dot segment", (pk) => { pk["node_modules/./left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["upper case", (pk) => { pk["node_modules/Left-Pad"] = e("Left-Pad"); }, /not a canonical registry install path/],
+    ["link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: true }; }, /is a link/],
+    ["foreign tarball", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://evil.example/left-pad-1.0.0.tgz" }; }, /lacks a registry tarball/],
+    ["weak integrity", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: "sha1-AAAA" }; }, /lacks a registry tarball/],
+    ["truncated sha512", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: "sha512-AAAA" }; }, /lacks a registry tarball/],
+    ["sha512 then sha1 downgrade", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), integrity: `sha512- sha1-${"A".repeat(27)}=` }; }, /lacks a registry tarball/],
+    ["truthy non-boolean link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: 1 }; }, /is a link or malformed/],
+    ["string link", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: "true" }; }, /is a link or malformed/],
+    ["false link field", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), link: false }; }, /is a link or malformed/],
+    ["half scope", (pk) => { pk["node_modules/@benign/"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["vendor segment", (pk) => { pk["node_modules/a/vendor/left-pad"] = e("left-pad"); }, /not a canonical registry install path/],
+    ["trailing dot name", (pk) => { pk["node_modules/left-pad."] = e("left-pad."); }, /not a canonical registry install path/],
+    ["tarball for another package", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/right-pad/-/right-pad-1.0.0.tgz" }; }, /lacks a registry tarball/],
+    ["tarball for another version", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/left-pad/-/left-pad-9.9.9.tgz" }; }, /lacks a registry tarball/],
+    ["traversal in tarball URL", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), resolved: "https://registry.npmjs.org/../../node_modules/left-pad" }; }, /lacks a registry tarball/],
+    ["invalid alias name", (pk) => { pk["node_modules/left-pad"] = { ...e("left-pad"), name: "Left Pad" }; }, /invalid package name/],
+    ["traversal in version", (pk) => {
+      const version = "1.0.0/../../../right-pad/-/right-pad-1.0.0";
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${version}.tgz` };
+    }, /lacks a registry tarball/],
+    ["encoded traversal in version", (pk) => {
+      const version = "1.0.0%2f%2e%2e%2fright-pad";
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${version}.tgz` };
+    }, /lacks a registry tarball/],
+    ["backslash in version", (pk) => {
+      const version = "1.0.0\\..\\right-pad";
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${version}.tgz` };
+    }, /lacks a registry tarball/],
+    ["non-semver version", (pk) => {
+      pk["node_modules/left-pad"] = { ...e("left-pad"), version: "1.0", resolved: "https://registry.npmjs.org/left-pad/-/left-pad-1.0.tgz" };
+    }, /lacks a registry tarball/],
+  ];
+  for (const [label, mutate, expected] of cases) {
+    const result = version(lockFixtureWith(mutate), "check");
+    assert.match(result.stderr, expected, label);
+    assert.doesNotMatch(result.stderr, /platform package/, `${label}: must fail on shape, not identity`);
+  }
+});
+
+// Defence-in-depth layers that the full check also covers through other
+// rules; these tests exercise each one directly.
+test("platform identity decodes encoded registry tarball paths", () => {
+  const hits = platformLockEntries({
+    "node_modules/once": {
+      version: "0.2.4",
+      resolved: `https://registry.npmjs.org/${platformNames[0].replace("/", "%2f")}/-/x-0.2.4.tgz`,
+    },
+  });
+  assert.equal(hits.length, 1);
+});
+
+test("platform identity ignores trailing dots on names", () => {
+  const errors = [];
+  checkManifestPlatformDeps({ dependencies: { [`${platformNames[0]}.`]: "0.2.1" } }, "m", errors);
+  assert.match(errors.join("\n"), /must not name platform package/);
+});
+
+test("root alias specs require a well-formed name and a registry range", () => {
+  for (const spec of ["npm:Not A Name@1.0.0", "npm:left-pad@https://evil.example/x.tgz", "npm:left-pad@github:a/b"]) {
+    const errors = [];
+    checkManifestPlatformDeps({ devDependencies: { x: spec } }, "m", errors);
+    assert.match(errors.join("\n"), /unsupported (alias )?spec/, spec);
+  }
+  const errors = [];
+  checkManifestPlatformDeps({ devDependencies: { "typescript-api": "npm:typescript@6.0.3", y: "^1.2.3" } }, "m", errors);
+  assert.deepEqual(errors, []);
+});
+
+test("root specs accept every npm registry range form and refuse other sources", () => {
+  const good = ["*", "", "x", "1.x", "1.2.*", ">=1 <2", "^1 || ^2", "1.0.0 - 2.0.0", "v1.2.3", "latest",
+    ">= 2.1.2 < 3.0.0", "^1.7.1 || ^2.0.0-alpha.4", "3.10.8", "~1.2.3", "=1.2.3", "1.2.3-rc.1+build.5",
+    "my_tag", "release_1", "next", "npm:typescript@^6", "npm:@scope/_pkg@1.x", "npm:left-pad@latest"];
+  const bad = ["https://registry.npmjs.org/x/-/x-1.0.0.tgz", "file:../x", "git+https://e.example/x.git",
+    "github:a/b", "a/b", "x@1.0.0", "link:../x", "npm:x@file:../y",
+    ".", "..", ".hidden", "foo.tgz", "foo.tar.gz", "addon.tar", "*.tgz", " foo.tgz", "1.2.3.tgz",
+    "npm:left-pad@..", "npm:left-pad@foo.tgz", "^^1.2.3", "1.2.3-..", "1 ||", "- 1.2.3",
+    "1.2.3-beta.1.tgz", "~1.2.3-beta.1.tgz", "2.3-foo.tar.gz", "1.2.3+bfoo.tar.gz", "1.2.3-x.TAR",
+    "npm:left-pad@1.2.3-beta.1.tgz"];
+  for (const spec of good) {
+    const errors = [];
+    checkManifestPlatformDeps({ dependencies: { left: spec } }, "m", errors);
+    assert.deepEqual(errors, [], spec);
+  }
+  for (const spec of bad) {
+    const errors = [];
+    checkManifestPlatformDeps({ dependencies: { left: spec } }, "m", errors);
+    assert.match(errors.join("\n"), /unsupported (alias )?spec/, spec);
+  }
+});
+
+test("root manifest shape: arrays, bundle booleans and overrides", () => {
+  const cases = [
+    [{ dependencies: [`innocent@npm:${platformNames[0]}@0.2.4`] }, /malformed; expected a name-to-spec map/],
+    [{ devDependencies: ["https://registry.npmjs.org/x/-/x-1.0.0.tgz"] }, /malformed; expected a name-to-spec map/],
+    [{ overrides: { once: `npm:${platformNames[0]}@0.2.4` } }, /overrides is not allowed/],
+    [{ bundleDependencies: [platformNames[1]] }, /must not name platform package/],
+    [{ bundledDependencies: "yes" }, /must be a boolean or a list/],
+  ];
+  for (const [manifest, expected] of cases) {
+    const errors = [];
+    checkManifestPlatformDeps(manifest, "m", errors);
+    assert.match(errors.join("\n"), expected, JSON.stringify(manifest));
+  }
+  for (const manifest of [{ bundleDependencies: true }, { bundledDependencies: false }, { bundleDependencies: ["left-pad"] }]) {
+    const errors = [];
+    checkManifestPlatformDeps(manifest, "m", errors);
+    assert.deepEqual(errors, [], JSON.stringify(manifest));
+  }
+});
+
+test("check refuses npm install overrides outside the lock", () => {
+  const tsDir = (root) => join(root, "bindings/typescript/sysprims");
+  const cases = [
+    ["shrinkwrap", (root) => writeJson(join(tsDir(root), "npm-shrinkwrap.json"), { lockfileVersion: 3, packages: {} }), /must not contain npm-shrinkwrap\.json/],
+    ["package .npmrc", (root) => writeFileSync(join(tsDir(root), ".npmrc"), "registry=https://evil.example/\n"), /must not contain \.npmrc/],
+    ["binding.gyp", (root) => writeFileSync(join(tsDir(root), "binding.gyp"), "{}\n"), /must not contain binding\.gyp/],
+    ...["preinstall", "install", "postinstall", "dependencies", "preprepare", "prepare", "postprepare", "prepublish",
+      "prepublishOnly", "publish", "postpublish", "prepack", "postpack"].map((name) => [
+      `${name} script`,
+      (root) => {
+        const path = join(tsDir(root), "package.json");
+        const pkg = readJson(path);
+        pkg.scripts = { ...(pkg.scripts ?? {}), [name]: "node -e 0" };
+        writeJson(path, pkg);
+      },
+      new RegExp(`must not define the ${name} install lifecycle script`),
+    ]),
+    ["malformed scripts", (root) => {
+      const path = join(tsDir(root), "package.json");
+      const pkg = readJson(path);
+      pkg.scripts = ["preinstall"];
+      writeJson(path, pkg);
+    }, /scripts is malformed/],
+  ];
+  for (const [label, mutate, expected] of cases) {
+    const root = createFixture();
+    mutate(root);
+    assert.match(version(root, "check").stderr, expected, label);
+  }
+  const root = createFixture();
+  const path = join(tsDir(root), "package.json");
+  const pkg = readJson(path);
+  pkg.scripts = { build: "tsc", test: "node --test", "platform-packages:set": "node scripts/set-platform-packages.js" };
+  writeJson(path, pkg);
+  assert.equal(version(root, "check").status, 0, "ordinary scripts are allowed");
+});
+
+test("check rejects platform packages in any root manifest dependency field", () => {
+  for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
+    const root = createFixture();
+    const path = join(root, "bindings/typescript/sysprims/package.json");
+    const pkg = readJson(path);
+    pkg[field] = { ...(pkg[field] ?? {}), [platformNames[0]]: "0.2.1" };
+    writeJson(path, pkg);
+    assert.match(version(root, "check").stderr, /must not name platform package/, field);
+  }
+});
+
+test("lock guard accepts canonical registry packages, including lookalikes", () => {
+  const cases = {
+    "lookalike name": (pk) => {
+      pk["node_modules/@3leaps/sysprims-linux-x64-gnu-extra"] = registryEntry("@3leaps/sysprims-linux-x64-gnu-extra", "1.0.0");
+    },
+    "nested registry dependency": (pk) => {
+      pk["node_modules/a/node_modules/b"] = registryEntry("b", "1.0.0");
+    },
+    "underscore scoped names": (pk) => {
+      pk["node_modules/@scope/_pkg"] = registryEntry("@scope/_pkg", "1.0.0");
+      pk["node_modules/@_scope/pkg"] = registryEntry("@_scope/pkg", "1.0.0");
+    },
+    "scope that contains node_modules": (pk) => {
+      pk["node_modules/@foo_node_modules/pkg"] = registryEntry("@foo_node_modules/pkg", "1.0.0");
+      pk["node_modules/@node_modules/left-pad"] = registryEntry("@node_modules/left-pad", "1.0.0");
+    },
+    "prerelease and build metadata": (pk) => {
+      pk["node_modules/clip"] = registryEntry("clip", "4.0.0-rc.4");
+      pk["node_modules/meta"] = registryEntry("meta", "1.0.0+build.7");
+    },
+    "registry alias to a non-platform package": (pk, lock) => {
+      pk["node_modules/typescript-api"] = { ...registryEntry("typescript", "6.0.3"), name: "typescript" };
+      lock.packages[""].devDependencies["typescript-api"] = "npm:typescript@6.0.3";
+    },
+  };
+  for (const [label, mutate] of Object.entries(cases)) {
+    const result = version(lockFixtureWith(mutate), "check");
+    assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+  }
+});
+
+test("sync removes canonical platform entries", () => {
+  const root = lockFixtureWith((pk) => {
+    pk[`node_modules/${platformNames[0]}`] = registryEntry(platformNames[0], "0.2.1");
+    pk["node_modules/innocent"] = { ...registryEntry(platformNames[1], "0.2.1"), name: platformNames[1] };
+  });
+  writeFileSync(join(root, "VERSION"), "0.2.2\n");
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
+  const result = version(root, "sync");
+  assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
+  const lock = readJson(join(root, "bindings/typescript/sysprims/package-lock.json"));
+  assert.equal(lock.packages[`node_modules/${platformNames[0]}`], undefined);
+  assert.equal(lock.packages["node_modules/innocent"], undefined);
+});
+
+test("TypeScript lock_phase is retired: legacy values pass, others fail", () => {
+  for (const [lockPhase, ok] of [["resolved", true], ["pre_registry", true], ["bogus", false]]) {
+    const root = createFixture();
+    const path = join(root, "docs/releases/v0.2.1.json");
+    const plan = readJson(path);
+    plan.surfaces.typescript.lock_phase = lockPhase;
+    writeJson(path, plan);
+    const result = version(root, "check");
+    if (ok) assert.equal(result.status, 0, result.stderr);
+    else assert.match(result.stderr, /typescript lock_phase is retired/);
+  }
 });
 
 test("Go pre_build keeps prior native evidence and tag guards reject it", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2", { go: "publish", goLockPhase: "pre_build", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "publish", goLockPhase: "pre_build" });
   const result = version(root, "set", "0.2.2");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
   const manifestPath = join(root, "bindings/go/sysprims/prebuilt-manifest.json");
@@ -348,7 +629,7 @@ test("check fails precisely when one native package is stale", () => {
 test("sync updates owned fields and removes only stale resolution evidence", () => {
   const root = createFixture();
   writeFileSync(join(root, "VERSION"), "0.2.2\n");
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
 
   const result = version(root, "sync");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
@@ -358,9 +639,7 @@ test("sync updates owned fields and removes only stale resolution evidence", () 
   );
   assert.equal(rootPackage.version, "0.2.2");
   assert.equal(rootPackage.devDependencies.typescript, "0.2.1");
-  for (const value of Object.values(rootPackage.optionalDependencies)) {
-    assert.equal(value, "0.2.2");
-  }
+  assert.equal(rootPackage.optionalDependencies, undefined);
 
   const nativePackage = readJson(
     join(
@@ -420,7 +699,7 @@ test("check fails precisely when the Go README install version is stale", () => 
   assert.match(result.stderr, /Go README install version is 0\.2\.0/);
 });
 
-test("check calls out stale npm resolution evidence without rewriting it", () => {
+test("check calls out npm platform resolution without rewriting it", () => {
   const root = createFixture();
   const lockPath = join(
     root,
@@ -429,20 +708,20 @@ test("check calls out stale npm resolution evidence without rewriting it", () =>
   const lock = readJson(lockPath);
   lock.packages[
     "node_modules/@3leaps/sysprims-linux-x64-gnu"
-  ].version = "0.2.0";
+  ] = { version: "0.2.0", optional: true };
   writeJson(lockPath, lock);
 
   const before = readFileSync(lockPath, "utf8");
   const result = version(root, "check");
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /stale npm platform resolution evidence/);
+  assert.match(result.stderr, /package-lock must not resolve platform package @3leaps\/sysprims-linux-x64-gnu/);
   assert.equal(readFileSync(lockPath, "utf8"), before);
 });
 
 test("set canonicalizes VERSION and synchronizes in one command", () => {
   const root = createFixture();
   writeFileSync(join(root, "VERSION"), "0.2.1\r\n");
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   const result = version(root, "set", "0.2.2");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
   assert.equal(readFileSync(join(root, "VERSION"), "utf8"), "0.2.2\n");
@@ -451,7 +730,7 @@ test("set canonicalizes VERSION and synchronizes in one command", () => {
 
 test("set synchronizes prerelease versions through Go README coordinates", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2-rc.1", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2-rc.1", { go: "skip", retained: "0.2.1" });
   const result = version(root, "set", "0.2.2-rc.1");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
 
@@ -491,7 +770,7 @@ test("patch, minor, and major bumps each synchronize the full pack", () => {
     ["minor", "0.3.0"],
     ["major", "1.0.0"],
   ]) {
-    writePlan(root, expected, { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+    writePlan(root, expected, { go: "skip", retained: "0.2.1" });
     const result = version(root, "bump", component);
     assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
     assert.equal(readFileSync(join(root, "VERSION"), "utf8"), `${expected}\n`);
@@ -501,7 +780,7 @@ test("patch, minor, and major bumps each synchronize the full pack", () => {
 
 test("set preflights every owned path before writing", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   rmSync(
     join(
       root,
@@ -520,7 +799,7 @@ test("set preflights every owned path before writing", () => {
 
 test("set restores every owned byte after a mid-sync failure", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   assert.equal(version(root, "check").status, 0);
   const ownedPathsResult = version(root, "owned-paths");
   assert.equal(
@@ -644,7 +923,7 @@ test("post-tag guard requires exact annotated and co-peeled tags", () => {
 test("Go skip tag guard requires retained tag and forbids current path tag", () => {
   function skippedRoot() {
     const root = createFixture();
-    writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+    writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
     assert.equal(version(root, "set", "0.2.2").status, 0);
     initGit(root);
     mustRun(root, "git", ["tag", "-a", "v0.2.2", "-m", "canonical"]);
@@ -668,4 +947,29 @@ test("Go skip tag guard requires retained tag and forbids current path tag", () 
   const messages = tagMessageDirectory(coherent, { "v0.2.2": "canonical\n" });
   const coherentResult = guard(coherent, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: messages });
   assert.equal(coherentResult.status, 0, `${coherentResult.stderr}${coherentResult.stdout}`);
+});
+
+// Every npm install or pack in CI and release tooling must skip lifecycle
+// scripts; a new invocation without the flag fails here.
+test("CI and release npm installs and packs pass --ignore-scripts", () => {
+  const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const files = [
+    ...readdirSync(join(repo, ".github/workflows")).filter((f) => f.endsWith(".yml")).map((f) => join(repo, ".github/workflows", f)),
+    join(repo, "Makefile"),
+    ...readdirSync(join(repo, "scripts")).filter((f) => /\.(m?js|sh)$/.test(f) && !f.endsWith(".test.mjs")).map((f) => join(repo, "scripts", f)),
+  ];
+  const offenders = [];
+  for (const file of files) {
+    readFileSync(file, "utf8").split("\n").forEach((line, index) => {
+      const code = line.replace(/^\s*(?:#|\/\/).*$/, "").replace(/\s#.*$/, "");
+      // A shell command (start of line, after run:, or after && ; |) or a
+      // spawn-style ["npm", ["ci", ...]] call.
+      const invokes = /(?:^|run:|&&|;|\|)\s*(?:npx\s+)?npm\s+(?:ci|install|i|pack|update)\b/.test(code) ||
+        /["']npm["'],\s*\[\s*["'](?:ci|install|i|pack|update)["']/.test(code);
+      if (invokes && !/-g\b|--global\b/.test(code) && !code.includes("--ignore-scripts")) {
+        offenders.push(`${file.slice(repo.length + 1)}:${index + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, []);
 });

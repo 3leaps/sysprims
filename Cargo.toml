@@ -31,7 +31,7 @@ sysprims-session = { version = "0.2.4", path = "crates/sysprims-session" }
 # Fulmen Ecosystem
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental
 # API changes.
-rsfulmen = { version = "=0.1.5", default-features = false, features = ["foundry-core"] }
+rsfulmen = { version = "=0.1.6", default-features = false, features = ["foundry-core"] }
 
 # Core Platform Abstractions
 libc = "0.2"
@@ -61,4 +61,4 @@ tracing-subscriber = { version = "0.3" }
 clap = { version = "4.5", features = ["derive", "env"] }
 
 # Error Handling
-thiserror = "1.0"
+thiserror = "2"

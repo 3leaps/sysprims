@@ -29,8 +29,10 @@ feature-depth = 1
 [advisories]
 # Ignore specific advisories (use sparingly, with justification)
 ignore = [
-    # Example:
-    # { id = "RUSTSEC-2020-0001", reason = "Not exploitable in our use case" },
+    # unsafe-libyaml is unmaintained (informational). It is reached only through
+    # rsfulmen's foundry-core YAML loader; sysprims parses no caller-supplied
+    # YAML. Remove when the dependency path moves to a maintained YAML parser.
+    { id = "RUSTSEC-2024-0449", reason = "unmaintained, informational; no untrusted YAML input; remove when the YAML path is replaced" },
 ]
 
 # ============================================================================

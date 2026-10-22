@@ -33,7 +33,7 @@ function digest(path, algorithm) { return createHash(algorithm).update(readFileS
 function json(path) { return JSON.parse(readFileSync(path, "utf8")); }
 
 function pack(directory, outputDirectory) {
-  const result = JSON.parse(mustRun("npm", ["pack", "--json", "--pack-destination", outputDirectory], { cwd: directory }));
+  const result = JSON.parse(mustRun("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", outputDirectory], { cwd: directory }));
   if (!Array.isArray(result) || result.length !== 1) fail(`npm pack returned an unexpected result for ${directory}`);
   const item = result[0];
   const path = join(outputDirectory, item.filename);
