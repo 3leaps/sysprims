@@ -291,6 +291,28 @@ test("check rejects committed npm platform resolution", () => {
   assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/);
 });
 
+test("check rejects nested and aliased npm platform resolution", () => {
+  const cases = [
+    [`node_modules/some-dep/node_modules/${platformNames[0]}`, { version: "0.2.1", optional: true }],
+    ["node_modules/innocent-alias", { name: platformNames[1], version: "0.2.1" }],
+    ["node_modules/a/node_modules/innocent-alias", { name: platformNames[2], version: "0.2.1" }],
+  ];
+  for (const [key, entry] of cases) {
+    const root = createFixture();
+    const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
+    const lock = readJson(lockPath);
+    lock.packages[key] = entry;
+    writeJson(lockPath, lock);
+    assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/, key);
+  }
+  const root = createFixture();
+  const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
+  const lock = readJson(lockPath);
+  lock.packages["node_modules/@3leaps/sysprims-linux-x64-gnu-extra"] = { version: "1.0.0" };
+  writeJson(lockPath, lock);
+  assert.equal(version(root, "check").status, 0, "a lookalike name is not a platform package");
+});
+
 test("TypeScript lock_phase is retired: legacy values pass, others fail", () => {
   for (const [lockPhase, ok] of [["resolved", true], ["pre_registry", true], ["bogus", false]]) {
     const root = createFixture();

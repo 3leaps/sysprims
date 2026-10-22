@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
       - name: Verify and materialize tag messages
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -177,7 +177,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           registry-url: https://registry.npmjs.org
       - name: Ensure trusted publishing npm runtime
         env:

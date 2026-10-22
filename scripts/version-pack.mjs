@@ -369,10 +369,20 @@ function checkJson(root, expected, plan, errors) {
     );
   }
 
-  for (const packageName of platformNames) {
-    if (lock.packages?.[`node_modules/${packageName}`] !== undefined) {
+  // Any resolution counts: root, nested, or an npm alias whose real name is a
+  // platform package.
+  const platformSet = new Set(platformNames);
+  for (const [key, entry] of Object.entries(lock.packages ?? {})) {
+    if (key === "") continue;
+    const installedAs = key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length);
+    const resolved = platformSet.has(installedAs)
+      ? installedAs
+      : platformSet.has(entry?.name)
+        ? entry.name
+        : null;
+    if (resolved) {
       errors.push(
-        `package-lock must not resolve platform package ${packageName}; platform pins are injected at publish time`,
+        `package-lock must not resolve platform package ${resolved} (at ${key}); platform pins are injected at publish time`,
       );
     }
   }
