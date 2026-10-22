@@ -142,17 +142,28 @@ jobs:
         # package.json lists no platform packages (they are injected at
         # publish time), so the lock file installs as-is.
         run: npm ci --ignore-scripts
-      - name: Install musl toolchain
+      # musl builds use the same zig cross-compile path as the release
+      # prebuilds (typescript-napi-prebuilds.yml), with the same pins.
+      - name: Install Zig
         if: endsWith(matrix.target, '-musl')
-        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406  # v2
+        with:
+          version: 0.12.0
+      - name: Install cargo-zigbuild
+        if: endsWith(matrix.target, '-musl')
+        run: cargo install cargo-zigbuild --locked --version 0.23.4
       - name: Check native target
         run: cargo check -p sysprims-ts-napi --target ${{ matrix.target }}
       - name: Build target native addon
         working-directory: bindings/typescript/sysprims
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
+          extra=()
+          if [[ "$TARGET" == *-musl ]]; then extra=(--cross-compile); fi
           npx napi build --manifest-path native/Cargo.toml --release --platform \
-            --no-js --strip --output-dir . --target ${{ matrix.target }}
+            --no-js --strip --output-dir . --target "$TARGET" "${extra[@]}"
       - name: Create target package
         working-directory: bindings/typescript/sysprims
         env:
