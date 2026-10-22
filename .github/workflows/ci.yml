@@ -274,7 +274,7 @@ jobs:
           AR: llvm-ar
         run: go test -v ./...
   recurrence:
-    # Rust crate and pure-Go twin of contract recurrence/v0: each passes the
+    # Rust crate and pure-Go module for contract recurrence/v0: each passes the
     # pinned corpus, and their outputs agree byte for byte (corpus NDJSON and
     # generated rules) on every OS cell.
     name: Recurrence Rust/Go agreement (${{ matrix.os }})

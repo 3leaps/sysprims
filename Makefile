@@ -313,7 +313,7 @@ test: ## Run test suite
 	$(CARGO) test --workspace
 	@echo "[ok] Tests passed"
 
-recurrence-test: ## Test the recurrence crate, the Go twin, and their byte-for-byte agreement
+recurrence-test: ## Test the recurrence crate, the Go module, and their byte-for-byte agreement
 	$(CARGO) test -p sysprims-recurrence
 	cd go/recurrence && GOWORK=off CGO_ENABLED=0 go vet ./... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./...
 	@$(MAKE) --no-print-directory recurrence-crosscheck

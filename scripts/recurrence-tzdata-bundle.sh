@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the pinned tzdb bundle for the recurrence crate and its Go twin.
+# Build the pinned tzdb bundle for the recurrence crate and the Go module.
 #
 # Maintainer step, never part of a build: it downloads the pinned IANA
 # tzdata/tzcode releases, verifies both against SHA-256 pins, compiles zic
