@@ -18,8 +18,8 @@ Replace every placeholder before review.
 - [ ] Go lock phase is `pre_build` for a pending publish build or `resolved`
       for committed, hashed, and smoked prebuilts. A skip is `resolved`.
 - [ ] TypeScript is `publish` or `skip`; a skip names the retained version.
-- [ ] TypeScript lock phase is `pre_registry` for a new post-tag publication
-      or `resolved` for registry-backed lock evidence.
+- [ ] TypeScript has no lock phase: platform packages are pinned at publish
+      time, and the committed lock must not resolve them.
 - [ ] `make release-plan-check version-check` passes.
 
 ## Merge attribution

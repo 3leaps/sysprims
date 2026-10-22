@@ -142,11 +142,15 @@ export function readReleasePlan(root, version = readCanonicalVersion(root)) {
     if (surfaces.go?.disposition === "skip" && surfaces.go.lock_phase !== "resolved") {
       errors.push("skipped go surface must use resolved lock_phase");
     }
-    if (surfaces.typescript && !["resolved", "pre_registry"].includes(surfaces.typescript.lock_phase)) {
-      errors.push("typescript lock_phase must be resolved or pre_registry");
-    }
-    if (surfaces.typescript?.disposition === "skip" && surfaces.typescript.lock_phase !== "resolved") {
-      errors.push("skipped typescript surface must use resolved lock_phase");
+    // TypeScript platform pins are injected at publish time, so the lock never
+    // carries registry evidence and no TypeScript lock phase applies. Plans
+    // from v0.2.x carry the retired field; it is accepted only with its old
+    // values and otherwise ignored.
+    if (
+      surfaces.typescript?.lock_phase !== undefined &&
+      !["resolved", "pre_registry"].includes(surfaces.typescript.lock_phase)
+    ) {
+      errors.push("typescript lock_phase is retired; omit it");
     }
   }
   if (errors.length) fail(errors.join("; "));

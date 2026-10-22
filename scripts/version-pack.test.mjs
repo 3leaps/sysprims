@@ -64,7 +64,7 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", retained = "0.2.1", lockPhase = "resolved" } = {}) {
+function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", retained = "0.2.1" } = {}) {
   writeJson(join(root, `docs/releases/v${version}.json`), {
     schema: "sysprims-release-plan/v1",
     version,
@@ -74,7 +74,7 @@ function writePlan(root, version, { go = "publish", goLockPhase = "resolved", ty
       cli: { disposition: "publish" },
       ffi: { disposition: "publish" },
       go: go === "publish" ? { disposition: "publish", lock_phase: goLockPhase } : { disposition: "skip", retained_version: retained, lock_phase: "resolved" },
-      typescript: typescript === "publish" ? { disposition: "publish", lock_phase: lockPhase } : { disposition: "skip", retained_version: retained, lock_phase: lockPhase },
+      typescript: typescript === "publish" ? { disposition: "publish" } : { disposition: "skip", retained_version: retained },
     },
   });
 }
@@ -282,24 +282,31 @@ test("check rejects Rust, TypeScript pin, and Go prebuilt evidence drift", () =>
   assert.match(version(goVersion, "check").stderr, /reported_version/);
 });
 
-test("check rejects committed npm platform resolution in any lock phase", () => {
-  for (const lockPhase of ["resolved", "pre_registry"]) {
+test("check rejects committed npm platform resolution", () => {
+  const root = createFixture();
+  const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
+  const lock = readJson(lockPath);
+  lock.packages[`node_modules/${platformNames[0]}`] = { version: "0.2.1", optional: true };
+  writeJson(lockPath, lock);
+  assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/);
+});
+
+test("TypeScript lock_phase is retired: legacy values pass, others fail", () => {
+  for (const [lockPhase, ok] of [["resolved", true], ["pre_registry", true], ["bogus", false]]) {
     const root = createFixture();
     const path = join(root, "docs/releases/v0.2.1.json");
     const plan = readJson(path);
     plan.surfaces.typescript.lock_phase = lockPhase;
     writeJson(path, plan);
-    const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
-    const lock = readJson(lockPath);
-    lock.packages[`node_modules/${platformNames[0]}`] = { version: "0.2.1", optional: true };
-    writeJson(lockPath, lock);
-    assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/);
+    const result = version(root, "check");
+    if (ok) assert.equal(result.status, 0, result.stderr);
+    else assert.match(result.stderr, /typescript lock_phase is retired/);
   }
 });
 
 test("Go pre_build keeps prior native evidence and tag guards reject it", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2", { go: "publish", goLockPhase: "pre_build", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "publish", goLockPhase: "pre_build" });
   const result = version(root, "set", "0.2.2");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
   const manifestPath = join(root, "bindings/go/sysprims/prebuilt-manifest.json");
@@ -331,7 +338,7 @@ test("check fails precisely when one native package is stale", () => {
 test("sync updates owned fields and removes only stale resolution evidence", () => {
   const root = createFixture();
   writeFileSync(join(root, "VERSION"), "0.2.2\n");
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
 
   const result = version(root, "sync");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
@@ -423,7 +430,7 @@ test("check calls out npm platform resolution without rewriting it", () => {
 test("set canonicalizes VERSION and synchronizes in one command", () => {
   const root = createFixture();
   writeFileSync(join(root, "VERSION"), "0.2.1\r\n");
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   const result = version(root, "set", "0.2.2");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
   assert.equal(readFileSync(join(root, "VERSION"), "utf8"), "0.2.2\n");
@@ -432,7 +439,7 @@ test("set canonicalizes VERSION and synchronizes in one command", () => {
 
 test("set synchronizes prerelease versions through Go README coordinates", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2-rc.1", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2-rc.1", { go: "skip", retained: "0.2.1" });
   const result = version(root, "set", "0.2.2-rc.1");
   assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
 
@@ -472,7 +479,7 @@ test("patch, minor, and major bumps each synchronize the full pack", () => {
     ["minor", "0.3.0"],
     ["major", "1.0.0"],
   ]) {
-    writePlan(root, expected, { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+    writePlan(root, expected, { go: "skip", retained: "0.2.1" });
     const result = version(root, "bump", component);
     assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
     assert.equal(readFileSync(join(root, "VERSION"), "utf8"), `${expected}\n`);
@@ -482,7 +489,7 @@ test("patch, minor, and major bumps each synchronize the full pack", () => {
 
 test("set preflights every owned path before writing", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   rmSync(
     join(
       root,
@@ -501,7 +508,7 @@ test("set preflights every owned path before writing", () => {
 
 test("set restores every owned byte after a mid-sync failure", () => {
   const root = createFixture();
-  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
   assert.equal(version(root, "check").status, 0);
   const ownedPathsResult = version(root, "owned-paths");
   assert.equal(
@@ -625,7 +632,7 @@ test("post-tag guard requires exact annotated and co-peeled tags", () => {
 test("Go skip tag guard requires retained tag and forbids current path tag", () => {
   function skippedRoot() {
     const root = createFixture();
-    writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1", lockPhase: "pre_registry" });
+    writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
     assert.equal(version(root, "set", "0.2.2").status, 0);
     initGit(root);
     mustRun(root, "git", ["tag", "-a", "v0.2.2", "-m", "canonical"]);
