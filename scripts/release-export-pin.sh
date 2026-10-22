@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Maintainer-only, one time: write the public pins that are then committed.
+# The operator environment feeds this first write only; every later step reads
+# the committed files. Nothing that already exists is overwritten.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd -P)"
+cd "$root"
+stop() {
+	echo "STOP: $1" >&2
+	exit 1
+}
+: "${SYSPRIMS_GPG_HOMEDIR:?load the approved GPG home}"
+: "${SYSPRIMS_PGP_KEY_ID:?load the approved signing-subkey selector (40 hex, ending in !)}"
+: "${SYSPRIMS_MINISIGN_PUB_EXPORT:?path to the approved minisign public key for this first write}"
+[[ "$SYSPRIMS_GPG_HOMEDIR" == /* && -d "$SYSPRIMS_GPG_HOMEDIR" ]] || stop 'approved GPG home must be an absolute directory'
+[[ "$SYSPRIMS_PGP_KEY_ID" =~ ^[0-9A-F]{40}!$ ]] || stop 'signing-subkey selector must be 40 uppercase hex ending in !'
+[[ -f "$SYSPRIMS_MINISIGN_PUB_EXPORT" && -s "$SYSPRIMS_MINISIGN_PUB_EXPORT" && ! -L "$SYSPRIMS_MINISIGN_PUB_EXPORT" ]] ||
+	stop 'minisign public export must be a nonempty regular file, not a symlink'
+python3 - "$SYSPRIMS_GPG_HOMEDIR" "$HOME/.gnupg" "$root" <<'PY'
+from pathlib import Path
+import sys
+home, default, repo = (Path(p).resolve() for p in sys.argv[1:4])
+if home == default:
+    raise SystemExit('STOP: the default GPG home is not approved for this export')
+if home == repo or repo in home.parents:
+    raise SystemExit('STOP: the GPG home must be outside the repository')
+PY
+asc=docs/security/release-signing-keys.asc
+pub=docs/security/sysprims-minisign.pub
+subkey=config/release/signing-subkey.txt
+for path in "$asc" "$pub" "$subkey"; do
+	[[ ! -e "$path" && ! -L "$path" ]] || stop "$path already exists; pins are written once and reviewed"
+done
+[[ ! -L docs/security && ! -L config/release ]] || stop 'pin directories must not be symlinks'
+mkdir -p docs/security config/release
+if grep -q -e 'secret key' -e 'PRIVATE KEY' "$SYSPRIMS_MINISIGN_PUB_EXPORT"; then
+	stop 'the minisign export contains private material'
+fi
+set -C
+gpg --homedir "$SYSPRIMS_GPG_HOMEDIR" --batch --armor --export-options export-minimal \
+	--export "$SYSPRIMS_PGP_KEY_ID" >"$asc" || stop 'OpenPGP public export failed; inspect the new file before retrying'
+cat "$SYSPRIMS_MINISIGN_PUB_EXPORT" >"$pub"
+printf '%s\n' "${SYSPRIMS_PGP_KEY_ID%!}" >"$subkey"
+set +C
+"$root/scripts/release-validate-pin.sh" --working-tree || stop 'the new pins did not validate; inspect them before committing'
+echo "[ok] wrote $asc, $pub and $subkey; review and commit them, then run make release-insert-anchors"
