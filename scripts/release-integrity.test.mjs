@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { assertInventory, expectedInventory, provenance, verifyChecksums } from "./release-integrity.mjs";
+import { assertInventory, expectedInventory, provenance, requiredTags, verifyChecksums } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -131,6 +131,19 @@ for (const tag of ["v0.2.3", "bindings/go/sysprims/v0.2.3"]) {
     ));
   });
 }
+
+test("the required tag set adds the recurrence module tag exactly when the module exists", () => {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-required-tags-"));
+  roots.push(root);
+  const publish = { surfaces: { go: { disposition: "publish" } } };
+  const skip = { surfaces: { go: { disposition: "skip" } } };
+  assert.deepEqual(requiredTags(publish, "1.2.3", root), ["v1.2.3", "bindings/go/sysprims/v1.2.3"]);
+  assert.deepEqual(requiredTags(skip, "1.2.3", root), ["v1.2.3"]);
+  mkdirSync(join(root, "go/recurrence"), { recursive: true });
+  writeFileSync(join(root, "go/recurrence/go.mod"), "module github.com/3leaps/sysprims/go/recurrence\n");
+  assert.deepEqual(requiredTags(publish, "1.2.3", root), ["v1.2.3", "bindings/go/sysprims/v1.2.3", "go/recurrence/v1.2.3"]);
+  assert.deepEqual(requiredTags(skip, "1.2.3", root), ["v1.2.3", "go/recurrence/v1.2.3"]);
+});
 
 test("commit footer rejects a non-policy coauthor email", () => {
   const wrongFooter = attributionFooter.replace("noreply@3leaps.net", "model@example.invalid");

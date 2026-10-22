@@ -18,7 +18,9 @@ node "$SCRIPT_DIR/version-pack.mjs" plan-check --root "$PROJECT_ROOT"
 node "$SCRIPT_DIR/version-pack.mjs" check --root "$PROJECT_ROOT"
 VERSION="$(tr -d '\r\n' <VERSION)"
 EXPECTED_TAG="v${VERSION}"
-INTENDED_TAG="${SYSPRIMS_RELEASE_TAG:-$EXPECTED_TAG}"
+# The release tag is an explicit input; it is never derived from VERSION.
+[ -n "${SYSPRIMS_RELEASE_TAG:-}" ] || fail "SYSPRIMS_RELEASE_TAG is required (expected ${EXPECTED_TAG})"
+INTENDED_TAG="$SYSPRIMS_RELEASE_TAG"
 [ "$INTENDED_TAG" = "$EXPECTED_TAG" ] || fail "intended release tag ${INTENDED_TAG} does not equal ${EXPECTED_TAG}"
 
 require_remote_annotated_tag() {
@@ -46,6 +48,11 @@ GO_DISPOSITION="$(node -e 'const p=require("./docs/releases/v"+require("fs").rea
 GO_LOCK_PHASE="$(node -e 'const p=require("./docs/releases/v"+require("fs").readFileSync("VERSION","utf8").trim()+".json"); process.stdout.write(p.surfaces.go.lock_phase)')"
 GO_RETAINED="$(node -e 'const p=require("./docs/releases/v"+require("fs").readFileSync("VERSION","utf8").trim()+".json"); process.stdout.write(p.surfaces.go.retained_version||"")')"
 GO_TAG="bindings/go/sysprims/${EXPECTED_TAG}"
+# The pure-Go recurrence module releases with every tag once it exists in the
+# tagged tree; its tag shares the version and commit of the other two.
+RECURRENCE_TAG="go/recurrence/${EXPECTED_TAG}"
+RECURRENCE_PRESENT=0
+[ -f go/recurrence/go.mod ] && RECURRENCE_PRESENT=1
 
 case "$MODE" in
 pre-tag)
@@ -73,6 +80,11 @@ post-tag)
 		printf '%s\n' "$lines" | grep -Fq "refs/tags/${retained}^{}" || fail "retained annotated Go tag ${retained} is missing"
 	else
 		fail "unknown Go disposition ${GO_DISPOSITION}"
+	fi
+	if [ "$RECURRENCE_PRESENT" = 1 ]; then
+		require_remote_annotated_tag "$RECURRENCE_TAG"
+	elif git ls-remote --exit-code --tags "$REMOTE" "refs/tags/${RECURRENCE_TAG}" >/dev/null 2>&1; then
+		fail "${RECURRENCE_TAG} exists but go/recurrence is absent from the tagged tree"
 	fi
 	node "$SCRIPT_DIR/release-integrity.mjs" provenance --root "$PROJECT_ROOT"
 	echo "[ok] post-tag guard: exact remote annotated tags, provenance, and version plan agree at ${HEAD_COMMIT}"

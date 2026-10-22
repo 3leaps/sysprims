@@ -107,11 +107,24 @@ help: ## Show available targets
 	@echo "  release-download      Download CI artifacts from GitHub"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
-	@echo "  release-export-keys   Export public signing keys"
+	@echo "  release-export-keys   Stage committed public keys from the tagged commit"
 	@echo "  release-verify        Verify checksums, signatures, and keys"
 	@echo "  release-upload        Upload signed artifacts to GitHub"
 	@echo "  release-publish       Verify remote state and publish the draft"
 	@echo "  release               Full release workflow (all of the above)"
+	@echo ""
+	@echo "Tag ceremony (maintainer; SYSPRIMS_RELEASE_TAG=vX.Y.Z required):"
+	@echo "  release-prepare-tag-message  Prepare per-tag annotation messages"
+	@echo "  release-tag                  Create every release tag, signed, local only"
+	@echo "  release-verify-tag           Verify local tags against the committed pin"
+	@echo "  release-push-tag             Push the verified tags atomically"
+	@echo "  release-verify-remote-tag    Verify the pushed tags"
+	@echo "  release-export-pin           One time: write the public pins (no overwrite)"
+	@echo "  release-validate-pin         Validate the committed pins and anchors"
+	@echo "  release-insert-anchors       Derive fingerprint anchors with decernor"
+	@echo "  release-crates-dry-run       Per-crate publish dry run from the release tag"
+	@echo "  release-crates-publish       Cued crates.io upload, one crate at a time"
+	@echo "  release-tooling-test         Synthetic release-tooling controls"
 	@echo ""
 	@echo "Version management:"
 	@echo "  version         Print current version"
@@ -659,14 +672,70 @@ version: ## Print current version
 
 DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
-# Canonical releases use the repository tag, not the path-prefixed Go module tag.
-SYSPRIMS_RELEASE_TAG ?= v$(VERSION)
 
-# Signing keys (set these environment variables)
+# The release tag is an explicit input (SYSPRIMS_RELEASE_TAG=vX.Y.Z). It is
+# never derived from VERSION, git describe, or the branch, and a bare
+# RELEASE_TAG from any origin is refused so it cannot stand in for it.
+ifneq ($(origin RELEASE_TAG),undefined)
+$(error RELEASE_TAG is not accepted; set SYSPRIMS_RELEASE_TAG=vX.Y.Z)
+endif
+REQUIRE_RELEASE_TAG = @if [ -z "$(SYSPRIMS_RELEASE_TAG)" ]; then \
+	echo "error: SYSPRIMS_RELEASE_TAG=vX.Y.Z is required"; exit 1; fi
+
+# Signing keys (operator environment). The minisign public pin is the committed
+# docs/security/sysprims-minisign.pub, read from the tagged commit; there is no
+# environment override for it.
 SYSPRIMS_MINISIGN_KEY ?=
-SYSPRIMS_MINISIGN_PUB ?=
 SYSPRIMS_PGP_KEY_ID ?=
 SYSPRIMS_GPG_HOMEDIR ?=
+
+# Tag ceremony and public identity (maintainer, local). Inputs:
+#   SYSPRIMS_RELEASE_TAG      vX.Y.Z (explicit; never derived)
+#   SYSPRIMS_TAG_MESSAGE_DIR  per-release message directory ending in the tag
+#   SYSPRIMS_DECERNOR_BIN     absolute path to decernor >= 0.1.8 (no fallback)
+#   SYSPRIMS_TAGGER_NAME/EMAIL, SYSPRIMS_PGP_KEY_ID (<subkey>!), SYSPRIMS_GPG_HOMEDIR
+release-prepare-tag-message: ## Prepare the per-tag annotation messages (outside the repo)
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-tag-operator.sh prepare-message
+
+release-tag: ## Create every release tag, signed and local only
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-tag-operator.sh local-tag
+
+release-push-tag: ## Push the verified release tags atomically, then verify them
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-tag-operator.sh remote-push
+
+release-verify-tag: ## Verify the local release tags against the committed pin
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-verify-tag.sh
+
+release-verify-remote-tag: ## Verify the pushed release tags against the committed pin
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-verify-remote-tag.sh
+
+release-export-pin: ## One time: write the public pins for review (refuses overwrite)
+	./scripts/release-export-pin.sh
+
+release-validate-pin: ## Validate the committed public pins and anchors
+	./scripts/release-validate-pin.sh
+
+release-insert-anchors: ## Derive the fingerprint anchors with decernor (refuses overwrite)
+	./scripts/release-insert-anchors.sh
+
+release-crates-list: ## List the published crates in registry order
+	@python3 scripts/release-crates.py list
+
+release-crates-dry-run: ## Per-crate cargo publish --dry-run from the detached release tag
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-crates-dry-run.sh
+
+release-crates-publish: ## Maintainer-cued crates.io upload, one crate at a time
+	$(REQUIRE_RELEASE_TAG)
+	./scripts/release-crates-dry-run.sh --publish
+
+release-tooling-test: ## Synthetic release-tooling controls (no operator keys)
+	./scripts/release-tooling-test.sh
 
 release-clean: ## Remove dist/release contents
 	@echo "Cleaning release directory..."
@@ -679,17 +748,15 @@ dist-local-clean: ## Remove dist/local contents
 	@echo "[ok] Local dist directory cleaned"
 
 release-download: release-guard-tag-version-post release-guard-provenance ## Download release assets from GitHub
-	@if [ -z "$(SYSPRIMS_RELEASE_TAG)" ] || [ "$(SYSPRIMS_RELEASE_TAG)" = "v" ]; then \
-		echo "Error: No release tag found. Set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; \
-		exit 1; \
-	fi
 	./scripts/download-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
 release-checksums: release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
+	$(REQUIRE_RELEASE_TAG)
 	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)
 	@$(MAKE) release-guard-checksummed --silent
 
 release-sign: release-require-checksummed ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
+	$(REQUIRE_RELEASE_TAG)
 	@if [ -z "$(SYSPRIMS_MINISIGN_KEY)" ]; then \
 		echo "Error: SYSPRIMS_MINISIGN_KEY not set"; \
 		echo ""; \
@@ -702,12 +769,8 @@ release-sign: release-require-checksummed ## Sign checksum manifests (requires S
 	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
 	./scripts/sign-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
-release-export-keys: release-require-checksummed ## Export public signing keys
-	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
-	SYSPRIMS_MINISIGN_PUB=$(SYSPRIMS_MINISIGN_PUB) \
-	SYSPRIMS_PGP_KEY_ID=$(SYSPRIMS_PGP_KEY_ID) \
-	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
-	./scripts/export-release-keys.sh $(DIST_RELEASE)
+release-export-keys: release-require-checksummed release-guard-tag-version-post ## Stage committed public keys from the tagged commit
+	./scripts/release-stage-public.sh $(DIST_RELEASE)
 
 release-verify-checksums: ## Verify checksums match artifacts
 	@echo "Verifying checksums..."
@@ -736,6 +799,7 @@ release-check: version-check ## Version consistency + package check (does not pu
 	@echo "  ✓ cargo publish was not run"
 
 release-notes: ## Copy release notes to dist
+	$(REQUIRE_RELEASE_TAG)
 	@src="docs/releases/$(SYSPRIMS_RELEASE_TAG).md"; \
 	if [ -f "$$src" ]; then \
 		cp "$$src" "$(DIST_RELEASE)/release-notes-$(SYSPRIMS_RELEASE_TAG).md"; \

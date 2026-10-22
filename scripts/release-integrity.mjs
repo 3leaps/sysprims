@@ -224,9 +224,12 @@ function uploaded(root, directory, version) {
   }
 }
 
-function requiredTags(plan, version) {
+export function requiredTags(plan, version, root = defaultRoot) {
   const tags = [`v${version}`];
   if (plan.surfaces.go.disposition === "publish") tags.push(`bindings/go/sysprims/v${version}`);
+  // The pure-Go recurrence module is tagged at the same commit whenever it is
+  // present in the tree.
+  if (existsSync(join(root, "go/recurrence/go.mod"))) tags.push(`go/recurrence/v${version}`);
   return tags;
 }
 
@@ -295,7 +298,7 @@ export function provenance(root, version) {
   const { plan } = readReleasePlan(root, version);
   const commit = run(root, "git", ["rev-parse", "HEAD^{commit}"]).trim();
   const body = run(root, "git", ["log", "-1", "--format=%B"]);
-  const tags = requiredTags(plan, version);
+  const tags = requiredTags(plan, version, root);
   if (footerPattern.test(body)) {
     verifyIntendedTagMessages(root, tags);
     return;
