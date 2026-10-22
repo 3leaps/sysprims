@@ -291,26 +291,92 @@ test("check rejects committed npm platform resolution", () => {
   assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/);
 });
 
-test("check rejects nested and aliased npm platform resolution", () => {
-  const cases = [
-    [`node_modules/some-dep/node_modules/${platformNames[0]}`, { version: "0.2.1", optional: true }],
-    ["node_modules/innocent-alias", { name: platformNames[1], version: "0.2.1" }],
-    ["node_modules/a/node_modules/innocent-alias", { name: platformNames[2], version: "0.2.1" }],
-  ];
-  for (const [key, entry] of cases) {
-    const root = createFixture();
-    const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
-    const lock = readJson(lockPath);
-    lock.packages[key] = entry;
-    writeJson(lockPath, lock);
-    assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/, key);
-  }
+function lockFixtureWith(mutate) {
   const root = createFixture();
   const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
   const lock = readJson(lockPath);
-  lock.packages["node_modules/@3leaps/sysprims-linux-x64-gnu-extra"] = { version: "1.0.0" };
+  mutate(lock.packages, lock);
   writeJson(lockPath, lock);
-  assert.equal(version(root, "check").status, 0, "a lookalike name is not a platform package");
+  return root;
+}
+
+test("check rejects platform packages under every npm-equivalent lock key", () => {
+  const p = platformNames;
+  const cases = {
+    "nested path": (pk) => { pk[`node_modules/dep/node_modules/${p[0]}`] = { version: "0.2.1" }; },
+    "root alias": (pk) => { pk["node_modules/innocent"] = { name: p[1], version: "0.2.1" }; },
+    "nested alias": (pk) => { pk["node_modules/a/node_modules/innocent"] = { name: p[2], version: "0.2.1" }; },
+    "trailing slash": (pk) => { pk[`node_modules/${p[3]}/`] = { version: "0.2.1" }; },
+    "dot segment": (pk) => { pk[`node_modules/./${p[4]}`] = { version: "0.2.1" }; },
+    "trailing dot": (pk) => { pk[`node_modules/${p[5]}/.`] = { version: "0.2.1" }; },
+    "double slash": (pk) => { pk[`node_modules//${p[6]}`] = { version: "0.2.1" }; },
+    "dotdot into scope": (pk) => { pk[`node_modules/@3leaps/foo/../${p[0].split("/")[1]}`] = { version: "0.2.1" }; },
+    "dotdot after extra": (pk) => { pk[`node_modules/${p[1]}/extra/..`] = { version: "0.2.1" }; },
+    "nested scoped dot": (pk) => { pk[`node_modules/dep/node_modules/./${p[2]}`] = { version: "0.2.1" }; },
+    "link to unnamed platform target": (pk) => {
+      pk[`packages/${p[3]}`] = { version: "0.2.1" };
+      pk["node_modules/alias"] = { resolved: `packages/${p[3]}`, link: true };
+    },
+    "link to named platform target": (pk) => {
+      pk["vendor/thing"] = { name: p[4], version: "0.2.1" };
+      pk["node_modules/thing"] = { resolved: "vendor/thing", link: true };
+    },
+    "lock root dependency": (_pk, lock) => { lock.packages[""].dependencies = { [p[5]]: "0.2.1" }; },
+    "lock root dev alias": (_pk, lock) => { lock.packages[""].devDependencies = { x: `npm:${p[6]}@0.2.1` }; },
+  };
+  for (const [label, mutate] of Object.entries(cases)) {
+    const result = version(lockFixtureWith(mutate), "check");
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stderr, /must not (resolve|name) platform package/, label);
+  }
+});
+
+test("check reports a link alias itself, not only its platform target", () => {
+  const root = lockFixtureWith((pk) => {
+    pk[`packages/${platformNames[3]}`] = { version: "0.2.1" };
+    pk["node_modules/alias"] = { resolved: `packages/${platformNames[3]}`, link: true };
+  });
+  assert.match(version(root, "check").stderr, /\(at node_modules\/alias\)/);
+});
+
+test("check rejects platform packages in any root manifest dependency field", () => {
+  for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
+    const root = createFixture();
+    const path = join(root, "bindings/typescript/sysprims/package.json");
+    const pkg = readJson(path);
+    pkg[field] = { ...(pkg[field] ?? {}), [platformNames[0]]: "0.2.1" };
+    writeJson(path, pkg);
+    assert.match(version(root, "check").stderr, /must not name platform package/, field);
+  }
+});
+
+test("lock guard ignores legitimate lookalike and local packages", () => {
+  const cases = {
+    "lookalike name": (pk) => { pk["node_modules/@3leaps/sysprims-linux-x64-gnu-extra"] = { version: "1.0.0" }; },
+    "local dir named like a platform, different package": (pk) => {
+      pk["third-party/@3leaps/sysprims-linux-x64-gnu"] = { name: "other", version: "1.0.0" };
+      pk["node_modules/other"] = { resolved: "third-party/@3leaps/sysprims-linux-x64-gnu", link: true };
+    },
+    "unrelated workspace": (pk) => { pk["packages/tool"] = { name: "tool", version: "1.0.0" }; },
+  };
+  for (const [label, mutate] of Object.entries(cases)) {
+    const result = version(lockFixtureWith(mutate), "check");
+    assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+  }
+});
+
+test("sync removes platform entries under any npm-equivalent key", () => {
+  const root = lockFixtureWith((pk) => {
+    pk[`node_modules/./${platformNames[0]}`] = { version: "0.2.1" };
+    pk["node_modules/innocent"] = { name: platformNames[1], version: "0.2.1" };
+  });
+  writeFileSync(join(root, "VERSION"), "0.2.2\n");
+  writePlan(root, "0.2.2", { go: "skip", retained: "0.2.1" });
+  const result = version(root, "sync");
+  assert.equal(result.status, 0, `${result.stderr}${result.stdout}`);
+  const lock = readJson(join(root, "bindings/typescript/sysprims/package-lock.json"));
+  assert.equal(lock.packages[`node_modules/./${platformNames[0]}`], undefined);
+  assert.equal(lock.packages["node_modules/innocent"], undefined);
 });
 
 test("TypeScript lock_phase is retired: legacy values pass, others fail", () => {

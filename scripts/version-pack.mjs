@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -297,6 +297,88 @@ function checkNoOptionalPins(value, label, errors) {
   }
 }
 
+// The package identities npm can assign to a lock entry. Keys are normalized
+// the way npm normalizes them (`./`, `//`, `..`, trailing `/`). Under
+// node_modules the folder name is what require() resolves, and entry.name is
+// the real package behind an alias; elsewhere (workspaces, local paths) npm
+// uses entry.name and falls back to the folder name. Link entries also carry
+// the identity of their target.
+function lockFolderName(normalizedKey) {
+  const parts = normalizedKey.split("/");
+  const last = parts.at(-1);
+  const scope = parts.at(-2);
+  return scope?.startsWith("@") ? `${scope}/${last}` : last;
+}
+
+function lockEntryIdentities(key, entry, packages, seen = new Set()) {
+  const normalized = posix.normalize(key).replace(/\/+$/, "");
+  const identities = new Set();
+  if (seen.has(normalized)) return identities;
+  seen.add(normalized);
+  const folder = lockFolderName(normalized);
+  const underNodeModules = normalized === "node_modules" ||
+    normalized.startsWith("node_modules/") ||
+    normalized.includes("/node_modules/");
+  if (underNodeModules) {
+    identities.add(folder);
+    if (typeof entry?.name === "string") identities.add(entry.name);
+  } else {
+    identities.add(typeof entry?.name === "string" ? entry.name : folder);
+  }
+  if (entry?.link === true && typeof entry.resolved === "string") {
+    const target = posix.normalize(entry.resolved).replace(/\/+$/, "");
+    const targetEntry = Object.entries(packages).find(
+      ([candidate]) => posix.normalize(candidate).replace(/\/+$/, "") === target,
+    )?.[1];
+    for (const identity of lockEntryIdentities(target, targetEntry, packages, seen)) {
+      identities.add(identity);
+    }
+  }
+  return identities;
+}
+
+function platformLockEntries(packages) {
+  const platformSet = new Set(platformNames);
+  const hits = [];
+  for (const [key, entry] of Object.entries(packages ?? {})) {
+    if (key === "") continue;
+    for (const identity of lockEntryIdentities(key, entry, packages)) {
+      if (platformSet.has(identity)) hits.push([key, identity]);
+    }
+  }
+  return hits;
+}
+
+const manifestDependencyFields = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+  "bundleDependencies",
+  "bundledDependencies",
+];
+
+// A root manifest may not name a platform package in any dependency field,
+// directly or through an `npm:` alias.
+function checkManifestPlatformDeps(manifest, label, errors) {
+  const platformSet = new Set(platformNames);
+  for (const field of manifestDependencyFields) {
+    const deps = manifest?.[field];
+    if (!deps || typeof deps !== "object") continue;
+    const entries = Array.isArray(deps)
+      ? deps.map((name) => [name, ""])
+      : Object.entries(deps);
+    for (const [name, spec] of entries) {
+      const aliasTarget = typeof spec === "string" && spec.startsWith("npm:")
+        ? spec.slice(4).replace(/@[^@/]*$/, "")
+        : null;
+      if (platformSet.has(name) || platformSet.has(aliasTarget)) {
+        errors.push(`${label}.${field} must not name platform package ${platformSet.has(name) ? name : aliasTarget}`);
+      }
+    }
+  }
+}
+
 function checkJson(root, expected, plan, errors) {
   const typescriptVersion = plannedVersion(plan.surfaces.typescript, expected);
   const rootPackage = readJson(
@@ -315,6 +397,7 @@ function checkJson(root, expected, plan, errors) {
     "TypeScript root optionalDependencies",
     errors,
   );
+  checkManifestPlatformDeps(rootPackage, "TypeScript root package", errors);
 
   for (let index = 0; index < nativeDirectories.length; index += 1) {
     const directory = nativeDirectories[index];
@@ -369,22 +452,11 @@ function checkJson(root, expected, plan, errors) {
     );
   }
 
-  // Any resolution counts: root, nested, or an npm alias whose real name is a
-  // platform package.
-  const platformSet = new Set(platformNames);
-  for (const [key, entry] of Object.entries(lock.packages ?? {})) {
-    if (key === "") continue;
-    const installedAs = key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length);
-    const resolved = platformSet.has(installedAs)
-      ? installedAs
-      : platformSet.has(entry?.name)
-        ? entry.name
-        : null;
-    if (resolved) {
-      errors.push(
-        `package-lock must not resolve platform package ${resolved} (at ${key}); platform pins are injected at publish time`,
-      );
-    }
+  checkManifestPlatformDeps(lockRoot, 'package-lock packages[""]', errors);
+  for (const [key, identity] of platformLockEntries(lock.packages)) {
+    errors.push(
+      `package-lock must not resolve platform package ${identity} (at ${key}); platform pins are injected at publish time`,
+    );
   }
 }
 
@@ -551,8 +623,8 @@ function updateJsonSurfaces(root, version) {
   }
   lock.version = version;
   lock.packages[""].version = version;
-  for (const packageName of platformNames) {
-    delete lock.packages[`node_modules/${packageName}`];
+  for (const [key] of platformLockEntries(lock.packages)) {
+    delete lock.packages[key];
   }
   writeJsonAtomic(lockPath, lock);
 }
