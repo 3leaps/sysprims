@@ -136,8 +136,13 @@ jobs:
       - name: Build root package
         working-directory: bindings/typescript/sysprims
         run: |
-          npm install --omit=optional
+          npm ci
           npm run build
+      - name: Point the root package at the same-commit platform packages
+        working-directory: bindings/typescript/sysprims
+        # Fails unless npm-packages holds exactly one package per napi target,
+        # each with its addon, at the root version.
+        run: node scripts/set-platform-packages.js ../../../npm-packages
       - name: Pack and attest all eight packages
         run: |
           node scripts/npm-release.mjs stage \

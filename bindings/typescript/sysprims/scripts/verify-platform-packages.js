@@ -1,6 +1,7 @@
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { parseTriple } = require("@napi-rs/cli");
 
 const packageRoot = path.resolve(__dirname, "..");
 const rootPackage = require(path.join(packageRoot, "package.json"));
@@ -18,22 +19,28 @@ const packagePlatforms = {
 };
 const supportedPackages = Object.keys(packagePlatforms);
 const supportedSet = new Set(supportedPackages);
-const platformDependencies = Object.entries(rootPackage.optionalDependencies ?? {}).filter(
-  ([name]) => name.startsWith(packagePrefix),
-);
-
+// The committed root package lists no platform packages so `npm ci` works;
+// scripts/set-platform-packages.js writes them at publish time. The declared
+// set is therefore napi.targets.
 const declaredPackages = new Set(
-  platformDependencies.map(([name]) => name.slice(packagePrefix.length)),
+  (rootPackage.napi?.targets ?? []).map((triple) => parseTriple(triple).platformArchABI),
 );
 if (rootPackage.name !== "@3leaps/sysprims") {
   throw new Error(`root package name must be @3leaps/sysprims, got ${rootPackage.name}`);
+}
+if (rootPackage.optionalDependencies !== undefined) {
+  throw new Error("committed package.json must not list optionalDependencies");
 }
 if (
   declaredPackages.size !== supportedSet.size ||
   [...supportedSet].some((packageDir) => !declaredPackages.has(packageDir))
 ) {
-  throw new Error(`platform optionalDependencies must be exactly: ${supportedPackages.join(", ")}`);
+  throw new Error(`napi.targets must be exactly: ${supportedPackages.join(", ")}`);
 }
+const platformDependencies = supportedPackages.map((packageDir) => [
+  `${packagePrefix}${packageDir}`,
+  rootPackage.version,
+]);
 
 const generatedPackages = fs
   .readdirSync(path.join(packageRoot, "npm"), { withFileTypes: true })

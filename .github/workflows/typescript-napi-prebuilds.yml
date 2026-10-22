@@ -100,7 +100,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Zig
@@ -115,9 +115,11 @@ jobs:
           rustup target add \
             x86_64-unknown-linux-musl \
             aarch64-unknown-linux-musl
+      - name: Install cargo-zigbuild (pinned; napi --cross-compile would otherwise fetch latest)
+        run: cargo install cargo-zigbuild --locked --version 0.23.4
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
+        run: npm ci
       - name: Build .node files (zig)
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -127,19 +129,19 @@ jobs:
           mkdir -p prebuilds
 
           # glibc baseline (2.17) for broad compatibility
-          npx napi build --cargo-cwd native --release --platform --js false --strip \
-            --target x86_64-unknown-linux-gnu --zig --zig-abi-suffix 2.17
-          mv sysprims.linux-x64-gnu.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds \
+            --target x86_64-unknown-linux-gnu --use-napi-cross
+          test -f prebuilds/sysprims.linux-x64-gnu.node
 
-          npx napi build --cargo-cwd native --release --platform --js false --strip \
-            --target x86_64-unknown-linux-musl --zig
-          mv sysprims.linux-x64-musl.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds \
+            --target x86_64-unknown-linux-musl --cross-compile
+          test -f prebuilds/sysprims.linux-x64-musl.node
 
           # arm64-gnu built natively on ubuntu-latest-arm64-s (build-linux-arm64 job)
 
-          npx napi build --cargo-cwd native --release --platform --js false --strip \
-            --target aarch64-unknown-linux-musl --zig
-          mv sysprims.linux-arm64-musl.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds \
+            --target aarch64-unknown-linux-musl --cross-compile
+          test -f prebuilds/sysprims.linux-arm64-musl.node
       - name: Upload prebuilds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -156,12 +158,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
+        run: npm ci
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -169,8 +171,8 @@ jobs:
           set -euo pipefail
           rm -f sysprims.*.node
           mkdir -p prebuilds
-          npx napi build --cargo-cwd native --release --platform --js false --strip
-          mv sysprims.linux-arm64-gnu.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          test -f prebuilds/sysprims.linux-arm64-gnu.node
       - name: Upload prebuild
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -187,12 +189,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
+        run: npm ci
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -200,8 +202,8 @@ jobs:
           set -euo pipefail
           rm -f sysprims.*.node
           mkdir -p prebuilds
-          npx napi build --cargo-cwd native --release --platform --js false --strip
-          mv sysprims.darwin-arm64.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          test -f prebuilds/sysprims.darwin-arm64.node
       - name: Upload prebuild
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -218,12 +220,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
+        run: npm ci
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: pwsh
@@ -231,8 +233,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Remove-Item -Force sysprims.*.node -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
-          npx napi build --cargo-cwd native --release --platform --js false --strip
-          Move-Item sysprims.win32-x64-msvc.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          $node = 'prebuilds/sysprims.win32-x64-msvc.node'
+          if (-not (Test-Path $node)) { throw "missing $node" }
       - name: Upload prebuild
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -249,12 +252,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
+        run: npm ci
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: pwsh
@@ -262,8 +265,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Remove-Item -Force sysprims.*.node -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
-          npx napi build --cargo-cwd native --release --platform --js false --strip
-          Move-Item sysprims.win32-arm64-msvc.node prebuilds/
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          $node = 'prebuilds/sysprims.win32-arm64-msvc.node'
+          if (-not (Test-Path $node)) { throw "missing $node" }
       - name: Upload prebuild
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -280,12 +284,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm install
+        run: npm ci
       - name: Build JS dist (root package)
         working-directory: bindings/typescript/sysprims
         run: npm run clean && npm run build && npm run build:native
@@ -306,7 +310,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf npm
-          npx napi create-npm-dir -t .
+          npx napi create-npm-dirs
       - name: Remove unsupported platform packages
         working-directory: bindings/typescript/sysprims
         shell: bash

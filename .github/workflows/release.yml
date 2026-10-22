@@ -160,7 +160,7 @@ jobs:
     name: Build Linux
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
     needs: validate-version
     strategy:
@@ -534,7 +534,7 @@ jobs:
     name: Generate C Header
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc:v0.5.6@sha256:afcffa00283c765928dfef40966c282f2ca190653cf4443f634cb8f67c1d51ab
+      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
     needs: validate-version
     steps:

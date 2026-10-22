@@ -22,23 +22,20 @@
     "node": ">=18"
   },
   "napi": {
-    "name": "sysprims",
-    "triples": {
-      "defaults": false,
-      "additional": [
-        "x86_64-unknown-linux-gnu",
-        "x86_64-unknown-linux-musl",
-        "aarch64-unknown-linux-gnu",
-        "aarch64-unknown-linux-musl",
-        "aarch64-apple-darwin",
-        "x86_64-pc-windows-msvc",
-        "aarch64-pc-windows-msvc"
-      ]
-    }
+    "binaryName": "sysprims",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
   },
   "scripts": {
     "clean": "node scripts/clean.js",
-    "build:native": "napi build --cargo-cwd native --release --platform --strip dist/native",
+    "build:native": "napi build --manifest-path native/Cargo.toml --release --platform --strip --output-dir dist/native",
     "build": "tsc -p tsconfig.build.json",
     "build:test": "tsc -p tsconfig.test.json",
     "api:generate": "node scripts/public-api.js generate",
@@ -47,21 +44,14 @@
     "platform-packages:check": "node scripts/verify-platform-packages.js",
     "test": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
     "test:ci": "npm run clean && npm run build && npm run build:native && npm run build:test && node scripts/run-tests.js",
-    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "platform-packages:set": "node scripts/set-platform-packages.js"
   },
   "dependencies": {},
-  "optionalDependencies": {
-    "@3leaps/sysprims-linux-x64-gnu": "0.2.4",
-    "@3leaps/sysprims-linux-x64-musl": "0.2.4",
-    "@3leaps/sysprims-linux-arm64-gnu": "0.2.4",
-    "@3leaps/sysprims-linux-arm64-musl": "0.2.4",
-    "@3leaps/sysprims-darwin-arm64": "0.2.4",
-    "@3leaps/sysprims-win32-x64-msvc": "0.2.4",
-    "@3leaps/sysprims-win32-arm64-msvc": "0.2.4"
-  },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.4",
-    "@types/node": "^22.10.0",
-    "typescript": "^5.6.3"
+    "@napi-rs/cli": "^3.10.5",
+    "@types/node": "^22.20.4",
+    "typescript": "^7.0.2",
+    "typescript-api": "npm:typescript@6.0.3"
   }
 }

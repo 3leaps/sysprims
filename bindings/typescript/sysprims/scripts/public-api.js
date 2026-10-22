@@ -2,7 +2,9 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const ts = require("typescript");
+// TypeScript 7 (the build compiler) has no JS compiler API; the drift guard
+// reads declarations with the last API-bearing release, aliased in devDependencies.
+const ts = require("typescript-api");
 
 const packageRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(packageRoot, "../../..");

@@ -40,8 +40,8 @@ VERSION := $(shell tr -d '\r\n' < VERSION 2>/dev/null || echo "dev")
 BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions for reproducibility
-SFETCH_VERSION := v0.4.9
-GONEAT_VERSION ?= v0.6.0
+SFETCH_VERSION := v0.4.11
+GONEAT_VERSION ?= v0.6.5
 GONEAT_FORMAT_FAIL_ON ?= medium
 CONTAINER_RUNTIME ?= docker
 

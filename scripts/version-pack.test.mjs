@@ -159,13 +159,9 @@ v0.1.14 remains part of the historical API notes.
   );
   writeGoFixture(root, "0.2.1");
 
-  const optionalDependencies = Object.fromEntries(
-    platformNames.map((name) => [name, "0.2.1"]),
-  );
   writeJson(join(root, "bindings/typescript/sysprims/package.json"), {
     name: "@3leaps/sysprims",
     version: "0.2.1",
-    optionalDependencies,
     devDependencies: {
       typescript: "0.2.1",
     },
@@ -191,21 +187,11 @@ v0.1.14 remains part of the historical API notes.
     "": {
       name: "@3leaps/sysprims",
       version: "0.2.1",
-      optionalDependencies,
       devDependencies: {
         typescript: "0.2.1",
       },
     },
   };
-  for (const name of platformNames) {
-    const bareName = name.replace("@3leaps/", "");
-    packages[`node_modules/${name}`] = {
-      version: "0.2.1",
-      resolved: `https://registry.npmjs.org/${name}/-/${bareName}-0.2.1.tgz`,
-      integrity: `sha512-${Buffer.alloc(64, 1).toString("base64")}`,
-      optional: true,
-    };
-  }
   writeJson(join(root, "bindings/typescript/sysprims/package-lock.json"), {
     name: "@3leaps/sysprims",
     version: "0.2.1",
@@ -280,9 +266,9 @@ test("check rejects Rust, TypeScript pin, and Go prebuilt evidence drift", () =>
   const typescript = createFixture();
   const packagePath = join(typescript, "bindings/typescript/sysprims/package.json");
   const pkg = readJson(packagePath);
-  pkg.optionalDependencies[platformNames[0]] = "0.2.0";
+  pkg.optionalDependencies = { [platformNames[0]]: "0.2.1" };
   writeJson(packagePath, pkg);
-  assert.match(version(typescript, "check").stderr, /optionalDependencies/);
+  assert.match(version(typescript, "check").stderr, /optionalDependencies must be absent/);
 
   const goHash = createFixture();
   writeFileSync(join(goHash, "bindings/go/sysprims/lib/linux-amd64/libsysprims_ffi.a"), "drift\n");
@@ -296,22 +282,19 @@ test("check rejects Rust, TypeScript pin, and Go prebuilt evidence drift", () =>
   assert.match(version(goVersion, "check").stderr, /reported_version/);
 });
 
-test("pre_registry is explicit and rejects stale registry evidence", () => {
-  const root = createFixture();
-  const path = join(root, "docs/releases/v0.2.1.json");
-  const plan = readJson(path);
-  plan.surfaces.typescript.lock_phase = "pre_registry";
-  writeJson(path, plan);
-  assert.match(version(root, "check").stderr, /pre_registry plan must not contain registry resolution evidence/);
-});
-
-test("resolved TypeScript lock rejects placeholder SRI", () => {
-  const root = createFixture();
-  const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
-  const lock = readJson(lockPath);
-  lock.packages[`node_modules/${platformNames[0]}`].integrity = "sha512-placeholder";
-  writeJson(lockPath, lock);
-  assert.match(version(root, "check").stderr, /invalid npm platform resolution evidence/);
+test("check rejects committed npm platform resolution in any lock phase", () => {
+  for (const lockPhase of ["resolved", "pre_registry"]) {
+    const root = createFixture();
+    const path = join(root, "docs/releases/v0.2.1.json");
+    const plan = readJson(path);
+    plan.surfaces.typescript.lock_phase = lockPhase;
+    writeJson(path, plan);
+    const lockPath = join(root, "bindings/typescript/sysprims/package-lock.json");
+    const lock = readJson(lockPath);
+    lock.packages[`node_modules/${platformNames[0]}`] = { version: "0.2.1", optional: true };
+    writeJson(lockPath, lock);
+    assert.match(version(root, "check").stderr, /package-lock must not resolve platform package/);
+  }
 });
 
 test("Go pre_build keeps prior native evidence and tag guards reject it", () => {
@@ -358,9 +341,7 @@ test("sync updates owned fields and removes only stale resolution evidence", () 
   );
   assert.equal(rootPackage.version, "0.2.2");
   assert.equal(rootPackage.devDependencies.typescript, "0.2.1");
-  for (const value of Object.values(rootPackage.optionalDependencies)) {
-    assert.equal(value, "0.2.2");
-  }
+  assert.equal(rootPackage.optionalDependencies, undefined);
 
   const nativePackage = readJson(
     join(
@@ -420,7 +401,7 @@ test("check fails precisely when the Go README install version is stale", () => 
   assert.match(result.stderr, /Go README install version is 0\.2\.0/);
 });
 
-test("check calls out stale npm resolution evidence without rewriting it", () => {
+test("check calls out npm platform resolution without rewriting it", () => {
   const root = createFixture();
   const lockPath = join(
     root,
@@ -429,13 +410,13 @@ test("check calls out stale npm resolution evidence without rewriting it", () =>
   const lock = readJson(lockPath);
   lock.packages[
     "node_modules/@3leaps/sysprims-linux-x64-gnu"
-  ].version = "0.2.0";
+  ] = { version: "0.2.0", optional: true };
   writeJson(lockPath, lock);
 
   const before = readFileSync(lockPath, "utf8");
   const result = version(root, "check");
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /stale npm platform resolution evidence/);
+  assert.match(result.stderr, /package-lock must not resolve platform package @3leaps\/sysprims-linux-x64-gnu/);
   assert.equal(readFileSync(lockPath, "utf8"), before);
 });
 

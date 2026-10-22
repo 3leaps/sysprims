@@ -283,25 +283,14 @@ function checkCargo(root, expected, errors) {
   }
 }
 
-function checkOptionalPins(value, expected, label, errors) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    errors.push(`${label} is missing`);
-    return;
+// Platform optionalDependencies are injected at publish time
+// (bindings/typescript/sysprims/scripts/set-platform-packages.js) so `npm ci`
+// works before same-version platform packages exist in the registry. The
+// committed manifests must not carry them.
+function checkNoOptionalPins(value, label, errors) {
+  if (value !== undefined) {
+    errors.push(`${label} must be absent; platform pins are injected at publish time`);
   }
-  for (const packageName of platformNames) {
-    if (value[packageName] !== expected) {
-      errors.push(
-        `${label}[${packageName}] is ${JSON.stringify(value[packageName])}, expected ${expected}`,
-      );
-    }
-  }
-}
-
-function validSha512Sri(value) {
-  const match = typeof value === "string" && value.match(/^sha512-([A-Za-z0-9+/]+={0,2})$/);
-  if (!match) return false;
-  try { return Buffer.from(match[1], "base64").length === 64; }
-  catch { return false; }
 }
 
 function checkJson(root, expected, plan, errors) {
@@ -317,9 +306,8 @@ function checkJson(root, expected, plan, errors) {
       `TypeScript root package is ${rootPackage.version}, expected ${typescriptVersion}`,
     );
   }
-  checkOptionalPins(
+  checkNoOptionalPins(
     rootPackage.optionalDependencies,
-    typescriptVersion,
     "TypeScript root optionalDependencies",
     errors,
   );
@@ -370,39 +358,18 @@ function checkJson(root, expected, plan, errors) {
         `package-lock packages[""] version is ${lockRoot.version}, expected ${typescriptVersion}`,
       );
     }
-    checkOptionalPins(
+    checkNoOptionalPins(
       lockRoot.optionalDependencies,
-      typescriptVersion,
       'package-lock packages[""].optionalDependencies',
       errors,
     );
   }
 
   for (const packageName of platformNames) {
-    const resolution = lock.packages?.[`node_modules/${packageName}`];
-    if (!resolution) {
-      if (plan.surfaces.typescript.lock_phase === "resolved") errors.push(`resolved npm platform node is missing for ${packageName}`);
-      continue;
-    }
-    if (resolution.version !== typescriptVersion) {
+    if (lock.packages?.[`node_modules/${packageName}`] !== undefined) {
       errors.push(
-        `stale npm platform resolution evidence for ${packageName}: resolved version ${resolution.version}, authored version ${typescriptVersion}`,
+        `package-lock must not resolve platform package ${packageName}; platform pins are injected at publish time`,
       );
-      continue;
-    }
-    const encodedName = packageName.replace("@3leaps/", "");
-    const expectedSuffix = `/${encodedName}-${typescriptVersion}.tgz`;
-    if (
-      typeof resolution.resolved !== "string" ||
-      !resolution.resolved.endsWith(expectedSuffix) ||
-      !validSha512Sri(resolution.integrity)
-    ) {
-      errors.push(
-        `invalid npm platform resolution evidence for ${packageName}@${typescriptVersion}`,
-      );
-    }
-    if (plan.surfaces.typescript.lock_phase === "pre_registry") {
-      errors.push(`pre_registry plan must not contain registry resolution evidence for ${packageName}`);
     }
   }
 }
@@ -541,10 +508,6 @@ function updateJsonSurfaces(root, version) {
   const rootPath = join(root, "bindings/typescript/sysprims/package.json");
   const rootPackage = readJson(rootPath);
   rootPackage.version = version;
-  rootPackage.optionalDependencies ??= {};
-  for (const packageName of platformNames) {
-    rootPackage.optionalDependencies[packageName] = version;
-  }
   writeJsonAtomic(rootPath, rootPackage);
 
   for (let index = 0; index < nativeDirectories.length; index += 1) {
@@ -574,18 +537,8 @@ function updateJsonSurfaces(root, version) {
   }
   lock.version = version;
   lock.packages[""].version = version;
-  lock.packages[""].optionalDependencies ??= {};
   for (const packageName of platformNames) {
-    lock.packages[""].optionalDependencies[packageName] = version;
-    const resolutionKey = `node_modules/${packageName}`;
-    const resolution = lock.packages[resolutionKey];
-    if (
-      resolution &&
-      (plan.surfaces.typescript.lock_phase === "pre_registry" ||
-        resolution.version !== version)
-    ) {
-      delete lock.packages[resolutionKey];
-    }
+    delete lock.packages[`node_modules/${packageName}`];
   }
   writeJsonAtomic(lockPath, lock);
 }
