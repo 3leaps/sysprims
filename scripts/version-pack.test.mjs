@@ -483,6 +483,41 @@ test("root manifest shape: arrays, bundle booleans and overrides", () => {
   }
 });
 
+test("check refuses npm install overrides outside the lock", () => {
+  const tsDir = (root) => join(root, "bindings/typescript/sysprims");
+  const cases = [
+    ["shrinkwrap", (root) => writeJson(join(tsDir(root), "npm-shrinkwrap.json"), { lockfileVersion: 3, packages: {} }), /must not contain npm-shrinkwrap\.json/],
+    ["package .npmrc", (root) => writeFileSync(join(tsDir(root), ".npmrc"), "registry=https://evil.example/\n"), /must not contain \.npmrc/],
+    ...["preinstall", "install", "postinstall", "prepare", "dependencies", "prepublish"].map((name) => [
+      `${name} script`,
+      (root) => {
+        const path = join(tsDir(root), "package.json");
+        const pkg = readJson(path);
+        pkg.scripts = { ...(pkg.scripts ?? {}), [name]: "node -e 0" };
+        writeJson(path, pkg);
+      },
+      new RegExp(`must not define the ${name} install lifecycle script`),
+    ]),
+    ["malformed scripts", (root) => {
+      const path = join(tsDir(root), "package.json");
+      const pkg = readJson(path);
+      pkg.scripts = ["preinstall"];
+      writeJson(path, pkg);
+    }, /scripts is malformed/],
+  ];
+  for (const [label, mutate, expected] of cases) {
+    const root = createFixture();
+    mutate(root);
+    assert.match(version(root, "check").stderr, expected, label);
+  }
+  const root = createFixture();
+  const path = join(tsDir(root), "package.json");
+  const pkg = readJson(path);
+  pkg.scripts = { build: "tsc", test: "node --test", "platform-packages:set": "node scripts/set-platform-packages.js" };
+  writeJson(path, pkg);
+  assert.equal(version(root, "check").status, 0, "ordinary scripts are allowed");
+});
+
 test("check rejects platform packages in any root manifest dependency field", () => {
   for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
     const root = createFixture();

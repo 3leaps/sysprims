@@ -450,6 +450,39 @@ export function checkManifestPlatformDeps(manifest, label, errors) {
   }
 }
 
+// Files and scripts that change what `npm ci` installs without touching
+// package-lock.json: a shrinkwrap (npm prefers it), a package-level .npmrc
+// (it can point the registry elsewhere), and install lifecycle scripts.
+const npmInstallOverrideFiles = ["npm-shrinkwrap.json", ".npmrc"];
+const npmInstallLifecycleScripts = [
+  "preinstall",
+  "install",
+  "postinstall",
+  "dependencies",
+  "preprepare",
+  "prepare",
+  "postprepare",
+  "prepublish",
+];
+
+export function checkNpmInstallSurface(packageDir, manifest, errors) {
+  for (const file of npmInstallOverrideFiles) {
+    if (existsSync(join(packageDir, file))) {
+      errors.push(`TypeScript package must not contain ${file}`);
+    }
+  }
+  const scripts = manifest?.scripts;
+  if (scripts !== undefined && (scripts === null || typeof scripts !== "object" || Array.isArray(scripts))) {
+    errors.push("TypeScript root package scripts is malformed");
+    return;
+  }
+  for (const name of npmInstallLifecycleScripts) {
+    if (scripts && Object.hasOwn(scripts, name)) {
+      errors.push(`TypeScript root package must not define the ${name} install lifecycle script`);
+    }
+  }
+}
+
 function checkJson(root, expected, plan, errors) {
   const typescriptVersion = plannedVersion(plan.surfaces.typescript, expected);
   const rootPackage = readJson(
@@ -469,6 +502,11 @@ function checkJson(root, expected, plan, errors) {
     errors,
   );
   checkManifestPlatformDeps(rootPackage, "TypeScript root package", errors);
+  checkNpmInstallSurface(
+    join(root, "bindings/typescript/sysprims"),
+    rootPackage,
+    errors,
+  );
 
   for (let index = 0; index < nativeDirectories.length; index += 1) {
     const directory = nativeDirectories[index];
