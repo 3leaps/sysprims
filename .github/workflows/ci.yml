@@ -302,7 +302,10 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           test -z "$(gofmt -l .)"
-          ! grep -q '^replace' go.mod
+          if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
+            echo "go/recurrence/go.mod must not contain replace directives" >&2
+            exit 1
+          fi
           go vet ./...
           go test -count=1 ./...
       - name: Rust/Go agreement
