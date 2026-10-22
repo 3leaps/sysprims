@@ -310,6 +310,8 @@ function checkNoOptionalPins(value, label, errors) {
 // well-formed names.
 const registryTarballPrefix = "https://registry.npmjs.org/";
 // npm names: lowercase; an unscoped name may not start with "." or "_";
+// Legacy mixed-case registry names (JSONStream, Base64) and inBundle entries
+// without a resolved tarball are refused by design; none is in this tree.
 // scope and scoped package parts may start with "_". No part ends with a dot.
 const unscopedSegment = "[a-z0-9~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
 const scopedSegment = "[a-z0-9_~-](?:[a-z0-9._~-]*[a-z0-9_~-])?";
@@ -322,9 +324,18 @@ const sha512Re = /^sha512-[A-Za-z0-9+/]{86}==$/;
 // Strict SemVer 2.0 (semver.org). It cannot contain "/", so a version can
 // never alter the path of the tarball URL built from it.
 const semverRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-// Root dependency specs: anything npm reads as a registry range or tag, and
-// nothing that can name another source (no ":", "/" or "@").
-const registrySpecRe = /^[0-9A-Za-z.*^~<>=| +-]+$/;
+// Root dependency specs must be a registry range or a dist-tag. A range is
+// "||"-separated sets of space-separated comparators or hyphen ranges over
+// partial versions (x, X and * wildcards, optional leading v). A tag is an
+// identifier with no dot, so local paths and tarballs (".", "..", "a.tgz")
+// never match either form.
+const dotIdentifiers = "[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*";
+const partialVersion = `v?(?:[0-9]+|[xX*])(?:\\.(?:[0-9]+|[xX*])){0,2}(?:-${dotIdentifiers})?(?:\\+${dotIdentifiers})?`;
+const comparator = `(?:[<>]=?|=|\\^|~)?\\s*${partialVersion}`;
+const rangeSet = `(?:${partialVersion}\\s+-\\s+${partialVersion}|${comparator}(?:\\s+${comparator})*)`;
+const registryRangeRe = new RegExp(`^\\s*${rangeSet}(?:\\s*\\|\\|\\s*${rangeSet})*\\s*$`);
+const distTagRe = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const isRegistrySpec = (spec) => spec === "" || registryRangeRe.test(spec) || distTagRe.test(spec);
 
 // Keys are validated against installPathRe first, so components are
 // separated by "/node_modules/" and the first one follows "node_modules/".
@@ -440,20 +451,22 @@ export function checkManifestPlatformDeps(manifest, label, errors) {
       if (alias) {
         if (isPlatform(alias[1])) {
           errors.push(`${label}.${field} must not name platform package ${alias[1]}`);
-        } else if (!packageNameRe.test(alias[1]) || !registrySpecRe.test(alias[2])) {
+        } else if (!packageNameRe.test(alias[1]) || !isRegistrySpec(alias[2])) {
           errors.push(`${label}.${field}.${name} has an unsupported alias spec ${JSON.stringify(spec)}`);
         }
-      } else if (!registrySpecRe.test(spec)) {
+      } else if (!isRegistrySpec(spec)) {
         errors.push(`${label}.${field}.${name} has an unsupported spec ${JSON.stringify(spec)}; use a registry range`);
       }
     }
   }
 }
 
-// Files and scripts that change what `npm ci` installs without touching
-// package-lock.json: a shrinkwrap (npm prefers it), a package-level .npmrc
-// (it can point the registry elsewhere), and install lifecycle scripts.
-const npmInstallOverrideFiles = ["npm-shrinkwrap.json", ".npmrc"];
+// Files and scripts that change what `npm ci` installs or runs without
+// touching package-lock.json: a shrinkwrap (npm prefers it), a package-level
+// .npmrc (it can point the registry elsewhere), a binding.gyp (npm runs an
+// implicit node-gyp rebuild), and install or publish lifecycle scripts. CI
+// also passes --ignore-scripts to every npm ci.
+const npmInstallOverrideFiles = ["npm-shrinkwrap.json", ".npmrc", "binding.gyp"];
 const npmInstallLifecycleScripts = [
   "preinstall",
   "install",
@@ -463,6 +476,12 @@ const npmInstallLifecycleScripts = [
   "prepare",
   "postprepare",
   "prepublish",
+  // Publish-time hooks run inside the trusted-publish job.
+  "prepublishOnly",
+  "publish",
+  "postpublish",
+  "prepack",
+  "postpack",
 ];
 
 export function checkNpmInstallSurface(packageDir, manifest, errors) {

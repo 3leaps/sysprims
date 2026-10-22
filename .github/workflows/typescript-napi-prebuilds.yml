@@ -119,7 +119,7 @@ jobs:
         run: cargo install cargo-zigbuild --locked --version 0.23.4
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build .node files (zig)
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -163,7 +163,7 @@ jobs:
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -194,7 +194,7 @@ jobs:
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -225,7 +225,7 @@ jobs:
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: pwsh
@@ -257,7 +257,7 @@ jobs:
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build .node file
         working-directory: bindings/typescript/sysprims
         shell: pwsh
@@ -289,7 +289,7 @@ jobs:
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Install Node dependencies
         working-directory: bindings/typescript/sysprims
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build JS dist (root package)
         working-directory: bindings/typescript/sysprims
         run: npm run clean && npm run build && npm run build:native

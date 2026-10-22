@@ -447,10 +447,13 @@ test("root alias specs require a well-formed name and a registry range", () => {
 });
 
 test("root specs accept every npm registry range form and refuse other sources", () => {
-  const good = ["*", "1.x", "1.2.*", ">=1 <2", "^1 || ^2", "1.0.0 - 2.0.0", "v1.2.3", "latest",
-    ">= 2.1.2 < 3.0.0", "^1.7.1 || ^2.0.0-alpha.4", "3.10.8", "npm:typescript@^6", "npm:@scope/_pkg@1.x"];
+  const good = ["*", "", "x", "1.x", "1.2.*", ">=1 <2", "^1 || ^2", "1.0.0 - 2.0.0", "v1.2.3", "latest",
+    ">= 2.1.2 < 3.0.0", "^1.7.1 || ^2.0.0-alpha.4", "3.10.8", "~1.2.3", "=1.2.3", "1.2.3-rc.1+build.5",
+    "my_tag", "release_1", "next", "npm:typescript@^6", "npm:@scope/_pkg@1.x", "npm:left-pad@latest"];
   const bad = ["https://registry.npmjs.org/x/-/x-1.0.0.tgz", "file:../x", "git+https://e.example/x.git",
-    "github:a/b", "a/b", "x@1.0.0", "link:../x", "npm:x@file:../y"];
+    "github:a/b", "a/b", "x@1.0.0", "link:../x", "npm:x@file:../y",
+    ".", "..", ".hidden", "foo.tgz", "foo.tar.gz", "addon.tar", "*.tgz", " foo.tgz", "1.2.3.tgz",
+    "npm:left-pad@..", "npm:left-pad@foo.tgz", "^^1.2.3", "1.2.3-..", "1 ||", "- 1.2.3"];
   for (const spec of good) {
     const errors = [];
     checkManifestPlatformDeps({ dependencies: { left: spec } }, "m", errors);
@@ -488,7 +491,9 @@ test("check refuses npm install overrides outside the lock", () => {
   const cases = [
     ["shrinkwrap", (root) => writeJson(join(tsDir(root), "npm-shrinkwrap.json"), { lockfileVersion: 3, packages: {} }), /must not contain npm-shrinkwrap\.json/],
     ["package .npmrc", (root) => writeFileSync(join(tsDir(root), ".npmrc"), "registry=https://evil.example/\n"), /must not contain \.npmrc/],
-    ...["preinstall", "install", "postinstall", "prepare", "dependencies", "prepublish"].map((name) => [
+    ["binding.gyp", (root) => writeFileSync(join(tsDir(root), "binding.gyp"), "{}\n"), /must not contain binding\.gyp/],
+    ...["preinstall", "install", "postinstall", "dependencies", "preprepare", "prepare", "postprepare", "prepublish",
+      "prepublishOnly", "publish", "postpublish", "prepack", "postpack"].map((name) => [
       `${name} script`,
       (root) => {
         const path = join(tsDir(root), "package.json");

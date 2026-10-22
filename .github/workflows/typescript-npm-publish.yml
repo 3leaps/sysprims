@@ -136,7 +136,7 @@ jobs:
       - name: Build root package
         working-directory: bindings/typescript/sysprims
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npm run build
       - name: Point the root package at the same-commit platform packages
         working-directory: bindings/typescript/sysprims

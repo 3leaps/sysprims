@@ -80,7 +80,7 @@ jobs:
         working-directory: bindings/typescript/sysprims
         # package.json lists no platform packages (they are injected at
         # publish time), so the lock file installs as-is.
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build package, native addon, and behavior tests
         working-directory: bindings/typescript/sysprims
         run: npm run clean && npm run build && npm run build:native && npm run build:test
@@ -141,7 +141,7 @@ jobs:
         working-directory: bindings/typescript/sysprims
         # package.json lists no platform packages (they are injected at
         # publish time), so the lock file installs as-is.
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Install musl toolchain
         if: endsWith(matrix.target, '-musl')
         run: sudo apt-get update && sudo apt-get install --yes musl-tools
@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           . "$HOME/.cargo/env"
-          npm ci
+          npm ci --ignore-scripts
       - name: Test
         working-directory: bindings/typescript/sysprims
         shell: bash
