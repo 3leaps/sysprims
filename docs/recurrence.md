@@ -1,9 +1,10 @@
 # Recurrence rules
 
 `sysprims-recurrence` (Rust) and `go/recurrence` (pure Go) implement
-[`contract: recurrence/v0`](https://github.com/3leaps/crucible/blob/main/docs/standards/recurrence-rule-contract.md):
+[`contract: recurrence/v0`](https://github.com/3leaps/crucible/blob/v0.2.0/docs/standards/recurrence-rule-contract.md):
 a frozen subset of RFC 5545 RRULE with one canonical JSON form, a digest, and
-expansion semantics. The contract is normative; this page summarizes it.
+expansion semantics, as published in crucible v0.2.0. The contract is
+normative; this page summarizes it.
 
 ## Supported subset
 
@@ -21,9 +22,13 @@ lines are refused, never ignored.
   offset) in the rule's `TZID`. `UNTIL` is an inclusive UTC instant.
 - Results are UTC instants with zero fractional seconds.
 - **Generated times in a DST gap are skipped** and consume no `COUNT`. A skipped
-  time is a non-slot: a scheduler must not record it as missed.
+  time is a non-slot: it has no slot identity, and a scheduler must not record
+  it as missed, late, or any other outcome. Expansion never returns it.
 - **Explicit times in a gap** (`DTSTART`, `RDATE`, `EXDATE`) use the offset before
   the gap. **Overlaps** always resolve to the earlier instant.
+- There is no configurable shift policy. A shift-forward behaviour, if one is
+  ever added, would be a separately named policy that is part of the rule's
+  identity and digest; it would never change the meaning of an existing rule.
 - Time-zone names are exact. `Europe/Oslo` is accepted and stays distinct from
   `Europe/Berlin`; Link-only aliases such as `US/Eastern` and `UTC` are refused
   (use `Etc/UTC`).
@@ -63,7 +68,7 @@ corpus for the pair:
 | `sha256:69387023c21ca147f2dd59c4e47f48447f5eb3ad77121975aab0e4fe0680b35b` | `2026e` |
 
 The corpus is vendored under `crates/sysprims-recurrence/tests/recurrence-v0`
-by `scripts/sync-recurrence-corpus.sh <crucible-ref>`, which verifies every file
-against the manifest; `PIN` records the crucible commit. CI also compares the
+by `scripts/sync-recurrence-corpus.sh v0.2.0`, which verifies every file
+against the manifest; `PIN` records the crucible tag and commit. CI also compares the
 two implementations' canonical bytes, digests, text and every query result
 byte for byte.
