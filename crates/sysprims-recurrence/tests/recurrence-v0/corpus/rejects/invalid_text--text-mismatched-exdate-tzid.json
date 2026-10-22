@@ -1,0 +1,9 @@
+{
+  "description": "RDATE and EXDATE use the rule's TZID.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=DAILY;COUNT=2",
+    "EXDATE;TZID=Asia/Tokyo:20260106T090000"
+  ],
+  "reason": "invalid_text"
+}

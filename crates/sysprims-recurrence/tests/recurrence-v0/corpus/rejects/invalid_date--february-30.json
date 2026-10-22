@@ -1,0 +1,10 @@
+{
+  "description": "A schema-valid string naming a date that does not exist.",
+  "rule": {
+    "dtstart": "2026-02-30T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 2
+  },
+  "reason": "invalid_date"
+}

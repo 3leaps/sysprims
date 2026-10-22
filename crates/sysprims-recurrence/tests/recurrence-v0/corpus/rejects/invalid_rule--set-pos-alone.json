@@ -1,0 +1,12 @@
+{
+  "description": "BYSETPOS requires another BY-part.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "by_set_pos": [
+      1
+    ]
+  },
+  "reason": "invalid_rule"
+}

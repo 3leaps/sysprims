@@ -1,0 +1,54 @@
+{
+  "description": "An RDATE may precede DTSTART; DTSTART bounds the RRULE only.",
+  "rule": {
+    "dtstart": "2026-01-02T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 1,
+    "rdate": [
+      "2026-01-01T09:00:00"
+    ]
+  },
+  "canonical": {
+    "dtstart": "2026-01-02T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 1,
+    "rdate": [
+      "2026-01-01T09:00:00"
+    ]
+  },
+  "digest": "sha256:acc988d49ff24c5c185b38dc35671ea32e2c3dcc2cb7f7941b526c518b730a4e",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260102T090000",
+    "RRULE:FREQ=DAILY;COUNT=1",
+    "RDATE;TZID=Etc/UTC:20260101T090000"
+  ],
+  "queries": [
+    {
+      "from": "2025-12-01T00:00:00Z",
+      "to": "2026-02-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-01T09:00:00Z",
+        "2026-01-02T09:00:00Z"
+      ]
+    },
+    {
+      "from": "2026-01-01T09:00:00Z",
+      "to": "2026-01-01T09:00:00Z",
+      "limit": 10,
+      "expected": []
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2025-12-31T00:00:00Z",
+      "expected": "2026-01-01T09:00:00Z"
+    },
+    {
+      "after": "2026-01-02T09:00:00Z",
+      "expected": null
+    }
+  ]
+}

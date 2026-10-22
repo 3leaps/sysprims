@@ -1,0 +1,52 @@
+{
+  "description": "Periods past the search horizon are never resolved, so a BYSETPOS rule near the end of the evidence window still answers queries the evidence supports.",
+  "rule": {
+    "dtstart": "2030-01-01T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "by_month": [
+      1
+    ],
+    "by_month_day": [
+      1
+    ],
+    "by_set_pos": [
+      1
+    ]
+  },
+  "canonical": {
+    "dtstart": "2030-01-01T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "by_month": [
+      1
+    ],
+    "by_month_day": [
+      1
+    ],
+    "by_set_pos": [
+      1
+    ]
+  },
+  "digest": "sha256:389337bbc8f9898810c51a41354f13d2adda80c5032d80547f98da1dc40aafe0",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20300101T090000",
+    "RRULE:FREQ=YEARLY;BYMONTH=1;BYMONTHDAY=1;BYSETPOS=1"
+  ],
+  "queries": [
+    {
+      "from": "2030-01-01T00:00:00Z",
+      "to": "2030-01-02T00:00:00Z",
+      "limit": 1,
+      "expected": [
+        "2030-01-01T09:00:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2029-12-31T00:00:00Z",
+      "expected": "2030-01-01T09:00:00Z"
+    }
+  ]
+}

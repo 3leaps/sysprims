@@ -1,0 +1,11 @@
+{
+  "description": "COUNT and UNTIL are mutually exclusive.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 2,
+    "until": "2026-02-01T00:00:00Z"
+  },
+  "reason": "invalid_rule"
+}

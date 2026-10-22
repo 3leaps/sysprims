@@ -1,0 +1,8 @@
+{
+  "description": "Unsupported RRULE parts are refused, never ignored.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=YEARLY;BYWEEKNO=20;COUNT=2"
+  ],
+  "reason": "unsupported_part"
+}

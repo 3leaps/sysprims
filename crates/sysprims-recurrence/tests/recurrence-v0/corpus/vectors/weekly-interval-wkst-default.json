@@ -1,0 +1,52 @@
+{
+  "description": "The same rule with the default WKST=MO selects different Sundays.",
+  "rule": {
+    "dtstart": "2026-08-04T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "interval": 2,
+    "by_day": [
+      {
+        "day": "TU"
+      },
+      {
+        "day": "SU"
+      }
+    ],
+    "count": 4
+  },
+  "canonical": {
+    "dtstart": "2026-08-04T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "interval": 2,
+    "by_day": [
+      {
+        "day": "TU"
+      },
+      {
+        "day": "SU"
+      }
+    ],
+    "count": 4
+  },
+  "digest": "sha256:c3f8cff3ef169c4cb099e9edb95f2f95e6456cfd4290da6ed5ca8494f3356ace",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260804T090000",
+    "RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU"
+  ],
+  "queries": [
+    {
+      "from": "2026-08-01T00:00:00Z",
+      "to": "2026-09-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-08-04T09:00:00Z",
+        "2026-08-09T09:00:00Z",
+        "2026-08-18T09:00:00Z",
+        "2026-08-23T09:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

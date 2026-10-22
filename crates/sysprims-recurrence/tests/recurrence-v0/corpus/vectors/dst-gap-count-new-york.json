@@ -1,0 +1,43 @@
+{
+  "description": "Daily 02:30 across the 2026-03-08 spring-forward gap: the gap day is skipped and does not consume COUNT.",
+  "rule": {
+    "dtstart": "2026-03-06T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "count": 4
+  },
+  "canonical": {
+    "dtstart": "2026-03-06T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "count": 4
+  },
+  "digest": "sha256:ad96cdfe6d3065c9b217edb24b747bca19b86f84740d8a3672eb0b09c11c167a",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260306T023000",
+    "RRULE:FREQ=DAILY;COUNT=4"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-03-06T07:30:00Z",
+        "2026-03-07T07:30:00Z",
+        "2026-03-09T06:30:00Z",
+        "2026-03-10T06:30:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2026-03-07T07:30:00Z",
+      "expected": "2026-03-09T06:30:00Z"
+    },
+    {
+      "after": "2026-03-10T06:30:00Z",
+      "expected": null
+    }
+  ]
+}

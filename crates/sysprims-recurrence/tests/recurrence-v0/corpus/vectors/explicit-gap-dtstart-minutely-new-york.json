@@ -1,0 +1,32 @@
+{
+  "description": "An explicit gap DTSTART resolves with the pre-gap offset (07:59Z); generated instances at or before it in UTC are ineligible, so 03:00-03:59 EDT are skipped.",
+  "rule": {
+    "dtstart": "2026-03-08T02:59:00",
+    "tzid": "America/New_York",
+    "freq": "MINUTELY",
+    "count": 2
+  },
+  "canonical": {
+    "dtstart": "2026-03-08T02:59:00",
+    "tzid": "America/New_York",
+    "freq": "MINUTELY",
+    "count": 2
+  },
+  "digest": "sha256:3e93feb251650e14c8fb31321770518d61cad007e90ad757ab128f9391ee0277",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260308T025900",
+    "RRULE:FREQ=MINUTELY;COUNT=2"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-08T00:00:00Z",
+      "to": "2026-03-09T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-03-08T07:59:00Z",
+        "2026-03-08T08:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

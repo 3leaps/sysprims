@@ -1,0 +1,62 @@
+{
+  "description": "Weekly Monday/Wednesday/Friday in a zone without DST.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Asia/Tokyo",
+    "freq": "WEEKLY",
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "WE"
+      },
+      {
+        "day": "FR"
+      }
+    ],
+    "count": 5
+  },
+  "canonical": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Asia/Tokyo",
+    "freq": "WEEKLY",
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "WE"
+      },
+      {
+        "day": "FR"
+      }
+    ],
+    "count": 5
+  },
+  "digest": "sha256:861ebf18f340998b533f301a3e7b2bf60dfdf1df3c5d58bb5192d0489b47ee09",
+  "text": [
+    "DTSTART;TZID=Asia/Tokyo:20260105T090000",
+    "RRULE:FREQ=WEEKLY;COUNT=5;BYDAY=MO,WE,FR"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-02-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-05T00:00:00Z",
+        "2026-01-07T00:00:00Z",
+        "2026-01-09T00:00:00Z",
+        "2026-01-12T00:00:00Z",
+        "2026-01-14T00:00:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2026-01-09T00:00:00Z",
+      "expected": "2026-01-12T00:00:00Z"
+    }
+  ]
+}

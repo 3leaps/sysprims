@@ -1,0 +1,16 @@
+{
+  "capabilities": [
+    "contract: recurrence/v0"
+  ],
+  "rule": {
+    "by_day": [
+      {
+        "day": "TH",
+        "ordinal": 1
+      }
+    ],
+    "dtstart": "2026-11-05T06:00:00",
+    "freq": "MONTHLY",
+    "tzid": "America/New_York"
+  }
+}

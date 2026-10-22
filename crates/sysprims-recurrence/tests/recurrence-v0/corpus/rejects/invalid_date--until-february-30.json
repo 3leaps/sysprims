@@ -1,0 +1,10 @@
+{
+  "description": "UNTIL requires a valid Gregorian date as well as UTC syntax.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "until": "2026-02-30T09:00:00Z"
+  },
+  "reason": "invalid_date"
+}

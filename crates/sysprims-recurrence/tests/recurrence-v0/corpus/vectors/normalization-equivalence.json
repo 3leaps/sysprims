@@ -1,0 +1,64 @@
+{
+  "description": "Defaults, duplicates, empty lists and BYDAY order are normalized away before JCS; the digest equals that of the minimal rule.",
+  "rule": {
+    "dtstart": "2026-04-06T08:00:00",
+    "tzid": "America/Winnipeg",
+    "freq": "WEEKLY",
+    "interval": 1,
+    "wkst": "MO",
+    "calendar": "gregorian",
+    "by_day": [
+      {
+        "day": "WE"
+      },
+      {
+        "day": "MO"
+      },
+      {
+        "day": "WE"
+      }
+    ],
+    "by_hour": [
+      8,
+      8
+    ],
+    "count": 4,
+    "exdate": []
+  },
+  "canonical": {
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "WE"
+      }
+    ],
+    "by_hour": [
+      8
+    ],
+    "count": 4,
+    "dtstart": "2026-04-06T08:00:00",
+    "freq": "WEEKLY",
+    "tzid": "America/Winnipeg"
+  },
+  "digest": "sha256:613150bba6ed7c0740d732924abdeee063ef747680f77622dd9b2a559c57ee45",
+  "text": [
+    "DTSTART;TZID=America/Winnipeg:20260406T080000",
+    "RRULE:FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE;BYHOUR=8"
+  ],
+  "queries": [
+    {
+      "from": "2026-04-01T00:00:00Z",
+      "to": "2026-05-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-04-06T13:00:00Z",
+        "2026-04-08T13:00:00Z",
+        "2026-04-13T13:00:00Z",
+        "2026-04-15T13:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

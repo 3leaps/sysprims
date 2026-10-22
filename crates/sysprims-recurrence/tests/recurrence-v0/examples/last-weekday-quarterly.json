@@ -1,0 +1,31 @@
+{
+  "by_day": [
+    {
+      "day": "MO"
+    },
+    {
+      "day": "TU"
+    },
+    {
+      "day": "WE"
+    },
+    {
+      "day": "TH"
+    },
+    {
+      "day": "FR"
+    }
+  ],
+  "by_month": [
+    3,
+    6,
+    9,
+    12
+  ],
+  "by_set_pos": [
+    -1
+  ],
+  "dtstart": "2026-12-31T17:00:00",
+  "freq": "MONTHLY",
+  "tzid": "Europe/Berlin"
+}

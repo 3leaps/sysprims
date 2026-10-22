@@ -1,0 +1,44 @@
+{
+  "description": "The sixth Monday selects no date in a month; unqualified Mondays still select their dates. Both selectors remain in identity.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "MO",
+        "ordinal": 6
+      }
+    ],
+    "count": 3
+  },
+  "canonical": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "MO",
+        "ordinal": 6
+      }
+    ],
+    "count": 3
+  },
+  "digest": "sha256:5b33a334d3d71da043def06b10e5825d3f041d3a7adc7b110e7dca52844b5998",
+  "text": ["DTSTART;TZID=Etc/UTC:20260105T090000", "RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=MO,6MO"],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": ["2026-01-05T09:00:00Z", "2026-01-12T09:00:00Z", "2026-01-19T09:00:00Z"]
+    }
+  ],
+  "next_after": []
+}

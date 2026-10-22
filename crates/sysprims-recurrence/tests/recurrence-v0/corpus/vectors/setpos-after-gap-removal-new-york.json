@@ -1,0 +1,55 @@
+{
+  "description": "Gap times are removed before BYSETPOS: on 2026-03-08 the candidates are 01:30 and 03:30, so position 2 is 03:30.",
+  "rule": {
+    "dtstart": "2026-03-07T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "by_hour": [
+      1,
+      2,
+      3
+    ],
+    "by_minute": [
+      30
+    ],
+    "by_set_pos": [
+      2
+    ],
+    "count": 3
+  },
+  "canonical": {
+    "dtstart": "2026-03-07T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "by_hour": [
+      1,
+      2,
+      3
+    ],
+    "by_minute": [
+      30
+    ],
+    "by_set_pos": [
+      2
+    ],
+    "count": 3
+  },
+  "digest": "sha256:b2844c2015e2789e92d32c5752c9c26650e6b8454363fb9e0b0eb3e0a055f505",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260307T023000",
+    "RRULE:FREQ=DAILY;COUNT=3;BYHOUR=1,2,3;BYMINUTE=30;BYSETPOS=2"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-03-07T07:30:00Z",
+        "2026-03-08T07:30:00Z",
+        "2026-03-09T06:30:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

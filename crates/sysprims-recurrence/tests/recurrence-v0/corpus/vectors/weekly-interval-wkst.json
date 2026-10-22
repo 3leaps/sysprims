@@ -1,0 +1,54 @@
+{
+  "description": "INTERVAL=2 with WKST=SU (RFC 5545 section 3.3.10 example shape).",
+  "rule": {
+    "dtstart": "2026-08-04T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "interval": 2,
+    "by_day": [
+      {
+        "day": "TU"
+      },
+      {
+        "day": "SU"
+      }
+    ],
+    "wkst": "SU",
+    "count": 4
+  },
+  "canonical": {
+    "dtstart": "2026-08-04T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "interval": 2,
+    "by_day": [
+      {
+        "day": "TU"
+      },
+      {
+        "day": "SU"
+      }
+    ],
+    "wkst": "SU",
+    "count": 4
+  },
+  "digest": "sha256:ad5fab6993eb5fe3fa1331fac8fc22cc6fdda37b9a967f28738e06dccc964eca",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260804T090000",
+    "RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU;WKST=SU"
+  ],
+  "queries": [
+    {
+      "from": "2026-08-01T00:00:00Z",
+      "to": "2026-09-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-08-04T09:00:00Z",
+        "2026-08-16T09:00:00Z",
+        "2026-08-18T09:00:00Z",
+        "2026-08-30T09:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

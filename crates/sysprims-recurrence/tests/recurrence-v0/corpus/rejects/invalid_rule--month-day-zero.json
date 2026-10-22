@@ -1,0 +1,12 @@
+{
+  "description": "BYMONTHDAY 0 is not a day.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_month_day": [
+      0
+    ]
+  },
+  "reason": "invalid_rule"
+}

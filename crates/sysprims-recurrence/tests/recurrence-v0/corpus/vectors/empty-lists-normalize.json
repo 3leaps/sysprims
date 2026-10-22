@@ -1,0 +1,34 @@
+{
+  "description": "Every empty list is absent after normalization, including weekly month-day and set-position lists.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "count": 2,
+    "by_day": [],
+    "by_month": [],
+    "by_month_day": [],
+    "by_hour": [],
+    "by_minute": [],
+    "by_set_pos": [],
+    "rdate": [],
+    "exdate": []
+  },
+  "canonical": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "count": 2
+  },
+  "digest": "sha256:a3b12cfa96a679494888e7b1cea4833cddd05ca56a7abb2368f1a3b0ae30f9d9",
+  "text": ["DTSTART;TZID=Etc/UTC:20260105T090000", "RRULE:FREQ=WEEKLY;COUNT=2"],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": ["2026-01-05T09:00:00Z", "2026-01-12T09:00:00Z"]
+    }
+  ],
+  "next_after": []
+}

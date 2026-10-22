@@ -1,0 +1,12 @@
+{
+  "description": "BYWEEKNO is outside the frozen subset.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "by_week_no": [
+      20
+    ]
+  },
+  "reason": "invalid_rule"
+}

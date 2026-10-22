@@ -1,0 +1,37 @@
+{
+  "description": "A yearly rule on February 29 occurs only in leap years.",
+  "rule": {
+    "dtstart": "2024-02-29T00:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "count": 2
+  },
+  "canonical": {
+    "dtstart": "2024-02-29T00:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "count": 2
+  },
+  "digest": "sha256:f2845dc8cbc0e5323d5087362c141e7f5720d571353fdfd435843f87f7262e9b",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20240229T000000",
+    "RRULE:FREQ=YEARLY;COUNT=2"
+  ],
+  "queries": [
+    {
+      "from": "2024-01-01T00:00:00Z",
+      "to": "2029-01-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2024-02-29T00:00:00Z",
+        "2028-02-29T00:00:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2024-02-29T00:00:00Z",
+      "expected": "2028-02-29T00:00:00Z"
+    }
+  ]
+}

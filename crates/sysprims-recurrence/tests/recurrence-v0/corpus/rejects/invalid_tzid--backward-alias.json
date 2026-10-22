@@ -1,0 +1,10 @@
+{
+  "description": "A backward-compatibility alias that is not a location name.",
+  "rule": {
+    "dtstart": "2026-03-06T02:30:00",
+    "tzid": "US/Eastern",
+    "freq": "DAILY",
+    "count": 2
+  },
+  "reason": "invalid_tzid"
+}

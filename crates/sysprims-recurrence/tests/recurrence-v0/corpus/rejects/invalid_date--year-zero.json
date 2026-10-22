@@ -1,0 +1,9 @@
+{
+  "description": "Year zero is outside the Gregorian date-time profile.",
+  "rule": {
+    "dtstart": "0000-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY"
+  },
+  "reason": "invalid_date"
+}

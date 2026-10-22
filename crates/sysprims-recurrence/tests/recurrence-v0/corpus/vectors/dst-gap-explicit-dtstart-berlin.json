@@ -1,0 +1,33 @@
+{
+  "description": "An explicit DTSTART inside the 2026-03-29 gap uses the pre-gap offset (+01:00); later generated instances use CEST.",
+  "rule": {
+    "dtstart": "2026-03-29T02:30:00",
+    "tzid": "Europe/Berlin",
+    "freq": "DAILY",
+    "count": 3
+  },
+  "canonical": {
+    "dtstart": "2026-03-29T02:30:00",
+    "tzid": "Europe/Berlin",
+    "freq": "DAILY",
+    "count": 3
+  },
+  "digest": "sha256:37cb7345c22dd6edb58eacf93b7e8232fefec3001866b1cc0de626b29a831681",
+  "text": [
+    "DTSTART;TZID=Europe/Berlin:20260329T023000",
+    "RRULE:FREQ=DAILY;COUNT=3"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-03-29T01:30:00Z",
+        "2026-03-30T00:30:00Z",
+        "2026-03-31T00:30:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

@@ -1,0 +1,43 @@
+{
+  "description": "Negative BYMONTHDAY counts from month end (31, 28, ...).",
+  "rule": {
+    "dtstart": "2026-01-01T18:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_month_day": [
+      -1,
+      1
+    ],
+    "count": 5
+  },
+  "canonical": {
+    "dtstart": "2026-01-01T18:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_month_day": [
+      -1,
+      1
+    ],
+    "count": 5
+  },
+  "digest": "sha256:3a0a5d63fd676715fc541dd0aeafd6ba28f69ec87c97801df6fbd801f85e5652",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260101T180000",
+    "RRULE:FREQ=MONTHLY;COUNT=5;BYMONTHDAY=-1,1"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-01T18:00:00Z",
+        "2026-01-31T18:00:00Z",
+        "2026-02-01T18:00:00Z",
+        "2026-02-28T18:00:00Z",
+        "2026-03-01T18:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

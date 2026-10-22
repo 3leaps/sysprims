@@ -1,0 +1,8 @@
+{
+  "description": "Text COUNT within the lexeme bound but over the schema bound.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=DAILY;COUNT=100001"
+  ],
+  "reason": "invalid_rule"
+}

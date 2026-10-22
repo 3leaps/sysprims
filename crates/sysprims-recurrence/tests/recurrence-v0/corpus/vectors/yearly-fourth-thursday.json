@@ -1,0 +1,51 @@
+{
+  "description": "Fourth Thursday of November.",
+  "rule": {
+    "dtstart": "2026-11-26T12:00:00",
+    "tzid": "America/New_York",
+    "freq": "YEARLY",
+    "by_month": [
+      11
+    ],
+    "by_day": [
+      {
+        "day": "TH",
+        "ordinal": 4
+      }
+    ],
+    "count": 3
+  },
+  "canonical": {
+    "dtstart": "2026-11-26T12:00:00",
+    "tzid": "America/New_York",
+    "freq": "YEARLY",
+    "by_month": [
+      11
+    ],
+    "by_day": [
+      {
+        "day": "TH",
+        "ordinal": 4
+      }
+    ],
+    "count": 3
+  },
+  "digest": "sha256:355bd67dec1e800f68a2ab124eba7f80295944de662e849c4aa5a6c07a30aedb",
+  "text": [
+    "DTSTART;TZID=America/New_York:20261126T120000",
+    "RRULE:FREQ=YEARLY;COUNT=3;BYMONTH=11;BYDAY=4TH"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2029-01-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-11-26T17:00:00Z",
+        "2027-11-25T17:00:00Z",
+        "2028-11-23T17:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

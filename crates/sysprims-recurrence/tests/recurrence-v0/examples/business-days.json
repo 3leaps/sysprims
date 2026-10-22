@@ -1,0 +1,22 @@
+{
+  "by_day": [
+    {
+      "day": "MO"
+    },
+    {
+      "day": "TU"
+    },
+    {
+      "day": "WE"
+    },
+    {
+      "day": "TH"
+    },
+    {
+      "day": "FR"
+    }
+  ],
+  "dtstart": "2026-11-02T18:30:00",
+  "freq": "WEEKLY",
+  "tzid": "America/New_York"
+}

@@ -1,0 +1,39 @@
+{
+  "description": "An empty BYMONTH is absent: the sixth Monday is counted within the year, February 9 in 2026 and February 8 in 2027.",
+  "rule": {
+    "dtstart": "2026-02-09T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "by_day": [
+      {
+        "day": "MO",
+        "ordinal": 6
+      }
+    ],
+    "count": 2,
+    "by_month": []
+  },
+  "canonical": {
+    "dtstart": "2026-02-09T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "YEARLY",
+    "by_day": [
+      {
+        "day": "MO",
+        "ordinal": 6
+      }
+    ],
+    "count": 2
+  },
+  "digest": "sha256:ed037b30cda256cde1d036633eb697d46dbf2031584abdabb18607e45c51f160",
+  "text": ["DTSTART;TZID=Etc/UTC:20260209T090000", "RRULE:FREQ=YEARLY;COUNT=2;BYDAY=6MO"],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2028-01-01T00:00:00Z",
+      "limit": 10,
+      "expected": ["2026-02-09T09:00:00Z", "2027-02-08T09:00:00Z"]
+    }
+  ],
+  "next_after": []
+}

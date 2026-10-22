@@ -1,0 +1,34 @@
+{
+  "description": "A monthly rule on the 31st skips months without a 31st; it is never clamped.",
+  "rule": {
+    "dtstart": "2026-01-31T10:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "count": 4
+  },
+  "canonical": {
+    "dtstart": "2026-01-31T10:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "count": 4
+  },
+  "digest": "sha256:abab472c82b388cb398692faa9a9621c75703eb9ed626688ddd1e95f20e90a08",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260131T100000",
+    "RRULE:FREQ=MONTHLY;COUNT=4"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-08-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-31T10:00:00Z",
+        "2026-03-31T10:00:00Z",
+        "2026-05-31T10:00:00Z",
+        "2026-07-31T10:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

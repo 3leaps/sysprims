@@ -1,0 +1,10 @@
+{
+  "description": "WEEKLY cannot combine with a nonempty BYMONTHDAY.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "by_month_day": [5]
+  },
+  "reason": "invalid_rule"
+}

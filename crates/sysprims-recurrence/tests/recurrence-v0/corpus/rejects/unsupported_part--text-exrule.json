@@ -1,0 +1,9 @@
+{
+  "description": "EXRULE is not supported.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=DAILY;COUNT=2",
+    "EXRULE:FREQ=WEEKLY"
+  ],
+  "reason": "unsupported_part"
+}
