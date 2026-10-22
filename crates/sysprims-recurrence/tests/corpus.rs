@@ -4,10 +4,11 @@
 //! comparison stream (one line per vector, sorted by file name).
 
 use std::fs;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use sysprims_recurrence::{RecurrenceRule, CORPUS_DIGEST};
+use sysprims_recurrence::{Instant, RecurrenceRule, CORPUS_DIGEST};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/recurrence-v0")
@@ -138,8 +139,40 @@ fn accept_vectors() {
             Ok(r) if r == rule => {}
             other => fail(format!("json round trip {other:?}")),
         }
-        // Query and next_after expectations need the expansion engine.
-        let results: Vec<serde_json::Value> = Vec::new();
+        let mut results = Vec::new();
+        for q in v["queries"].as_array().unwrap() {
+            let from = Instant::parse(q["from"].as_str().unwrap()).unwrap();
+            let to = Instant::parse(q["to"].as_str().unwrap()).unwrap();
+            let limit = NonZeroU32::new(q["limit"].as_u64().unwrap() as u32).unwrap();
+            let got: Vec<String> = match rule.expand(from, to, limit) {
+                Ok(v) => v.iter().map(Instant::to_string).collect(),
+                Err(e) => vec![format!("error: {e:?}")],
+            };
+            let want: Vec<&str> = q["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_str().unwrap())
+                .collect();
+            if got != want {
+                fail(format!(
+                    "expand {from}..{to} limit {limit}: {got:?} != {want:?}"
+                ));
+            }
+            results.push(serde_json::json!({"kind": "expand", "from": from.to_string(), "to": to.to_string(), "limit": limit.get(), "result": got}));
+        }
+        for na in v["next_after"].as_array().unwrap() {
+            let after = Instant::parse(na["after"].as_str().unwrap()).unwrap();
+            let got = match rule.next_after(after) {
+                Ok(Some(i)) => serde_json::Value::String(i.to_string()),
+                Ok(None) => serde_json::Value::Null,
+                Err(e) => serde_json::Value::String(format!("error: {e:?}")),
+            };
+            if got != na["expected"] {
+                fail(format!("next_after {after}: {got} != {}", na["expected"]));
+            }
+            results.push(serde_json::json!({"kind": "next_after", "after": after.to_string(), "result": got}));
+        }
         lines.push(serde_json::json!({
             "vector": name,
             "canonical": canonical,
@@ -183,10 +216,6 @@ fn reject_vectors() {
             want,
             "{name}: file name and reason disagree"
         );
-        if want == "dtstart_not_synchronized" {
-            // Synchronization is judged by the expansion engine.
-            continue;
-        }
         match input_rule(&v) {
             Ok(r) => failures.push(format!(
                 "{name}: accepted as {}",

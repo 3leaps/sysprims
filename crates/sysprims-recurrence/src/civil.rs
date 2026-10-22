@@ -49,7 +49,6 @@ pub(crate) fn days_in_month(year: i32, month: u8) -> u8 {
 }
 
 /// Weekday index of a day count, Monday = 0 .. Sunday = 6.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn weekday_of_days(days: i64) -> u8 {
     // 1970-01-01 was a Thursday (index 3).
     (days + 3).rem_euclid(7) as u8

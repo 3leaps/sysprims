@@ -61,7 +61,8 @@ tracing-subscriber = { version = "0.3" }
 # CLI Dependencies
 clap = { version = "4.5", features = ["derive", "env"] }
 
-
+# Recurrence (time-zone arithmetic over the pinned tzdb bundle; no host lookup)
+jiff = { version = "0.2.37", default-features = false, features = ["std"] }
 sha2 = "0.10.9"
 
 # Error Handling

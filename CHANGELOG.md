@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sysprims-recurrence` crate: RFC 5545 recurrence rules under
+  `contract: recurrence/v0` with canonical JSON (RFC 8785), digest, canonical
+  text, and expansion into UTC instants over an embedded tzdb 2026e bundle.
+  Passes the recurrence/v0 conformance corpus
+  (`sha256:69387023c21ca147f2dd59c4e47f48447f5eb3ad77121975aab0e4fe0680b35b`,
+  tzdb `2026e`). Go twin pending.
+
 ## [0.2.4] - 2026-09-19
 
 ### Added

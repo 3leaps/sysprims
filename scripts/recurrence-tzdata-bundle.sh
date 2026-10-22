@@ -38,10 +38,13 @@ trap 'rm -rf "$work"' EXIT
 for kind in tzdata tzcode; do
   file="${kind}${TZ_VERSION}.tar.gz"
   curl -fsSL --proto '=https' --tlsv1.2 -o "${work}/${file}" "${BASE_URL}/${file}"
-  want="TZDATA_SHA256"; [[ "$kind" == tzcode ]] && want="TZCODE_SHA256"
+  case "$kind" in
+    tzdata) want="$TZDATA_SHA256" ;;
+    tzcode) want="$TZCODE_SHA256" ;;
+  esac
   got="$(sha256 "${work}/${file}")"
-  if [[ "$got" != "${!want}" ]]; then
-    echo "error: ${file} sha256 ${got} does not match pin ${!want}" >&2; exit 1
+  if [[ "$got" != "$want" ]]; then
+    echo "error: ${file} sha256 ${got} does not match pin ${want}" >&2; exit 1
   fi
   mkdir -p "${work}/src"
   tar -xzf "${work}/${file}" -C "${work}/src"

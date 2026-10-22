@@ -683,7 +683,9 @@ impl RecurrenceRule {
 
     fn finish(draft: Draft) -> Result<Self, Refusal> {
         crate::validate::check_tzid(&draft.tzid)?;
-        draft.into_rule()
+        let rule = draft.into_rule()?;
+        crate::validate::check_synchronized(&rule)?;
+        Ok(rule)
     }
 
     pub fn dtstart(&self) -> CivilDateTime {
