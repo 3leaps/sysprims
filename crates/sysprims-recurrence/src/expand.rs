@@ -672,4 +672,84 @@ mod tests {
             Err(QueryError::SearchLimitExceeded)
         );
     }
+
+    fn expand_all(json: &str, from: &str, to: &str, limit: u32) -> Vec<String> {
+        let r = RecurrenceRule::from_json(json.as_bytes()).unwrap();
+        r.expand(
+            Instant::parse(from).unwrap(),
+            Instant::parse(to).unwrap(),
+            NonZeroU32::new(limit).unwrap(),
+        )
+        .unwrap()
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+    }
+
+    // Expected values are derived by hand from contract A3, not from an engine.
+
+    /// Hourly through the 2026-11-01 New York fall-back: 01:30 is ambiguous
+    /// and takes its first (EDT) instant; 02:30 exists once, in EST.
+    #[test]
+    fn hourly_through_a_fold_is_strictly_increasing_without_repeats() {
+        let got = expand_all(
+            r#"{"dtstart":"2026-11-01T00:30:00","tzid":"America/New_York","freq":"HOURLY","count":6}"#,
+            "2026-10-31T00:00:00Z",
+            "2026-11-02T00:00:00Z",
+            10,
+        );
+        assert_eq!(
+            got,
+            [
+                "2026-11-01T04:30:00Z",
+                "2026-11-01T05:30:00Z",
+                "2026-11-01T07:30:00Z",
+                "2026-11-01T08:30:00Z",
+                "2026-11-01T09:30:00Z",
+                "2026-11-01T10:30:00Z",
+            ]
+        );
+    }
+
+    /// The explicit gap DTSTART 02:30 resolves at the pre-gap offset to
+    /// 07:30Z, the same instant as the generated 03:30 EDT candidate in the
+    /// same period; it is counted once.
+    #[test]
+    fn a_gap_seed_and_a_generated_candidate_at_one_instant_count_once() {
+        let got = expand_all(
+            r#"{"dtstart":"2026-03-08T02:30:00","tzid":"America/New_York","freq":"DAILY","by_hour":[2,3],"by_minute":[30],"count":3}"#,
+            "2026-03-01T00:00:00Z",
+            "2026-04-01T00:00:00Z",
+            10,
+        );
+        assert_eq!(
+            got,
+            [
+                "2026-03-08T07:30:00Z",
+                "2026-03-09T06:30:00Z",
+                "2026-03-09T07:30:00Z",
+            ]
+        );
+    }
+
+    /// Without BYMONTH, a yearly BYDAY ordinal counts within the year even
+    /// when BYMONTHDAY drives the candidates: the 5th that is the year's
+    /// first Monday is January 5 in years starting on a Thursday.
+    #[test]
+    fn yearly_ordinal_with_month_day_and_no_month_counts_in_the_year() {
+        let got = expand_all(
+            r#"{"dtstart":"2026-01-05T09:00:00","tzid":"Etc/UTC","freq":"YEARLY","by_day":[{"day":"MO","ordinal":1}],"by_month_day":[5],"count":3}"#,
+            "2026-01-01T00:00:00Z",
+            "2040-01-01T00:00:00Z",
+            10,
+        );
+        assert_eq!(
+            got,
+            [
+                "2026-01-05T09:00:00Z",
+                "2032-01-05T09:00:00Z",
+                "2037-01-05T09:00:00Z",
+            ]
+        );
+    }
 }

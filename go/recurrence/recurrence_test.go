@@ -205,3 +205,53 @@ func TestExpansionPropertiesAcrossGapsAndFolds(t *testing.T) {
 		}
 	}
 }
+
+func expandAll(t *testing.T, js, from, to string) []string {
+	t.Helper()
+	got, err := mustRule(t, js).Expand(at(t, from), at(t, to), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, len(got))
+	for i, v := range got {
+		out[i] = FormatInstant(v)
+	}
+	return out
+}
+
+func sameStrings(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+}
+
+// Expected values are derived by hand from contract A3, not from an engine.
+
+// Hourly through the 2026-11-01 New York fall-back: 01:30 is ambiguous and
+// takes its first (EDT) instant; 02:30 exists once, in EST.
+func TestHourlyThroughAFoldHasNoRepeats(t *testing.T) {
+	sameStrings(t, expandAll(t,
+		`{"dtstart":"2026-11-01T00:30:00","tzid":"America/New_York","freq":"HOURLY","count":6}`,
+		"2026-10-31T00:00:00Z", "2026-11-02T00:00:00Z"),
+		"2026-11-01T04:30:00Z", "2026-11-01T05:30:00Z", "2026-11-01T07:30:00Z",
+		"2026-11-01T08:30:00Z", "2026-11-01T09:30:00Z", "2026-11-01T10:30:00Z")
+}
+
+// The explicit gap DTSTART 02:30 resolves at the pre-gap offset to 07:30Z,
+// the same instant as the generated 03:30 EDT candidate; it counts once.
+func TestGapSeedAndGeneratedCandidateCountOnce(t *testing.T) {
+	sameStrings(t, expandAll(t,
+		`{"dtstart":"2026-03-08T02:30:00","tzid":"America/New_York","freq":"DAILY","by_hour":[2,3],"by_minute":[30],"count":3}`,
+		"2026-03-01T00:00:00Z", "2026-04-01T00:00:00Z"),
+		"2026-03-08T07:30:00Z", "2026-03-09T06:30:00Z", "2026-03-09T07:30:00Z")
+}
+
+// Without BYMONTH, a yearly BYDAY ordinal counts within the year even when
+// BYMONTHDAY drives the candidates: January 5 in years starting on Thursday.
+func TestYearlyOrdinalWithMonthDayAndNoMonthCountsInTheYear(t *testing.T) {
+	sameStrings(t, expandAll(t,
+		`{"dtstart":"2026-01-05T09:00:00","tzid":"Etc/UTC","freq":"YEARLY","by_day":[{"day":"MO","ordinal":1}],"by_month_day":[5],"count":3}`,
+		"2026-01-01T00:00:00Z", "2040-01-01T00:00:00Z"),
+		"2026-01-05T09:00:00Z", "2032-01-05T09:00:00Z", "2037-01-05T09:00:00Z")
+}
