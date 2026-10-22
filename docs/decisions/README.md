@@ -33,6 +33,7 @@ This directory contains architectural, design, and security decision records for
 | [ADR-0014](ADR-0014-ffi-artifact-groups-and-binding-consumers.md) | FFI Artifact Groups and Binding Consumers | Accepted |
 | [ADR-0015](ADR-0015-typescript-npm-publishing.md)                 | TypeScript npm Publishing Standard        | Accepted |
 | [ADR-0016](ADR-0016-session-spawn-ffi-contract.md)                 | Session Spawn FFI Contract                | Accepted |
+| [ADR-0017](ADR-0017-recurrence-go-module-and-release-tags.md)     | Recurrence Go Module and Release Tag Set  | Accepted |
 
 ### Design Decision Records (DDR)
 

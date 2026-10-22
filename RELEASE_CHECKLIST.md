@@ -148,51 +148,58 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     validation jobs back to `npm ci` unless the release process also changes how
     platform optional dependencies are staged.
 
-- [ ] Create the complete annotation message files. Each must contain the
-  intended release text and, when an approved provenance exception is in use,
-  the complete standard attribution footer whose exact bytes are bound by the
-  signed receipt. Store them in the per-release tag-message directory — not a
-  `/tmp` or other scratch path — as `v${VERSION}.txt` and
-  `bindings__go__sysprims__v${VERSION}.txt`. The post-tag guards compare these
-  stored bytes against the messages of the pushed annotated tags. The devsecops
-  loader already resolves the directory for the release tag:
+- [ ] **Rebuild the recurrence time-zone bundle (network, human step).** Run
+  `make recurrence-tzdata-check`, which rebuilds the TZif bundle from the
+  hash-pinned tzdata and tzcode and requires byte equality with both committed
+  copies, and paste its output into the "pre-tag rebuild" block of
+  `docs/releases/vX.Y.Z.md`. CI checks copy-and-pin equality only, so this is
+  the check that a bundle and its pins were not replaced together. It is not
+  run in CI.
+
+- [ ] Load the ceremony environment and set the explicit tag. Nothing derives
+  the tag from `VERSION`; a bare `RELEASE_TAG` is refused by `make`.
 
   ```bash
+  export SYSPRIMS_RELEASE_TAG="v$(cat VERSION)"
   source ~/devsecops/vars/3leaps-sysprims-cicd.sh
-  # SYSPRIMS_TAG_MESSAGE_DIR=$HOME/devsecops/vars/sysprims-tag-messages/$SYSPRIMS_RELEASE_TAG
+  # SYSPRIMS_TAG_MESSAGE_DIR=$HOME/devsecops/releases/github/3leaps/sysprims/$SYSPRIMS_RELEASE_TAG
+  # SYSPRIMS_DECERNOR_BIN=/absolute/path/to/decernor   (>= 0.1.8; no PATH fallback)
+  # SYSPRIMS_TAGGER_NAME / SYSPRIMS_TAGGER_EMAIL       (config/release/tagger-identity.txt)
+  # SYSPRIMS_PGP_KEY_ID="<signing subkey>!"            (config/release/signing-subkey.txt)
+  # SYSPRIMS_GPG_HOMEDIR=/path/outside/the/repository
   ```
-- [ ] Create and push tags (both must be annotated, use the message files, and
-  point to the same commit):
 
-  ```bash
-  VERSION=$(cat VERSION)
+- [ ] Prepare the annotation messages: `make release-prepare-tag-message`.
+  It creates one file per tag in `SYSPRIMS_TAG_MESSAGE_DIR` (`v${VERSION}.txt`,
+  `bindings__go__sysprims__v${VERSION}.txt` when the Go binding is published,
+  `go__recurrence__v${VERSION}.txt` when the recurrence module is present) and
+  never overwrites a file. Complete each one: subject `Release ${VERSION}` for
+  the canonical tag and the tag name for the others, the release text, and the
+  complete attribution footer. The tag scripts and the post-tag guards refuse a
+  file with a placeholder, a different subject or no footer.
 
-   # IMPORTANT: both tags point at the merge SHA of the Go Bindings Prep PR
-   # (the release's provenance-anchored commit) and peel to that one commit.
-   # Later main recuts never move the tags — do not retarget them onto a newer main HEAD.
+- [ ] Validate the committed pins: `make release-validate-pin`.
 
-  # Canonical repo tag (drives .github/workflows/release.yml)
-  git tag -a "v${VERSION}" --cleanup=verbatim -F "/path/to/v${VERSION}.txt"
+- [ ] Create every tag, signed, local only: `make release-tag`. All tags point
+  at the merge SHA of the Go Bindings Prep PR (the release's
+  provenance-anchored commit) and peel to that one commit. Later `main` recuts
+  never move the tags.
 
-  # Go submodule tag (required so Go resolves semver for subdir module)
-  git tag -a "bindings/go/sysprims/v${VERSION}" --cleanup=verbatim -F "/path/to/bindings-go-sysprims-v${VERSION}.txt"
+- [ ] Verify them: `make release-verify-tag` (message bytes, tagger, common
+  target, and each signature against the pin committed in the tagged commit).
 
-  # Pure-Go recurrence module tag (same commit; Go resolves the nested module by this prefix)
-  git tag -a "go/recurrence/v${VERSION}" --cleanup=verbatim -F "/path/to/go-recurrence-v${VERSION}.txt"
-
-  # Push all three tags
-  git push origin "v${VERSION}" "bindings/go/sysprims/v${VERSION}" "go/recurrence/v${VERSION}"
-
-  # Fetch remote tag objects, then verify exact names, object types, messages,
-  # version plan, and common peeled target. Nearest older tags are never used.
-  make release-guard-tag-version-post
-  ```
+- [ ] Push them in one atomic push and re-verify the remote objects:
+  `make release-push-tag`. Then run `make release-guard-tag-version-post`.
 
 Notes:
 
-- Go requires the path-prefixed tag because the module is `github.com/3leaps/sysprims/bindings/go/sysprims`.
+- Go requires a path-prefixed tag for each module in a subdirectory:
+  `bindings/go/sysprims/vX.Y.Z` and `go/recurrence/vX.Y.Z`
+  ([ADR-0017](docs/decisions/ADR-0017-recurrence-go-module-and-release-tags.md)).
 - Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
 - See `docs/decisions/ADR-0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
+- Changes to the recurrence TZif bundle, its `.sha256` pins, or the corpus `PIN`
+  file are trust-material changes and need security review.
 
 ### Required Post-Tag Execution Order
 
@@ -281,43 +288,32 @@ What gets published:
 | `sysprims-signal` | yes (after core is indexed) |
 | `sysprims-session` | yes (after core is indexed) |
 | `sysprims-proc` | yes (after signal is indexed) |
-| `sysprims-timeout` | yes (last) |
+| `sysprims-timeout` | yes |
+| `sysprims-recurrence` | yes (last) |
 | `sysprims-cli` | **never** (`publish = false`) |
 | `sysprims-ffi` | **no** (`publish = false`) |
 | `sysprims-ts-napi` | **no** (`publish = false`) |
 
-Workspace `publish` stays `false`. The five public Rust libraries opt in.
+Workspace `publish` stays `false`. The public Rust libraries opt in.
 
-Use a crates.io token scoped to the five library crate names. First upload of a
+Use a crates.io token scoped to the library crate names. First upload of a
 crate name requires `publish-new` and `publish-update`; later releases should
 use update-only scope. Never store the token in this repository.
 
-Publish from a clean detached checkout of the tag:
+Publish from a clean detached checkout of the tag. The order comes from
+`config/release/publishable-crates.txt` and is checked against the workspace
+dependency graph (`make release-crates-list`).
 
 ```bash
-VERSION=$(cat VERSION)
-git switch --detach "v${VERSION}"
-cargo publish --dry-run -p sysprims-core
-cargo publish -p sysprims-core
-cargo info --registry crates-io "sysprims-core@${VERSION}"
-cargo publish --dry-run -p sysprims-signal
-cargo publish -p sysprims-signal
-cargo info --registry crates-io "sysprims-signal@${VERSION}"
-cargo publish --dry-run -p sysprims-session
-cargo publish -p sysprims-session
-cargo info --registry crates-io "sysprims-session@${VERSION}"
-cargo publish --dry-run -p sysprims-proc
-cargo publish -p sysprims-proc
-cargo info --registry crates-io "sysprims-proc@${VERSION}"
-cargo publish --dry-run -p sysprims-timeout
-cargo publish -p sysprims-timeout
+git switch --detach "$SYSPRIMS_RELEASE_TAG"
+make release-crates-dry-run     # per-crate cargo publish --dry-run, nothing uploaded
+make release-crates-publish     # one confirmed upload per crate, waits for the index
 ```
 
-- [ ] Dry-run then publish each crate in dependency order.
-- [ ] Confirm each predecessor with
-      `cargo info --registry crates-io <crate>@${VERSION}` before the next
-      dependent publish.
-- [ ] On the first upload of these crate names, expect standalone dry-runs for
+- [ ] Run the dry run, then the cued publish. Each crate is uploaded only after
+      you type its name, and the next one waits until it is on the index.
+      Already-published crates are skipped, so a rerun resumes in order.
+- [ ] On the first upload of a crate name, expect standalone dry-runs for
       dependent crates to fail until predecessor crates are actually indexed.
 - [ ] Do **not** `cargo publish -p sysprims-cli`, `sysprims-ffi`, or
       `sysprims-ts-napi`.
@@ -342,7 +338,6 @@ source ~/devsecops/vars/3leaps-sysprims-cicd.sh
 # Or set individually:
 export SYSPRIMS_RELEASE_TAG=v$(cat VERSION)
 export SYSPRIMS_MINISIGN_KEY=/path/to/signing.key
-export SYSPRIMS_MINISIGN_PUB=/path/to/signing.pub
 export SYSPRIMS_PGP_KEY_ID="keyid!"
 export SYSPRIMS_GPG_HOMEDIR=/path/to/gpg/homedir  # optional
 ```
@@ -524,13 +519,21 @@ git push origin main
 | `make release-download`    | Download the exact CI payload from the draft                                   |
 | `make release-checksums`   | Generate SHA256SUMS and SHA512SUMS                                             |
 | `make release-sign`        | Sign checksums with minisign + PGP                                             |
-| `make release-export-keys` | Export public signing keys                                                     |
+| `make release-export-keys` | Stage the committed public keys from the tagged commit                         |
 | `make release-verify`      | Verify checksums, signatures, and keys                                         |
 | `make release-notes`       | Copy release notes to dist                                                     |
 | `make release-upload`      | Upload signed artifacts; keep the GitHub release draft                         |
 | `make release-guard-remote`| Verify the fresh remote draft, registries/modules, and native runtime           |
 | `make release-publish`     | Sole maintainer-cued draft → public promotion                                  |
 | `make release`             | Full preparation workflow (clean → upload; remains draft)                      |
+| `make release-prepare-tag-message` | Prepare the per-tag annotation messages                                |
+| `make release-tag`         | Create every release tag, signed, local only                                   |
+| `make release-verify-tag`  | Verify local tags against the committed pin                                    |
+| `make release-push-tag`    | Push the verified tags atomically and re-verify                               |
+| `make release-validate-pin`| Validate the committed public pins and anchors                                |
+| `make release-crates-dry-run` | Per-crate publish dry run from the release tag                              |
+| `make release-crates-publish` | Cued crates.io upload, one crate at a time                                  |
+| `make release-tooling-test`| Synthetic release-tooling controls                                             |
 
 ## Troubleshooting
 
