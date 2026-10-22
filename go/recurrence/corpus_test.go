@@ -16,15 +16,18 @@ import (
 // corpusDir locates the recurrence/v0 corpus. In this repository it is the
 // copy vendored for the Rust crate; RECURRENCE_CORPUS_DIR points elsewhere
 // (for example at a crucible checkout) when this module is verified on its
-// own.
+// own. A missing corpus fails the test; only `go test -short` skips it.
 func corpusDir(t *testing.T) string {
 	t.Helper()
-	if d := os.Getenv("RECURRENCE_CORPUS_DIR"); d != "" {
-		return d
+	d := os.Getenv("RECURRENCE_CORPUS_DIR")
+	if d == "" {
+		d = filepath.Join("..", "..", "crates", "sysprims-recurrence", "tests", "recurrence-v0")
 	}
-	d := filepath.Join("..", "..", "crates", "sysprims-recurrence", "tests", "recurrence-v0")
 	if _, err := os.Stat(filepath.Join(d, "corpus", "MANIFEST.json")); err != nil {
-		t.Skip("recurrence/v0 corpus not found; set RECURRENCE_CORPUS_DIR to verify this module standalone")
+		if testing.Short() {
+			t.Skip("recurrence/v0 corpus not found (-short)")
+		}
+		t.Fatalf("recurrence/v0 corpus not found at %s; set RECURRENCE_CORPUS_DIR", d)
 	}
 	return d
 }

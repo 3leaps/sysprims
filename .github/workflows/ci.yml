@@ -308,6 +308,20 @@ jobs:
           fi
           go vet ./...
           go test -count=1 ./...
+      - name: Go module alone (outside the repository, no SKIP allowed)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          corpus="$PWD/crates/sysprims-recurrence/tests/recurrence-v0"
+          standalone="$(mktemp -d)/recurrence"
+          cp -R go/recurrence "$standalone"
+          cd "$standalone"
+          RECURRENCE_CORPUS_DIR="$corpus" go test -count=1 -v ./... | tee "$RUNNER_TEMP/go-standalone.log"
+          if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-standalone.log"; then
+            echo "standalone go/recurrence tests must not skip" >&2
+            exit 1
+          fi
       - name: Rust/Go agreement
         run: scripts/recurrence-crosscheck.sh
   license-check:
