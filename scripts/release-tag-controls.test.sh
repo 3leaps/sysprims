@@ -14,15 +14,19 @@ lib="$repo/scripts/release-tag-common.sh"
 in_repo() { (cd "$repo" && env "$@"); }
 call() { in_repo "${@:2}" bash -c "source '$lib'; $1"; }
 
-# Every checklist `make` target exists. The recurrence targets arrive with the
-# recurrence module itself, so they are only required once it is in the tree.
+# Every checklist `make` target exists. The target list is captured first so a
+# missing or unreadable checklist fails instead of yielding an empty loop.
+checklist_targets="$(grep -oE 'make [a-z][a-z0-9-]+' "$fixture_root/RELEASE_CHECKLIST.md" | awk '{print $2}' | sort -u)"
+[[ -n "$checklist_targets" ]] || {
+	echo "error: RELEASE_CHECKLIST.md names no make targets" >&2
+	exit 1
+}
 while IFS= read -r target; do
-	[[ "$target" == recurrence-* && ! -f "$fixture_root/go/recurrence/go.mod" ]] && continue
 	grep -Eq "^${target}:" "$fixture_root/Makefile" || {
 		echo "error: RELEASE_CHECKLIST.md names missing make target $target" >&2
 		exit 1
 	}
-done < <(grep -oE 'make [a-z][a-z0-9-]+' "$fixture_root/RELEASE_CHECKLIST.md" | awk '{print $2}' | sort -u)
+done <<<"$checklist_targets"
 
 # Which targets read the release tag is derived from the recipes and the
 # scripts they run (scripts/release-make-guard.py); each must start with
