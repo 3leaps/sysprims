@@ -41,7 +41,11 @@ release phase requires them to equal the tagged commit's blobs byte for byte.
 fetches them from a published release into a new or empty directory, after
 verifying the manifest signatures with the keys committed at that tag and
 checking each anchor against the signed manifests and the tagged commit; it
-never writes `keys/`.
+never writes `keys/`. Those keys come from the local tag, so the local tag must
+first be proven to be the signed, published one: with `SYSPRIMS_DECERNOR_BIN`
+set, the command runs the remote tag verification itself; otherwise it refuses
+unless `ANCHORS_TRUST_LOCAL_TAG=1` records that
+`make release-verify-remote-tag` has already passed on this clone.
 
 ## Tags
 

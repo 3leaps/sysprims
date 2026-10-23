@@ -761,9 +761,9 @@ release-download: release-require-tag release-guard-tag-version-post release-gua
 release-stage-anchors: release-require-tag release-guard-tag-version-post ## Stage the fingerprint anchors from the tagged commit (before checksums)
 	./scripts/release-stage-public.sh --anchors $(DIST_RELEASE)
 
-release-fetch-anchors: release-require-tag ## Fetch a published release's anchors into ANCHORS_DIR, verified (never writes keys/)
+release-fetch-anchors: release-require-tag ## Fetch a published release's verified anchors into ANCHORS_DIR (needs SYSPRIMS_DECERNOR_BIN, or ANCHORS_TRUST_LOCAL_TAG=1 after release-verify-remote-tag)
 	@test -n "$(ANCHORS_DIR)" || { echo "error: ANCHORS_DIR=<new or empty directory> is required"; exit 1; }
-	./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
+	ANCHORS_TRUST_LOCAL_TAG="$(ANCHORS_TRUST_LOCAL_TAG)" ./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
 
 release-checksums: release-require-tag release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)

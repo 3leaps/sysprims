@@ -79,7 +79,19 @@ sign() {
 			-u "$4!" -o "$1/$manifest.asc" "$1/$manifest"
 	done
 }
-fetch() { (cd "$repo" && SYSPRIMS_RELEASE_TAG="$tag" SYSPRIMS_FETCH_ASSET_DIR="$1" ./scripts/release-fetch-anchors.sh "$2"); }
+# fetch <assets> <out> [VAR=value...]: the checks after the tag is trusted
+# (ANCHORS_TRUST_LOCAL_TAG=1 unless overridden; tag trust is tested below).
+fetch() {
+	local assets="$1" dest="$2" unset=(-u SYSPRIMS_DECERNOR_BIN) trust=(ANCHORS_TRUST_LOCAL_TAG=1)
+	shift 2
+	while [[ "${1:-}" == -u ]]; do
+		unset+=("$1" "$2")
+		[[ "$2" != ANCHORS_TRUST_LOCAL_TAG ]] || trust=()
+		shift 2
+	done
+	(cd "$repo" && env "${unset[@]}" SYSPRIMS_RELEASE_TAG="$tag" SYSPRIMS_FETCH_ASSET_DIR="$assets" \
+		${trust[@]+"${trust[@]}"} "$@" ./scripts/release-fetch-anchors.sh "$dest")
+}
 keys_untouched() {
 	[[ "$(cd "$repo/keys" && shasum ./*)" == "$keys_before" ]] || {
 		echo 'error: fetching changed keys/' >&2
@@ -95,13 +107,14 @@ for name in expected-fingerprints.txt expected-fingerprints.ndjson; do
 done
 keys_untouched
 
-# refused <reason> <assets>: refused, nothing written, keys/ untouched.
+# refused <reason> <assets>: refused, no output directory created, keys/
+# untouched.
 n=0
 refused() {
 	n=$((n + 1))
 	expect_fail_with "$1" fetch "$2" "$fixture_dir/out-$n"
-	[[ -z "$(find "$fixture_dir/out-$n" -mindepth 1 -print -quit 2>/dev/null)" ]] || {
-		echo "error: a refused fetch wrote into its output ($1)" >&2
+	[[ ! -e "$fixture_dir/out-$n" ]] || {
+		echo "error: a refused fetch left its output directory behind ($1)" >&2
 		exit 1
 	}
 	keys_untouched
@@ -149,6 +162,93 @@ expect_fail_with 'inside keys/' fetch "$published" "$repo/keys"
 ln -s "$repo/keys" "$fixture_dir/keys-link"
 expect_fail_with 'inside keys/' fetch "$published" "$fixture_dir/keys-link/sub/deeper"
 [[ ! -e "$repo/keys/sub" ]]
+keys_untouched
+# No `.` or `..` component, even where a missing directory would hide it from
+# the textual keys/ test and mkdir would follow it.
+for path in "$repo/nonexist/../keys/pwn" "$repo/./keys-not/x" "$fixture_dir/a/../b"; do
+	expect_fail_with 'must not contain \. or \.\. components' fetch "$published" "$path"
+done
+[[ ! -e "$repo/keys/pwn" && ! -e "$repo/nonexist" ]]
+keys_untouched
+# The keys/ test applies to the fully resolved path (symlinks anywhere in it,
+# components that do not exist yet), and nothing is created when it refuses.
+ln -s "$repo" "$fixture_dir/repo-link"
+expect_fail_with 'inside keys/' fetch "$published" "$fixture_dir/repo-link/keys/new"
+[[ ! -e "$repo/keys/new" ]]
+# A failing run leaves no output directory; a failure at the second write
+# removes the first anchor and the directory this run made, and a rerun then
+# succeeds.
+refused 'the release has no expected-fingerprints.txt' "$fixture_dir/no-such-assets"
+mkdir -p "$repo/.variant"
+cp "$repo/scripts/write-exclusive.py" "$repo/.variant/real-helper.py"
+cp "$repo/scripts/write-exclusive.py" "$fixture_dir/helper.saved"
+cat >"$repo/scripts/write-exclusive.py" <<PY
+#!/usr/bin/env python3
+import subprocess, sys
+if sys.argv[1] != "--remove" and sys.argv[2].endswith(".ndjson"):
+    sys.exit("error: injected failure on the second write")
+sys.exit(subprocess.call([sys.executable, "$repo/.variant/real-helper.py", *sys.argv[1:]]))
+PY
+expect_fail_with 'cannot write .*expected-fingerprints.ndjson' fetch "$published" "$fixture_dir/partial"
+[[ ! -e "$fixture_dir/partial" ]] || {
+	echo "error: a failed write left partial state: $(find "$fixture_dir/partial")" >&2
+	exit 1
+}
+# A directory the caller made beforehand is kept (empty), not removed.
+mkdir "$fixture_dir/premade"
+expect_fail_with 'cannot write' fetch "$published" "$fixture_dir/premade"
+[[ -d "$fixture_dir/premade" && -z "$(find "$fixture_dir/premade" -mindepth 1 -print -quit)" ]]
+cp "$fixture_dir/helper.saved" "$repo/scripts/write-exclusive.py"
+fetch "$published" "$fixture_dir/partial" >/dev/null
+fetch "$published" "$fixture_dir/premade" >/dev/null
+for name in expected-fingerprints.txt expected-fingerprints.ndjson; do
+	tag_blob "keys/$name" | cmp - "$fixture_dir/partial/$name"
+done
+# The path is re-checked after the directory is created: here a parent is
+# swapped for a link into keys/ as the directory is made (a mkdir shim on
+# PATH), so the pre-checks pass and only the re-check can refuse; nothing is
+# written into keys/.
+mkdir -p "$fixture_dir/swap/parent" "$fixture_dir/swap-bin"
+cat >"$fixture_dir/swap-bin/mkdir" <<SH
+#!/usr/bin/env bash
+mv "$fixture_dir/swap/parent" "$fixture_dir/swap/parent.moved"
+ln -s "$repo/keys" "$fixture_dir/swap/parent"
+/bin/mkdir "\$@"
+SH
+chmod +x "$fixture_dir/swap-bin/mkdir"
+expect_fail_with 'changed while it was being created|inside keys/' fetch "$published" "$fixture_dir/swap/parent/out" \
+	PATH="$fixture_dir/swap-bin:$PATH"
+[[ ! -e "$repo/keys/out/expected-fingerprints.txt" ]] || {
+	echo 'error: a swapped parent let the fetch write into keys/' >&2
+	exit 1
+}
+rmdir "$repo/keys/out" 2>/dev/null || true
+rm "$fixture_dir/swap/parent"
+keys_untouched
+# The local tag supplies the pins, so by default the command refuses until the
+# tag is proven to be the published one.
+expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" -u ANCHORS_TRUST_LOCAL_TAG
+expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" ANCHORS_TRUST_LOCAL_TAG=yes
+[[ ! -e "$fixture_dir/untrusted" ]]
+# With the checker available, the remote tag verification runs first: when it
+# fails, nothing is fetched or written; when it passes, the fetch proceeds.
+# (A stand-in records the call; the verification itself has its own suite.)
+cat >"$repo/scripts/release-verify-remote-tag.sh" <<SH
+#!/usr/bin/env bash
+echo "\$SYSPRIMS_RELEASE_TAG" >>"$fixture_dir/remote-verified"
+exit "\${REMOTE_TAG_STATUS:-0}"
+SH
+chmod +x "$repo/scripts/release-verify-remote-tag.sh"
+expect_fail_with 'is not the verified published tag' fetch "$fixture_dir/no-such-assets" "$fixture_dir/hostile" \
+	-u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_DECERNOR_BIN=/checker REMOTE_TAG_STATUS=1
+[[ ! -e "$fixture_dir/hostile" && "$(cat "$fixture_dir/remote-verified")" == "$tag" ]]
+rm "$fixture_dir/remote-verified"
+fetch "$published" "$fixture_dir/verified" -u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_DECERNOR_BIN=/checker >/dev/null
+[[ "$(cat "$fixture_dir/remote-verified")" == "$tag" && -f "$fixture_dir/verified/expected-fingerprints.txt" ]]
+# The opt-in never skips the verification when the checker is set.
+rm "$fixture_dir/remote-verified"
+expect_fail_with 'is not the verified published tag' fetch "$published" "$fixture_dir/hostile" \
+	SYSPRIMS_DECERNOR_BIN=/checker REMOTE_TAG_STATUS=1
 keys_untouched
 expect_fail_with 'SYSPRIMS_RELEASE_TAG is required' bash -c "cd '$repo' && env -u SYSPRIMS_RELEASE_TAG ./scripts/release-fetch-anchors.sh '$fixture_dir/no-tag'"
 echo '[ok] anchor release-asset controls passed'
