@@ -53,10 +53,18 @@ printf '%s\n' "${SYSPRIMS_PGP_KEY_ID%!}" >"$scratch/$subkey"
 "$root/scripts/release-validate-pin.sh" --dir "$scratch" || stop 'the exported pins did not validate; nothing was written'
 mkdir -p docs/security config/release
 for path in "$asc" "$pub" "$subkey"; do
-	# Exclusive create, ownership recorded at once, then the copy.
-	(set -C && : >"$path") 2>/dev/null || stop "$path appeared during export; nothing more was written"
-	created+=("$path")
-	cat "$scratch/$path" >"$path" || stop "writing $path failed; the files this run created were removed"
+	# Created with O_EXCL|O_NOFOLLOW and written through that descriptor.
+	status=0
+	python3 "$root/scripts/write-exclusive.py" "$scratch/$path" "$path" || status=$?
+	case "$status" in
+	0) created+=("$path") ;;
+	3) stop "$path appeared during export; nothing more was written" ;;
+	*)
+		# Any status but 3 means the helper created the path; it is ours to remove.
+		created+=("$path")
+		stop "writing $path failed; the files this run created were removed"
+		;;
+	esac
 done
 created=()
 echo "[ok] wrote $asc, $pub and $subkey; review and commit them, then run make release-insert-anchors"

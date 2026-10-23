@@ -35,15 +35,25 @@ trap 'rollback; exit 143' TERM
 trap 'rollback; exit 129' HUP
 # Each anchor is created with O_EXCL semantics (noclobber); a file that appears
 # meanwhile is left alone and fails the installation.
+helper="$(cd "$(dirname "$0")" && pwd -P)/write-exclusive.py"
 for name in "${names[@]}"; do
-	# Exclusive create first, ownership recorded at once, then the copy: a copy
-	# that fails part way leaves a file this run owns and therefore removes.
-	if ! (set -C && : >"$dest/$name") 2>/dev/null; then
+	# Created with O_EXCL|O_NOFOLLOW and written through that descriptor, so a
+	# file or symlink that appears at the path is never written or followed.
+	status=0
+	python3 "$helper" "$staging/$name" "$dest/$name" || status=$?
+	case "$status" in
+	0) owned+=("$dest/$name") ;;
+	3)
 		echo "error: $dest/$name appeared during installation; it was left untouched" >&2
 		exit 1
-	fi
-	owned+=("$dest/$name")
-	cat "$staging/$name" >"$dest/$name"
+		;;
+	*)
+		# Any status but 3 means the helper created the path; it is ours to remove.
+		owned+=("$dest/$name")
+		echo "error: writing $dest/$name failed" >&2
+		exit 1
+		;;
+	esac
 done
 if [[ "$#" -gt 0 ]]; then
 	"$@"

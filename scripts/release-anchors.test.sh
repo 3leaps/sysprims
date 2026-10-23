@@ -121,19 +121,57 @@ expect_fail "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixtur
 printf 'unrelated\n' >"$fixture_dir/dest/other"
 "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest"
 [[ "$(cat "$fixture_dir/dest/other")" == unrelated ]]
-# A copy that writes part of an anchor and then fails: the partial file was
-# created by this run, so it is removed with the rest.
+# Exclusive writes go through the created descriptor. A symlink at the
+# destination is refused and its target is never written; a write that fails
+# part way leaves no file behind.
+helper="$fixture_root/scripts/write-exclusive.py"
+mkdir -p "$fixture_dir/ex"
+printf 'victim\n' >"$fixture_dir/ex/victim"
+ln -s "$fixture_dir/ex/victim" "$fixture_dir/ex/link"
+status=0
+python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/link" 2>/dev/null || status=$?
+[[ "$status" == 3 && "$(cat "$fixture_dir/ex/victim")" == victim && -L "$fixture_dir/ex/link" ]]
+head -c 300000 /dev/zero >"$fixture_dir/ex/big"
+status=0
+(ulimit -f 64 && python3 "$helper" "$fixture_dir/ex/big" "$fixture_dir/ex/partial") 2>/dev/null || status=$?
+[[ "$status" != 0 && ! -e "$fixture_dir/ex/partial" ]] || {
+	echo 'error: a failed exclusive write left a file behind' >&2
+	exit 1
+}
+python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ok"
+cmp "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ok"
+# Failures before the create report 3 (nothing created), so a caller never
+# claims, and later removes, a file it did not make.
+for args in "" "$fixture_dir/ex/absent-src $fixture_dir/ex/new" \
+	"$stage/expected-fingerprints.txt $fixture_dir/ex/no-such-dir/file"; do
+	status=0
+	# shellcheck disable=SC2086 # Word splitting builds the argument list.
+	python3 "$helper" $args 2>/dev/null || status=$?
+	[[ "$status" == 3 ]] || {
+		echo "error: write-exclusive.py returned $status, not 3, for a pre-create failure ($args)" >&2
+		exit 1
+	}
+done
+[[ ! -e "$fixture_dir/ex/new" ]]
+# The installers never open a destination a second time by path.
+for script in install-release-anchors.sh release-export-pin.sh; do
+	# shellcheck disable=SC2016 # A literal pattern matched in the scripts.
+	if grep -nE '(cat|printf)[^|]*>[[:space:]]*"\$(dest|path)' "$fixture_root/scripts/$script"; then
+		echo "error: $script writes a destination through a second open" >&2
+		exit 1
+	fi
+done
+# Through the installer: a failing write mid-pair removes what this run made.
 partial="$fixture_dir/partial"
-mkdir -p "$partial" "$fixture_dir/partial-bin"
-cat >"$fixture_dir/partial-bin/cat" <<SH
-#!/usr/bin/env bash
-if [[ "\$1" == *expected-fingerprints.ndjson ]]; then printf 'half'; exit 1; fi
-exec /bin/cat "\$@"
-SH
-chmod +x "$fixture_dir/partial-bin/cat"
-expect_fail env PATH="$fixture_dir/partial-bin:$PATH" "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$partial"
-[[ -z "$(ls -A "$partial")" ]] || {
-	echo "error: a partially written anchor survived: $(ls -A "$partial")" >&2
+mkdir -p "$partial"
+status=0
+(ulimit -f 64 && head -c 300000 /dev/zero >"$stage/expected-fingerprints.ndjson.big" &&
+	cp "$stage/expected-fingerprints.txt" "$fixture_dir/stage-txt" &&
+	mkdir -p "$fixture_dir/bigstage" && cp "$stage/expected-fingerprints.txt" "$fixture_dir/bigstage/" &&
+	mv "$stage/expected-fingerprints.ndjson.big" "$fixture_dir/bigstage/expected-fingerprints.ndjson" &&
+	"$fixture_root/scripts/install-release-anchors.sh" "$fixture_dir/bigstage" "$partial") 2>/dev/null || status=$?
+[[ "$status" != 0 && -z "$(ls -A "$partial")" ]] || {
+	echo "error: a partially installed anchor pair survived: $(ls -A "$partial")" >&2
 	exit 1
 }
 echo '[ok] anchor and checker-binding controls passed'
