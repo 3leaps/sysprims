@@ -13,6 +13,7 @@ env:
   LLVM_MINGW_VERSION: '20260407'
   CBINDGEN_VERSION: '0.29.2'
   GOVULNCHECK_VERSION: 'v1.9.0'
+  GOSEC_VERSION: 'v2.29.0'
 jobs:
   format:
     name: Format Check
@@ -308,6 +309,19 @@ jobs:
           fi
           go vet ./...
           go test -count=1 ./...
+      # The pure-Go module sits outside go.work by design, so repo-root Go
+      # tooling does not reach it; scan it here directly.
+      - name: Go module security (gosec, govulncheck)
+        if: runner.os == 'Linux'
+        working-directory: go/recurrence
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          "$(go env GOPATH)/bin/gosec" ./...
+          "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Go module alone (outside the repository, no SKIP allowed)
         env:
           GOWORK: 'off'
