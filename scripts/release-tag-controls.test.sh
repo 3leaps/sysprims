@@ -24,10 +24,45 @@ while IFS= read -r target; do
 	}
 done < <(grep -oE 'make [a-z][a-z0-9-]+' "$fixture_root/RELEASE_CHECKLIST.md" | awk '{print $2}' | sort -u)
 
-# The Makefile refuses a bare RELEASE_TAG from any origin and derives no default.
-expect_fail_with 'RELEASE_TAG is not accepted' env RELEASE_TAG=v9.9.9 make -s -C "$fixture_root" -n help
-expect_fail_with 'RELEASE_TAG is not accepted' env -u RELEASE_TAG make -s -C "$fixture_root" -n help RELEASE_TAG=v9.9.9
-expect_fail_with 'RELEASE_TAG is not accepted' env RELEASE_TAG= make -s -C "$fixture_root" -n help
+# Tag-consuming targets refuse a bare RELEASE_TAG from any origin (environment,
+# command line, set but empty) before any side effect: the operator script must
+# never run. SYSPRIMS_RELEASE_TAG is set, so only the bare variable can refuse.
+sentinel="$fixture_dir/operator-ran"
+shim="$fixture_dir/shim-root"
+mkdir -p "$shim/scripts"
+cp "$fixture_root/Makefile" "$fixture_root/VERSION" "$shim/"
+printf '#!/usr/bin/env bash\ntouch %q\n' "$sentinel" >"$shim/scripts/release-tag-operator.sh"
+chmod +x "$shim/scripts/release-tag-operator.sh"
+for origin in env cli empty; do
+	rm -f "$sentinel"
+	case "$origin" in
+	env) expect_fail_with 'RELEASE_TAG is not accepted' env RELEASE_TAG=v9.9.9 SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag ;;
+	cli) expect_fail_with 'RELEASE_TAG is not accepted' env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag RELEASE_TAG=v9.9.9 ;;
+	empty) expect_fail_with 'RELEASE_TAG is not accepted' env RELEASE_TAG= SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag ;;
+	esac
+	[[ ! -e "$sentinel" ]] || {
+		echo "error: release-tag ran its operator script despite a bare RELEASE_TAG ($origin)" >&2
+		exit 1
+	}
+done
+# Without a bare RELEASE_TAG the same target reaches the operator (control).
+rm -f "$sentinel"
+env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag >/dev/null
+[[ -e "$sentinel" ]] || {
+	echo "error: release-tag did not reach its operator script with a valid tag" >&2
+	exit 1
+}
+# Targets that consume no tag are unaffected by an unrelated RELEASE_TAG.
+env RELEASE_TAG=v9.9.9 make -s -C "$fixture_root" -n help >/dev/null
+# Every target that runs a tag-consuming script starts with the guard.
+awk '
+	/^[a-z][a-z0-9-]*:/ { target = $1; sub(":", "", target); first = 1; next }
+	first && /^\t/ { if (target ~ /^release-(prepare-tag-message|tag|push-tag|verify-tag|verify-remote-tag|verify-published-tag|record-anchor|crates-publish|crates-verify)$/ && $0 !~ /REQUIRE_RELEASE_TAG/) { print target; bad = 1 } first = 0 }
+	END { exit bad }
+' "$fixture_root/Makefile" || {
+	echo "error: a tag-consuming target does not start with REQUIRE_RELEASE_TAG" >&2
+	exit 1
+}
 expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' env -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG make -s -C "$fixture_root" release-tag
 if grep -En 'SYSPRIMS_RELEASE_TAG[[:space:]]*\?=|v\$\(VERSION\)' "$fixture_root/Makefile"; then
 	echo 'error: the Makefile derives a release tag' >&2

@@ -674,12 +674,15 @@ DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
 
 # The release tag is an explicit input (SYSPRIMS_RELEASE_TAG=vX.Y.Z). It is
-# never derived from VERSION, git describe, or the branch, and a bare
-# RELEASE_TAG from any origin is refused so it cannot stand in for it.
-ifneq ($(origin RELEASE_TAG),undefined)
-$(error RELEASE_TAG is not accepted; set SYSPRIMS_RELEASE_TAG=vX.Y.Z)
-endif
-REQUIRE_RELEASE_TAG = @if [ -z "$(SYSPRIMS_RELEASE_TAG)" ]; then \
+# never derived from VERSION, git describe, or the branch. Every
+# tag-consuming target starts with REQUIRE_RELEASE_TAG, which refuses a bare
+# RELEASE_TAG from any origin (set or empty) before any side effect, so it
+# cannot stand in for the prefixed variable. Targets that consume no tag are
+# unaffected by an unrelated RELEASE_TAG in the environment.
+RELEASE_TAG_ORIGIN := $(origin RELEASE_TAG)
+REQUIRE_RELEASE_TAG = @if [ "$(RELEASE_TAG_ORIGIN)" != "undefined" ]; then \
+	echo "error: RELEASE_TAG is not accepted; set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; exit 1; fi; \
+	if [ -z "$(SYSPRIMS_RELEASE_TAG)" ]; then \
 	echo "error: SYSPRIMS_RELEASE_TAG=vX.Y.Z is required"; exit 1; fi
 
 # Signing keys (operator environment). The minisign public pin is the committed
