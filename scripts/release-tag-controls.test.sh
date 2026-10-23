@@ -131,6 +131,43 @@ done <<<"$guarded"
 rm -f "$sentinel"
 shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag >/dev/null
 grep -qx release-tag-operator.sh "$sentinel"
+# Independent of any classification list: these leaf targets act on a tagged
+# release (they read release notes at the tag, download or edit the GitHub
+# release, or check the registries for its version). Each refuses a bare
+# RELEASE_TAG, and a missing SYSPRIMS_RELEASE_TAG, with no side effect. This
+# list is written by hand on purpose.
+for target in release-guard-downloaded release-guard-checksummed release-require-checksummed \
+	release-guard-signed release-guard-uploaded release-guard-remote release-publish \
+	release-download release-checksums release-sign release-export-keys release-notes \
+	release-upload release-verify release-verify-signatures release-crates-dry-run release-crates-publish \
+	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-prepare-tag-message \
+	release-guard-tag-version release-guard-tag-version-post release-preflight release; do
+	for origin in bare-only missing; do
+		rm -f "$sentinel"
+		case "$origin" in
+		bare-only) expect_fail_with 'RELEASE_TAG is not accepted' shim_make -u SYSPRIMS_RELEASE_TAG RELEASE_TAG=v1.2.3 make -s -C "$shim" "$target" ;;
+		missing) expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' shim_make -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG make -s -C "$shim" "$target" ;;
+		esac
+		[[ ! -s "$sentinel" ]] || {
+			echo "error: make $target ran $(paste -sd, "$sentinel") without an explicit release tag ($origin)" >&2
+			exit 1
+		}
+	done
+done
+# The integrity commands themselves refuse too, without make in front.
+for command in downloaded checksummed require-checksummed signed uploaded remote publish; do
+	expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' env -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG \
+		node "$fixture_root/scripts/release-integrity.mjs" "$command" --root "$repo" --dir "$fixture_dir"
+	expect_fail_with 'RELEASE_TAG is not accepted' env -u SYSPRIMS_RELEASE_TAG RELEASE_TAG=v1.2.3 \
+		node "$fixture_root/scripts/release-integrity.mjs" "$command" --root "$repo" --dir "$fixture_dir"
+done
+# The version comes from the tag's commit: a tag on a commit whose VERSION
+# differs is refused, and a checkout at a later VERSION does not matter.
+git -C "$repo" tag -a -m t v9.9.9
+expect_fail_with 'does not match VERSION 1.2.3 at its commit' env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v9.9.9 \
+	node "$fixture_root/scripts/release-integrity.mjs" downloaded --root "$repo" --dir "$fixture_dir"
+git -C "$repo" tag -d v9.9.9 >/dev/null
+
 # A target that reads no tag runs without SYSPRIMS_RELEASE_TAG and despite a
 # stray bare RELEASE_TAG.
 for origin in none bare; do

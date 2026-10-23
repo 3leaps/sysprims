@@ -687,8 +687,7 @@ DIST_LOCAL := dist/local
 RELEASE_TAG_ORIGIN := $(origin RELEASE_TAG)
 RELEASE_TAG_FREE_TARGETS := release-clean release-tooling-test release-plan-check release-check \
 	release-crates-list release-export-pin release-validate-pin release-insert-anchors \
-	release-verify-checksums release-verify-keys release-require-tag \
-	release-guard-provenance release-guard-downloaded release-guard-checksummed release-require-checksummed release-guard-uploaded release-guard-remote
+	release-verify-checksums release-verify-keys release-require-tag release-guard-provenance
 
 release-require-tag:
 	@if [ "$(RELEASE_TAG_ORIGIN)" != "undefined" ]; then \
@@ -932,20 +931,20 @@ release-guard-tag-version-post: release-require-tag ## Require exact annotated c
 release-guard-provenance: ## Require attribution and bind stored tag messages when tags exist
 	@node scripts/release-integrity.mjs provenance
 
-release-guard-downloaded: ## Verify the exact downloaded draft payload inventory
+release-guard-downloaded: release-require-tag ## Verify the exact downloaded draft payload inventory
 	@node scripts/release-integrity.mjs downloaded --dir $(DIST_RELEASE)
 
-release-guard-checksummed: ## Verify both checksum manifests cover the exact payload
+release-guard-checksummed: release-require-tag ## Verify both checksum manifests cover the exact payload
 	@node scripts/release-integrity.mjs checksummed --dir $(DIST_RELEASE)
 
-release-require-checksummed: ## Internal prerequisite allowing known later-phase files during recovery
+release-require-checksummed: release-require-tag ## Internal prerequisite allowing known later-phase files during recovery
 	@node scripts/release-integrity.mjs require-checksummed --dir $(DIST_RELEASE)
 
 release-guard-signed: release-require-tag ## Verify exact signatures, public keys, and any prior remote assets
 	@node scripts/release-integrity.mjs signed --dir $(DIST_RELEASE)
 
-release-guard-uploaded: ## Verify a fresh copy of the complete remote draft
+release-guard-uploaded: release-require-tag ## Verify a fresh copy of the complete remote draft
 	@node scripts/release-integrity.mjs uploaded --dir $(DIST_RELEASE)
 
-release-guard-remote: ## Verify remote registries/modules and native runtime before publish
+release-guard-remote: release-require-tag ## Verify remote registries/modules and native runtime before publish
 	@node scripts/release-integrity.mjs remote --dir $(DIST_RELEASE)
