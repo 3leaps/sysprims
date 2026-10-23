@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { existsSync as existsSyncLocal } from "node:fs";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums } from "./release-integrity.mjs";
+import { ANCHORS, assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyTaggedAssets } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -426,5 +427,180 @@ test("every published npm package must carry exactly the tag commit as gitHead",
     for (const [label, value] of bad) {
       assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(position, value)), /npm gitHead mismatch/, `package ${position}: ${label}`);
     }
+  }
+});
+
+// The fingerprint anchors are release assets: in every phase's inventory,
+// covered by the checksum manifests, and equal to the tag commit's blobs.
+function anchorPhaseFixture() {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-anchor-phases-"));
+  roots.push(root);
+  const version = "1.2.3";
+  mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "keys"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), `${version}\n`);
+  writeFileSync(join(root, `docs/releases/v${version}.md`), "notes\n");
+  writeFileSync(join(root, "keys/expected-fingerprints.txt"), "gpg A\nminisign B\n");
+  writeFileSync(join(root, "keys/expected-fingerprints.ndjson"), "{\"a\":1}\n{\"b\":2}\n");
+  must(root, "git", ["init", "-q", "-b", "main"]);
+  must(root, "git", ["config", "user.name", "Fixture"]);
+  must(root, "git", ["config", "user.email", "fixture@example.invalid"]);
+  must(root, "git", ["add", "-A"]);
+  must(root, "git", ["commit", "-qm", "release"]);
+  must(root, "git", ["tag", "-a", "-m", `Release ${version}`, `v${version}`]);
+  // A later worktree edit of an anchor never counts: the tag's blob decides.
+  writeFileSync(join(root, "keys/expected-fingerprints.txt"), "gpg EDITED\n");
+  const dist = join(root, "dist");
+  mkdirSync(dist);
+  const { base, checksummed } = expectedInventory(version);
+  for (const name of base) writeFileSync(join(dist, name), `${name}\n`);
+  writeFileSync(join(dist, `release-notes-v${version}.md`), "notes\n");
+  for (const [path, name] of ANCHORS) writeFileSync(join(dist, name), must(root, "git", ["cat-file", "blob", `v${version}:${path}`]) + "\n");
+  const manifest = (algorithm) => base.map((name) => `${hash(readFileSync(join(dist, name)), algorithm)}  ${name}`).join("\n") + "\n";
+  const sums = () => {
+    writeFileSync(join(dist, "SHA256SUMS"), manifest("sha256"));
+    writeFileSync(join(dist, "SHA512SUMS"), manifest("sha512"));
+  };
+  const metadataFile = join(root, "metadata.json");
+  // GitHub's view: draft, with digests of the CI-built assets (and, once
+  // uploaded, of everything) as they are in `from`.
+  const metadata = (names, from = dist) => writeFileSync(metadataFile, JSON.stringify({
+    tagName: `v${version}`, isDraft: true,
+    assets: names.map((name) => ({ name, digest: `sha256:${hash(readFileSync(join(from, name)))}` })),
+  }));
+  const cli = (command, env = {}) => spawnSync("node", ["scripts/release-integrity.mjs", command, "--root", root, "--dir", dist], {
+    encoding: "utf8", env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${version}`, SYSPRIMS_RELEASE_METADATA_FILE: metadataFile, ...env, RELEASE_TAG: undefined },
+  });
+  return { root, version, dist, base, checksummed, sums, metadata, cli, built: base.filter((name) => !/^release-notes-|^expected-fingerprints\./.test(name)) };
+}
+
+test("anchors are base payload: in the inventory and the checksum manifests", () => {
+  const { base } = expectedInventory("1.2.3");
+  for (const [, name] of ANCHORS) assert.ok(base.includes(name), name);
+  const checksums = readFileSync("scripts/generate-checksums.sh", "utf8");
+  for (const [, name] of ANCHORS) assert.match(checksums, new RegExp(`EXPECTED=\\([\\s\\S]*${name.replace(".", "\\.")}`));
+});
+
+test("every phase requires both anchors equal to the tag commit's blobs", () => {
+  const f = anchorPhaseFixture();
+  // Each tampering, applied to a good state and undone after.
+  const tamperings = [];
+  for (const [, name] of ANCHORS) {
+    const file = join(f.dist, name);
+    tamperings.push([`${name} missing`, () => { const saved = readFileSync(file); unlinkSync(file); return () => writeFileSync(file, saved); }, /inventory mismatch|state mismatch|missing or not a regular file/]);
+    tamperings.push([`${name} altered`, () => { const saved = readFileSync(file); writeFileSync(file, Buffer.concat([saved, Buffer.from("x")])); return () => writeFileSync(file, saved); }, /does not match the immutable tag-tree blob/]);
+    tamperings.push([`${name} symlinked`, () => { const saved = readFileSync(file); const elsewhere = join(f.root, `elsewhere-${name}`); writeFileSync(elsewhere, saved); unlinkSync(file); symlinkSync(elsewhere, file); return () => { unlinkSync(file); writeFileSync(file, saved); }; }, /missing or not a regular file|inventory mismatch|state mismatch/]);
+  }
+  const phases = [
+    ["downloaded", () => f.metadata(f.built)],
+    ["checksummed", () => { f.sums(); f.metadata(f.built); }],
+    ["require-checksummed", () => { f.sums(); f.metadata(f.built); }],
+  ];
+  for (const [phase, prepare] of phases) {
+    for (const name of ["SHA256SUMS", "SHA512SUMS"]) rmSync(join(f.dist, name), { force: true });
+    prepare();
+    const good = f.cli(phase);
+    assert.equal(good.status, 0, `${phase}: ${good.stderr}`);
+    for (const [label, apply, pattern] of tamperings) {
+      const undo = apply();
+      // Re-checksummed after the tampering, so the manifests agree with the
+      // altered bytes and only the anchor checks can refuse.
+      if (phase !== "downloaded" && !label.endsWith("missing")) f.sums();
+      const result = f.cli(phase);
+      undo();
+      if (phase !== "downloaded") f.sums();
+      assert.notEqual(result.status, 0, `${phase} accepted: ${label}`);
+      assert.match(result.stderr, pattern, `${phase} ${label}: ${result.stderr}`);
+    }
+  }
+  // Uploaded: the remote copy is checked against the tag blobs, and against
+  // GitHub's digests; a remote anchor that differs from the tag commit's blob
+  // is refused even when GitHub's digest and the manifests agree with it.
+  const { signed } = expectedInventory(f.version);
+  const remote = join(f.root, "remote");
+  mkdirSync(remote);
+  f.sums();
+  for (const name of signed) {
+    if (existsSyncLocal(join(f.dist, name))) copyFileSync(join(f.dist, name), join(remote, name));
+    else writeFileSync(join(remote, name), `${name}\n`);
+  }
+  f.metadata(signed, remote);
+  const env = { SYSPRIMS_REMOTE_ASSET_DIR: remote };
+  const emptyLocal = join(f.root, "empty-local");
+  mkdirSync(emptyLocal);
+  const uploaded = () => spawnSync("node", ["scripts/release-integrity.mjs", "uploaded", "--root", f.root, "--dir", emptyLocal], {
+    encoding: "utf8", env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${f.version}`, SYSPRIMS_RELEASE_METADATA_FILE: join(f.root, "metadata.json"), ...env, RELEASE_TAG: undefined },
+  });
+  assert.equal(uploaded().status, 0, uploaded().stderr);
+  for (const [, name] of ANCHORS) {
+    const file = join(remote, name);
+    const saved = readFileSync(file);
+    writeFileSync(file, Buffer.concat([saved, Buffer.from("x")]));
+    const remoteManifest = (algorithm) => expectedInventory(f.version).base.map((n) => `${hash(readFileSync(join(remote, n)), algorithm)}  ${n}`).join("\n") + "\n";
+    writeFileSync(join(remote, "SHA256SUMS"), remoteManifest("sha256"));
+    writeFileSync(join(remote, "SHA512SUMS"), remoteManifest("sha512"));
+    f.metadata(signed, remote);
+    const result = uploaded();
+    assert.notEqual(result.status, 0, `uploaded accepted an altered ${name}`);
+    assert.match(result.stderr, /does not match the immutable tag-tree blob/, result.stderr);
+    writeFileSync(file, saved);
+    writeFileSync(join(remote, "SHA256SUMS"), remoteManifest("sha256"));
+    writeFileSync(join(remote, "SHA512SUMS"), remoteManifest("sha512"));
+    // GitHub's digest disagreeing with the downloaded bytes is refused too.
+    f.metadata(signed, remote);
+    const metadataPath = join(f.root, "metadata.json");
+    const doc = JSON.parse(readFileSync(metadataPath, "utf8"));
+    doc.assets.find((asset) => asset.name === name).digest = `sha256:${"0".repeat(64)}`;
+    writeFileSync(metadataPath, JSON.stringify(doc));
+    const digest = uploaded();
+    assert.notEqual(digest.status, 0);
+    assert.match(digest.stderr, new RegExp(`GitHub digest mismatch for ${name.replace(".", "\\.")}`));
+    f.metadata(signed, remote);
+  }
+  // The signed phase uses the same check (its other steps run the signature
+  // scripts, exercised in their own suites).
+  assert.match(readFileSync("scripts/release-integrity.mjs", "utf8"), /function signed\([^)]*\) \{[\s\S]*?verifyTaggedAssets\(root, directory, version\)/);
+  assert.doesNotThrow(() => verifyTaggedAssets(f.root, f.dist, f.version));
+  // The tag-blob check itself refuses a symlinked anchor, even one whose
+  // target holds exactly the tag's bytes (the inventory check would also
+  // refuse it; this pins the property on its own).
+  for (const [, name] of ANCHORS) {
+    const file = join(f.dist, name);
+    const saved = readFileSync(file);
+    const target = join(f.root, `same-bytes-${name}`);
+    writeFileSync(target, saved);
+    unlinkSync(file);
+    symlinkSync(target, file);
+    assert.throws(() => verifyTaggedAssets(f.root, f.dist, f.version), /missing or not a regular file/, name);
+    unlinkSync(file);
+    writeFileSync(file, saved);
+  }
+});
+
+test("the anchors are staged before the checksums and uploaded with the release", () => {
+  const makefile = readFileSync("Makefile", "utf8");
+  const release = makefile.slice(makefile.indexOf("\nrelease: "), makefile.indexOf("\n\n", makefile.indexOf("\nrelease: ")));
+  const order = [...release.matchAll(/\$\(MAKE\) (release-[a-z-]+)/g)].map((m) => m[1]);
+  assert.ok(order.includes("release-stage-anchors"), order.join(" "));
+  assert.ok(order.indexOf("release-stage-anchors") < order.indexOf("release-checksums"), order.join(" "));
+  assert.match(makefile, /^release-stage-anchors: release-require-tag [^\n]*\n\t\.\/scripts\/release-stage-public\.sh --anchors /m);
+  // The upload script, run against a stub gh, uploads both anchors.
+  const dir = mkdtempSync(join(tmpdir(), "sysprims-upload-"));
+  roots.push(dir);
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >>"${join(dir, "gh.log")}"\n`, { mode: 0o755 });
+  const dist = join(dir, "dist");
+  mkdirSync(dist);
+  for (const name of ["SHA256SUMS", "SHA256SUMS.minisig", "SHA512SUMS", "SHA512SUMS.minisig", "sysprims-minisign.pub", "SHA256SUMS.asc", "SHA512SUMS.asc", "sysprims-release-signing-key.asc", "release-notes-v1.2.3.md", "expected-fingerprints.txt", "expected-fingerprints.ndjson"]) writeFileSync(join(dist, name), "x\n");
+  const result = spawnSync("bash", ["scripts/upload-release-assets.sh", "v1.2.3", dist], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const upload = readFileSync(join(dir, "gh.log"), "utf8").split("\n").find((line) => line.startsWith("release upload"));
+  for (const [, name] of ANCHORS) assert.ok(upload.split(" ").includes(name), upload);
+  for (const [, name] of ANCHORS) {
+    rmSync(join(dist, name));
+    const missing = spawnSync("bash", ["scripts/upload-release-assets.sh", "v1.2.3", dist], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    assert.notEqual(missing.status, 0, `upload ran without ${name}`);
+    writeFileSync(join(dist, name), "x\n");
   }
 });

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -79,6 +80,7 @@ export function expectedInventory(version) {
     "LICENSE-APACHE",
     "LICENSE-MIT",
     `release-notes-v${version}.md`,
+    ...ANCHORS.map(([, name]) => name),
     `sbom-${version}.cdx.json`,
     `sysprims-${version}-darwin-amd64.tar.gz`,
     `sysprims-${version}-darwin-arm64.tar.gz`,
@@ -143,11 +145,30 @@ function verifyAssetDigests(directory, assets, names) {
   }
 }
 
-function verifyTaggedNotes(root, directory, version) {
-  const tag = `v${version}`;
-  const tagged = run(root, "git", ["show", `${tag}:docs/releases/${tag}.md`]);
-  const local = readFileSync(join(directory, `release-notes-${tag}.md`), "utf8");
-  if (local !== tagged) fail("release notes do not match the immutable tag-tree blob");
+// Release assets taken from the tagged commit's blobs rather than built by CI:
+// the notes and the fingerprint anchors. They are staged locally before the
+// checksums, so they are covered by the signed manifests, and at every phase
+// each must equal its blob at the tag's commit byte for byte.
+export const ANCHORS = [
+  ["keys/expected-fingerprints.txt", "expected-fingerprints.txt"],
+  ["keys/expected-fingerprints.ndjson", "expected-fingerprints.ndjson"],
+];
+function taggedAssets(version) {
+  return [[`docs/releases/v${version}.md`, `release-notes-v${version}.md`], ...ANCHORS];
+}
+const isTaggedAsset = (version) => (name) => taggedAssets(version).some(([, asset]) => asset === name);
+
+export function verifyTaggedAssets(root, directory, version) {
+  const commit = resolveCommit(root, `refs/tags/v${version}`);
+  for (const [path, name] of taggedAssets(version)) {
+    const entry = run(root, "git", ["ls-tree", commit, "--", path]).split(/\s/);
+    if (!["100644", "100755"].includes(entry[0]) || entry[1] !== "blob") fail(`committed ${path} is required in the tagged commit`);
+    const tagged = spawnSync("git", ["cat-file", "blob", `${commit}:${path}`], { cwd: root }).stdout;
+    if (!tagged?.length) fail(`committed ${path} is empty in the tagged commit`);
+    const file = join(directory, name);
+    if (!existsSync(file) || lstatSync(file).isSymbolicLink() || !lstatSync(file).isFile()) fail(`${name} is missing or not a regular file`);
+    if (!readFileSync(file).equals(tagged)) fail(`${name} does not match the immutable tag-tree blob ${path}`);
+  }
 }
 
 function parseManifest(path, algorithm) {
@@ -177,10 +198,10 @@ function downloaded(root, directory, version) {
   const tag = `v${version}`;
   const { base } = expectedInventory(version);
   assertInventory(directory, base, "downloaded");
-  verifyTaggedNotes(root, directory, version);
+  verifyTaggedAssets(root, directory, version);
   const metadata = releaseMetadata(root, tag);
   assertDraft(metadata, tag);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !name.startsWith("release-notes-")));
+  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
   return metadata;
 }
 
@@ -189,8 +210,8 @@ function checksummed(root, directory, version) {
   assertInventory(directory, inventory, "checksummed");
   const metadata = releaseMetadata(root, `v${version}`);
   assertDraft(metadata, `v${version}`);
-  verifyTaggedNotes(root, directory, version);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !name.startsWith("release-notes-")));
+  verifyTaggedAssets(root, directory, version);
+  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
   verifyChecksums(directory, base);
 }
 
@@ -202,8 +223,8 @@ function requireChecksummed(root, directory, version) {
   if (missing.length || extra.length) fail(`required checksummed state mismatch; missing=[${missing.join(", ")}], extra=[${extra.join(", ")}]`);
   const metadata = releaseMetadata(root, `v${version}`);
   assertDraft(metadata, `v${version}`);
-  verifyTaggedNotes(root, directory, version);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !name.startsWith("release-notes-")));
+  verifyTaggedAssets(root, directory, version);
+  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
   verifyChecksums(directory, base);
 }
 
@@ -212,8 +233,8 @@ function signed(root, directory, version) {
   assertInventory(directory, inventory, "signed");
   const metadata = releaseMetadata(root, `v${version}`);
   assertDraft(metadata, `v${version}`);
-  verifyTaggedNotes(root, directory, version);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !name.startsWith("release-notes-")));
+  verifyTaggedAssets(root, directory, version);
+  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
   verifyChecksums(directory, base);
   run(root, "bash", ["scripts/verify-signatures.sh", directory]);
   run(root, "bash", ["scripts/verify-public-keys.sh", directory]);
@@ -241,7 +262,7 @@ function uploaded(root, directory, version) {
     if (!fixtureDir) run(root, "gh", ["release", "download", tag, "--dir", remoteDir]);
     assertInventory(remoteDir, inventory, "remote uploaded");
     verifyAssetDigests(remoteDir, metadata.assets, inventory);
-    verifyTaggedNotes(root, remoteDir, version);
+    verifyTaggedAssets(root, remoteDir, version);
     verifyChecksums(remoteDir, expectedInventory(version).base);
     for (const name of inventory) {
       if (existsSync(join(directory, name)) && sha256(join(directory, name)) !== sha256(join(remoteDir, name))) fail(`remote/local mismatch for ${name}`);

@@ -400,13 +400,18 @@ on HEAD.
    The copied note must be byte-identical to `docs/releases/vX.Y.Z.md` in the
    immutable tag tree. It is part of both signed checksum manifests.
 
-4. **Generate exact checksum manifests**
+4. **Stage the fingerprint anchors, then generate exact checksum manifests**
 
    ```bash
+   make release-stage-anchors
    make release-checksums
    ```
 
-   Unexpected, foreign-version, or leftover files are blocking.
+   `release-stage-anchors` copies `keys/expected-fingerprints.txt` and
+   `keys/expected-fingerprints.ndjson` from the tagged commit's blobs; the
+   anchors are published as release assets, covered by both signed checksum
+   manifests. `release-checksums` refuses to run without them. Unexpected,
+   foreign-version, or leftover files are blocking.
 
 5. **Sign checksum manifests** (minisign + PGP)
 
@@ -547,11 +552,13 @@ git push origin main
 | `make release-clean`       | Remove dist/release contents                                                   |
 | `make release-plan-check`  | Validate the machine-readable per-cut surface plan                             |
 | `make release-download`    | Download the exact CI payload from the draft                                   |
+| `make release-stage-anchors` | Stage the fingerprint anchors from the tagged commit (before checksums)      |
 | `make release-checksums`   | Generate SHA256SUMS and SHA512SUMS                                             |
 | `make release-sign`        | Sign checksums with minisign + PGP                                             |
 | `make release-export-keys` | Stage the committed public keys from the tagged commit                         |
 | `make release-verify`      | Verify checksums, signatures, and keys                                         |
 | `make release-notes`       | Copy release notes to dist                                                     |
+| `make release-fetch-anchors` | Fetch a published release's anchors, verified, into `ANCHORS_DIR` (never `keys/`) |
 | `make release-upload`      | Upload signed artifacts; keep the GitHub release draft                         |
 | `make release-guard-remote`| Verify the fresh remote draft, registries/modules, and native runtime           |
 | `make release-publish`     | Sole maintainer-cued draft → public promotion                                  |

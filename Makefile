@@ -20,6 +20,7 @@
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
 .PHONY: release release-check release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
+.PHONY: release-stage-anchors release-fetch-anchors
 .PHONY: release-verify-keys release-notes release-upload release-preflight
 .PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
 .PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
@@ -30,7 +31,7 @@
 
 # Every target that reads the release tag runs its prerequisites serially, so
 # release-require-tag (always first) finishes before any other prerequisite.
-.NOTPARALLEL: release release-checksums release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-tag release-upload release-verify release-verify-remote-tag release-verify-signatures release-verify-tag
+.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-tag release-upload release-verify release-verify-remote-tag release-verify-signatures release-verify-tag
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -110,6 +111,7 @@ help: ## Show available targets
 	@echo "  release-download      Download CI artifacts from GitHub"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
+	@echo "  release-stage-anchors Stage the fingerprint anchors (release-fetch-anchors: pull, verified)"
 	@echo "  release-export-keys   Stage committed public keys from the tagged commit"
 	@echo "  release-verify        Verify checksums, signatures, and keys"
 	@echo "  release-upload        Upload signed artifacts to GitHub"
@@ -756,6 +758,13 @@ dist-local-clean: ## Remove dist/local contents
 release-download: release-require-tag release-guard-tag-version-post release-guard-provenance ## Download release assets from GitHub
 	./scripts/download-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
+release-stage-anchors: release-require-tag release-guard-tag-version-post ## Stage the fingerprint anchors from the tagged commit (before checksums)
+	./scripts/release-stage-public.sh --anchors $(DIST_RELEASE)
+
+release-fetch-anchors: release-require-tag ## Fetch a published release's anchors into ANCHORS_DIR, verified (never writes keys/)
+	@test -n "$(ANCHORS_DIR)" || { echo "error: ANCHORS_DIR=<new or empty directory> is required"; exit 1; }
+	./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
+
 release-checksums: release-require-tag release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)
 	@$(MAKE) release-guard-checksummed --silent
@@ -867,6 +876,7 @@ release: release-require-tag ## Prepare and upload signed assets; release remain
 	@$(MAKE) release-clean
 	@$(MAKE) release-download
 	@$(MAKE) release-notes
+	@$(MAKE) release-stage-anchors
 	@$(MAKE) release-checksums
 	@$(MAKE) release-sign
 	@$(MAKE) release-export-keys

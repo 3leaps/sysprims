@@ -33,6 +33,16 @@ with that tool, then use the approved minisign public key to verify both
 manifests and check every listed digest. Require the complete expected asset
 set.
 
+Both anchors are also published with every release as assets
+(`expected-fingerprints.txt`, `expected-fingerprints.ndjson`), copied from the
+tagged commit's blobs and listed in both signed checksum manifests. Every
+release phase requires them to equal the tagged commit's blobs byte for byte.
+`make release-fetch-anchors SYSPRIMS_RELEASE_TAG=vX.Y.Z ANCHORS_DIR=<dir>`
+fetches them from a published release into a new or empty directory, after
+verifying the manifest signatures with the keys committed at that tag and
+checking each anchor against the signed manifests and the tagged commit; it
+never writes `keys/`.
+
 ## Tags
 
 A release tags one commit with each name in its tag set, at the same version:
