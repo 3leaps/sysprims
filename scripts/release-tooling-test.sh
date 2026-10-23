@@ -5,8 +5,8 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
-for suite in release-tag-controls release-anchors release-validate-pin verify-pinned-tag \
-	release-stage-public release-materialize-tag-messages release-crates; do
+for suite in release-tag-controls release-anchors release-validate-pin verify-pinned-tag release-tag \
+	release-stage-public release-materialize-tag-messages verify-signatures release-crates; do
 	echo "== $suite"
 	"$root/scripts/$suite.test.sh"
 done

@@ -24,50 +24,86 @@ while IFS= read -r target; do
 	}
 done < <(grep -oE 'make [a-z][a-z0-9-]+' "$fixture_root/RELEASE_CHECKLIST.md" | awk '{print $2}' | sort -u)
 
-# Tag-consuming targets refuse a bare RELEASE_TAG from any origin (environment,
-# command line, set but empty) before any side effect: the operator script must
-# never run. SYSPRIMS_RELEASE_TAG is set, so only the bare variable can refuse.
-sentinel="$fixture_dir/operator-ran"
-shim="$fixture_dir/shim-root"
-mkdir -p "$shim/scripts"
-cp "$fixture_root/Makefile" "$fixture_root/VERSION" "$shim/"
-printf '#!/usr/bin/env bash\ntouch %q\n' "$sentinel" >"$shim/scripts/release-tag-operator.sh"
-chmod +x "$shim/scripts/release-tag-operator.sh"
-for origin in env cli empty; do
-	rm -f "$sentinel"
-	case "$origin" in
-	env) expect_fail_with 'RELEASE_TAG is not accepted' env RELEASE_TAG=v9.9.9 SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag ;;
-	cli) expect_fail_with 'RELEASE_TAG is not accepted' env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag RELEASE_TAG=v9.9.9 ;;
-	empty) expect_fail_with 'RELEASE_TAG is not accepted' env RELEASE_TAG= SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag ;;
-	esac
-	[[ ! -e "$sentinel" ]] || {
-		echo "error: release-tag ran its operator script despite a bare RELEASE_TAG ($origin)" >&2
+# Which targets read the release tag is derived from the recipes and the
+# scripts they run (scripts/release-make-guard.py); each must start with
+# release-require-tag and none may be listed as tag-free.
+guarded="$(python3 "$fixture_root/scripts/release-make-guard.py" "$fixture_root")"
+for expected in release release-download release-export-keys release-upload release-publish release-preflight \
+	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-crates-publish release-guard-signed; do
+	grep -qx "$expected" <<<"$guarded" || {
+		echo "error: the guard analysis does not see $expected as tag-reading" >&2
 		exit 1
 	}
 done
-# Without a bare RELEASE_TAG the same target reaches the operator (control).
+
+# Live: every guarded target refuses a bare RELEASE_TAG (environment, command
+# line, set but empty) and a missing SYSPRIMS_RELEASE_TAG before any other
+# prerequisite or recipe runs. The shim replaces every script with one that
+# records it ran, so any side effect is visible.
+sentinel="$fixture_dir/ran"
+shim="$fixture_dir/shim-root"
+mkdir -p "$shim/scripts"
+cp "$fixture_root/Makefile" "$fixture_root/VERSION" "$shim/"
+for script in "$fixture_root"/scripts/*; do
+	name="$(basename "$script")"
+	printf '#!/usr/bin/env bash\necho %q >>%q\n' "$name" "$sentinel" >"$shim/scripts/$name"
+	chmod +x "$shim/scripts/$name"
+done
+printf '#!/usr/bin/env bash\necho node >>%q\n' "$sentinel" >"$fixture_dir/node"
+chmod +x "$fixture_dir/node"
+# shim_make [-u VAR]... [VAR=value]... make ARGS: env flags first, then PATH.
+shim_make() {
+	local flags=()
+	while [[ "${1:-}" == -u ]]; do
+		flags+=("$1" "$2")
+		shift 2
+	done
+	env ${flags[@]+"${flags[@]}"} PATH="$fixture_dir:$PATH" "$@"
+}
+while IFS= read -r target; do
+	for origin in env cli empty missing; do
+		rm -f "$sentinel"
+		case "$origin" in
+		env) expect_fail_with 'RELEASE_TAG is not accepted' shim_make RELEASE_TAG=v9.9.9 SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" "$target" ;;
+		cli) expect_fail_with 'RELEASE_TAG is not accepted' shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" "$target" RELEASE_TAG=v9.9.9 ;;
+		empty) expect_fail_with 'RELEASE_TAG is not accepted' shim_make RELEASE_TAG= SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" "$target" ;;
+		missing) expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' shim_make -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG make -s -C "$shim" "$target" ;;
+		esac
+		[[ ! -s "$sentinel" ]] || {
+			echo "error: make $target ran $(paste -sd, "$sentinel") despite an invalid tag input ($origin)" >&2
+			exit 1
+		}
+	done
+done <<<"$guarded"
+# Control: with a valid tag the guard passes and the target proceeds.
 rm -f "$sentinel"
-env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag >/dev/null
-[[ -e "$sentinel" ]] || {
-	echo "error: release-tag did not reach its operator script with a valid tag" >&2
-	exit 1
-}
-# Targets that consume no tag are unaffected by an unrelated RELEASE_TAG.
+shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag >/dev/null
+grep -qx release-tag-operator.sh "$sentinel"
+# Targets that read no tag ignore an unrelated RELEASE_TAG.
 env RELEASE_TAG=v9.9.9 make -s -C "$fixture_root" -n help >/dev/null
-# Every target that runs a tag-consuming script starts with the guard.
-awk '
-	/^[a-z][a-z0-9-]*:/ { target = $1; sub(":", "", target); first = 1; next }
-	first && /^\t/ { if (target ~ /^release-(prepare-tag-message|tag|push-tag|verify-tag|verify-remote-tag|verify-published-tag|record-anchor|crates-publish|crates-verify)$/ && $0 !~ /REQUIRE_RELEASE_TAG/) { print target; bad = 1 } first = 0 }
-	END { exit bad }
-' "$fixture_root/Makefile" || {
-	echo "error: a tag-consuming target does not start with REQUIRE_RELEASE_TAG" >&2
-	exit 1
-}
-expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' env -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG make -s -C "$fixture_root" release-tag
 if grep -En 'SYSPRIMS_RELEASE_TAG[[:space:]]*\?=|v\$\(VERSION\)' "$fixture_root/Makefile"; then
 	echo 'error: the Makefile derives a release tag' >&2
 	exit 1
 fi
+
+# One resolver decides the tag set; no other release script carries its own
+# copy of the prefixes or reads go.mod or the plan from the working tree.
+# Membership decisions: a filesystem test of go/recurrence/go.mod, or building
+# a tag list from a hardcoded prefix.
+if grep -nE "(\[ -f |existsSync\(|is_file\(\)).*go/recurrence|tags\.push\(|tags\.append\(|tags\+=\(\"(bindings|go/)" \
+	"$fixture_root"/scripts/release-guard-tag-version.sh "$fixture_root"/scripts/release-integrity.mjs \
+	"$fixture_root"/scripts/release-materialize-tag-messages.mjs "$fixture_root"/scripts/release-prepare-tag-message.py \
+	"$fixture_root"/scripts/release-tag-common.sh; then
+	echo 'error: a release script decides tag membership outside scripts/release-tag-set.mjs' >&2
+	exit 1
+fi
+for consumer in release-guard-tag-version.sh release-integrity.mjs release-materialize-tag-messages.mjs \
+	release-prepare-tag-message.py release-tag-common.sh; do
+	grep -q 'release-tag-set' "$fixture_root/scripts/$consumer" || {
+		echo "error: $consumer does not use the shared tag-set resolver" >&2
+		exit 1
+	}
+done
 
 # The release tag is required, canonical, and equal to VERSION.
 expect_fail_with 'SYSPRIMS_RELEASE_TAG is required' call tag_version -u SYSPRIMS_RELEASE_TAG
@@ -75,15 +111,42 @@ expect_fail_with 'canonical vX.Y.Z' call tag_version SYSPRIMS_RELEASE_TAG=1.2.3
 expect_fail_with 'does not match VERSION' call tag_version SYSPRIMS_RELEASE_TAG=v1.2.4
 call tag_version SYSPRIMS_RELEASE_TAG="v$version"
 
-# The tag set: canonical, Go binding when published, recurrence when present.
-[[ "$(call tag_set SYSPRIMS_RELEASE_TAG="v$version" | paste -sd, -)" == "v$version,bindings/go/sysprims/v$version,go/recurrence/v$version" ]]
+# The tag set is loaded from git blobs at a commit; uncommitted edits to the
+# plan, go.mod or prefix list never change it.
+load() { call "tag_load_set ${1:-HEAD} && printf '%s,' \"\${RELEASE_TAGS[@]}\"" SYSPRIMS_RELEASE_TAG="v$version"; }
+full="v$version,bindings/go/sysprims/v$version,go/recurrence/v$version,"
+[[ "$(load)" == "$full" ]]
 printf '{"surfaces":{"go":{"disposition":"skip","retained_version":"0.0.1"}}}\n' >"$repo/docs/releases/v$version.json"
-[[ "$(call tag_set SYSPRIMS_RELEASE_TAG="v$version" | paste -sd, -)" == "v$version,go/recurrence/v$version" ]]
 rm -rf "$repo/go"
-[[ "$(call tag_set SYSPRIMS_RELEASE_TAG="v$version" | paste -sd, -)" == "v$version" ]]
+[[ "$(load)" == "$full" ]]
+fixture_commit "$repo" "skip, no module"
+[[ "$(load)" == "v$version," ]]
+[[ "$(load HEAD~1)" == "$full" ]]
+git -C "$repo" checkout -q HEAD~1 -- .
+fixture_commit "$repo" restore
+
+# A failing producer never yields a partial set. With an unknown prefix after
+# "v" the resolver fails after reading the file; the loader refuses even though
+# "v" alone would have looked like a valid set.
 printf 'v\nother/v\n' >"$repo/config/release/release-tags.txt"
-expect_fail_with 'unknown tag prefix' call tag_set SYSPRIMS_RELEASE_TAG="v$version"
-git -C "$repo" checkout -q -- .
+fixture_commit "$repo" bad-prefix
+expect_fail_with 'cannot resolve the release tag set' load
+printf 'v\nbindings/go/sysprims/v\nbindings/go/sysprims/v\n' >"$repo/config/release/release-tags.txt"
+fixture_commit "$repo" repeated-prefix
+expect_fail_with 'cannot resolve the release tag set' load
+printf 'bindings/go/sysprims/v\nv\n' >"$repo/config/release/release-tags.txt"
+fixture_commit "$repo" canonical-not-first
+expect_fail_with 'cannot resolve the release tag set' load
+git -C "$repo" checkout -q HEAD~3 -- config/release/release-tags.txt
+fixture_commit "$repo" restore-prefixes
+[[ "$(load)" == "$full" ]]
+# Every consumer that iterates tags goes through tag_load_set, never a
+# process-substitution loop over a producer.
+if grep -nE 'done < <\(' "$fixture_root"/scripts/release-*.sh "$fixture_root"/scripts/verify-pinned-tag.sh |
+	grep -v '\.test\.sh'; then
+	echo 'error: a release script iterates a producer without checking its exit status' >&2
+	exit 1
+fi
 
 # Message files: one per tag, outside the repo, under a directory named for the
 # tag, complete, with the expected subject.

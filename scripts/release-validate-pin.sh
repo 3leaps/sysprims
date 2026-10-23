@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Maintainer-only: inspect the public pins without changing them. By default
 # the files are read as git blobs at SYSPRIMS_ANCHOR_COMMIT (default HEAD).
-# `--working-tree` reads the uncommitted files instead; it exists only for the
-# one-time export step before the pins are first committed. No operator
-# keyring is opened.
+# `--dir PATH` reads them from a staging directory laid out like the tree; it
+# exists only for the one-time export step, which validates there before it
+# writes anything. No operator keyring is opened.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 # shellcheck source=scripts/release-decernor.sh
@@ -16,10 +16,13 @@ stop() {
 	exit 1
 }
 source_mode=commit
-if [[ "${1:-}" == --working-tree ]]; then
-	source_mode=working-tree
+stage_dir=
+if [[ "${1:-}" == --dir && -n "${2:-}" && $# -eq 2 ]]; then
+	source_mode=staged
+	stage_dir="$2"
+	[[ -d "$stage_dir" && ! -L "$stage_dir" ]] || stop 'the staging directory must exist and not be a symlink'
 elif [[ $# -gt 0 ]]; then
-	stop 'usage: release-validate-pin.sh [--working-tree]'
+	stop 'usage: release-validate-pin.sh [--dir PATH]'
 fi
 commit="$(git rev-parse --verify "${SYSPRIMS_ANCHOR_COMMIT:-HEAD}^{commit}")"
 scratch="$(mktemp -d)"
@@ -27,9 +30,9 @@ trap 'gpgconf --homedir "$scratch/gpg" --kill all >/dev/null 2>&1 || true; rm -r
 mkdir -m 700 "$scratch/gpg"
 blob() {
 	local path="$1" out="$2"
-	if [[ "$source_mode" == working-tree ]]; then
-		[[ -f "$path" && ! -L "$path" ]] || stop "$path must be a regular file"
-		cat "$path" >"$out"
+	if [[ "$source_mode" == staged ]]; then
+		[[ -f "$stage_dir/$path" && ! -L "$stage_dir/$path" ]] || stop "$path must be a regular file"
+		cat "$stage_dir/$path" >"$out"
 	else
 		[[ "$(git ls-tree "$commit" -- "$path" | awk '{print $1}')" == 100644 ]] ||
 			stop "$path must be a committed regular file at $commit"
@@ -38,7 +41,7 @@ blob() {
 	[[ -s "$out" ]] || stop "$path is empty"
 }
 present() {
-	if [[ "$source_mode" == working-tree ]]; then [[ -e "$1" ]]; else git cat-file -e "$commit:$1" 2>/dev/null; fi
+	if [[ "$source_mode" == staged ]]; then [[ -e "$stage_dir/$1" ]]; else git cat-file -e "$commit:$1" 2>/dev/null; fi
 }
 blob docs/security/release-signing-keys.asc "$scratch/keys.asc"
 blob docs/security/sysprims-minisign.pub "$scratch/minisign.pub"

@@ -79,4 +79,46 @@ fixture_minisign_pub "$fixture_dir/other.pub" 3
 		"$fixture_dir/edited.txt" "$repo/keys/expected-fingerprints.ndjson" \
 		"$repo/docs/security/release-signing-keys.asc" "$repo/docs/security/sysprims-minisign.pub"
 )
+# Rollback removes only what this invocation created. A file that appears at
+# the destination after the absence check is left untouched, and a failing
+# verify step removes the pair this run installed and nothing else.
+stage="$fixture_dir/stage"
+mkdir -p "$stage" "$fixture_dir/dest"
+printf 'gpg A\nminisign B\n' >"$stage/expected-fingerprints.txt"
+printf '{}\n{}\n' >"$stage/expected-fingerprints.ndjson"
+racer="$fixture_dir/racer.sh"
+cat >"$racer" <<SH
+#!/usr/bin/env bash
+# Runs as the verify step after the txt anchor exists: simulates a concurrent
+# writer that created the ndjson anchor first, so this run never owned it.
+exit 1
+SH
+chmod +x "$racer"
+printf 'concurrent\n' >"$fixture_dir/dest/expected-fingerprints.ndjson"
+# The pre-check refuses an existing destination outright.
+expect_fail_with 'never overwritten' "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest"
+[[ "$(cat "$fixture_dir/dest/expected-fingerprints.ndjson")" == concurrent ]]
+[[ ! -e "$fixture_dir/dest/expected-fingerprints.txt" ]]
+rm "$fixture_dir/dest/expected-fingerprints.ndjson"
+# A file created between the check and the write (race) survives.
+appear="$fixture_dir/appear"
+mkdir "$appear"
+# The shim runs at the script's mkdir, after the absence check and before any
+# anchor is opened, and creates the ndjson anchor as a concurrent writer would.
+mkdir "$fixture_dir/race-bin"
+cat >"$fixture_dir/race-bin/mkdir" <<SH
+#!/usr/bin/env bash
+/bin/mkdir "\$@"
+printf 'raced\\n' >"$appear/expected-fingerprints.ndjson"
+SH
+chmod +x "$fixture_dir/race-bin/mkdir"
+expect_fail_with 'appeared during installation' env PATH="$fixture_dir/race-bin:$PATH" "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$appear"
+[[ "$(cat "$appear/expected-fingerprints.ndjson")" == raced ]]
+[[ ! -e "$appear/expected-fingerprints.txt" ]]
+# A failing verify step removes this run's pair only.
+expect_fail "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest" "$racer"
+[[ ! -e "$fixture_dir/dest/expected-fingerprints.txt" && ! -e "$fixture_dir/dest/expected-fingerprints.ndjson" ]]
+printf 'unrelated\n' >"$fixture_dir/dest/other"
+"$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest"
+[[ "$(cat "$fixture_dir/dest/other")" == unrelated ]]
 echo '[ok] anchor and checker-binding controls passed'

@@ -32,15 +32,29 @@ for path in "$asc" "$pub" "$subkey"; do
 	[[ ! -e "$path" && ! -L "$path" ]] || stop "$path already exists; pins are written once and reviewed"
 done
 [[ ! -L docs/security && ! -L config/release ]] || stop 'pin directories must not be symlinks'
-mkdir -p docs/security config/release
 if grep -q -e 'secret key' -e 'PRIVATE KEY' "$SYSPRIMS_MINISIGN_PUB_EXPORT"; then
 	stop 'the minisign export contains private material'
 fi
-set -C
+# Build and validate all three pins in scratch first; nothing in the tree is
+# written until they pass.
+scratch="$(mktemp -d)"
+created=()
+cleanup() {
+	local path
+	for path in ${created[@]+"${created[@]}"}; do rm -f "$path"; done
+	rm -rf "$scratch"
+}
+trap cleanup EXIT
+mkdir -p "$scratch/docs/security" "$scratch/config/release"
 gpg --homedir "$SYSPRIMS_GPG_HOMEDIR" --batch --armor --export-options export-minimal \
-	--export "$SYSPRIMS_PGP_KEY_ID" >"$asc" || stop 'OpenPGP public export failed; inspect the new file before retrying'
-cat "$SYSPRIMS_MINISIGN_PUB_EXPORT" >"$pub"
-printf '%s\n' "${SYSPRIMS_PGP_KEY_ID%!}" >"$subkey"
-set +C
-"$root/scripts/release-validate-pin.sh" --working-tree || stop 'the new pins did not validate; inspect them before committing'
+	--export "$SYSPRIMS_PGP_KEY_ID" >"$scratch/$asc" || stop 'OpenPGP public export failed'
+cat "$SYSPRIMS_MINISIGN_PUB_EXPORT" >"$scratch/$pub"
+printf '%s\n' "${SYSPRIMS_PGP_KEY_ID%!}" >"$scratch/$subkey"
+"$root/scripts/release-validate-pin.sh" --dir "$scratch" || stop 'the exported pins did not validate; nothing was written'
+mkdir -p docs/security config/release
+for path in "$asc" "$pub" "$subkey"; do
+	(set -C && cat "$scratch/$path" >"$path") || stop "$path appeared during export; nothing more was written"
+	created+=("$path")
+done
+created=()
 echo "[ok] wrote $asc, $pub and $subkey; review and commit them, then run make release-insert-anchors"
