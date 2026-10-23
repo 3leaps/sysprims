@@ -95,11 +95,61 @@ def main():
             with os.fdopen(fd, "wb") as handle:
                 handle.write(content)
     verify(repo, entries, root)
+    attach_commit(repo, commit, root)
+
+
+def attach_commit(repo, commit, root):
+    """Make the export a git checkout of COMMIT without rewriting any file.
+
+    The commit is fetched from the local repository (no network) and the index
+    is built from its tree; read-tree never touches the working files, so the
+    verified bytes stay as written. Cargo then records the commit in
+    .cargo_vcs_info.json, and, since nothing passes --allow-dirty, refuses to
+    package if any file differs from its blob: a second, independent check.
+    """
+
+    def local(*args):
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "core.sparseCheckout=false",
+                *args,
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise SystemExit(
+                f"error: git {' '.join(args)} in the export failed: {result.stderr.decode(errors='replace').strip()}"
+            )
+        return result.stdout.decode()
+
+    full = git(repo, "rev-parse", "--verify", f"{commit}^{{commit}}").decode().strip()
+    local("init", "-q")
+    local("config", "core.autocrlf", "false")
+    local("config", "core.sparseCheckout", "false")
+    local("fetch", "-q", "--no-tags", str(pathlib.Path(repo).resolve()), full)
+    local("update-ref", "HEAD", "FETCH_HEAD")
+    if local("rev-parse", "HEAD").strip() != full:
+        raise SystemExit("error: the export's HEAD is not the tagged commit")
+    local("read-tree", "HEAD")
+    local("update-index", "-q", "--refresh")
+    status = local("status", "--porcelain", "--untracked-files=all", "--ignored=no")
+    if status:
+        raise SystemExit(f"error: the export differs from the tagged commit:\n{status}")
 
 
 def verify(repo, entries, root):
     found = set()
     for current, dirs, files in os.walk(root):
+        # The repository metadata attach_commit adds is not exported content.
+        if pathlib.Path(current) == root and ".git" in dirs and ".git" not in entries:
+            dirs.remove(".git")
         for name in files + [
             d for d in dirs if (pathlib.Path(current) / d).is_symlink()
         ]:

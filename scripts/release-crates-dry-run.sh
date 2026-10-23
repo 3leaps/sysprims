@@ -71,10 +71,14 @@ registry_checksum() {
 # sha256 of the crate packaged from the tagged commit. The .crate is removed
 # first so the hash is always of the file this call produced.
 local_checksum() {
-	local crate="$1" file="$CARGO_TARGET_DIR/package/${1}-${version}.crate"
+	local crate="$1" file="$CARGO_TARGET_DIR/package/${1}-${version}.crate" path
 	rm -f "$file"
+	# No --allow-dirty: cargo refuses if any file differs from the tagged commit.
 	cargo package --locked --no-verify -p "$crate" >/dev/null 2>&1 || die "cannot package $crate"
 	[[ -f "$file" ]] || die "packaged crate $file not found"
+	path="$(python3 "$tree/scripts/release-crates.py" paths | awk -v c="$crate" '$1==c {print $2}')"
+	python3 "$tree/scripts/release-crates.py" vcs-info "$file" "$crate" "$version" "$commit" "$path" ||
+		die "$crate does not record the tagged commit and its path"
 	python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$file"
 }
 

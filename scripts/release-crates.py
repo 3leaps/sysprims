@@ -80,7 +80,35 @@ def registry_checksum(crate, version, text):
     return checksum
 
 
+def check_vcs_info(crate_file, crate, version, commit, path):
+    """The packaged crate records the tagged commit and the crate's tree path."""
+    import tarfile
+
+    member = f"{crate}-{version}/.cargo_vcs_info.json"
+    with tarfile.open(crate_file, "r:gz") as archive:
+        try:
+            handle = archive.extractfile(member)
+        except KeyError:
+            handle = None
+        if handle is None:
+            raise ValueError(f"{crate_file} has no .cargo_vcs_info.json")
+        info = json.loads(handle.read())
+    if info.get("git", {}).get("sha1") != commit:
+        raise ValueError(
+            f"{crate} records commit {info.get('git', {}).get('sha1')}, not {commit}"
+        )
+    if info.get("git", {}).get("dirty"):
+        raise ValueError(f"{crate} was packaged from a dirty tree")
+    if info.get("path_in_vcs") != path:
+        raise ValueError(
+            f"{crate} records path {info.get('path_in_vcs')!r}, not {path!r}"
+        )
+
+
 def main():
+    if len(sys.argv) == 7 and sys.argv[1] == "vcs-info":
+        check_vcs_info(*sys.argv[2:])
+        return
     if len(sys.argv) == 4 and sys.argv[1] == "registry-checksum":
         print(registry_checksum(sys.argv[2], sys.argv[3], sys.stdin.read()))
         return

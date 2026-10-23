@@ -4,7 +4,7 @@
 set -euo pipefail
 # shellcheck source=scripts/release-test-fixture.sh
 source "$(dirname "$0")/release-test-fixture.sh"
-python3 - "$fixture_root/scripts" <<'PY'
+PYTHONDONTWRITEBYTECODE=1 python3 - "$fixture_root/scripts" <<'PY'
 import importlib.util
 import pathlib
 import sys
@@ -124,6 +124,36 @@ git -C "$pub" tag -a -m "Release $version" "v$version"
 git -C "$pub" checkout -q --detach "v$version"
 bin="$fixture_dir/pub-bin"
 mkdir -p "$bin"
+# A deterministic stand-in for cargo's .crate: gzip'd tar of the crate's
+# sources plus .cargo_vcs_info.json (commit from the current git HEAD, the
+# crate's path), refusing a dirty tree as cargo does without --allow-dirty.
+cat >"$fixture_dir/fake-crate.py" <<'PY'
+import gzip, io, json, subprocess, sys, tarfile
+root, out, version, source = sys.argv[1:5]
+def blob(path):
+    if source == "tree":
+        return open(f"{root}/{path}", "rb").read()
+    return subprocess.run(["git", "-C", root, "cat-file", "blob", f"{source}:{path}"], capture_output=True, check=True).stdout
+rev = "HEAD" if source == "tree" else source
+commit = subprocess.run(["git", "-C", root, "rev-parse", rev], capture_output=True, text=True, check=True).stdout.strip()
+if source == "tree" and subprocess.run(["git", "-C", root, "status", "--porcelain"], capture_output=True, text=True).stdout:
+    sys.exit("error: files in the working directory contain changes that were not yet committed into git")
+files = {
+    "Cargo.toml": blob("crates/sysprims-core/Cargo.toml"),
+    "src/lib.rs": blob("crates/sysprims-core/src/lib.rs"),
+    ".cargo_vcs_info.json": json.dumps({"git": {"sha1": __import__("os").environ.get("FAKE_VCS_SHA", commit)},
+                                        "path_in_vcs": __import__("os").environ.get("FAKE_VCS_PATH", "crates/sysprims-core")}).encode(),
+}
+raw = io.BytesIO()
+with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+    for name, data in sorted(files.items()):
+        info = tarfile.TarInfo(f"sysprims-core-{version}/{name}")
+        info.size, info.mtime, info.mode = len(data), 0, 0o644
+        archive.addfile(info, io.BytesIO(data))
+with open(out, "wb") as handle:
+    with gzip.GzipFile(fileobj=handle, mode="wb", mtime=0, filename="") as gz:
+        gz.write(raw.getvalue())
+PY
 cat >"$bin/cargo" <<'SH'
 #!/usr/bin/env bash
 case "$1" in
@@ -131,7 +161,7 @@ metadata) printf '{"packages":[{"name":"sysprims-core","publish":null,"dependenc
 package)
 	out="${CARGO_TARGET_DIR:-$PWD/target}/package"
 	mkdir -p "$out"
-	cat crates/sysprims-core/Cargo.toml crates/sysprims-core/src/lib.rs >"$out/sysprims-core-$(cat VERSION).crate"
+	python3 "$FAKE_CRATE" "$PWD" "$out/sysprims-core-$(cat VERSION).crate" "$(cat VERSION)" tree
 	;;
 publish) echo "UPLOAD $PWD" >>"$UPLOAD_LOG" ;;
 *) exit 1 ;;
@@ -143,12 +173,10 @@ printf '{"version":{"crate":"sysprims-core","num":"$version","checksum":"%s"}}\n
 SH
 chmod +x "$bin/cargo" "$bin/curl"
 # The checksum of the crate built from the tagged commit's own bytes.
-tag_sum="$( (
-	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/Cargo.toml"
-	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/src/lib.rs"
-) | shasum -a 256 | awk '{print $1}')"
+tag_sum="$(python3 "$fixture_dir/fake-crate.py" "$pub" "$fixture_dir/expected.crate" "$version" "v$version^{commit}" &&
+	shasum -a 256 "$fixture_dir/expected.crate" | awk '{print $1}')"
 publish_run() {
-	(cd "$pub" && env PATH="$bin:$PATH" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" "$@" \
+	(cd "$pub" && env PATH="$bin:$PATH" FAKE_CRATE="$fixture_dir/fake-crate.py" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" "$@" \
 		./scripts/release-crates-dry-run.sh --publish)
 }
 printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
@@ -158,6 +186,11 @@ printf '%s' "$(printf 'b%.0s' $(seq 64))" >"$fixture_dir/index-sum"
 expect_fail_with 'on crates.io with different contents' publish_run
 [[ ! -e "$fixture_dir/uploads" ]]
 printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+
+# A packaged crate that records another commit or another path is refused
+# before its checksum is trusted.
+expect_fail_with 'does not record the tagged commit and its path' publish_run FAKE_VCS_SHA="$(printf 'a%.0s' $(seq 40))"
+expect_fail_with 'does not record the tagged commit and its path' publish_run FAKE_VCS_PATH=sysprims-core
 
 # Hidden working-tree edits are refused before packaging.
 lib="crates/sysprims-core/src/lib.rs"
@@ -184,7 +217,7 @@ chmod +x "$pub/.variant/no-flag-check.sh"
 git -C "$pub" update-index --skip-worktree "$lib"
 printf 'pub fn tampered() {}\n' >"$pub/$lib"
 printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
-out="$(cd "$pub" && env PATH="$bin:$PATH" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" \
+out="$(cd "$pub" && env PATH="$bin:$PATH" FAKE_CRATE="$fixture_dir/fake-crate.py" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" \
 	./.variant/no-flag-check.sh --publish)"
 [[ "$out" == *"already on crates.io with these contents; skipping"* ]]
 git -C "$pub" update-index --no-skip-worktree "$lib"
@@ -218,10 +251,8 @@ fixture_commit "$pub" attributes
 git -C "$pub" tag -d "v$version" >/dev/null
 git -C "$pub" tag -a -m "Release $version" "v$version"
 git -C "$pub" checkout -q --detach "v$version"
-tag_sum="$( (
-	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/Cargo.toml"
-	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/src/lib.rs"
-) | shasum -a 256 | awk '{print $1}')"
+tag_sum="$(python3 "$fixture_dir/fake-crate.py" "$pub" "$fixture_dir/expected.crate" "$version" "v$version^{commit}" &&
+	shasum -a 256 "$fixture_dir/expected.crate" | awk '{print $1}')"
 printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
 for setting in plain autocrlf sparse; do
 	case "$setting" in
@@ -252,7 +283,7 @@ cmp <(git -C "$pub" cat-file blob "v$version:crates/sysprims-core/src/lib.rs") "
 grep -q 'Format:%H' "$exported/crates/sysprims-core/src/lib.rs"
 [[ -f "$exported/crates/sysprims-core/Cargo.toml" ]]
 expect_fail_with 'already exists' python3 "$fixture_root/scripts/release-export-tree.py" "$pub" "v$version" "$exported"
-python3 - "$fixture_root/scripts" "$pub" "v$version" "$exported" <<'PY'
+PYTHONDONTWRITEBYTECODE=1 python3 - "$fixture_root/scripts" "$pub" "v$version" "$exported" <<'PY'
 import importlib.util, pathlib, sys
 spec = importlib.util.spec_from_file_location("ex", pathlib.Path(sys.argv[1]) / "release-export-tree.py")
 ex = importlib.util.module_from_spec(spec)
@@ -278,4 +309,64 @@ refused(lambda: lib.rename(root / "moved"), lambda: (root / "moved").rename(lib)
 refused(lambda: lib.chmod(0o755), lambda: lib.chmod(0o644), "wrong mode")
 ex.verify(repo, entries, root)
 PY
+# Real cargo, offline, on a tiny crate: the export is attached to the tagged
+# commit, so cargo records it in .cargo_vcs_info.json without --allow-dirty,
+# and refuses to package if an exported byte differs from its blob.
+# No cargo package or publish invocation carries --allow-dirty. (Options come
+# before the path: BSD grep treats later arguments as files.)
+allow_dirty() {
+	grep -rnE --include='*.sh' --include='*.py' --include='*.mjs' \
+		'cargo[[:space:]]+(package|publish)[^#]*--allow-dirty|"--allow-dirty"' "$1" | grep -v '\.test\.sh:'
+}
+if allow_dirty "$fixture_root/scripts"; then
+	echo 'error: the package or publish path passes --allow-dirty' >&2
+	exit 1
+fi
+mkdir -p "$fixture_dir/dirty-probe"
+printf 'cargo package --locked --allow-dirty -p x\n' >"$fixture_dir/dirty-probe/probe.sh"
+allow_dirty "$fixture_dir/dirty-probe" >/dev/null || {
+	echo 'error: the --allow-dirty check does not detect a planted use' >&2
+	exit 1
+}
+real="$fixture_dir/real"
+fixture_repo "$real" "$version" publish 0
+cp "$fixture_root/scripts/"{release-export-tree.py,release-crates.py} "$real/scripts/"
+mkdir -p "$real/crates/sysprims-core/src"
+printf '[workspace]\nmembers = ["crates/sysprims-core"]\nresolver = "2"\n' >"$real/Cargo.toml"
+printf '[package]\nname = "sysprims-core"\nversion = "%s"\nedition = "2021"\nlicense = "MIT"\ndescription = "fixture"\npublish = true\n' "$version" \
+	>"$real/crates/sysprims-core/Cargo.toml"
+printf 'pub fn tagged() {}\n' >"$real/crates/sysprims-core/src/lib.rs"
+printf 'target/\n' >"$real/.gitignore"
+(cd "$real" && cargo generate-lockfile --offline -q)
+fixture_commit "$real" crate
+commit="$(git -C "$real" rev-parse HEAD)"
+export_and_package() {
+	local tree="$fixture_dir/export-$1"
+	rm -rf "$tree" "$fixture_dir/target-$1"
+	python3 "$2" "$real" "$commit" "$tree" >/dev/null
+	[[ -z "${3:-}" ]] || eval "$3"
+	(cd "$tree" && CARGO_TARGET_DIR="$fixture_dir/target-$1" cargo package --locked --no-verify --offline -q -p sysprims-core)
+}
+export_and_package clean "$real/scripts/release-export-tree.py"
+crate="$fixture_dir/target-clean/package/sysprims-core-$version.crate"
+python3 "$real/scripts/release-crates.py" vcs-info "$crate" sysprims-core "$version" "$commit" crates/sysprims-core
+expect_fail_with 'records commit' python3 "$real/scripts/release-crates.py" vcs-info "$crate" sysprims-core "$version" \
+	"$(printf '0%.0s' $(seq 40))" crates/sysprims-core
+expect_fail_with 'records path' python3 "$real/scripts/release-crates.py" vcs-info "$crate" sysprims-core "$version" \
+	"$commit" sysprims-core
+# A byte changed after the export (a copy of the exporter whose blob check is
+# disabled, then a CRLF rewrite) makes cargo refuse: nothing allows dirty.
+sed 's/^    verify(repo, entries, root)$/    pass/' "$real/scripts/release-export-tree.py" >"$fixture_dir/unverified-export.py"
+grep -q '^    pass$' "$fixture_dir/unverified-export.py"
+python3 - "$fixture_dir/unverified-export.py" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+text = text.replace("    attach_commit(repo, commit, root)",
+    "    lib = root / 'crates/sysprims-core/src/lib.rs'\n    lib.write_bytes(lib.read_bytes().replace(b'\\n', b'\\r\\n'))\n    attach_commit(repo, commit, root)", 1)
+open(sys.argv[1], "w").write(text)
+PY
+expect_fail_with 'export differs from the tagged commit' export_and_package tampered "$fixture_dir/unverified-export.py"
+# Even past the exporter's own status check, cargo refuses the dirty file.
+sed -i.bak 's/^    if status:$/    if False:/' "$fixture_dir/unverified-export.py"
+expect_fail_with 'uncommitted|dirty' export_and_package tampered "$fixture_dir/unverified-export.py"
 echo '[ok] crate plan and publication guard controls passed'
