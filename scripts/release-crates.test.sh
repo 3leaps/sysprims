@@ -112,7 +112,8 @@ grep -q "plan_output=\"\$(python3 \"\$tree/scripts/release-crates.py\" paths)\" 
 # bytes published, so the tests can see which tree and which path were used.
 pub="$fixture_dir/pub"
 fixture_repo "$pub" "$version" publish 0
-cp "$fixture_root/scripts/release-crates-dry-run.sh" "$fixture_root/scripts/release-crates.py" "$pub/scripts/"
+cp "$fixture_root/scripts/release-crates-dry-run.sh" "$fixture_root/scripts/release-crates.py" \
+	"$fixture_root/scripts/release-export-tree.py" "$pub/scripts/"
 printf 'sysprims-core\n' >"$pub/config/release/publishable-crates.txt"
 mkdir -p "$pub/crates/sysprims-core/src"
 printf '[package]\nname = "sysprims-core"\npublish = true\n' >"$pub/crates/sysprims-core/Cargo.toml"
@@ -174,7 +175,7 @@ git -C "$pub" update-index --no-assume-unchanged "$lib"
 git -C "$pub" checkout -q -- "$lib"
 
 # The packaging layer on its own: a test-local copy of the script without the
-# index-flag refusal still publishes the tag's bytes from its fresh worktree,
+# index-flag refusal still publishes the tag's bytes from its blob export,
 # so a hidden edit cannot reach the package even if that refusal were gone.
 # (In an ignored directory one level down, so the script finds this repository.)
 mkdir -p "$pub/.variant"
@@ -203,6 +204,78 @@ expect_fail_with 'on crates.io with different contents' publish_run CARGO_BUILD_
 expect_fail_with 'on crates.io with different contents' publish_run
 printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
 publish_run CARGO_TARGET_DIR="$fixture_dir/caller-target" >/dev/null
-# The release worktree is removed afterwards.
-[[ "$(git -C "$pub" worktree list | wc -l | tr -d ' ')" == 1 ]]
+# Checkout settings never change the packaged bytes: with autocrlf on, an
+# eol=crlf attribute, export-ignore/export-subst attributes and a sparse
+# checkout configured, publication still packages the tag's exact blobs (the
+# index checksum of the tag's bytes matches) or refuses; it never packages
+# different bytes.
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+git -C "$pub" checkout -q main
+printf 'crates/** text eol=crlf\ncrates/sysprims-core/src/lib.rs export-subst\ncrates/sysprims-core/Cargo.toml export-ignore\n' >"$pub/.gitattributes"
+# shellcheck disable=SC2016 # A literal export-subst marker.
+printf '$Format:%%H$ pub fn tagged() {}\n' >"$pub/crates/sysprims-core/src/lib.rs"
+fixture_commit "$pub" attributes
+git -C "$pub" tag -d "v$version" >/dev/null
+git -C "$pub" tag -a -m "Release $version" "v$version"
+git -C "$pub" checkout -q --detach "v$version"
+tag_sum="$( (
+	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/Cargo.toml"
+	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/src/lib.rs"
+) | shasum -a 256 | awk '{print $1}')"
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+for setting in plain autocrlf sparse; do
+	case "$setting" in
+	autocrlf) git -C "$pub" config core.autocrlf true ;;
+	sparse)
+		git -C "$pub" config core.autocrlf false
+		git -C "$pub" sparse-checkout set --no-cone /config /scripts /VERSION /docs /.gitignore /.gitattributes
+		;;
+	esac
+	out="$(publish_run 2>&1)" || {
+		[[ "$out" == *"cannot export the tagged commit"* || "$out" == *"skip-worktree or assume-unchanged"* ]] || {
+			echo "error: publication under $setting failed for an unexpected reason: $out" >&2
+			exit 1
+		}
+		continue
+	}
+	[[ "$out" == *"already on crates.io with these contents; skipping"* ]] || {
+		echo "error: publication under $setting packaged bytes other than the tag's: $out" >&2
+		exit 1
+	}
+done
+git -C "$pub" sparse-checkout disable
+# The exporter itself: a tampered export (an extra, a missing or a changed
+# file) is refused by its verification step.
+exported="$fixture_dir/exported"
+python3 "$fixture_root/scripts/release-export-tree.py" "$pub" "v$version" "$exported"
+cmp <(git -C "$pub" cat-file blob "v$version:crates/sysprims-core/src/lib.rs") "$exported/crates/sysprims-core/src/lib.rs"
+grep -q 'Format:%H' "$exported/crates/sysprims-core/src/lib.rs"
+[[ -f "$exported/crates/sysprims-core/Cargo.toml" ]]
+expect_fail_with 'already exists' python3 "$fixture_root/scripts/release-export-tree.py" "$pub" "v$version" "$exported"
+python3 - "$fixture_root/scripts" "$pub" "v$version" "$exported" <<'PY'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("ex", pathlib.Path(sys.argv[1]) / "release-export-tree.py")
+ex = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ex)
+repo, commit, root = sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4])
+entries = ex.tree_entries(repo, commit)
+def refused(change, undo, needle):
+    change()
+    try:
+        ex.verify(repo, entries, root)
+    except SystemExit as error:
+        assert needle in str(error), (needle, str(error))
+    else:
+        raise SystemExit(f"expected refusal: {needle}")
+    finally:
+        undo()
+lib = root / "crates/sysprims-core/src/lib.rs"
+original = lib.read_bytes()
+refused(lambda: lib.write_bytes(original.replace(b"\n", b"\r\n")), lambda: lib.write_bytes(original), "differs from its blob")
+extra = root / "crates/sysprims-core/src/extra.rs"
+refused(lambda: extra.write_text("x"), lambda: extra.unlink(), "file set differs")
+refused(lambda: lib.rename(root / "moved"), lambda: (root / "moved").rename(lib), "file set differs")
+refused(lambda: lib.chmod(0o755), lambda: lib.chmod(0o644), "wrong mode")
+ex.verify(repo, entries, root)
+PY
 echo '[ok] crate plan and publication guard controls passed'

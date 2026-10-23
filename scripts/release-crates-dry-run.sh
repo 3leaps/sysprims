@@ -38,19 +38,16 @@ version="$(git cat-file blob "$commit:VERSION" | tr -d '\r\n')"
 [[ "$SYSPRIMS_RELEASE_TAG" == "v$version" ]] || die 'SYSPRIMS_RELEASE_TAG does not match VERSION at the tagged commit'
 
 # Everything that reads crate sources (plan check, dry runs, packaging,
-# publication) runs in a fresh worktree of the tagged commit, with cargo's
-# target directory pinned to a fresh directory, so the bytes packaged and
-# hashed are exactly the tag's and the .crate hashed is the one just written.
+# publication) runs in an export of the tagged commit's blobs: no checkout
+# semantics (autocrlf, eol, filters, sparse-checkout, export attributes) apply,
+# and every exported file is checked against its blob before cargo runs.
+# cargo's target directory is a fresh directory, so the .crate hashed is the
+# one just written.
 scratch="$(cd "$(mktemp -d)" && pwd -P)"
 tree="$scratch/tree"
-cleanup() {
-	git -C "$root" worktree remove --force "$tree" >/dev/null 2>&1 || true
-	rm -rf "$scratch"
-}
-trap cleanup EXIT
-git -C "$root" worktree add --quiet --detach "$tree" "$commit" || die 'cannot create a worktree of the tagged commit'
-[[ "$(git -C "$tree" rev-parse HEAD)" == "$commit" && -z "$(git -C "$tree" status --porcelain --untracked-files=all)" ]] ||
-	die 'the release worktree is not a clean checkout of the tagged commit'
+trap 'rm -rf "$scratch"' EXIT
+python3 "$root/scripts/release-export-tree.py" "$root" "$commit" "$tree" ||
+	die 'cannot export the tagged commit with its exact bytes'
 unset CARGO_BUILD_TARGET_DIR
 export CARGO_TARGET_DIR="$scratch/target"
 cd "$tree"
