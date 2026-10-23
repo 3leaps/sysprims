@@ -558,7 +558,7 @@ git push origin main
 | `make release-export-keys` | Stage the committed public keys from the tagged commit                         |
 | `make release-verify`      | Verify checksums, signatures, and keys                                         |
 | `make release-notes`       | Copy release notes to dist                                                     |
-| `make release-fetch-anchors` | Fetch a published release's anchors, verified, into `ANCHORS_DIR` (never `keys/`); needs `SYSPRIMS_DECERNOR_BIN`, or `ANCHORS_TRUST_LOCAL_TAG=1` after `make release-verify-remote-tag` |
+| `make release-fetch-anchors` | Fetch a published release's anchors, verified, into `ANCHORS_DIR` (never `keys/`); needs `SYSPRIMS_DECERNOR_BIN`, or `ANCHORS_TRUST_LOCAL_TAG=1` as a command-line argument (never the environment) after `make release-verify-remote-tag` |
 | `make release-upload`      | Upload signed artifacts; keep the GitHub release draft                         |
 | `make release-guard-remote`| Verify the fresh remote draft, registries/modules, and native runtime           |
 | `make release-publish`     | Sole maintainer-cued draft → public promotion                                  |

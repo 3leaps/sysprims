@@ -15,8 +15,12 @@
 # The pins come from the local release tag, so that tag must be the signed,
 # published one. With SYSPRIMS_DECERNOR_BIN set, the remote tag verification
 # (scripts/release-verify-remote-tag.sh) runs first. Without it the command
-# refuses, unless ANCHORS_TRUST_LOCAL_TAG=1 states that
-# `make release-verify-remote-tag` has already passed on this clone.
+# refuses, unless the operator states, for this run only, that
+# `make release-verify-remote-tag` has already passed on this clone:
+# `make release-fetch-anchors ... ANCHORS_TRUST_LOCAL_TAG=1` on the make command
+# line, which make passes here as SYSPRIMS_FETCH_TRUST_LOCAL=1 (honoured only
+# when run by make, which always sets it explicitly). An ANCHORS_TRUST_LOCAL_TAG
+# left in the environment is refused; a direct run needs the checker.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 # shellcheck source=scripts/release-tag-common.sh
@@ -37,10 +41,36 @@ for part in "${parts[@]}"; do
 done
 # realpath resolves every existing symlink in the full path.
 real_path() { python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1], strict=False))' "$1"; }
+# Whether the path is keys/ or inside it is decided by identity, not spelling:
+# from the path (or its nearest existing ancestor) up to /, no directory may be
+# the same file (device and inode) as keys/. That covers case variants,
+# Unicode-normalised spellings and symlinks alike. If keys/ does not exist,
+# nothing inside the repository is accepted. The text test is an extra
+# refusal only.
 outside_keys() {
 	case "$1/" in
 	"$root/keys/"*) die "$out is inside keys/; the committed anchors are never written by this command" ;;
 	esac
+	python3 - "$1" "$root" <<'PY' || die "$out is inside keys/; the committed anchors are never written by this command"
+import os, sys
+path, root = sys.argv[1], sys.argv[2]
+keys = os.path.join(root, "keys")
+try:
+    guard = os.stat(keys)
+except FileNotFoundError:
+    guard = os.stat(root)
+current = os.path.abspath(path)
+while not os.path.lexists(current):
+    current = os.path.dirname(current)
+while True:
+    info = os.stat(current)
+    if (info.st_dev, info.st_ino) == (guard.st_dev, guard.st_ino):
+        sys.exit(1)
+    parent = os.path.dirname(current)
+    if parent == current:
+        break
+    current = parent
+PY
 }
 out_target="$(real_path "$out")"
 outside_keys "$out_target"
@@ -52,8 +82,10 @@ fi
 if [[ -n "${SYSPRIMS_DECERNOR_BIN:-}" ]]; then
 	"$root/scripts/release-verify-remote-tag.sh" >/dev/null ||
 		die "$SYSPRIMS_RELEASE_TAG is not the verified published tag; nothing was fetched"
-elif [[ "${ANCHORS_TRUST_LOCAL_TAG:-}" != 1 ]]; then
-	die "set SYSPRIMS_DECERNOR_BIN to verify $SYSPRIMS_RELEASE_TAG against the published tag first, or, if make release-verify-remote-tag has already passed on this clone, ANCHORS_TRUST_LOCAL_TAG=1"
+elif [[ -n "${ANCHORS_TRUST_LOCAL_TAG:-}" ]]; then
+	die "ANCHORS_TRUST_LOCAL_TAG is accepted only on the make command line, for one run (make release-fetch-anchors ... ANCHORS_TRUST_LOCAL_TAG=1)"
+elif [[ "${SYSPRIMS_FETCH_TRUST_LOCAL:-}" != 1 || -z "${MAKELEVEL:-}" ]]; then
+	die "set SYSPRIMS_DECERNOR_BIN to verify $SYSPRIMS_RELEASE_TAG against the published tag first, or, if make release-verify-remote-tag has already passed on this clone, pass ANCHORS_TRUST_LOCAL_TAG=1 on the make command line"
 fi
 object="$(git rev-parse --verify --quiet "refs/tags/$SYSPRIMS_RELEASE_TAG")" || die "$SYSPRIMS_RELEASE_TAG is absent"
 commit="$(git rev-parse "${object}^{commit}")"

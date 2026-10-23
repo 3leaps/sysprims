@@ -79,14 +79,15 @@ sign() {
 			-u "$4!" -o "$1/$manifest.asc" "$1/$manifest"
 	done
 }
-# fetch <assets> <out> [VAR=value...]: the checks after the tag is trusted
-# (ANCHORS_TRUST_LOCAL_TAG=1 unless overridden; tag trust is tested below).
+# fetch <assets> <out> [-u VAR]... [VAR=value...]: the checks after the tag
+# is trusted (as make passes a command-line opt-in, unless -u
+# SYSPRIMS_FETCH_TRUST_LOCAL; tag trust is tested below).
 fetch() {
-	local assets="$1" dest="$2" unset=(-u SYSPRIMS_DECERNOR_BIN) trust=(ANCHORS_TRUST_LOCAL_TAG=1)
+	local assets="$1" dest="$2" unset=(-u SYSPRIMS_DECERNOR_BIN -u ANCHORS_TRUST_LOCAL_TAG) trust=(SYSPRIMS_FETCH_TRUST_LOCAL=1 MAKELEVEL=1)
 	shift 2
 	while [[ "${1:-}" == -u ]]; do
 		unset+=("$1" "$2")
-		[[ "$2" != ANCHORS_TRUST_LOCAL_TAG ]] || trust=()
+		case "$2" in SYSPRIMS_FETCH_TRUST_LOCAL) trust=() ;; MAKELEVEL) trust=(SYSPRIMS_FETCH_TRUST_LOCAL=1) ;; esac
 		shift 2
 	done
 	(cd "$repo" && env "${unset[@]}" SYSPRIMS_RELEASE_TAG="$tag" SYSPRIMS_FETCH_ASSET_DIR="$assets" \
@@ -175,6 +176,30 @@ keys_untouched
 ln -s "$repo" "$fixture_dir/repo-link"
 expect_fail_with 'inside keys/' fetch "$published" "$fixture_dir/repo-link/keys/new"
 [[ ! -e "$repo/keys/new" ]]
+# keys/ under another spelling is still keys/: the test is by identity. On a
+# case-insensitive volume, KEYS/pwn (absolute or relative) names keys/pwn.
+mkdir "$fixture_dir/case-probe"
+if [[ -d "$fixture_dir/CASE-PROBE" ]]; then
+	for path in "$repo/KEYS/pwn" "KEYS/pwn" "$repo/Keys/pwn/deeper"; do
+		expect_fail_with 'inside keys/' fetch "$published" "$path"
+	done
+	[[ ! -e "$repo/keys/pwn" ]] || {
+		echo 'error: a case variant of keys/ let the fetch write into keys/' >&2
+		exit 1
+	}
+	# The nearest existing directory may sit deeper inside keys/: every
+	# ancestor is checked, not only the nearest.
+	mkdir -p "$repo/keys/deep/er"
+	expect_fail_with 'inside keys/' fetch "$published" "$repo/KEYS/deep/er/new"
+	[[ ! -e "$repo/keys/deep/er/new" ]]
+	rm -r "$repo/keys/deep"
+	# The spelling alone does not decide it: the text prefix test passes it.
+	case "$repo/KEYS/pwn/" in "$repo/keys/"*) echo 'error: the case fixture is caught by text' >&2 && exit 1 ;; esac
+else
+	echo '[skip] case-variant keys/ fixture: this volume is case-sensitive'
+fi
+rmdir "$fixture_dir/case-probe"
+keys_untouched
 # A failing run leaves no output directory; a failure at the second write
 # removes the first anchor and the directory this run made, and a rerun then
 # succeeds.
@@ -227,9 +252,39 @@ rm "$fixture_dir/swap/parent"
 keys_untouched
 # The local tag supplies the pins, so by default the command refuses until the
 # tag is proven to be the published one.
-expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" -u ANCHORS_TRUST_LOCAL_TAG
-expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" ANCHORS_TRUST_LOCAL_TAG=yes
+expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" -u SYSPRIMS_FETCH_TRUST_LOCAL
+expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" SYSPRIMS_FETCH_TRUST_LOCAL=yes
+# The user-facing opt-in in the environment is refused, even with the
+# internal value present; the internal value outside make is not honoured.
+expect_fail_with 'accepted only on the make command line' fetch "$published" "$fixture_dir/untrusted" ANCHORS_TRUST_LOCAL_TAG=1
+expect_fail_with 'set SYSPRIMS_DECERNOR_BIN to verify' fetch "$published" "$fixture_dir/untrusted" -u MAKELEVEL
 [[ ! -e "$fixture_dir/untrusted" ]]
+# Through make: the opt-in counts only on the make command line, for that run.
+shim="$fixture_dir/shim"
+mkdir -p "$shim/scripts"
+cp "$fixture_root/Makefile" "$fixture_root/VERSION" "$shim/"
+# shellcheck disable=SC2016 # The stub's own expansions, written literally.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "trust=${SYSPRIMS_FETCH_TRUST_LOCAL:-} user=${ANCHORS_TRUST_LOCAL_TAG:-}" >>%q\n' "$fixture_dir/shim.log" \
+	>"$shim/scripts/release-fetch-anchors.sh"
+chmod +x "$shim/scripts/release-fetch-anchors.sh"
+shim_make() { env -u RELEASE_TAG -u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_RELEASE_TAG="$tag" "$@"; }
+rm -f "$fixture_dir/shim.log"
+shim_make make -s -C "$shim" release-fetch-anchors ANCHORS_DIR="$fixture_dir/x" ANCHORS_TRUST_LOCAL_TAG=1
+[[ "$(cat "$fixture_dir/shim.log")" == "trust=1 user=" ]]
+rm -f "$fixture_dir/shim.log"
+shim_make make -s -C "$shim" release-fetch-anchors ANCHORS_DIR="$fixture_dir/x"
+[[ "$(cat "$fixture_dir/shim.log")" == "trust= user=" ]]
+rm -f "$fixture_dir/shim.log"
+expect_fail_with 'accepted only on the make command line' shim_make ANCHORS_TRUST_LOCAL_TAG=1 \
+	make -s -C "$shim" release-fetch-anchors ANCHORS_DIR="$fixture_dir/x"
+expect_fail_with 'accepted only on the make command line' shim_make ANCHORS_TRUST_LOCAL_TAG=1 \
+	make -e -s -C "$shim" release-fetch-anchors ANCHORS_DIR="$fixture_dir/x"
+expect_fail_with 'accepted only on the make command line' shim_make SYSPRIMS_FETCH_TRUST_LOCAL=1 ANCHORS_TRUST_LOCAL_TAG=1 \
+	make -s -C "$shim" release-fetch-anchors ANCHORS_DIR="$fixture_dir/x"
+[[ ! -e "$fixture_dir/shim.log" ]]
+# An inherited internal value does not survive make: it sets its own.
+shim_make SYSPRIMS_FETCH_TRUST_LOCAL=1 make -s -C "$shim" release-fetch-anchors ANCHORS_DIR="$fixture_dir/x"
+[[ "$(cat "$fixture_dir/shim.log")" == "trust= user=" ]]
 # With the checker available, the remote tag verification runs first: when it
 # fails, nothing is fetched or written; when it passes, the fetch proceeds.
 # (A stand-in records the call; the verification itself has its own suite.)
@@ -240,10 +295,10 @@ exit "\${REMOTE_TAG_STATUS:-0}"
 SH
 chmod +x "$repo/scripts/release-verify-remote-tag.sh"
 expect_fail_with 'is not the verified published tag' fetch "$fixture_dir/no-such-assets" "$fixture_dir/hostile" \
-	-u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_DECERNOR_BIN=/checker REMOTE_TAG_STATUS=1
+	-u SYSPRIMS_FETCH_TRUST_LOCAL SYSPRIMS_DECERNOR_BIN=/checker REMOTE_TAG_STATUS=1
 [[ ! -e "$fixture_dir/hostile" && "$(cat "$fixture_dir/remote-verified")" == "$tag" ]]
 rm "$fixture_dir/remote-verified"
-fetch "$published" "$fixture_dir/verified" -u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_DECERNOR_BIN=/checker >/dev/null
+fetch "$published" "$fixture_dir/verified" -u SYSPRIMS_FETCH_TRUST_LOCAL SYSPRIMS_DECERNOR_BIN=/checker >/dev/null
 [[ "$(cat "$fixture_dir/remote-verified")" == "$tag" && -f "$fixture_dir/verified/expected-fingerprints.txt" ]]
 # The opt-in never skips the verification when the checker is set.
 rm "$fixture_dir/remote-verified"

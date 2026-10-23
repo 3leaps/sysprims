@@ -44,7 +44,8 @@ checking each anchor against the signed manifests and the tagged commit; it
 never writes `keys/`. Those keys come from the local tag, so the local tag must
 first be proven to be the signed, published one: with `SYSPRIMS_DECERNOR_BIN`
 set, the command runs the remote tag verification itself; otherwise it refuses
-unless `ANCHORS_TRUST_LOCAL_TAG=1` records that
+unless `ANCHORS_TRUST_LOCAL_TAG=1`, given on the make command line for that run
+only (never from the environment), records that
 `make release-verify-remote-tag` has already passed on this clone.
 
 ## Tags

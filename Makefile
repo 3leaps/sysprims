@@ -687,6 +687,8 @@ DIST_LOCAL := dist/local
 # targets that read no tag; scripts/release-tag-controls.test.sh checks both
 # lists against the recipes. Release targets run serially (.NOTPARALLEL).
 RELEASE_TAG_ORIGIN := $(origin RELEASE_TAG)
+# The anchor-fetch trust opt-in is honoured only from the make command line.
+ANCHORS_TRUST_ORIGIN := $(origin ANCHORS_TRUST_LOCAL_TAG)
 RELEASE_TAG_FREE_TARGETS := release-clean release-tooling-test release-plan-check release-check \
 	release-crates-list release-export-pin release-validate-pin release-insert-anchors \
 	release-verify-checksums release-verify-keys release-require-tag release-guard-provenance
@@ -763,7 +765,10 @@ release-stage-anchors: release-require-tag release-guard-tag-version-post ## Sta
 
 release-fetch-anchors: release-require-tag ## Fetch a published release's verified anchors into ANCHORS_DIR (needs SYSPRIMS_DECERNOR_BIN, or ANCHORS_TRUST_LOCAL_TAG=1 after release-verify-remote-tag)
 	@test -n "$(ANCHORS_DIR)" || { echo "error: ANCHORS_DIR=<new or empty directory> is required"; exit 1; }
-	ANCHORS_TRUST_LOCAL_TAG="$(ANCHORS_TRUST_LOCAL_TAG)" ./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
+	@case "$(ANCHORS_TRUST_ORIGIN)" in undefined|"command line") ;; *) \
+		echo "error: ANCHORS_TRUST_LOCAL_TAG is accepted only on the make command line, for one run (make release-fetch-anchors ... ANCHORS_TRUST_LOCAL_TAG=1)"; exit 1;; esac
+	env -u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_FETCH_TRUST_LOCAL="$(ANCHORS_TRUST_LOCAL_TAG)" \
+		./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
 
 release-checksums: release-require-tag release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)
