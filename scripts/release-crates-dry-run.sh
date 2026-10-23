@@ -21,14 +21,40 @@ fi
 [[ "$publish" == 0 || -z "${CI:-}" ]] || die 'crates.io publication is a local maintainer step, never CI'
 
 : "${SYSPRIMS_RELEASE_TAG:?SYSPRIMS_RELEASE_TAG=vX.Y.Z is required}"
-version="$(tr -d '\r\n' <VERSION)"
-[[ "$SYSPRIMS_RELEASE_TAG" == "v$version" ]] || die 'SYSPRIMS_RELEASE_TAG does not match VERSION'
+[[ "$SYSPRIMS_RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'SYSPRIMS_RELEASE_TAG must be a canonical vX.Y.Z tag'
 ! git symbolic-ref --quiet HEAD >/dev/null || die 'HEAD must be detached at the release tag'
 object="$(git rev-parse --verify --quiet "refs/tags/$SYSPRIMS_RELEASE_TAG")" || die "$SYSPRIMS_RELEASE_TAG is absent"
 [[ "$(git cat-file -t "$object")" == tag ]] || die "$SYSPRIMS_RELEASE_TAG must be an annotated tag"
 [[ "$(git rev-parse "${object}^{commit}")" == "$(git rev-parse HEAD)" ]] || die 'HEAD is not the release tag commit'
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || die 'clean checkout required'
-python3 "$root/scripts/release-crates.py" check
+# git status does not show skip-worktree or assume-unchanged files. Refuse any
+# index entry that is not an ordinary cached file (defence in depth: packaging
+# below never reads this checkout's files).
+flagged="$(git ls-files -v | awk '$1 != "H" {print}' | head -5)"
+[[ -z "$flagged" ]] || die "index entries hide working-tree changes (skip-worktree or assume-unchanged): $flagged"
+commit="$(git rev-parse "${object}^{commit}")"
+# VERSION at the tagged commit decides the version published.
+version="$(git cat-file blob "$commit:VERSION" | tr -d '\r\n')"
+[[ "$SYSPRIMS_RELEASE_TAG" == "v$version" ]] || die 'SYSPRIMS_RELEASE_TAG does not match VERSION at the tagged commit'
+
+# Everything that reads crate sources (plan check, dry runs, packaging,
+# publication) runs in a fresh worktree of the tagged commit, with cargo's
+# target directory pinned to a fresh directory, so the bytes packaged and
+# hashed are exactly the tag's and the .crate hashed is the one just written.
+scratch="$(cd "$(mktemp -d)" && pwd -P)"
+tree="$scratch/tree"
+cleanup() {
+	git -C "$root" worktree remove --force "$tree" >/dev/null 2>&1 || true
+	rm -rf "$scratch"
+}
+trap cleanup EXIT
+git -C "$root" worktree add --quiet --detach "$tree" "$commit" || die 'cannot create a worktree of the tagged commit'
+[[ "$(git -C "$tree" rev-parse HEAD)" == "$commit" && -z "$(git -C "$tree" status --porcelain --untracked-files=all)" ]] ||
+	die 'the release worktree is not a clean checkout of the tagged commit'
+unset CARGO_BUILD_TARGET_DIR
+export CARGO_TARGET_DIR="$scratch/target"
+cd "$tree"
+python3 "$tree/scripts/release-crates.py" check
 
 # Publication state on crates.io, always the real registry. Prints "absent",
 # or the published checksum.
@@ -40,22 +66,23 @@ registry_checksum() {
 	body="${body%$'\n'*}"
 	case "$status" in
 	404) echo absent ;;
-	200) python3 "$root/scripts/release-crates.py" registry-checksum "$crate" "$version" <<<"$body" ;;
+	200) python3 "$tree/scripts/release-crates.py" registry-checksum "$crate" "$version" <<<"$body" ;;
 	*) die "crates.io returned HTTP $status for $crate@$version" ;;
 	esac
 }
 
-# sha256 of the crate this checkout packages, as crates.io records it.
+# sha256 of the crate packaged from the tagged commit. The .crate is removed
+# first so the hash is always of the file this call produced.
 local_checksum() {
-	local crate="$1" file
+	local crate="$1" file="$CARGO_TARGET_DIR/package/${1}-${version}.crate"
+	rm -f "$file"
 	cargo package --locked --no-verify -p "$crate" >/dev/null 2>&1 || die "cannot package $crate"
-	file="$root/target/package/${crate}-${version}.crate"
 	[[ -f "$file" ]] || die "packaged crate $file not found"
 	python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$file"
 }
 
 # Collect the ordered plan whole and check the producer before iterating.
-plan_output="$(python3 "$root/scripts/release-crates.py" paths)" || die 'cannot read the crate publication plan'
+plan_output="$(python3 "$tree/scripts/release-crates.py" paths)" || die 'cannot read the crate publication plan'
 crates=()
 paths=()
 while read -r crate path; do

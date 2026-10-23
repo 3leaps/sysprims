@@ -69,7 +69,7 @@ cp "$fixture_root/scripts/release-crates-dry-run.sh" "$repo/scripts/"
 fixture_commit "$repo"
 dry() { (cd "$repo" && env "$@" ./scripts/release-crates-dry-run.sh); }
 expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' dry -u SYSPRIMS_RELEASE_TAG
-expect_fail_with 'does not match VERSION' dry SYSPRIMS_RELEASE_TAG=v9.9.9
+expect_fail_with 'canonical vX.Y.Z' dry SYSPRIMS_RELEASE_TAG=9.9.9
 git -C "$repo" tag -a -m "Release $version" "v$version"
 expect_fail_with 'HEAD must be detached' dry SYSPRIMS_RELEASE_TAG="v$version"
 git -C "$repo" checkout -q --detach HEAD
@@ -104,29 +104,35 @@ for body in '{"version":{"crate":"other","num":"0.3.0","checksum":"'"$sum"'"}}' 
 	expect_fail bash -c "printf '%s' '$body' | python3 '$fixture_root/scripts/release-crates.py' registry-checksum sysprims-core 0.3.0"
 done
 # A failing plan producer stops the run before any crate is touched.
-grep -q "plan_output=\"\$(python3 \"\$root/scripts/release-crates.py\" paths)\" || die" "$fixture_root/scripts/release-crates-dry-run.sh"
-# Behaviour on the publish path, with the network and cargo stubbed on PATH:
-# an index checksum equal to the local crate skips; any other checksum stops.
+grep -q "plan_output=\"\$(python3 \"\$tree/scripts/release-crates.py\" paths)\" || die" "$fixture_root/scripts/release-crates-dry-run.sh"
+# Behaviour on the publish path, with the network and cargo stubbed on PATH.
+# The cargo stub behaves like cargo where it matters: it packages the crate
+# source it finds in the current directory and writes the .crate under
+# ${CARGO_TARGET_DIR:-./target}/package. Whatever bytes it packages are the
+# bytes published, so the tests can see which tree and which path were used.
 pub="$fixture_dir/pub"
 fixture_repo "$pub" "$version" publish 0
 cp "$fixture_root/scripts/release-crates-dry-run.sh" "$fixture_root/scripts/release-crates.py" "$pub/scripts/"
 printf 'sysprims-core\n' >"$pub/config/release/publishable-crates.txt"
-mkdir -p "$pub/crates/sysprims-core"
+mkdir -p "$pub/crates/sysprims-core/src"
 printf '[package]\nname = "sysprims-core"\npublish = true\n' >"$pub/crates/sysprims-core/Cargo.toml"
-printf 'target/\n' >"$pub/.gitignore"
+printf 'pub fn tagged() {}\n' >"$pub/crates/sysprims-core/src/lib.rs"
+printf 'target/\n/.variant/\n' >"$pub/.gitignore"
 fixture_commit "$pub"
 git -C "$pub" tag -a -m "Release $version" "v$version"
 git -C "$pub" checkout -q --detach "v$version"
 bin="$fixture_dir/pub-bin"
 mkdir -p "$bin"
-printf 'crate bytes\n' >"$fixture_dir/core.crate"
-local_sum="$(shasum -a 256 "$fixture_dir/core.crate" | awk '{print $1}')"
-cat >"$bin/cargo" <<SH
+cat >"$bin/cargo" <<'SH'
 #!/usr/bin/env bash
-case "\$1" in
-metadata) printf '{"packages":[{"name":"sysprims-core","publish":null,"dependencies":[],"manifest_path":"$pub/crates/sysprims-core/Cargo.toml"}]}' ;;
-package) mkdir -p "$pub/target/package" && cp "$fixture_dir/core.crate" "$pub/target/package/sysprims-core-$version.crate" ;;
-publish) echo "UPLOAD \$*" >>"$fixture_dir/uploads"; exit 0 ;;
+case "$1" in
+metadata) printf '{"packages":[{"name":"sysprims-core","publish":null,"dependencies":[],"manifest_path":"%s/crates/sysprims-core/Cargo.toml"}]}' "$PWD" ;;
+package)
+	out="${CARGO_TARGET_DIR:-$PWD/target}/package"
+	mkdir -p "$out"
+	cat crates/sysprims-core/Cargo.toml crates/sysprims-core/src/lib.rs >"$out/sysprims-core-$(cat VERSION).crate"
+	;;
+publish) echo "UPLOAD $PWD" >>"$UPLOAD_LOG" ;;
 *) exit 1 ;;
 esac
 SH
@@ -135,11 +141,68 @@ cat >"$bin/curl" <<SH
 printf '{"version":{"crate":"sysprims-core","num":"$version","checksum":"%s"}}\n200' "\$(cat "$fixture_dir/index-sum")"
 SH
 chmod +x "$bin/cargo" "$bin/curl"
-publish_run() { (cd "$pub" && env PATH="$bin:$PATH" SYSPRIMS_RELEASE_TAG="v$version" ./scripts/release-crates-dry-run.sh --publish); }
-printf '%s' "$local_sum" >"$fixture_dir/index-sum"
+# The checksum of the crate built from the tagged commit's own bytes.
+tag_sum="$( (
+	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/Cargo.toml"
+	git -C "$pub" cat-file blob "v$version:crates/sysprims-core/src/lib.rs"
+) | shasum -a 256 | awk '{print $1}')"
+publish_run() {
+	(cd "$pub" && env PATH="$bin:$PATH" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" "$@" \
+		./scripts/release-crates-dry-run.sh --publish)
+}
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
 out="$(publish_run)"
 [[ "$out" == *"already on crates.io with these contents; skipping"* ]]
 printf '%s' "$(printf 'b%.0s' $(seq 64))" >"$fixture_dir/index-sum"
 expect_fail_with 'on crates.io with different contents' publish_run
 [[ ! -e "$fixture_dir/uploads" ]]
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+
+# Hidden working-tree edits are refused before packaging.
+lib="crates/sysprims-core/src/lib.rs"
+git -C "$pub" update-index --skip-worktree "$lib"
+printf 'pub fn tampered() {}\n' >"$pub/$lib"
+[[ -z "$(git -C "$pub" status --porcelain)" ]]
+expect_fail_with 'skip-worktree or assume-unchanged' publish_run
+git -C "$pub" update-index --no-skip-worktree "$lib"
+git -C "$pub" checkout -q -- "$lib"
+git -C "$pub" update-index --assume-unchanged "$lib"
+printf 'pub fn tampered() {}\n' >"$pub/$lib"
+[[ -z "$(git -C "$pub" status --porcelain)" ]]
+expect_fail_with 'skip-worktree or assume-unchanged' publish_run
+git -C "$pub" update-index --no-assume-unchanged "$lib"
+git -C "$pub" checkout -q -- "$lib"
+
+# The packaging layer on its own: a test-local copy of the script without the
+# index-flag refusal still publishes the tag's bytes from its fresh worktree,
+# so a hidden edit cannot reach the package even if that refusal were gone.
+# (In an ignored directory one level down, so the script finds this repository.)
+mkdir -p "$pub/.variant"
+sed '/index entries hide working-tree changes/d' "$pub/scripts/release-crates-dry-run.sh" >"$pub/.variant/no-flag-check.sh"
+chmod +x "$pub/.variant/no-flag-check.sh"
+git -C "$pub" update-index --skip-worktree "$lib"
+printf 'pub fn tampered() {}\n' >"$pub/$lib"
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+out="$(cd "$pub" && env PATH="$bin:$PATH" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" \
+	./.variant/no-flag-check.sh --publish)"
+[[ "$out" == *"already on crates.io with these contents; skipping"* ]]
+git -C "$pub" update-index --no-skip-worktree "$lib"
+git -C "$pub" checkout -q -- "$lib"
+
+# A caller's CARGO_TARGET_DIR, and a stale .crate at the default path whose
+# checksum matches the index, are both ignored: the hash is of the crate just
+# packaged from the tagged commit into a fresh directory.
+printf '%s' "$(printf 'c%.0s' $(seq 64))" >"$fixture_dir/index-sum"
+mkdir -p "$pub/target/package" "$fixture_dir/caller-target/package"
+printf 'stale\n' >"$pub/target/package/sysprims-core-$version.crate"
+printf 'stale\n' >"$fixture_dir/caller-target/package/sysprims-core-$version.crate"
+stale_sum="$(shasum -a 256 "$pub/target/package/sysprims-core-$version.crate" | awk '{print $1}')"
+printf '%s' "$stale_sum" >"$fixture_dir/index-sum"
+expect_fail_with 'on crates.io with different contents' publish_run CARGO_TARGET_DIR="$fixture_dir/caller-target"
+expect_fail_with 'on crates.io with different contents' publish_run CARGO_BUILD_TARGET_DIR="$fixture_dir/caller-target"
+expect_fail_with 'on crates.io with different contents' publish_run
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+publish_run CARGO_TARGET_DIR="$fixture_dir/caller-target" >/dev/null
+# The release worktree is removed afterwards.
+[[ "$(git -C "$pub" worktree list | wc -l | tr -d ' ')" == 1 ]]
 echo '[ok] crate plan and publication guard controls passed'
