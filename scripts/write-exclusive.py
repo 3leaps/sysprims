@@ -46,16 +46,60 @@ def token(info, data):
 
 
 def captured_matches(directory, name, expected):
-    """Whether the captured object is a regular file matching the token."""
+    """Whether the captured object is a regular file matching the token.
+
+    The type is checked with lstat before anything is opened, so a FIFO, a
+    device, a directory or a symlink is a mismatch and is never opened; the
+    open is also non-blocking. Any error is a mismatch, never a crash.
+    """
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        if not stat.S_ISREG(
+            os.stat(name, dir_fd=directory, follow_symlinks=False).st_mode
+        ):
+            return False
+        fd = os.open(
+            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+        )
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return False
+            return token(info, handle.read()) == expected
+    except Exception:
+        return False
+
+
+def restore(directory, aside, name):
+    """Put a captured object back at NAME without replacing anything there.
+
+    A regular file is linked back (link never replaces an existing name).
+    Anything else (a directory, a FIFO) cannot always be linked, so it is
+    renamed back only if NAME is absent; between that check and the rename a
+    same-user process could still create NAME (the documented residual).
+    Returns whether it is back at NAME.
+    """
+    try:
+        if stat.S_ISREG(
+            os.stat(aside, dir_fd=directory, follow_symlinks=False).st_mode
+        ):
+            os.link(
+                aside,
+                name,
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+                follow_symlinks=False,
+            )
+            os.unlink(aside, dir_fd=directory)
+            return True
+        try:
+            os.stat(name, dir_fd=directory, follow_symlinks=False)
+            return False
+        except FileNotFoundError:
+            pass
+        os.rename(aside, name, src_dir_fd=directory, dst_dir_fd=directory)
+        return True
     except OSError:
         return False
-    with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            return False
-        return token(info, handle.read()) == expected
 
 
 def remove(dest, expected):
@@ -72,26 +116,17 @@ def remove(dest, expected):
         if captured_matches(directory, aside, expected):
             os.unlink(aside, dir_fd=directory)
             return
-        try:
-            os.link(
-                aside,
-                name,
-                src_dir_fd=directory,
-                dst_dir_fd=directory,
-                follow_symlinks=False,
-            )
-        except FileExistsError:
+        if restore(directory, aside, name):
             print(
-                f"warning: {dest} is not the file this run created, and another file "
-                f"appeared there; the captured file is kept at {os.path.join(parent, aside)}",
+                f"warning: {dest} is not the file this run created; left in place",
                 file=sys.stderr,
             )
-            return
-        os.unlink(aside, dir_fd=directory)
-        print(
-            f"warning: {dest} is not the file this run created; left in place",
-            file=sys.stderr,
-        )
+        else:
+            print(
+                f"warning: {dest} is not the file this run created and could not be put "
+                f"back without replacing something; it is kept at {os.path.join(parent, aside)}",
+                file=sys.stderr,
+            )
     finally:
         os.close(directory)
 

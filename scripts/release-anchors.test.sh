@@ -276,13 +276,133 @@ sys.argv = sys.argv[1:]
 runpy.run_path(sys.argv[0], run_name="__main__")
 PY
 python3 "$fixture_dir/race-link.py" "$helper" --remove "$own/ours" "$token" 2>"$own.err"
-kept="$(sed -n 's/.*the captured file is kept at //p' "$own.err")"
+kept="$(sed -n 's/.* it is kept at //p' "$own.err")"
 [[ -n "$kept" && "$(cat "$kept")" == evil && "$(cat "$own/ours")" == third ]] || {
 	echo 'error: a race at link-back lost a file this run did not write' >&2
 	cat "$own.err" >&2
 	exit 1
 }
 [[ "$(find "$own" -mindepth 1 | wc -l | tr -d ' ')" == 2 ]]
+# Non-regular replacements are mismatches and are never opened: a directory
+# and a FIFO at the destination each end up back there, intact, or at the
+# path the warning names. The FIFO run is under a watchdog, so a blocking open
+# fails the suite instead of hanging it.
+# run_bounded <seconds> <command...>: the command's status, or 124 if killed.
+run_bounded() {
+	local limit="$1" pid watchdog status=0
+	shift
+	"$@" &
+	pid=$!
+	(sleep "$limit" && kill -9 "$pid" 2>/dev/null) &
+	watchdog=$!
+	wait "$pid" || status=$?
+	kill "$watchdog" 2>/dev/null || true
+	wait "$watchdog" 2>/dev/null || true
+	[[ "$status" != 137 ]] || status=124
+	return "$status"
+}
+for kind in directory fifo; do
+	odd="$fixture_dir/odd-$kind"
+	mkdir "$odd"
+	python3 "$helper" "$fixture_dir/ours.src" "$odd/ours" >"$odd.token"
+	rm "$odd/ours"
+	case "$kind" in
+	directory)
+		mkdir "$odd/ours"
+		printf 'inside\n' >"$odd/ours/content"
+		;;
+	fifo) mkfifo "$odd/ours" ;;
+	esac
+	status=0
+	run_bounded 10 python3 "$helper" --remove "$odd/ours" "$(cat "$odd.token")" 2>"$odd.err" || status=$?
+	[[ "$status" == 0 ]] || {
+		echo "error: rollback over a $kind exited $status (124: it hung)" >&2
+		cat "$odd.err" >&2
+		exit 1
+	}
+	# The destination was free, so the object is back there, intact, and
+	# nothing is left under a rollback name.
+	case "$kind" in
+	directory) [[ -d "$odd/ours" && ! -L "$odd/ours" && "$(cat "$odd/ours/content")" == inside ]] ;;
+	fifo) [[ -p "$odd/ours" ]] ;;
+	esac && [[ "$(find "$odd" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 1 ]] || {
+		echo "error: rollback did not put back a $kind it did not create" >&2
+		cat "$odd.err" >&2
+		exit 1
+	}
+	grep -q 'left in place' "$odd.err"
+done
+# The same protocol, instrumented: a non-regular captured object is never
+# opened; an unexpected exception while checking is a mismatch, not a crash;
+# and a non-regular object is never renamed over a file that appeared at the
+# destination meanwhile (it is kept, and its path named).
+PYTHONDONTWRITEBYTECODE=1 python3 - "$helper" "$fixture_dir/instrumented" <<'PY'
+import contextlib, importlib.util, io, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("wx", sys.argv[1])
+wx = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(wx)
+base = pathlib.Path(sys.argv[2])
+base.mkdir()
+(base / "ours.src").write_bytes(b"ours\n")
+
+def owned(name):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        sys.argv = ["write-exclusive.py", str(base / "ours.src"), str(base / name)]
+        wx.main()
+    os.unlink(base / name)
+    return out.getvalue().strip()
+
+def removing(name, token):
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        wx.remove(str(base / name), token)
+    return err.getvalue()
+
+# Never opened: every open of a rollback name is recorded.
+real_open, opened = os.open, []
+def recording_open(path, flags, *args, **kwargs):
+    if ".rollback-" in str(path):
+        opened.append(path)
+    return real_open(path, flags, *args, **kwargs)
+os.open = recording_open
+for kind, make in (("dir", os.mkdir), ("fifo", os.mkfifo)):
+    token = owned(kind)
+    make(base / kind)
+    removing(kind, token)
+    assert not opened, f"a captured {kind} was opened: {opened}"
+os.open = real_open
+
+# An unexpected exception during the check is a mismatch: the file is put back.
+token = owned("raises")
+(base / "raises").write_bytes(b"evil\n")
+real_fstat = os.fstat
+def failing_fstat(fd):
+    raise ValueError("injected")
+os.fstat = failing_fstat
+try:
+    message = removing("raises", token)
+finally:
+    os.fstat = real_fstat
+assert (base / "raises").read_bytes() == b"evil\n", "a checking error lost the file"
+assert "left in place" in message, message
+
+# No clobber: a file appears at the destination just before a captured FIFO
+# is restored; both survive, the FIFO at the named path.
+token = owned("contested")
+os.mkfifo(base / "contested")
+real_restore = wx.restore
+def contested_restore(directory, aside, name):
+    (base / name).write_bytes(b"third\n")
+    return real_restore(directory, aside, name)
+wx.restore = contested_restore
+message = removing("contested", token)
+wx.restore = real_restore
+# (Type first: reading a FIFO left there would block.)
+assert (base / "contested").is_file() and (base / "contested").read_bytes() == b"third\n", "the restore replaced a file that appeared"
+kept = message.rsplit("it is kept at ", 1)[-1].strip()
+assert "it is kept at " in message and pathlib.Path(kept).is_fifo(), message
+PY
 # A malformed token removes nothing.
 expect_fail_with 'malformed ownership token' python3 "$helper" --remove "$own/ours" 0:0
 [[ "$(cat "$own/ours")" == third ]]
