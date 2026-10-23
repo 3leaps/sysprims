@@ -105,7 +105,25 @@ export function readReleasePlan(root, version = readCanonicalVersion(root)) {
   const relativePath = `docs/releases/v${version}.json`;
   const path = join(root, relativePath);
   if (!existsSync(path)) fail(`release plan is missing: ${relativePath}`);
-  const plan = readJson(path);
+  return { plan: validateReleasePlan(readJson(path), version), path, relativePath };
+}
+
+// The plan as committed at `commit`, read from its blob; the working tree and
+// index are never consulted.
+export function readReleasePlanAt(root, commit, version) {
+  const relativePath = `docs/releases/v${version}.json`;
+  const result = spawnSync("git", ["cat-file", "blob", `${commit}:${relativePath}`], { cwd: root, encoding: "utf8" });
+  if (result.status !== 0) fail(`release plan is missing at ${commit}: ${relativePath}`);
+  let plan;
+  try {
+    plan = JSON.parse(result.stdout);
+  } catch (error) {
+    fail(`cannot parse JSON ${relativePath} at ${commit}: ${error.message}`);
+  }
+  return { plan: validateReleasePlan(plan, version), relativePath };
+}
+
+function validateReleasePlan(plan, version) {
   const errors = [];
   if (plan.schema !== "sysprims-release-plan/v1") errors.push("unknown release plan schema");
   if (plan.version !== version) errors.push(`release plan version is ${JSON.stringify(plan.version)}, expected ${version}`);
@@ -154,7 +172,7 @@ export function readReleasePlan(root, version = readCanonicalVersion(root)) {
     }
   }
   if (errors.length) fail(errors.join("; "));
-  return { plan, path, relativePath };
+  return plan;
 }
 
 function plannedVersion(surface, releaseVersion) {

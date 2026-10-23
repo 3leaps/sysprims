@@ -8,8 +8,10 @@ Writes every blob of COMMIT under DEST (which must not exist) straight from
 conversion, no export-ignore or export-subst, no sparse-checkout. Then checks
 that DEST holds exactly the tree's paths, that every regular file's
 `git hash-object --no-filters` equals its blob id and its executable bit
-matches the tree mode, and that symlinks match their blobs. Any difference
-refuses. Submodules (gitlinks) are refused.
+matches the tree mode. Any difference refuses. Symlinks (mode 120000) and
+submodules (gitlinks) are refused: packaging follows a symlink to whatever it
+names, which the blob hash cannot vouch for. The export is also checked to
+hold no symlink at all before anything reads it.
 """
 
 import os
@@ -40,7 +42,7 @@ def tree_entries(repo, commit):
             continue
         meta, path = record.split(b"\t", 1)
         mode, kind, oid = meta.decode().split()
-        if kind != "blob" or mode not in ("100644", "100755", "120000"):
+        if kind != "blob" or mode not in ("100644", "100755"):
             raise SystemExit(
                 f"error: unsupported tree entry {mode} {kind} {path.decode(errors='replace')}"
             )
@@ -84,16 +86,13 @@ def main():
             raise SystemExit(f"error: tree path escapes the export: {path}")
         target.parent.mkdir(parents=True, exist_ok=True)
         content = blobs[oid]
-        if mode == "120000":
-            os.symlink(content.decode(), target)
-        else:
-            fd = os.open(
-                target,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o755 if mode == "100755" else 0o644,
-            )
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(content)
+        fd = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o755 if mode == "100755" else 0o644,
+        )
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
     verify(repo, entries, root)
     attach_commit(repo, commit, root)
 
@@ -150,9 +149,12 @@ def verify(repo, entries, root):
         # The repository metadata attach_commit adds is not exported content.
         if pathlib.Path(current) == root and ".git" in dirs and ".git" not in entries:
             dirs.remove(".git")
-        for name in files + [
-            d for d in dirs if (pathlib.Path(current) / d).is_symlink()
-        ]:
+        for name in dirs + files:
+            if (pathlib.Path(current) / name).is_symlink():
+                raise SystemExit(
+                    f"error: the export contains a symlink: {(pathlib.Path(current) / name).relative_to(root)}"
+                )
+        for name in files:
             found.add(str((pathlib.Path(current) / name).relative_to(root)))
     if found != set(entries):
         missing = sorted(set(entries) - found)[:5]
@@ -160,7 +162,7 @@ def verify(repo, entries, root):
         raise SystemExit(
             f"error: exported file set differs from the tree (missing {missing}, extra {extra})"
         )
-    paths = [p for p, (mode, _) in entries.items() if mode != "120000"]
+    paths = list(entries)
     hashed = git(
         repo,
         "hash-object",
@@ -174,13 +176,6 @@ def verify(repo, entries, root):
         executable = os.stat(root / path).st_mode & 0o111 != 0
         if executable != (entries[path][0] == "100755"):
             raise SystemExit(f"error: exported {path} has the wrong mode")
-    for path, (mode, oid) in entries.items():
-        if mode == "120000":
-            link = os.readlink(root / path).encode()
-            if git(repo, "hash-object", "--stdin", data=link).decode().strip() != oid:
-                raise SystemExit(
-                    f"error: exported symlink {path} differs from its blob"
-                )
 
 
 if __name__ == "__main__":

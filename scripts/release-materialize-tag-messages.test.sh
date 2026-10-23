@@ -84,5 +84,5 @@ run >/dev/null
 
 # A tag absent from the remote fails the fetch.
 git -C "$repo" push -q origin --delete "refs/tags/bindings/go/sysprims/v$version"
-expect_fail run
+expect_fail_with "couldn't find remote ref refs/tags/bindings/go/sysprims/v$version" run
 echo '[ok] tag-message materialization controls passed'

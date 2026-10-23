@@ -38,10 +38,13 @@ fi
 # Build and validate all three pins in scratch first; nothing in the tree is
 # written until they pass.
 scratch="$(mktemp -d)"
+helper="$root/scripts/write-exclusive.py"
+# Created files as "<dev:ino> <path>", recorded from the helper's report; each
+# is removed on failure only while it is still that inode.
 created=()
 cleanup() {
-	local path
-	for path in ${created[@]+"${created[@]}"}; do rm -f "$path"; done
+	local entry
+	for entry in ${created[@]+"${created[@]}"}; do python3 "$helper" --remove "${entry#* }" "${entry%% *}"; done
 	rm -rf "$scratch"
 }
 trap cleanup EXIT
@@ -55,14 +58,16 @@ mkdir -p docs/security config/release
 for path in "$asc" "$pub" "$subkey"; do
 	# Created with O_EXCL|O_NOFOLLOW and written through that descriptor.
 	status=0
-	python3 "$root/scripts/write-exclusive.py" "$scratch/$path" "$path" || status=$?
+	identity="$(python3 "$helper" "$scratch/$path" "$path")" || status=$?
 	case "$status" in
-	0) created+=("$path") ;;
+	0)
+		[[ "$identity" =~ ^[0-9]+:[0-9]+$ ]] || stop "no identity reported for $path; it was left in place"
+		created+=("$identity $path")
+		;;
 	3) stop "$path appeared during export; nothing more was written" ;;
 	*)
-		# Any status but 3 means the helper created the path; it is ours to remove.
-		created+=("$path")
-		stop "writing $path failed; the files this run created were removed"
+		# Only 0 means created and ours; any other status leaves it unknown.
+		stop "writing $path failed (status $status); the files this run created were removed, and $path was left in place for inspection"
 		;;
 	esac
 done

@@ -91,6 +91,7 @@ cat >"$racer" <<SH
 #!/usr/bin/env bash
 # Runs as the verify step after the txt anchor exists: simulates a concurrent
 # writer that created the ndjson anchor first, so this run never owned it.
+echo 'verify step ran' >&2
 exit 1
 SH
 chmod +x "$racer"
@@ -116,7 +117,7 @@ expect_fail_with 'appeared during installation' env PATH="$fixture_dir/race-bin:
 [[ "$(cat "$appear/expected-fingerprints.ndjson")" == raced ]]
 [[ ! -e "$appear/expected-fingerprints.txt" ]]
 # A failing verify step removes this run's pair only.
-expect_fail "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest" "$racer"
+expect_fail_with 'verify step ran' "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest" "$racer"
 [[ ! -e "$fixture_dir/dest/expected-fingerprints.txt" && ! -e "$fixture_dir/dest/expected-fingerprints.ndjson" ]]
 printf 'unrelated\n' >"$fixture_dir/dest/other"
 "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest"
@@ -133,12 +134,17 @@ python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/link" 2>/d
 [[ "$status" == 3 && "$(cat "$fixture_dir/ex/victim")" == victim && -L "$fixture_dir/ex/link" ]]
 head -c 300000 /dev/zero >"$fixture_dir/ex/big"
 status=0
-(ulimit -f 64 && python3 "$helper" "$fixture_dir/ex/big" "$fixture_dir/ex/partial") 2>/dev/null || status=$?
+[[ "$(wc -c <"$fixture_dir/ex/big")" -eq 300000 ]]
+(ulimit -f 64 && python3 "$helper" "$fixture_dir/ex/big" "$fixture_dir/ex/partial") 2>"$fixture_dir/ex/partial.err" || status=$?
+grep -q "error: writing $fixture_dir/ex/partial failed:" "$fixture_dir/ex/partial.err" || {
+	echo 'error: the helper partial-write control did not reach the failing write' >&2
+	exit 1
+}
 [[ "$status" != 0 && ! -e "$fixture_dir/ex/partial" ]] || {
 	echo 'error: a failed exclusive write left a file behind' >&2
 	exit 1
 }
-python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ok"
+python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ok" >/dev/null
 cmp "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ok"
 # Failures before the create report 3 (nothing created), so a caller never
 # claims, and later removes, a file it did not make.
@@ -162,16 +168,68 @@ for script in install-release-anchors.sh release-export-pin.sh; do
 	fi
 done
 # Through the installer: a failing write mid-pair removes what this run made.
+# The oversized stage is built first, with no limit; only the installer runs
+# under the file-size limit, and the failure must be the ndjson write itself.
 partial="$fixture_dir/partial"
-mkdir -p "$partial"
+mkdir -p "$partial" "$fixture_dir/bigstage"
+cp "$stage/expected-fingerprints.txt" "$fixture_dir/bigstage/"
+head -c 300000 /dev/zero >"$fixture_dir/bigstage/expected-fingerprints.ndjson"
+[[ "$(wc -c <"$fixture_dir/bigstage/expected-fingerprints.ndjson")" -eq 300000 ]]
 status=0
-(ulimit -f 64 && head -c 300000 /dev/zero >"$stage/expected-fingerprints.ndjson.big" &&
-	cp "$stage/expected-fingerprints.txt" "$fixture_dir/stage-txt" &&
-	mkdir -p "$fixture_dir/bigstage" && cp "$stage/expected-fingerprints.txt" "$fixture_dir/bigstage/" &&
-	mv "$stage/expected-fingerprints.ndjson.big" "$fixture_dir/bigstage/expected-fingerprints.ndjson" &&
-	"$fixture_root/scripts/install-release-anchors.sh" "$fixture_dir/bigstage" "$partial") 2>/dev/null || status=$?
-[[ "$status" != 0 && -z "$(ls -A "$partial")" ]] || {
+(ulimit -f 64 && "$fixture_root/scripts/install-release-anchors.sh" "$fixture_dir/bigstage" "$partial") \
+	>"$fixture_dir/partial.out" 2>&1 || status=$?
+if [[ "$status" == 0 ]] || ! grep -q "error: writing $partial/expected-fingerprints.ndjson failed:" "$fixture_dir/partial.out"; then
+	echo 'error: the partial-write control did not reach the failing anchor write' >&2
+	cat "$fixture_dir/partial.out" >&2
+	exit 1
+fi
+[[ -z "$(ls -A "$partial")" ]] || {
 	echo "error: a partially installed anchor pair survived: $(ls -A "$partial")" >&2
 	exit 1
 }
+# An unexpected helper exit (here a crash after creating the file) is not
+# ownership: the installer does not claim or remove that file, and still
+# removes the anchor it did create.
+mkdir -p "$fixture_dir/stubbed"
+cp "$fixture_root/scripts/install-release-anchors.sh" "$fixture_dir/stubbed/"
+cat >"$fixture_dir/stubbed/write-exclusive.py" <<PY
+#!/usr/bin/env python3
+import os, subprocess, sys
+if sys.argv[1] != "--remove" and sys.argv[2].endswith(".ndjson"):
+    open(sys.argv[2], "x").write("crashed")
+    os.kill(os.getpid(), 9)
+sys.exit(subprocess.call([sys.executable, "$helper", *sys.argv[1:]]))
+PY
+crash="$fixture_dir/crash"
+mkdir "$crash"
+expect_fail_with 'status 137.*left in place' "$fixture_dir/stubbed/install-release-anchors.sh" "$stage" "$crash"
+[[ ! -e "$crash/expected-fingerprints.txt" && "$(cat "$crash/expected-fingerprints.ndjson")" == crashed ]] || {
+	echo 'error: the installer claimed a file of unknown ownership, or kept its own' >&2
+	exit 1
+}
+# Rollback is by identity: an anchor this run created, replaced by another
+# file before the rollback, is left alone.
+replacer="$fixture_dir/replacer.sh"
+cat >"$replacer" <<'SH'
+#!/usr/bin/env bash
+rm "$REPLACE_DIR/expected-fingerprints.txt"
+printf 'replacement\n' >"$REPLACE_DIR/expected-fingerprints.txt"
+echo 'replacer ran' >&2
+exit 1
+SH
+chmod +x "$replacer"
+replaced="$fixture_dir/replaced"
+mkdir "$replaced"
+expect_fail_with 'replacer ran' env REPLACE_DIR="$replaced" "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$replaced" "$replacer"
+[[ "$(cat "$replaced/expected-fingerprints.txt")" == replacement && ! -e "$replaced/expected-fingerprints.ndjson" ]] || {
+	echo 'error: the rollback removed a file that replaced the one it created, or kept its own' >&2
+	exit 1
+}
+# The helper's own identity removal.
+python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ident" >"$fixture_dir/ex/ident.id"
+grep -Eqx '[0-9]+:[0-9]+' "$fixture_dir/ex/ident.id"
+python3 "$helper" --remove "$fixture_dir/ex/ident" 0:0 2>/dev/null
+[[ -e "$fixture_dir/ex/ident" ]]
+python3 "$helper" --remove "$fixture_dir/ex/ident" "$(cat "$fixture_dir/ex/ident.id")"
+[[ ! -e "$fixture_dir/ex/ident" ]]
 echo '[ok] anchor and checker-binding controls passed'

@@ -946,5 +946,5 @@ release-guard-signed: release-require-tag ## Verify exact signatures, public key
 release-guard-uploaded: release-require-tag ## Verify a fresh copy of the complete remote draft
 	@node scripts/release-integrity.mjs uploaded --dir $(DIST_RELEASE)
 
-release-guard-remote: release-require-tag ## Verify remote registries/modules and native runtime before publish
+release-guard-remote: release-require-tag release-guard-tag-version-post ## Verify remote registries/modules and native runtime before publish
 	@node scripts/release-integrity.mjs remote --dir $(DIST_RELEASE)

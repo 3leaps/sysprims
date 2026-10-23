@@ -97,11 +97,13 @@ grep -q 'die "$crate@$version is on crates.io with different contents' "$fixture
 sum="$(printf 'a%.0s' $(seq 64))"
 [[ "$(printf '{"version":{"crate":"sysprims-core","num":"0.3.0","checksum":"%s"}}' "$sum" |
 	python3 "$fixture_root/scripts/release-crates.py" registry-checksum sysprims-core 0.3.0)" == "$sum" ]]
-for body in '{"version":{"crate":"other","num":"0.3.0","checksum":"'"$sum"'"}}' \
-	'{"version":{"crate":"sysprims-core","num":"0.2.9","checksum":"'"$sum"'"}}' \
-	'{"version":{"crate":"sysprims-core","num":"0.3.0","checksum":"short"}}' \
-	'{"version":{"crate":"sysprims-core","num":"0.3.0"}}' 'not json'; do
-	expect_fail bash -c "printf '%s' '$body' | python3 '$fixture_root/scripts/release-crates.py' registry-checksum sysprims-core 0.3.0"
+for body in 'does not describe|{"version":{"crate":"other","num":"0.3.0","checksum":"'"$sum"'"}}' \
+	'does not describe|{"version":{"crate":"sysprims-core","num":"0.2.9","checksum":"'"$sum"'"}}' \
+	'no valid checksum|{"version":{"crate":"sysprims-core","num":"0.3.0","checksum":"short"}}' \
+	'no valid checksum|{"version":{"crate":"sysprims-core","num":"0.3.0"}}' 'Expecting value|not json'; do
+	reason="${body%%|*}"
+	body="${body#*|}"
+	expect_fail_with "$reason" bash -c "printf '%s' '$body' | python3 '$fixture_root/scripts/release-crates.py' registry-checksum sysprims-core 0.3.0"
 done
 # A failing plan producer stops the run before any crate is touched.
 grep -q "plan_output=\"\$(python3 \"\$tree/scripts/release-crates.py\" paths)\" || die" "$fixture_root/scripts/release-crates-dry-run.sh"
@@ -156,6 +158,7 @@ with open(out, "wb") as handle:
 PY
 cat >"$bin/cargo" <<'SH'
 #!/usr/bin/env bash
+[[ -z "${CARGO_CALLS:-}" ]] || echo "$1" >>"$CARGO_CALLS"
 case "$1" in
 metadata) printf '{"packages":[{"name":"sysprims-core","publish":null,"dependencies":[],"manifest_path":"%s/crates/sysprims-core/Cargo.toml"}]}' "$PWD" ;;
 package)
@@ -307,8 +310,54 @@ extra = root / "crates/sysprims-core/src/extra.rs"
 refused(lambda: extra.write_text("x"), lambda: extra.unlink(), "file set differs")
 refused(lambda: lib.rename(root / "moved"), lambda: (root / "moved").rename(lib), "file set differs")
 refused(lambda: lib.chmod(0o755), lambda: lib.chmod(0o644), "wrong mode")
+# Defence in depth: a symlink in the export, to a file or a directory, is
+# refused even if it somehow got there.
+link = root / "crates/sysprims-core/src/link.rs"
+refused(lambda: link.symlink_to("lib.rs"), lambda: link.unlink(), "contains a symlink")
+up = root / "crates/sysprims-core/up"
+refused(lambda: up.symlink_to(".."), lambda: up.unlink(), "contains a symlink")
 ex.verify(repo, entries, root)
 PY
+# Symlinks in the tagged tree are refused before anything is written, whatever
+# they point at: cargo would follow them to bytes no blob hash covers.
+links="$fixture_dir/links"
+for kind in relative-escape absolute dir dangling chain; do
+	rm -rf "$links" "$fixture_dir/links-export"
+	git init -q "$links"
+	mkdir -p "$links/crates/sysprims-core/src"
+	printf 'pub fn tagged() {}\n' >"$links/crates/sysprims-core/src/lib.rs"
+	case "$kind" in
+	relative-escape) ln -s ../../../../outside "$links/crates/sysprims-core/src/extra.rs" ;;
+	absolute) ln -s /etc/hosts "$links/crates/sysprims-core/src/extra.rs" ;;
+	dir) ln -s ../../.. "$links/crates/sysprims-core/src/up" ;;
+	dangling) ln -s missing.rs "$links/crates/sysprims-core/src/extra.rs" ;;
+	chain)
+		ln -s lib.rs "$links/crates/sysprims-core/src/one.rs"
+		ln -s one.rs "$links/crates/sysprims-core/src/two.rs"
+		;;
+	esac
+	git -C "$links" add -A
+	git -C "$links" -c user.name=t -c user.email=t@example.invalid commit -q -m "$kind"
+	[[ "$(git -C "$links" ls-tree -r HEAD | grep -c '^120000 ')" -ge 1 ]]
+	expect_fail_with 'unsupported tree entry 120000' python3 "$fixture_root/scripts/release-export-tree.py" "$links" HEAD "$fixture_dir/links-export"
+	[[ ! -e "$fixture_dir/links-export/crates" ]]
+done
+# On the publish path the same refusal stops the run before cargo is called.
+git -C "$pub" checkout -q main
+ln -s /etc/hosts "$pub/crates/sysprims-core/src/hosts.rs"
+fixture_commit "$pub" link
+git -C "$pub" tag -d "v$version" >/dev/null
+git -C "$pub" tag -a -m "Release $version" "v$version"
+git -C "$pub" checkout -q --detach "v$version"
+rm -f "$fixture_dir/cargo-calls"
+expect_fail_with 'unsupported tree entry 120000' publish_run CARGO_CALLS="$fixture_dir/cargo-calls"
+[[ ! -e "$fixture_dir/cargo-calls" && ! -e "$fixture_dir/uploads" ]]
+git -C "$pub" checkout -q main
+git -C "$pub" rm -q "crates/sysprims-core/src/hosts.rs"
+fixture_commit "$pub" unlink
+git -C "$pub" tag -d "v$version" >/dev/null
+git -C "$pub" tag -a -m "Release $version" "v$version"
+git -C "$pub" checkout -q --detach "v$version"
 # Real cargo, offline, on a tiny crate: the export is attached to the tagged
 # commit, so cargo records it in .cargo_vcs_info.json without --allow-dirty,
 # and refuses to package if an exported byte differs from its blob.

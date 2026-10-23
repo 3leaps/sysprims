@@ -131,6 +131,14 @@ done <<<"$guarded"
 rm -f "$sentinel"
 shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag >/dev/null
 grep -qx release-tag-operator.sh "$sentinel"
+# The registry check runs only on a checkout that equals the tag's commit:
+# the post-tag guard runs before it.
+rm -f "$sentinel"
+shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-guard-remote >/dev/null
+[[ "$(paste -sd, "$sentinel")" == release-guard-tag-version.sh,node ]] || {
+	echo "error: release-guard-remote ran $(paste -sd, "$sentinel"), not the post-tag guard then its check" >&2
+	exit 1
+}
 # Independent of any classification list: these leaf targets act on a tagged
 # release (they read release notes at the tag, download or edit the GitHub
 # release, or check the registries for its version). Each refuses a bare

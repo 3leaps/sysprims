@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { assertInventory, checkRemote, expectedInventory, provenance, remoteRequirements, requiredTags, verifyChecksums } from "./release-integrity.mjs";
+import { assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -228,6 +228,7 @@ test("release leaves are guard-wired and only release-publish can undraft", () =
   assert.match(makefile, /^release-sign: release-require-tag release-require-checksummed/m);
   assert.match(makefile, /^release-upload: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed/m);
   assert.match(makefile, /^release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-remote/m);
+  assert.match(makefile, /^release-guard-remote: release-require-tag release-guard-tag-version-post /m);
   const upload = readFileSync("scripts/upload-release-assets.sh", "utf8");
   assert.doesNotMatch(upload, /--draft=false/);
   const implementation = readFileSync("scripts/release-integrity.mjs", "utf8");
@@ -294,4 +295,96 @@ test("registry requirements follow the release commit's plan and tree", () => {
   assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.length, 1, "the working tree is not consulted");
   commitAll("module");
   assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.at(-1).path, "github.com/3leaps/sysprims/go/recurrence");
+});
+
+// The release decisions after tagging are taken at the tag's commit: the plan
+// is that commit's blob, npm gitHead and provenance are checked against that
+// commit, and an index flag that hides a working-tree edit is refused.
+function taggedPlanFixture() {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-tagged-plan-"));
+  roots.push(root);
+  const plan = (typescript) => JSON.stringify({
+    schema: "sysprims-release-plan/v1", version: "1.2.3", provenance_policy: "commit_footer",
+    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, ffi: { disposition: "publish" }, go: { disposition: "publish", lock_phase: "resolved" }, typescript },
+  });
+  mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "config/release"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), "1.2.3\n");
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
+  writeFileSync(join(root, "config/release/publishable-crates.txt"), "sysprims-core\n");
+  writeFileSync(join(root, "docs/releases/v1.2.3.json"), plan({ disposition: "publish" }));
+  must(root, "git", ["init", "-q", "-b", "main"]);
+  must(root, "git", ["config", "user.name", "Fixture"]);
+  must(root, "git", ["config", "user.email", "fixture@example.invalid"]);
+  must(root, "git", ["add", "-A"]);
+  must(root, "git", ["commit", "-qm", "release without attribution"]);
+  must(root, "git", ["tag", "-a", "-m", "Release 1.2.3", "v1.2.3"]);
+  const tagCommit = must(root, "git", ["rev-parse", "v1.2.3^{commit}"]);
+  const skipPlan = plan({ disposition: "skip", retained_version: "1.2.2" });
+  // Records which npm versions were asked for; every lookup resolves.
+  const lookup = (gitHead = tagCommit) => {
+    const asked = [];
+    return {
+      asked,
+      crate: (_, v) => v,
+      goModule: (_, v) => `v${v}`,
+      npm(url) { const v = url.split("/").pop(); asked.push(v); return { version: v, gitHead, dist: { integrity: "x", tarball: "y" } }; },
+      npmResolves: () => false,
+    };
+  };
+  return { root, tagCommit, skipPlan, lookup };
+}
+
+test("registry checks use the tag commit's plan, not the checkout's", () => {
+  const { root, tagCommit, skipPlan, lookup } = taggedPlanFixture();
+  const plain = lookup();
+  remoteRegistries(root, tagCommit, "1.2.3", plain);
+  assert.ok(plain.asked.length > 0 && plain.asked.every((v) => v === "1.2.3"));
+  // A skip-worktree, then an assume-unchanged, edit of the plan is not seen.
+  for (const flag of ["--skip-worktree", "--assume-unchanged"]) {
+    must(root, "git", ["update-index", flag, "docs/releases/v1.2.3.json"]);
+    writeFileSync(join(root, "docs/releases/v1.2.3.json"), skipPlan);
+    assert.equal(must(root, "git", ["status", "--porcelain"]), "");
+    const seen = lookup();
+    remoteRegistries(root, tagCommit, "1.2.3", seen);
+    assert.ok(seen.asked.every((v) => v === "1.2.3"), `${flag} plan edit reached the registry check`);
+    must(root, "git", ["update-index", flag.replace("--", "--no-"), "docs/releases/v1.2.3.json"]);
+    must(root, "git", ["checkout", "--", "docs/releases/v1.2.3.json"]);
+  }
+  // A later commit at the same VERSION with a different plan is not used,
+  // and npm's gitHead must name the tag's commit, not the later one.
+  writeFileSync(join(root, "docs/releases/v1.2.3.json"), skipPlan);
+  must(root, "git", ["commit", "-qam", "same version, other plan"]);
+  const head = must(root, "git", ["rev-parse", "HEAD"]);
+  assert.notEqual(head, tagCommit);
+  const later = lookup();
+  remoteRegistries(root, tagCommit, "1.2.3", later);
+  assert.ok(later.asked.every((v) => v === "1.2.3"));
+  assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", lookup(head)), /gitHead mismatch/);
+});
+
+test("provenance after tagging binds the tag commit, not HEAD", () => {
+  const { root, tagCommit } = taggedPlanFixture();
+  must(root, "git", ["commit", "-q", "--allow-empty", "-m", `later\n\n${attributionFooter}`]);
+  assert.throws(() => provenance(root, "1.2.3", tagCommit), /complete attribution footer is missing/);
+});
+
+test("remote and publish refuse hidden index entries before any check", () => {
+  const { root, skipPlan } = taggedPlanFixture();
+  must(root, "git", ["checkout", "-q", "--detach", "v1.2.3"]);
+  for (const flag of ["--skip-worktree", "--assume-unchanged"]) {
+    must(root, "git", ["update-index", flag, "docs/releases/v1.2.3.json"]);
+    writeFileSync(join(root, "docs/releases/v1.2.3.json"), skipPlan);
+    const env = { ...process.env, SYSPRIMS_RELEASE_TAG: "v1.2.3", SYSPRIMS_RELEASE_METADATA_FILE: join(root, "absent.json") };
+    delete env.RELEASE_TAG;
+    for (const command of ["remote", "publish"]) {
+      const result = spawnSync("node", ["scripts/release-integrity.mjs", command, "--root", root, "--dir", root], {
+        encoding: "utf8", env,
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /skip-worktree or assume-unchanged/, `${command} ${flag}: ${result.stderr}`);
+    }
+    must(root, "git", ["update-index", flag.replace("--", "--no-"), "docs/releases/v1.2.3.json"]);
+    must(root, "git", ["checkout", "--", "docs/releases/v1.2.3.json"]);
+  }
 });

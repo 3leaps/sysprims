@@ -52,7 +52,7 @@ validate >/dev/null
 gpg --homedir "$fixture_dir/gpg" --batch --armor --export >"$repo/docs/security/release-signing-keys.asc"
 gpg --homedir "$fixture_dir/gpg-other" --batch --armor --export >>"$repo/docs/security/release-signing-keys.asc"
 fixture_commit "$repo" two-keys
-expect_fail validate
+expect_fail_with 'exactly one primary and one subkey' validate
 printf -- '-----BEGIN PGP PRIVATE KEY BLOCK-----\n' >"$repo/docs/security/release-signing-keys.asc"
 fixture_commit "$repo" private
 expect_fail_with 'private material' validate
@@ -94,28 +94,53 @@ export_pin >/dev/null
 cmp "$fixture_dir/approved.pub" "$export_repo/docs/security/sysprims-minisign.pub"
 expect_fail_with 'already exists' export_pin
 # Export whose last installing write fails after creating its file (the real
-# helper's own cleanup is tested directly in release-anchors.test.sh): every
-# file this run created, including the earlier pins, is removed.
-rm -f "$export_repo/docs/security/release-signing-keys.asc" "$export_repo/docs/security/sysprims-minisign.pub" \
-	"$export_repo/config/release/signing-subkey.txt"
+# helper's own cleanup is tested directly in release-anchors.test.sh): the
+# earlier pins this run created are removed, and the file whose helper exited
+# with an unexpected status is not claimed, so it is left in place.
+pins_reset() {
+	rm -f "$export_repo/docs/security/release-signing-keys.asc" "$export_repo/docs/security/sysprims-minisign.pub" \
+		"$export_repo/config/release/signing-subkey.txt"
+}
+pins_reset
 cp "$export_repo/scripts/write-exclusive.py" "$fixture_dir/real-helper.py"
-cat >"$export_repo/scripts/write-exclusive.py" <<PY
+# stub_helper <python run for signing-subkey.txt>: the real helper otherwise.
+stub_helper() {
+	cat >"$export_repo/scripts/write-exclusive.py" <<PY
 #!/usr/bin/env python3
-import subprocess, sys
-dest = sys.argv[2]
-if dest.endswith("signing-subkey.txt"):
-    open(dest, "x").write("partial")
-    sys.exit(1)
+import os, subprocess, sys
+dest = sys.argv[-2] if sys.argv[1] == "--remove" else sys.argv[2]
+if sys.argv[1] != "--remove" and dest.endswith("signing-subkey.txt"):
+$1
 sys.exit(subprocess.call([sys.executable, "$fixture_dir/real-helper.py", *sys.argv[1:]]))
 PY
+}
+stub_helper '    open(dest, "x").write("partial")
+    os.kill(os.getpid(), 9)'
 status=0
 export_pin >"$fixture_dir/export.out" 2>&1 || status=$?
 [[ "$status" != 0 ]]
-grep -q 'writing config/release/signing-subkey.txt failed' "$fixture_dir/export.out" || {
+grep -q 'writing config/release/signing-subkey.txt failed (status 137)' "$fixture_dir/export.out" || {
 	echo 'error: the export did not fail at the installing write' >&2
 	cat "$fixture_dir/export.out" >&2
 	exit 1
 }
-no_pins
+[[ ! -e "$export_repo/docs/security/release-signing-keys.asc" && ! -e "$export_repo/docs/security/sysprims-minisign.pub" ]]
+[[ "$(cat "$export_repo/config/release/signing-subkey.txt")" == partial ]] || {
+	echo 'error: a file of unknown ownership was removed' >&2
+	exit 1
+}
+pins_reset
+# Rollback is by identity: a pin this run created but that was replaced by
+# another file before the rollback is left alone.
+stub_helper '    os.unlink("docs/security/sysprims-minisign.pub")
+    open("docs/security/sysprims-minisign.pub", "x").write("replacement")
+    sys.exit(3)'
+expect_fail_with 'signing-subkey.txt appeared during export' export_pin
+[[ ! -e "$export_repo/docs/security/release-signing-keys.asc" ]]
+[[ "$(cat "$export_repo/docs/security/sysprims-minisign.pub")" == replacement ]] || {
+	echo 'error: the rollback removed a file that replaced the one it created' >&2
+	exit 1
+}
+pins_reset
 cp "$fixture_dir/real-helper.py" "$export_repo/scripts/write-exclusive.py"
 echo '[ok] pin validation controls passed'

@@ -79,7 +79,7 @@ fi
 exec "$real_git" "\$@"
 SH
 chmod +x "$fixture_dir/bin/git"
-expect_fail tag_run PATH="$fixture_dir/bin:$PATH"
+expect_fail_with 'simulated signing failure' tag_run PATH="$fixture_dir/bin:$PATH"
 no_tags
 
 # Through the real maintainer entry points (make release-tag / release-push-tag
