@@ -2,6 +2,7 @@ package recurrence
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -77,12 +78,7 @@ func scanFields(s, layout string) (fields []int, ok bool) {
 	const order = "YMDhms"
 	out := make([]int, len(order))
 	for i := 0; i < len(layout); i++ {
-		k := -1
-		for j := 0; j < len(order); j++ {
-			if layout[i] == order[j] {
-				k = j
-			}
-		}
+		k := strings.LastIndexByte(order, layout[i])
 		if k < 0 {
 			if s[i] != layout[i] {
 				return nil, false
