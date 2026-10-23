@@ -27,18 +27,25 @@ jobs:
             echo "relevant=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
-          printf '%s\n' "$changed"
+          # NUL-delimited raw paths (no quoting) with renames split into a
+          # deletion and an addition, matched in-process (no pipe, so no
+          # SIGPIPE under pipefail on large diffs).
           patterns=(
             '^bindings/typescript/sysprims/'
             '^crates/sysprims-(core|proc|session|signal|timeout)/'
             '^Cargo\.(lock|toml)$'
             '^\.github/workflows/typescript-bindings\.yml$'
           )
+          # A failed diff must fail the job, never read as "nothing changed".
+          paths_file="$RUNNER_TEMP/changed-paths"
+          git diff --name-only --no-renames -z "$BASE_SHA"...HEAD >"$paths_file"
           relevant=false
-          for pattern in "${patterns[@]}"; do
-            if printf '%s\n' "$changed" | grep -Eq "$pattern"; then relevant=true; fi
-          done
+          while IFS= read -r -d '' path; do
+            printf '%s\n' "$path"
+            for pattern in "${patterns[@]}"; do
+              if [[ "$path" =~ $pattern ]]; then relevant=true; fi
+            done
+          done <"$paths_file"
           if [ "$relevant" = true ]; then
             echo "relevant=true" >>"$GITHUB_OUTPUT"
           else
