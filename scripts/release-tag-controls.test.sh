@@ -28,6 +28,54 @@ while IFS= read -r target; do
 	}
 done <<<"$checklist_targets"
 
+# The checklist sets the tag environment (clearing a bare RELEASE_TAG) before
+# the first target that reads the tag.
+guarded_targets="$(python3 "$fixture_root/scripts/release-make-guard.py" "$fixture_root")"
+env_line="$(grep -n '^unset RELEASE_TAG$' "$fixture_root/RELEASE_CHECKLIST.md" | head -1 | cut -d: -f1)"
+[[ -n "$env_line" ]] || {
+	echo 'error: RELEASE_CHECKLIST.md never clears a bare RELEASE_TAG' >&2
+	exit 1
+}
+first_guarded="$(grep -noE 'make [a-z][a-z0-9-]+' "$fixture_root/RELEASE_CHECKLIST.md" |
+	while IFS=: read -r line text; do grep -qx "${text#make }" <<<"$guarded_targets" && {
+		echo "$line"
+		break
+	}; done)"
+[[ -n "$first_guarded" && "$env_line" -lt "$first_guarded" ]] || {
+	echo "error: RELEASE_CHECKLIST.md uses a tag-reading target (line $first_guarded) before clearing RELEASE_TAG (line $env_line)" >&2
+	exit 1
+}
+# The analysis on synthetic Makefiles: a tag-free target that demands the tag
+# is reported as over-guarded (not reclassified as tag-reading because of the
+# guard itself), and a tag-reading target without the guard is reported.
+synthetic="$fixture_dir/synthetic"
+mkdir -p "$synthetic/scripts"
+cp "$fixture_root/scripts/release-integrity.mjs" "$synthetic/scripts/"
+write_make() {
+	cat >"$synthetic/Makefile" <<MK
+RELEASE_TAG_FREE_TARGETS := release-require-tag release-free
+.NOTPARALLEL: release-reads
+release-require-tag:
+	@test -n "\$(SYSPRIMS_RELEASE_TAG)"
+release-reads: release-require-tag ## reads
+	@test -n "\$(SYSPRIMS_RELEASE_TAG)"
+release-free: $1 ## no tag
+	@true
+MK
+}
+write_make ""
+python3 "$fixture_root/scripts/release-make-guard.py" "$synthetic" >/dev/null
+write_make release-require-tag
+expect_fail_with 'release-free reads no release tag but requires one' python3 "$fixture_root/scripts/release-make-guard.py" "$synthetic"
+sed -i.bak 's/^release-reads: release-require-tag /release-reads: /' "$synthetic/Makefile"
+expect_fail_with 'release-reads reads the release tag but does not start with release-require-tag' python3 "$fixture_root/scripts/release-make-guard.py" "$synthetic"
+
+# Provenance reads no tag, so the footer check runs without one.
+if grep -qx release-guard-provenance <<<"$guarded_targets"; then
+	echo 'error: release-guard-provenance is classified as reading the release tag' >&2
+	exit 1
+fi
+
 # Which targets read the release tag is derived from the recipes and the
 # scripts they run (scripts/release-make-guard.py); each must start with
 # release-require-tag and none may be listed as tag-free.
@@ -83,6 +131,19 @@ done <<<"$guarded"
 rm -f "$sentinel"
 shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-tag >/dev/null
 grep -qx release-tag-operator.sh "$sentinel"
+# A target that reads no tag runs without SYSPRIMS_RELEASE_TAG and despite a
+# stray bare RELEASE_TAG.
+for origin in none bare; do
+	rm -f "$sentinel"
+	case "$origin" in
+	none) shim_make -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG make -s -C "$shim" release-guard-provenance ;;
+	bare) shim_make -u SYSPRIMS_RELEASE_TAG RELEASE_TAG=v9.9.9 make -s -C "$shim" release-guard-provenance ;;
+	esac
+	grep -qx node "$sentinel" || {
+		echo "error: release-guard-provenance did not run its check ($origin)" >&2
+		exit 1
+	}
+done
 # Targets that read no tag ignore an unrelated RELEASE_TAG.
 env RELEASE_TAG=v9.9.9 make -s -C "$fixture_root" -n help >/dev/null
 if grep -En 'SYSPRIMS_RELEASE_TAG[[:space:]]*\?=|v\$\(VERSION\)' "$fixture_root/Makefile"; then
@@ -112,8 +173,10 @@ done
 # The release tag is required, canonical, and equal to VERSION.
 expect_fail_with 'SYSPRIMS_RELEASE_TAG is required' call tag_version -u SYSPRIMS_RELEASE_TAG
 expect_fail_with 'canonical vX.Y.Z' call tag_version SYSPRIMS_RELEASE_TAG=1.2.3
-expect_fail_with 'does not match VERSION' call tag_version SYSPRIMS_RELEASE_TAG=v1.2.4
+# Syntax only: VERSION is compared at the commit, by tag_load_set.
+call tag_version SYSPRIMS_RELEASE_TAG=v1.2.4
 call tag_version SYSPRIMS_RELEASE_TAG="v$version"
+expect_fail_with 'cannot resolve the release tag set' call 'tag_load_set HEAD' SYSPRIMS_RELEASE_TAG=v1.2.4
 
 # The tag set is loaded from git blobs at a commit; uncommitted edits to the
 # plan, go.mod or prefix list never change it.
@@ -129,19 +192,26 @@ fixture_commit "$repo" "skip, no module"
 git -C "$repo" checkout -q HEAD~1 -- .
 fixture_commit "$repo" restore
 
-# A failing producer never yields a partial set. With an unknown prefix after
-# "v" the resolver fails after reading the file; the loader refuses even though
-# "v" alone would have looked like a valid set.
-printf 'v\nother/v\n' >"$repo/config/release/release-tags.txt"
-fixture_commit "$repo" bad-prefix
-expect_fail_with 'cannot resolve the release tag set' load
-printf 'v\nbindings/go/sysprims/v\nbindings/go/sysprims/v\n' >"$repo/config/release/release-tags.txt"
-fixture_commit "$repo" repeated-prefix
-expect_fail_with 'cannot resolve the release tag set' load
-printf 'bindings/go/sysprims/v\nv\n' >"$repo/config/release/release-tags.txt"
-fixture_commit "$repo" canonical-not-first
-expect_fail_with 'cannot resolve the release tag set' load
-git -C "$repo" checkout -q HEAD~3 -- config/release/release-tags.txt
+# The prefix file must be exactly the canonical list. Any other content (an
+# omitted companion, swapped companions, an extra or a repeated prefix, a
+# missing final newline) is refused by every consumer, not shortened.
+prefix_ok="$(cat "$repo/config/release/release-tags.txt")"
+[[ "$prefix_ok" == $'v\nbindings/go/sysprims/v\ngo/recurrence/v' ]]
+for bad in 'v\n' 'v\nbindings/go/sysprims/v\n' 'v\ngo/recurrence/v\n' \
+	'v\ngo/recurrence/v\nbindings/go/sysprims/v\n' 'bindings/go/sysprims/v\nv\ngo/recurrence/v\n' \
+	'v\nbindings/go/sysprims/v\ngo/recurrence/v\nother/v\n' 'v\nv\nbindings/go/sysprims/v\ngo/recurrence/v\n' \
+	'v\nbindings/go/sysprims/v\ngo/recurrence/v'; do
+	printf '%b' "$bad" >"$repo/config/release/release-tags.txt"
+	fixture_commit "$repo" "prefixes $bad"
+	expect_fail_with 'cannot resolve the release tag set' load
+	expect_fail_with 'release-tags.txt must be exactly' bash -c "cd '$repo' && node scripts/release-tag-set.mjs tags --tag v$version"
+	expect_fail_with 'release-tags.txt must be exactly' node --input-type=module -e "
+		import { requiredTags } from '$fixture_root/scripts/release-integrity.mjs';
+		requiredTags('$repo', 'HEAD', '$version');"
+	expect_fail_with 'release-tags.txt must be exactly' env SYSPRIMS_RELEASE_TAG="v$version" \
+		SYSPRIMS_TAG_MESSAGE_DIR="$fixture_dir/prefix-messages/v$version" "$repo/scripts/release-prepare-tag-message.py"
+done
+printf '%s\n' "$prefix_ok" >"$repo/config/release/release-tags.txt"
 fixture_commit "$repo" restore-prefixes
 [[ "$(load)" == "$full" ]]
 # Every consumer that iterates tags goes through tag_load_set, never a

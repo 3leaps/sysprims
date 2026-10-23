@@ -12,6 +12,20 @@ This document walks maintainers through the build/sign/upload flow for each sysp
 
 ## 1. Pre-Release Preparation
 
+### Release tag in the shell (once, before any release target)
+
+Release targets that read the tag require `SYSPRIMS_RELEASE_TAG` and refuse a
+bare `RELEASE_TAG` from any origin. Set this in the shell you use for the whole
+release, after `VERSION` holds the release version:
+
+```bash
+unset RELEASE_TAG
+export SYSPRIMS_RELEASE_TAG="v$(cat VERSION)"
+```
+
+Targets that read no tag (for example `release-guard-provenance`,
+`release-plan-check`, `release-validate-pin`) work with or without it.
+
 ### PR Merge Gate
 
 - [ ] Confirm all in-scope PRs are merged: `gh pr list --state open`
@@ -140,7 +154,8 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     missing footer is blocking and must follow the signed receipt exception
     path rather than rewriting public `main`.
   - Ensure `main` is green again.
-  - Run `SYSPRIMS_RELEASE_TAG=v$(cat VERSION) make release-preflight` on this
+  - Run `make release-preflight` (with `SYSPRIMS_RELEASE_TAG` exported and no
+    bare `RELEASE_TAG`, as set at the start of this checklist) on this
     synchronized final `main`. It requires
     `go.lock_phase: resolved`, exact prebuilt hashes/smokes, clean local/remote
     state, the complete commit attribution footer (or approved signed receipt),
@@ -158,10 +173,12 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     validation jobs back to `npm ci` unless the release process also changes how
     platform optional dependencies are staged.
 
-- [ ] Load the ceremony environment and set the explicit tag. Nothing derives
-  the tag from `VERSION`; a bare `RELEASE_TAG` is refused by `make`.
+- [ ] Load the ceremony environment. The explicit tag is already exported
+  (start of this checklist); nothing derives it from `VERSION`, and `make`
+  refuses a bare `RELEASE_TAG`.
 
   ```bash
+  unset RELEASE_TAG
   export SYSPRIMS_RELEASE_TAG="v$(cat VERSION)"
   source ~/devsecops/vars/3leaps-sysprims-cicd.sh
   # SYSPRIMS_TAG_MESSAGE_DIR=$HOME/devsecops/releases/github/3leaps/sysprims/$SYSPRIMS_RELEASE_TAG

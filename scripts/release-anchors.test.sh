@@ -121,4 +121,19 @@ expect_fail "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixtur
 printf 'unrelated\n' >"$fixture_dir/dest/other"
 "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$fixture_dir/dest"
 [[ "$(cat "$fixture_dir/dest/other")" == unrelated ]]
+# A copy that writes part of an anchor and then fails: the partial file was
+# created by this run, so it is removed with the rest.
+partial="$fixture_dir/partial"
+mkdir -p "$partial" "$fixture_dir/partial-bin"
+cat >"$fixture_dir/partial-bin/cat" <<SH
+#!/usr/bin/env bash
+if [[ "\$1" == *expected-fingerprints.ndjson ]]; then printf 'half'; exit 1; fi
+exec /bin/cat "\$@"
+SH
+chmod +x "$fixture_dir/partial-bin/cat"
+expect_fail env PATH="$fixture_dir/partial-bin:$PATH" "$fixture_root/scripts/install-release-anchors.sh" "$stage" "$partial"
+[[ -z "$(ls -A "$partial")" ]] || {
+	echo "error: a partially written anchor survived: $(ls -A "$partial")" >&2
+	exit 1
+}
 echo '[ok] anchor and checker-binding controls passed'

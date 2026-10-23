@@ -36,11 +36,14 @@ trap 'rollback; exit 129' HUP
 # Each anchor is created with O_EXCL semantics (noclobber); a file that appears
 # meanwhile is left alone and fails the installation.
 for name in "${names[@]}"; do
-	if ! (set -C && cat "$staging/$name" >"$dest/$name") 2>/dev/null; then
+	# Exclusive create first, ownership recorded at once, then the copy: a copy
+	# that fails part way leaves a file this run owns and therefore removes.
+	if ! (set -C && : >"$dest/$name") 2>/dev/null; then
 		echo "error: $dest/$name appeared during installation; it was left untouched" >&2
 		exit 1
 	fi
 	owned+=("$dest/$name")
+	cat "$staging/$name" >"$dest/$name"
 done
 if [[ "$#" -gt 0 ]]; then
 	"$@"

@@ -53,8 +53,10 @@ printf '%s\n' "${SYSPRIMS_PGP_KEY_ID%!}" >"$scratch/$subkey"
 "$root/scripts/release-validate-pin.sh" --dir "$scratch" || stop 'the exported pins did not validate; nothing was written'
 mkdir -p docs/security config/release
 for path in "$asc" "$pub" "$subkey"; do
-	(set -C && cat "$scratch/$path" >"$path") || stop "$path appeared during export; nothing more was written"
+	# Exclusive create, ownership recorded at once, then the copy.
+	(set -C && : >"$path") 2>/dev/null || stop "$path appeared during export; nothing more was written"
 	created+=("$path")
+	cat "$scratch/$path" >"$path" || stop "writing $path failed; the files this run created were removed"
 done
 created=()
 echo "[ok] wrote $asc, $pub and $subkey; review and commit them, then run make release-insert-anchors"

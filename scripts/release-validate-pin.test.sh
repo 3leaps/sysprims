@@ -93,4 +93,30 @@ export_pin >/dev/null
 [[ "$(cat "$export_repo/config/release/signing-subkey.txt")" == "$subkey" ]]
 cmp "$fixture_dir/approved.pub" "$export_repo/docs/security/sysprims-minisign.pub"
 expect_fail_with 'already exists' export_pin
+# Export whose second write fails part way: every file this run created is
+# removed, including the partial one.
+rm -f "$export_repo/docs/security/release-signing-keys.asc" "$export_repo/docs/security/sysprims-minisign.pub" \
+	"$export_repo/config/release/signing-subkey.txt"
+mkdir -p "$fixture_dir/export-bin"
+# The scratch minisign pin is read twice: once by validation, then by the
+# installing copy. Fail the second read part way.
+rm -f "$fixture_dir/reads"
+cat >"$fixture_dir/export-bin/cat" <<SH
+#!/usr/bin/env bash
+case "\$1" in
+"$export_repo"/*) ;;
+*/docs/security/sysprims-minisign.pub)
+	echo read >>"$fixture_dir/reads"
+	if [[ "\$(wc -l <"$fixture_dir/reads")" -ge 2 ]]; then printf 'untrusted'; exit 1; fi
+	;;
+esac
+exec /bin/cat "\$@"
+SH
+chmod +x "$fixture_dir/export-bin/cat"
+expect_fail export_pin PATH="$fixture_dir/export-bin:$PATH"
+[[ "$(wc -l <"$fixture_dir/reads")" -ge 2 ]] || {
+	echo 'error: the partial-write shim never reached the installing copy' >&2
+	exit 1
+}
+no_pins
 echo '[ok] pin validation controls passed'
