@@ -49,6 +49,15 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   `[x.y.z]:` footer definition. A missing definition renders as an undefined link, and `goneat`
   / `make` do not flag it. Backfill prior-release gaps while here.
 - [ ] Create release notes: `docs/releases/vX.Y.Z.md`
+- [ ] **Record the recurrence time-zone bundle rebuild (network, human step).**
+  Run `make recurrence-tzdata-check`, which rebuilds the TZif bundle from the
+  hash-pinned tzdata and tzcode and requires byte equality with both committed
+  copies, and paste its output into the "pre-tag rebuild" block of
+  `docs/releases/vX.Y.Z.md` **in this release-pack PR**, so the record is part
+  of the commit that is merged, prepared and tagged. CI checks copy-and-pin
+  equality only, so this is the check that a bundle and its pins were not
+  replaced together. It is not run in CI, and it is not repeated after the
+  final preflight (that would dirty the tag target).
 - [ ] Run `make release-plan-check version-check`. Do not tag a cut whose
   plan, manifests, lock evidence, or Go prebuilt hashes disagree.
 
@@ -131,7 +140,8 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     missing footer is blocking and must follow the signed receipt exception
     path rather than rewriting public `main`.
   - Ensure `main` is green again.
-  - Run `make release-preflight` on this synchronized final `main`. It requires
+  - Run `SYSPRIMS_RELEASE_TAG=v$(cat VERSION) make release-preflight` on this
+    synchronized final `main`. It requires
     `go.lock_phase: resolved`, exact prebuilt hashes/smokes, clean local/remote
     state, the complete commit attribution footer (or approved signed receipt),
     and all normal gates. **It must pass before tagging.**
@@ -147,14 +157,6 @@ This document walks maintainers through the build/sign/upload flow for each sysp
     before the npm publication workflow has created them. Do not switch these PR
     validation jobs back to `npm ci` unless the release process also changes how
     platform optional dependencies are staged.
-
-- [ ] **Rebuild the recurrence time-zone bundle (network, human step).** Run
-  `make recurrence-tzdata-check`, which rebuilds the TZif bundle from the
-  hash-pinned tzdata and tzcode and requires byte equality with both committed
-  copies, and paste its output into the "pre-tag rebuild" block of
-  `docs/releases/vX.Y.Z.md`. CI checks copy-and-pin equality only, so this is
-  the check that a bundle and its pins were not replaced together. It is not
-  run in CI.
 
 - [ ] Load the ceremony environment and set the explicit tag. Nothing derives
   the tag from `VERSION`; a bare `RELEASE_TAG` is refused by `make`.
@@ -179,6 +181,16 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   file with a placeholder, a different subject or no footer.
 
 - [ ] Validate the committed pins: `make release-validate-pin`.
+
+  **First adoption only** (the pins are not in the tree yet): the public pins
+  are written once and reviewed as their own change, before any release uses
+  them. With the approved GPG home, subkey selector and minisign public key
+  loaded, run `make release-export-pin` (it validates in scratch and then writes
+  `docs/security/release-signing-keys.asc`, `docs/security/sysprims-minisign.pub`
+  and `config/release/signing-subkey.txt`, refusing to overwrite), commit them,
+  then run `make release-insert-anchors` (decernor derives
+  `keys/expected-fingerprints.{txt,ndjson}` from the committed exports) and
+  commit those. Both land on `main` through review before the release pack.
 
 - [ ] Create every tag, signed, local only: `make release-tag`. All tags point
   at the merge SHA of the Go Bindings Prep PR (the release's
@@ -212,11 +224,12 @@ VERSION=$(cat VERSION)
 git switch --detach "v${VERSION}"
 ```
 
-After both tags are pushed, keep release execution in this order:
+After every release tag is pushed (three when the Go binding is published and
+the recurrence module is present), keep release execution in this order:
 
 1. Verify the tag-triggered release workflow and optional validation workflow.
-2. Publish the five crates.io library crates in dependency order (from this
-   detached tag checkout).
+2. Publish the six crates.io library crates in dependency order with
+   `make release-crates-publish` (from this detached tag checkout).
 3. Download, copy tagged notes, checksum, sign, verify, and upload the GitHub
    release assets (`make release-download` / `release-sign` / `release-upload`
    run from this detached tag checkout). Upload leaves the release as a draft.

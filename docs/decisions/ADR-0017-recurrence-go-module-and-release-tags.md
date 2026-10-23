@@ -29,18 +29,23 @@ coupling the pure-Go code to the cgo binding or moving the existing binding.
 1. The pure-Go recurrence implementation is its own module,
    `github.com/3leaps/sysprims/go/recurrence`, with its own `go.mod`, in the
    `go/recurrence/` directory. It does not import the cgo binding, sets no
-   `replace` directives, and is not part of a `go.work` workspace; CI tests it
-   with `GOWORK=off` and `CGO_ENABLED=0`, including from a copy outside the
-   repository.
+   `replace` directives, and is not part of a `go.work` workspace. The CI job
+   `recurrence` (`.github/workflows/ci.yml`, on Linux, macOS and Windows) runs
+   its tests with `GOWORK=off` and `CGO_ENABLED=0` in the repository and again
+   from a copy outside it, where `RECURRENCE_CORPUS_DIR` points at the vendored
+   corpus and any skipped test fails the job.
 2. The module is tagged `go/recurrence/vX.Y.Z`, the directory-prefixed form
    Go uses to resolve versions of a module in a subdirectory.
 3. A release tags one commit with every name in its tag set, all at the same
    version: `vX.Y.Z`; `bindings/go/sysprims/vX.Y.Z` when the release plan
    publishes the Go binding; and `go/recurrence/vX.Y.Z` whenever
    `go/recurrence/go.mod` is present in the tagged tree. The prefixes are
-   listed in `config/release/release-tags.txt`; the tag guard, the provenance
-   check, the tag-message workflow step and the signed-tag ceremony all derive
-   the set from it the same way.
+   listed in `config/release/release-tags.txt`. One resolver,
+   `scripts/release-tag-set.mjs`, computes the set from git blobs at the
+   release commit (the prefix file, `VERSION`, the release plan and the
+   presence of `go/recurrence/go.mod`), never from the working tree. The tag
+   guard, the provenance check, the registry check, the tag-message workflow
+   step, the message preparer and the signed-tag ceremony all call it.
 4. Every tag in the set is annotated, signed by the committed signing subkey,
    carries its own reviewed message, and peels to the one release commit. A
    tag that points elsewhere fails the guard.
@@ -56,8 +61,9 @@ coupling the pure-Go code to the cgo binding or moving the existing binding.
   dependency on the binding's prebuilt archives.
 - `go get github.com/3leaps/sysprims/go/recurrence@vX.Y.Z` resolves a tagged
   version at the same commit as every other surface of the release.
-- The tag set is computed from one file and the tagged tree, so the guards
-  cannot disagree about which tags a release needs.
+- The tag set is computed by one resolver from the release commit, so the
+  guards cannot disagree about which tags a release needs, and a later
+  checkout cannot change the set for an earlier release.
 
 ### Negative
 
