@@ -1,22 +1,52 @@
 name: TypeScript Bindings
+# Runs on every pull request so that "TypeScript gate" can be a required
+# check. The changes job decides whether the native matrix needs to run.
 on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - 'bindings/typescript/sysprims/**'
-      - 'crates/sysprims-core/**'
-      - 'crates/sysprims-proc/**'
-      - 'crates/sysprims-session/**'
-      - 'crates/sysprims-signal/**'
-      - 'crates/sysprims-timeout/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/typescript-bindings.yml'
 env:
   CARGO_TERM_COLOR: always
 jobs:
+  changes:
+    name: Detect TypeScript-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "relevant=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
+          printf '%s\n' "$changed"
+          patterns=(
+            '^bindings/typescript/sysprims/'
+            '^crates/sysprims-(core|proc|session|signal|timeout)/'
+            '^Cargo\.(lock|toml)$'
+            '^\.github/workflows/typescript-bindings\.yml$'
+          )
+          relevant=false
+          for pattern in "${patterns[@]}"; do
+            if printf '%s\n' "$changed" | grep -Eq "$pattern"; then relevant=true; fi
+          done
+          if [ "$relevant" = true ]; then
+            echo "relevant=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >>"$GITHUB_OUTPUT"
+          fi
   test:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     name: Native behavior (${{ matrix.platform }}, ${{ matrix.runtime }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -106,6 +136,8 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: bun scripts/run-tests.js
   package-only:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     name: Build/package only (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -176,6 +208,8 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: node scripts/verify-platform-packages.js "${{ matrix.package-dir }}"
   test-musl:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     name: Test (linux-musl, alpine)
     runs-on: ubuntu-latest
     container:
@@ -209,3 +243,27 @@ jobs:
           set -euo pipefail
           . "$HOME/.cargo/env"
           npm run test:ci
+  # Required status check. Passes when nothing TypeScript-relevant changed;
+  # otherwise every native job must have succeeded.
+  gate:
+    name: TypeScript gate
+    if: always()
+    needs: [changes, test, package-only, test-musl]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          CHANGES: ${{ needs.changes.result }}
+          TEST: ${{ needs.test.result }}
+          PACKAGE_ONLY: ${{ needs.package-only.result }}
+          TEST_MUSL: ${{ needs.test-musl.result }}
+        run: |
+          set -euo pipefail
+          [ "$CHANGES" = success ] || { echo "change detection: $CHANGES" >&2; exit 1; }
+          if [ "$RELEVANT" != true ]; then
+            echo "no TypeScript-relevant changes"
+            exit 0
+          fi
+          for result in "$TEST" "$PACKAGE_ONLY" "$TEST_MUSL"; do
+            [ "$result" = success ] || { echo "native job result: $result" >&2; exit 1; }
+          done
