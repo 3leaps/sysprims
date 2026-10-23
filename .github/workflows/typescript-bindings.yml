@@ -1,22 +1,60 @@
 name: TypeScript Bindings
+# Runs on every pull request so that "TypeScript gate" can be a required
+# check. The changes job decides whether the native matrix needs to run.
 on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - 'bindings/typescript/sysprims/**'
-      - 'crates/sysprims-core/**'
-      - 'crates/sysprims-proc/**'
-      - 'crates/sysprims-session/**'
-      - 'crates/sysprims-signal/**'
-      - 'crates/sysprims-timeout/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/typescript-bindings.yml'
 env:
   CARGO_TERM_COLOR: always
 jobs:
+  changes:
+    name: Detect TypeScript-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "relevant=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # NUL-delimited raw paths (no quoting) with renames split into a
+          # deletion and an addition, matched in-process (no pipe, so no
+          # SIGPIPE under pipefail on large diffs).
+          patterns=(
+            '^bindings/typescript/sysprims/'
+            '^crates/sysprims-(core|proc|session|signal|timeout)/'
+            '^Cargo\.(lock|toml)$'
+            '^\.github/workflows/typescript-bindings\.yml$'
+          )
+          # A failed diff must fail the job, never read as "nothing changed".
+          paths_file="$RUNNER_TEMP/changed-paths"
+          git diff --name-only --no-renames -z "$BASE_SHA"...HEAD >"$paths_file"
+          relevant=false
+          # Paths are not echoed: a crafted filename could inject a runner
+          # workflow command into the log.
+          while IFS= read -r -d '' path; do
+            for pattern in "${patterns[@]}"; do
+              if [[ "$path" =~ $pattern ]]; then relevant=true; fi
+            done
+          done <"$paths_file"
+          if [ "$relevant" = true ]; then
+            echo "relevant=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >>"$GITHUB_OUTPUT"
+          fi
   test:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     name: Native behavior (${{ matrix.platform }}, ${{ matrix.runtime }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -106,6 +144,8 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: bun scripts/run-tests.js
   package-only:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     name: Build/package only (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -176,6 +216,8 @@ jobs:
         working-directory: bindings/typescript/sysprims
         run: node scripts/verify-platform-packages.js "${{ matrix.package-dir }}"
   test-musl:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     name: Test (linux-musl, alpine)
     runs-on: ubuntu-latest
     container:
@@ -209,3 +251,36 @@ jobs:
           set -euo pipefail
           . "$HOME/.cargo/env"
           npm run test:ci
+  # Required status check. Passes when nothing TypeScript-relevant changed;
+  # otherwise every native job must have succeeded.
+  gate:
+    name: TypeScript gate
+    if: always()
+    needs: [changes, test, package-only, test-musl]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          CHANGES: ${{ needs.changes.result }}
+          TEST: ${{ needs.test.result }}
+          PACKAGE_ONLY: ${{ needs.package-only.result }}
+          TEST_MUSL: ${{ needs.test-musl.result }}
+        run: |
+          set -euo pipefail
+          [ "$CHANGES" = success ] || { echo "change detection: $CHANGES" >&2; exit 1; }
+          # Only an explicit "false" skips the native checks; a missing or
+          # unexpected value fails the gate.
+          case "$RELEVANT" in
+          false)
+            echo "no TypeScript-relevant changes"
+            exit 0
+            ;;
+          true) ;;
+          *)
+            echo "change detection produced no valid result" >&2
+            exit 1
+            ;;
+          esac
+          for result in "$TEST" "$PACKAGE_ONLY" "$TEST_MUSL"; do
+            [ "$result" = success ] || { echo "native job result: $result" >&2; exit 1; }
+          done
