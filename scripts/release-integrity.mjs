@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { annotationBody, releaseTagSet } from "./release-tag-set.mjs";
 import { readReleasePlan } from "./version-pack.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -224,13 +225,10 @@ function uploaded(root, directory, version) {
   }
 }
 
-export function requiredTags(plan, version, root = defaultRoot) {
-  const tags = [`v${version}`];
-  if (plan.surfaces.go.disposition === "publish") tags.push(`bindings/go/sysprims/v${version}`);
-  // The pure-Go recurrence module is tagged at the same commit whenever it is
-  // present in the tree.
-  if (existsSync(join(root, "go/recurrence/go.mod"))) tags.push(`go/recurrence/v${version}`);
-  return tags;
+// The required tag set comes from the shared resolver, which reads git blobs
+// at the commit; the working tree is never consulted.
+export function requiredTags(root = defaultRoot, commit = "HEAD", version = undefined) {
+  return releaseTagSet(root, commit, version === undefined ? undefined : `v${version}`).tags;
 }
 
 function tagExists(root, tag) {
@@ -245,13 +243,10 @@ function intendedTagMessage(tag) {
   return readFileSync(path, "utf8");
 }
 
+// The annotation's message bytes with any OpenPGP signature armor removed, so a
+// signed tag compares equal to the reviewed unsigned message.
 function tagMessage(root, tag) {
-  if (tagExists(root, tag)) {
-    const object = run(root, "git", ["cat-file", "tag", `refs/tags/${tag}`]);
-    const separator = object.indexOf("\n\n");
-    if (separator === -1) fail(`annotated tag object is malformed for ${tag}`);
-    return object.slice(separator + 2);
-  }
+  if (tagExists(root, tag)) return annotationBody(root, tag).toString("utf8");
   return intendedTagMessage(tag);
 }
 
@@ -295,10 +290,9 @@ function verifyReceipt(root, version, commit, tags) {
 }
 
 export function provenance(root, version) {
-  const { plan } = readReleasePlan(root, version);
   const commit = run(root, "git", ["rev-parse", "HEAD^{commit}"]).trim();
   const body = run(root, "git", ["log", "-1", "--format=%B"]);
-  const tags = requiredTags(plan, version, root);
+  const tags = requiredTags(root, commit, version);
   if (footerPattern.test(body)) {
     verifyIntendedTagMessages(root, tags);
     return;
@@ -306,38 +300,57 @@ export function provenance(root, version) {
   verifyReceipt(root, version, commit, tags);
 }
 
+// What must be on the registries for the release at `commit`, read from git
+// blobs there: every crate in config/release/publishable-crates.txt, the Go
+// binding (published or retained), and the recurrence module when present.
+export function remoteRequirements(root, commit, version) {
+  const set = releaseTagSet(root, commit, `v${version}`);
+  const crates = run(root, "git", ["cat-file", "blob", `${set.commit}:config/release/publishable-crates.txt`]).split("\n").filter(Boolean);
+  if (crates.length === 0) fail("publishable-crates.txt is empty");
+  const plan = JSON.parse(run(root, "git", ["cat-file", "blob", `${set.commit}:docs/releases/v${version}.json`]));
+  const go = plan.surfaces.go;
+  const modules = [{
+    path: "github.com/3leaps/sysprims/bindings/go/sysprims",
+    version: go.disposition === "publish" ? version : go.retained_version,
+    absentAt: go.disposition === "publish" ? null : version,
+  }];
+  if (set.recurrence) modules.push({ path: "github.com/3leaps/sysprims/go/recurrence", version, absentAt: null });
+  return { crates, modules };
+}
+
+// lookup.crate(name, version) -> resolved version or null;
+// lookup.goModule(path, version) -> resolved version or null.
+export function checkRemote(requirements, version, lookup) {
+  for (const crate of requirements.crates) {
+    if (lookup.crate(crate, version) !== version) fail(`crates.io did not resolve ${crate}@${version}`);
+  }
+  for (const module of requirements.modules) {
+    if (!module.version) fail(`no version to resolve for ${module.path}`);
+    if (lookup.goModule(module.path, module.version) !== `v${module.version}`) fail(`Go module ${module.path} did not resolve v${module.version}`);
+    if (module.absentAt && lookup.goModule(module.path, module.absentAt) !== null) fail(`skipped Go module ${module.path} unexpectedly resolves at v${module.absentAt}`);
+  }
+}
+
+function liveLookup(root) {
+  return {
+    crate(name, version) {
+      const result = spawnSync("curl", ["-fsSL", `https://crates.io/api/v1/crates/${name}/${version}`], { cwd: root, encoding: "utf8" });
+      if (result.status !== 0) return null;
+      return JSON.parse(result.stdout).version?.num ?? null;
+    },
+    goModule(path, version) {
+      const result = spawnSync("go", ["list", "-m", "-json", `${path}@v${version}`], { cwd: root, encoding: "utf8" });
+      if (result.status !== 0) return null;
+      return JSON.parse(result.stdout).Version ?? null;
+    },
+  };
+}
+
 function remote(root, directory, version) {
   uploaded(root, directory, version);
-  const fixture = process.env.SYSPRIMS_REMOTE_SURFACES_FILE;
   const { plan } = readReleasePlan(root, version);
   const head = run(root, "git", ["rev-parse", "HEAD^{commit}"]).trim();
-  if (fixture) {
-    const proof = JSON.parse(readFileSync(fixture, "utf8"));
-    for (const name of ["rust", "cli", "ffi", "go", "typescript"]) {
-      const surface = plan.surfaces[name];
-      const expected = surface.disposition === "publish" ? version : surface.retained_version;
-      if (proof[name]?.version !== expected) fail(`remote proof version mismatch for ${name}`);
-      if (surface.disposition === "publish" && proof[name]?.sha !== head) fail(`remote proof commit mismatch for ${name}`);
-      if (surface.disposition === "skip" && (proof[name]?.current_version_present !== false || !/^[0-9a-f]{40}$/.test(proof[name]?.retained_sha ?? ""))) fail(`remote skip proof mismatch for ${name}`);
-    }
-    if (proof.native_smoke_version !== version) fail("remote native binary smoke version mismatch");
-    return;
-  }
-
-  for (const crate of ["sysprims-core", "sysprims-signal", "sysprims-session", "sysprims-proc", "sysprims-timeout"]) {
-    const response = JSON.parse(run(root, "curl", ["-fsSL", `https://crates.io/api/v1/crates/${crate}/${version}`]));
-    if (response.version?.num !== version) fail(`crates.io did not resolve ${crate}@${version}`);
-  }
-
-  const go = plan.surfaces.go;
-  const module = "github.com/3leaps/sysprims/bindings/go/sysprims";
-  const goVersion = go.disposition === "publish" ? version : go.retained_version;
-  const goResult = JSON.parse(run(root, "go", ["list", "-m", "-json", `${module}@v${goVersion}`]));
-  if (goResult.Version !== `v${goVersion}`) fail(`Go module did not resolve retained/published v${goVersion}`);
-  if (go.disposition === "skip") {
-    const current = spawnSync("go", ["list", "-m", `${module}@v${version}`], { cwd: root, encoding: "utf8" });
-    if (current.status === 0) fail(`skipped Go module unexpectedly resolves at v${version}`);
-  }
+  checkRemote(remoteRequirements(root, head, version), version, liveLookup(root));
 
   const npmNames = ["@3leaps/sysprims-darwin-arm64", "@3leaps/sysprims-linux-arm64-gnu", "@3leaps/sysprims-linux-arm64-musl", "@3leaps/sysprims-linux-x64-gnu", "@3leaps/sysprims-linux-x64-musl", "@3leaps/sysprims-win32-arm64-msvc", "@3leaps/sysprims-win32-x64-msvc", "@3leaps/sysprims"];
   const typescript = plan.surfaces.typescript;

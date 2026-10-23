@@ -120,6 +120,8 @@ function createFixture() {
   roots.push(root);
   mkdirSync(join(root, "crate", "src"), { recursive: true });
   writeFileSync(join(root, "VERSION"), "0.2.1\n");
+  mkdirSync(join(root, "config/release"), { recursive: true });
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
   writeFileSync(
     join(root, "Cargo.toml"),
     `[workspace]
@@ -243,9 +245,10 @@ function guard(root, mode, extraEnv = {}) {
   return command(root, "bash", [guardScript], { env });
 }
 
+// Tag messages live outside the repository, as in a real release.
 function tagMessageDirectory(root, messages) {
-  const directory = join(root, "tag-messages");
-  mkdirSync(directory);
+  const directory = mkdtempSync(join(tmpdir(), "sysprims-tag-messages-"));
+  roots.push(directory);
   for (const [tag, message] of Object.entries(messages)) {
     writeFileSync(join(directory, `${tag.replaceAll("/", "__")}.txt`), message);
   }
@@ -967,7 +970,28 @@ test("post-tag guard covers the recurrence module tag exactly when the module ex
   initGit(withoutModule);
   const stray = guard(withoutModule, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: tagAll(withoutModule, three) });
   assert.notEqual(stray.status, 0);
-  assert.match(stray.stderr, /go\/recurrence\/v0\.2\.1 exists but go\/recurrence is absent/);
+  assert.match(stray.stderr, /go\/recurrence\/v0\.2\.1 exists but the release at [0-9a-f]+ does not include it/);
+
+  // The set comes from the commit: deleting the module from the checkout makes
+  // the tree dirty, and the guard refuses rather than drop the tag.
+  const tampered = createFixture();
+  mkdirSync(join(tampered, "go/recurrence"), { recursive: true });
+  writeFileSync(join(tampered, "go/recurrence/go.mod"), "module github.com/3leaps/sysprims/go/recurrence\n");
+  initGit(tampered);
+  const messages = tagAll(tampered, base);
+  rmSync(join(tampered, "go"), { recursive: true });
+  const dirty = guard(tampered, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: messages });
+  assert.notEqual(dirty.status, 0);
+  assert.match(dirty.stderr, /post-tag guard requires a clean working tree/);
+
+  // A skip-worktree (sparse) checkout of go.mod still reports the module,
+  // because presence is read from the commit's tree.
+  mustRun(tampered, "git", ["checkout", "--", "go"]);
+  mustRun(tampered, "git", ["update-index", "--skip-worktree", "go/recurrence/go.mod"]);
+  rmSync(join(tampered, "go"), { recursive: true });
+  const sparse = guard(tampered, "post-tag", { SYSPRIMS_TAG_MESSAGE_DIR: messages });
+  assert.notEqual(sparse.status, 0);
+  assert.match(sparse.stderr, /remote exact tag go\/recurrence\/v0\.2\.1 does not exist/);
 });
 
 test("Go skip tag guard requires retained tag and forbids current path tag", () => {
@@ -990,7 +1014,7 @@ test("Go skip tag guard requires retained tag and forbids current path tag", () 
   mustRun(accidental, "git", ["tag", "-a", "bindings/go/sysprims/v0.2.2", "-m", "accidental"]);
   const accidentalResult = guard(accidental, "post-tag");
   assert.notEqual(accidentalResult.status, 0);
-  assert.match(accidentalResult.stderr, /forbids current path tag/);
+  assert.match(accidentalResult.stderr, /bindings\/go\/sysprims\/v0\.2\.2 exists but the release at [0-9a-f]+ does not include it/);
 
   const coherent = skippedRoot();
   mustRun(coherent, "git", ["tag", "-a", "bindings/go/sysprims/v0.2.1", "-m", "retained"]);

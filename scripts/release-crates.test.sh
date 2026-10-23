@@ -85,4 +85,61 @@ touch "$repo/dirty"
 expect_fail_with 'clean checkout required' dry SYSPRIMS_RELEASE_TAG="v$version"
 rm "$repo/dirty"
 expect_fail_with 'never CI' bash -c "cd '$repo' && CI=true SYSPRIMS_RELEASE_TAG=v$version ./scripts/release-crates-dry-run.sh --publish"
+# The publish path reads crates.io directly and treats a crate as published
+# only when the index checksum equals the locally packaged crate; there is no
+# alternate lookup command it would honour.
+if grep -nE 'SYSPRIMS_CARGO_INFO|cargo info' "$fixture_root/scripts/release-crates-dry-run.sh"; then
+	echo 'error: the publish path must not use a substitutable index lookup' >&2
+	exit 1
+fi
+# shellcheck disable=SC2016 # Literal text matched in the script under test.
+grep -q 'die "$crate@$version is on crates.io with different contents' "$fixture_root/scripts/release-crates-dry-run.sh"
+sum="$(printf 'a%.0s' $(seq 64))"
+[[ "$(printf '{"version":{"crate":"sysprims-core","num":"0.3.0","checksum":"%s"}}' "$sum" |
+	python3 "$fixture_root/scripts/release-crates.py" registry-checksum sysprims-core 0.3.0)" == "$sum" ]]
+for body in '{"version":{"crate":"other","num":"0.3.0","checksum":"'"$sum"'"}}' \
+	'{"version":{"crate":"sysprims-core","num":"0.2.9","checksum":"'"$sum"'"}}' \
+	'{"version":{"crate":"sysprims-core","num":"0.3.0","checksum":"short"}}' \
+	'{"version":{"crate":"sysprims-core","num":"0.3.0"}}' 'not json'; do
+	expect_fail bash -c "printf '%s' '$body' | python3 '$fixture_root/scripts/release-crates.py' registry-checksum sysprims-core 0.3.0"
+done
+# A failing plan producer stops the run before any crate is touched.
+grep -q "plan_output=\"\$(python3 \"\$root/scripts/release-crates.py\" paths)\" || die" "$fixture_root/scripts/release-crates-dry-run.sh"
+# Behaviour on the publish path, with the network and cargo stubbed on PATH:
+# an index checksum equal to the local crate skips; any other checksum stops.
+pub="$fixture_dir/pub"
+fixture_repo "$pub" "$version" publish 0
+cp "$fixture_root/scripts/release-crates-dry-run.sh" "$fixture_root/scripts/release-crates.py" "$pub/scripts/"
+printf 'sysprims-core\n' >"$pub/config/release/publishable-crates.txt"
+mkdir -p "$pub/crates/sysprims-core"
+printf '[package]\nname = "sysprims-core"\npublish = true\n' >"$pub/crates/sysprims-core/Cargo.toml"
+printf 'target/\n' >"$pub/.gitignore"
+fixture_commit "$pub"
+git -C "$pub" tag -a -m "Release $version" "v$version"
+git -C "$pub" checkout -q --detach "v$version"
+bin="$fixture_dir/pub-bin"
+mkdir -p "$bin"
+printf 'crate bytes\n' >"$fixture_dir/core.crate"
+local_sum="$(shasum -a 256 "$fixture_dir/core.crate" | awk '{print $1}')"
+cat >"$bin/cargo" <<SH
+#!/usr/bin/env bash
+case "\$1" in
+metadata) printf '{"packages":[{"name":"sysprims-core","publish":null,"dependencies":[],"manifest_path":"$pub/crates/sysprims-core/Cargo.toml"}]}' ;;
+package) mkdir -p "$pub/target/package" && cp "$fixture_dir/core.crate" "$pub/target/package/sysprims-core-$version.crate" ;;
+publish) echo "UPLOAD \$*" >>"$fixture_dir/uploads"; exit 0 ;;
+*) exit 1 ;;
+esac
+SH
+cat >"$bin/curl" <<SH
+#!/usr/bin/env bash
+printf '{"version":{"crate":"sysprims-core","num":"$version","checksum":"%s"}}\n200' "\$(cat "$fixture_dir/index-sum")"
+SH
+chmod +x "$bin/cargo" "$bin/curl"
+publish_run() { (cd "$pub" && env PATH="$bin:$PATH" SYSPRIMS_RELEASE_TAG="v$version" ./scripts/release-crates-dry-run.sh --publish); }
+printf '%s' "$local_sum" >"$fixture_dir/index-sum"
+out="$(publish_run)"
+[[ "$out" == *"already on crates.io with these contents; skipping"* ]]
+printf '%s' "$(printf 'b%.0s' $(seq 64))" >"$fixture_dir/index-sum"
+expect_fail_with 'on crates.io with different contents' publish_run
+[[ ! -e "$fixture_dir/uploads" ]]
 echo '[ok] crate plan and publication guard controls passed'

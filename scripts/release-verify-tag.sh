@@ -11,8 +11,10 @@ tag_version
 tag_selector
 resolve_release_decernor
 export RELEASE_DECERNOR_BIN
+tag_require_clean
 target="$(git rev-parse HEAD)"
-while IFS= read -r tag; do
+tag_load_set "$target"
+for tag in "${RELEASE_TAGS[@]}"; do
 	tag_verify_object "$tag" "$target"
-done < <(tag_set)
+done
 "$tag_root/scripts/verify-pinned-tag.sh"

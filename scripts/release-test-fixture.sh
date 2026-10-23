@@ -79,7 +79,7 @@ PY
 fixture_repo() {
 	local repo="$1" version="$2" go="$3" recurrence="$4"
 	mkdir -p "$repo/scripts" "$repo/config/release" "$repo/docs/releases" "$repo/docs/security" "$repo/keys"
-	cp "$fixture_root"/scripts/{release-tag-common.sh,release-decernor.sh,release-prepare-tag-message.py,release-tag-body.sh,verify-pinned-tag.sh,validate-release-anchors.sh,release-insert-anchors.sh,install-release-anchors.sh,release-validate-pin.sh,release-stage-public.sh,verify-public-keys.sh} "$repo/scripts/"
+	cp "$fixture_root"/scripts/{release-tag-set.mjs,release-tag-common.sh,release-decernor.sh,release-prepare-tag-message.py,release-tag-body.sh,verify-pinned-tag.sh,validate-release-anchors.sh,release-insert-anchors.sh,install-release-anchors.sh,release-validate-pin.sh,release-stage-public.sh,verify-public-keys.sh} "$repo/scripts/"
 	cp "$fixture_root"/config/release/{release-tags.txt,tagger-identity.txt} "$repo/config/release/"
 	printf '%s\n' "$version" >"$repo/VERSION"
 	if [[ "$go" == publish ]]; then

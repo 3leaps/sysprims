@@ -62,7 +62,28 @@ def validate(packages, names, manifests):
             raise ValueError(f"{name} must remain unpublished")
 
 
+def registry_checksum(crate, version, text):
+    """The checksum crates.io records for crate@version, from its API JSON."""
+    data = json.loads(text)
+    record = data.get("version") or {}
+    if record.get("crate") != crate or record.get("num") != version:
+        raise ValueError(f"crates.io response does not describe {crate}@{version}")
+    checksum = record.get("checksum")
+    if (
+        not isinstance(checksum, str)
+        or len(checksum) != 64
+        or any(c not in "0123456789abcdef" for c in checksum)
+    ):
+        raise ValueError(
+            f"crates.io response has no valid checksum for {crate}@{version}"
+        )
+    return checksum
+
+
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "registry-checksum":
+        print(registry_checksum(sys.argv[2], sys.argv[3], sys.stdin.read()))
+        return
     names = read_plan()
     metadata = json.loads(
         subprocess.check_output(
@@ -86,11 +107,13 @@ def main():
                 pathlib.Path(by_name[name]["manifest_path"]).parent.relative_to(ROOT),
             )
     elif sys.argv[1:] != ["check"]:
-        raise ValueError("usage: release-crates.py check|list|paths")
+        raise ValueError(
+            "usage: release-crates.py check|list|paths|registry-checksum CRATE VERSION"
+        )
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, KeyError) as error:
+    except (ValueError, KeyError, json.JSONDecodeError) as error:
         sys.exit(f"error: {error}")

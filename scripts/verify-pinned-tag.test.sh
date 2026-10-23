@@ -107,4 +107,24 @@ for tag in "v$version" "bindings/go/sysprims/v$version"; do sign "$fixture_dir/g
 out="$(verify)"
 [[ "$out" == *"2 signed tag(s) verified"* ]]
 [[ "$other_primary" != "$primary" ]]
+
+# --published decides the set from the tagged commit. A later clean checkout
+# whose plan is skip and whose tree has no recurrence module still requires
+# every tag the tagged commit requires.
+git -C "$repo" tag -d "v$version" "bindings/go/sysprims/v$version" >/dev/null
+git -C "$repo" checkout -q HEAD~2 -- go
+fixture_commit "$repo" module-back
+for tag in "${tags[@]}"; do sign "$fixture_dir/gpg" "$subkey" "$tag"; done
+verify >/dev/null
+retag "go/recurrence/v$version"
+printf '{"surfaces":{"go":{"disposition":"skip","retained_version":"0.0.1"}}}\n' >"$repo/docs/releases/v$version.json"
+git -C "$repo" rm -rq go/recurrence
+fixture_commit "$repo" later-skip-no-module
+expect_fail_with "go/recurrence/v$version is absent" verify --published
+sign "$fixture_dir/gpg" "$subkey" "go/recurrence/v$version" "v$version^{commit}"
+retag "bindings/go/sysprims/v$version"
+expect_fail_with "bindings/go/sysprims/v$version is absent" verify --published
+sign "$fixture_dir/gpg" "$subkey" "bindings/go/sysprims/v$version" "v$version^{commit}"
+out="$(verify --published)"
+[[ "$out" == *"3 signed tag(s) verified"* ]]
 echo '[ok] verify-pinned-tag controls passed'

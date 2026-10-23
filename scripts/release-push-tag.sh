@@ -7,8 +7,9 @@ source "$(dirname "$0")/release-tag-common.sh"
 cd "$tag_root"
 tag_version
 "$tag_root/scripts/release-verify-tag.sh"
-tags=()
-while IFS= read -r line; do tags+=("$line"); done < <(tag_set)
+tag_require_clean
+tag_load_set HEAD
+tags=("${RELEASE_TAGS[@]}")
 refs=()
 for tag in "${tags[@]}"; do
 	[[ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ]] || tag_die "remote tag $tag already exists"

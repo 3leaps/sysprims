@@ -13,7 +13,9 @@ tag_die() {
 }
 
 # The release tag is the explicit input; it must name the canonical vX.Y.Z tag
-# for the version under release.
+# for the version under release. The working-tree VERSION check here is an
+# early, cheap refusal; tag_load_set checks it again against VERSION at the
+# commit being released.
 tag_version() {
 	[[ -n "${SYSPRIMS_RELEASE_TAG:-}" ]] || {
 		tag_die 'SYSPRIMS_RELEASE_TAG is required'
@@ -29,30 +31,34 @@ tag_version() {
 	}
 }
 
-# Every tag name for this release, one per line, in config/release/release-tags.txt
-# order. The Go binding tag follows the release plan's Go disposition; the
-# recurrence module tag is present whenever the module is in the tree.
-tag_set() {
-	local tree="${1:-$tag_root}" prefix disposition
-	# shellcheck disable=SC2016 # The single-quoted script is JavaScript.
-	disposition="$(cd "$tree" && node -e '
-const fs = require("fs");
-const v = fs.readFileSync("VERSION", "utf8").trim();
-process.stdout.write(JSON.parse(fs.readFileSync(`docs/releases/v${v}.json`, "utf8")).surfaces.go.disposition);
-')" || return 1
-	while IFS= read -r prefix; do
-		[[ -n "$prefix" ]] || continue
-		case "$prefix" in
-		v) ;;
-		bindings/go/sysprims/v) [[ "$disposition" == publish ]] || continue ;;
-		go/recurrence/v) [[ -f "$tree/go/recurrence/go.mod" ]] || continue ;;
-		*)
-			tag_die "unknown tag prefix in config/release/release-tags.txt: $prefix"
-			return 1
-			;;
-		esac
-		printf '%s%s\n' "$prefix" "${SYSPRIMS_RELEASE_TAG#v}"
-	done <"$tag_root/config/release/release-tags.txt"
+# Load the required release tag set for a commit into the RELEASE_TAGS array.
+# The set is computed from git blobs at that commit (VERSION, release plan,
+# config/release/release-tags.txt, go/recurrence/go.mod) by
+# scripts/release-tag-set.mjs, the same resolver every other consumer uses.
+# The producer's output is captured whole and its exit status checked before
+# any caller iterates; an error or an empty set fails.
+tag_load_set() {
+	local commit="${1:-HEAD}" output line
+	RELEASE_TAGS=()
+	output="$(cd "$tag_root" && node "$tag_root/scripts/release-tag-set.mjs" tags --commit "$commit" --tag "$SYSPRIMS_RELEASE_TAG")" || {
+		tag_die "cannot resolve the release tag set at $commit"
+		return 1
+	}
+	while IFS= read -r line; do
+		[[ -n "$line" ]] && RELEASE_TAGS+=("$line")
+	done <<<"$output"
+	[[ "${#RELEASE_TAGS[@]}" -ge 1 && "${RELEASE_TAGS[0]}" == "$SYSPRIMS_RELEASE_TAG" ]] || {
+		tag_die 'the release tag set is empty or does not start with the release tag'
+		return 1
+	}
+}
+
+# Clean tree: tracked and untracked changes both refuse.
+tag_require_clean() {
+	[[ -z "$(git -C "$tag_root" status --porcelain --untracked-files=normal)" ]] || {
+		tag_die 'clean checkout required'
+		return 1
+	}
 }
 
 tag_identity() {
@@ -198,7 +204,7 @@ tag_verify_object() {
 	}
 	expected="$(tag_message_file "$tag")" || return 1
 	actual="$(mktemp)"
-	if ! "$tag_root/scripts/release-tag-body.sh" "$object" >"$actual"; then
+	if ! (cd "$tag_root" && node "$tag_root/scripts/release-tag-set.mjs" body "$tag") >"$actual"; then
 		rm -f "$actual"
 		return 1
 	fi

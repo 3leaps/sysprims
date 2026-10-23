@@ -10,11 +10,13 @@ cd "$tag_root"
 tag_version
 resolve_release_decernor
 export RELEASE_DECERNOR_BIN
-while IFS= read -r tag; do
+canonical="$(git rev-parse --verify --quiet "refs/tags/$SYSPRIMS_RELEASE_TAG")" || tag_die "local tag $SYSPRIMS_RELEASE_TAG is absent"
+tag_load_set "$(git rev-parse "${canonical}^{commit}")"
+for tag in "${RELEASE_TAGS[@]}"; do
 	local_object="$(git rev-parse --verify --quiet "refs/tags/$tag")" || tag_die "local tag $tag is absent"
 	remote_object="$(git ls-remote --tags origin "refs/tags/$tag" | awk -v ref="refs/tags/$tag" '$2==ref {print $1}')"
 	[[ -n "$remote_object" ]] || tag_die "remote tag $tag is absent"
 	[[ "$remote_object" == "$local_object" ]] || tag_die "remote tag $tag differs from the local verified object"
-done < <(tag_set)
+done
 "$tag_root/scripts/verify-pinned-tag.sh" --published
 echo '[ok] remote tags match the verified local tags'

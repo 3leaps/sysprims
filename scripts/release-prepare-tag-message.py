@@ -7,9 +7,9 @@ and placeholders; the maintainer completes it, and `--validate-message` (used by
 the tag scripts) refuses a file that still has a placeholder or no footer.
 """
 
-import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,23 +55,39 @@ def validate_message(data: bytes, subject: str | None = None) -> str:
     return message
 
 
-def tag_set(root: Path, version: str) -> list[str]:
-    plan = json.loads((root / f"docs/releases/v{version}.json").read_text())
-    tags = []
-    for prefix in (root / "config/release/release-tags.txt").read_text().split():
-        if (
-            prefix == "bindings/go/sysprims/v"
-            and plan["surfaces"]["go"]["disposition"] != "publish"
-        ):
-            continue
-        if (
-            prefix == "go/recurrence/v"
-            and not (root / "go/recurrence/go.mod").is_file()
-        ):
-            continue
-        if prefix not in ("v", "bindings/go/sysprims/v", "go/recurrence/v"):
-            fail(f"unknown tag prefix {prefix!r}")
-        tags.append(f"{prefix}{version}")
+def tag_set(root: Path, release_tag: str) -> list[str]:
+    """The release tag set at HEAD, from the shared resolver (git blobs only)."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if status.stdout.strip():
+        fail("clean checkout required")
+    result = subprocess.run(
+        [
+            "node",
+            str(root / "scripts/release-tag-set.mjs"),
+            "tags",
+            "--commit",
+            "HEAD",
+            "--tag",
+            release_tag,
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        fail(
+            result.stderr.strip().removeprefix("error: ")
+            or "cannot resolve the release tag set"
+        )
+    tags = result.stdout.split("\n")[:-1]
+    if not tags or tags[0] != release_tag or any(not t for t in tags):
+        fail("the release tag set is empty or malformed")
     return tags
 
 
@@ -108,7 +124,7 @@ def prepare() -> None:
     if release_tag != f"v{version}":
         fail("SYSPRIMS_RELEASE_TAG must match VERSION")
     directory = message_dir(root, release_tag)
-    for tag in tag_set(root, version):
+    for tag in tag_set(root, release_tag):
         file = directory / f"{tag.replace('/', '__')}.txt"
         skeleton = (
             f"{subject_for(tag, version)}\n\n"
@@ -156,7 +172,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
         detail = (
             str(error)
             if isinstance(error, ValueError)

@@ -44,47 +44,57 @@ require_remote_annotated_tag() {
 	[ "$(git rev-parse "$ref")" = "$object" ] || fail "local and remote tag objects differ for ${tag}"
 }
 
-GO_DISPOSITION="$(node -e 'const p=require("./docs/releases/v"+require("fs").readFileSync("VERSION","utf8").trim()+".json"); process.stdout.write(p.surfaces.go.disposition)')"
-GO_LOCK_PHASE="$(node -e 'const p=require("./docs/releases/v"+require("fs").readFileSync("VERSION","utf8").trim()+".json"); process.stdout.write(p.surfaces.go.lock_phase)')"
-GO_RETAINED="$(node -e 'const p=require("./docs/releases/v"+require("fs").readFileSync("VERSION","utf8").trim()+".json"); process.stdout.write(p.surfaces.go.retained_version||"")')"
-GO_TAG="bindings/go/sysprims/${EXPECTED_TAG}"
-# The pure-Go recurrence module releases with every tag once it exists in the
-# tagged tree; its tag shares the version and commit of the other two.
-RECURRENCE_TAG="go/recurrence/${EXPECTED_TAG}"
-RECURRENCE_PRESENT=0
-[ -f go/recurrence/go.mod ] && RECURRENCE_PRESENT=1
+# Both modes read the release decisions from git blobs at HEAD, so the tree
+# must be clean: an uncommitted plan, prefix list or go.mod cannot change them.
+if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+	git status --short >&2
+	fail "${MODE} guard requires a clean working tree"
+fi
+HEAD_COMMIT="$(git rev-parse 'HEAD^{commit}')"
+PLAN_BLOB="$(git cat-file blob "${HEAD_COMMIT}:docs/releases/${EXPECTED_TAG}.json")" || fail "release plan is missing at ${HEAD_COMMIT}"
+GO_LOCK_PHASE="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).surfaces.go.lock_phase))' "$PLAN_BLOB")"
+GO_RETAINED="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).surfaces.go.retained_version || ""))' "$PLAN_BLOB")"
+# The one shared resolver decides the required tag set from the commit.
+SET_OUTPUT="$(node "$SCRIPT_DIR/release-tag-set.mjs" tags --commit "$HEAD_COMMIT" --tag "$INTENDED_TAG")" ||
+	fail "cannot resolve the release tag set at ${HEAD_COMMIT}"
+REQUIRED_TAGS=()
+while IFS= read -r line; do
+	[ -n "$line" ] && REQUIRED_TAGS+=("$line")
+done <<<"$SET_OUTPUT"
+[ "${#REQUIRED_TAGS[@]}" -ge 1 ] && [ "${REQUIRED_TAGS[0]}" = "$EXPECTED_TAG" ] ||
+	fail "the release tag set at ${HEAD_COMMIT} is empty or does not start with ${EXPECTED_TAG}"
+in_set() {
+	local wanted="$1" tag
+	for tag in "${REQUIRED_TAGS[@]}"; do [ "$tag" = "$wanted" ] && return 0; done
+	return 1
+}
 
 case "$MODE" in
 pre-tag)
 	[ "$GO_LOCK_PHASE" = "resolved" ] || fail "Go lock_phase must be resolved before pre-tag guard (found ${GO_LOCK_PHASE})"
-	if [ -n "$(git status --porcelain)" ]; then
-		git status --short >&2
-		fail "pre-tag guard requires a clean working tree"
-	fi
 	node "$SCRIPT_DIR/release-integrity.mjs" provenance --root "$PROJECT_ROOT"
-	echo "[ok] pre-tag guard: clean coherent plan intends ${EXPECTED_TAG}"
+	echo "[ok] pre-tag guard: clean coherent plan intends ${REQUIRED_TAGS[*]}"
 	;;
 post-tag)
 	[ "$GO_LOCK_PHASE" = "resolved" ] || fail "Go lock_phase must be resolved before tag guard (found ${GO_LOCK_PHASE})"
-	HEAD_COMMIT="$(git rev-parse 'HEAD^{commit}')"
-	require_remote_annotated_tag "$EXPECTED_TAG"
-	if [ "$GO_DISPOSITION" = "publish" ]; then
-		require_remote_annotated_tag "$GO_TAG"
-	elif [ "$GO_DISPOSITION" = "skip" ]; then
-		[ -n "$GO_RETAINED" ] || fail "Go skip plan has no retained_version"
-		if git ls-remote --exit-code --tags "$REMOTE" "refs/tags/${GO_TAG}" >/dev/null 2>&1; then
-			fail "Go skip plan forbids current path tag ${GO_TAG}"
+	for tag in "${REQUIRED_TAGS[@]}"; do
+		require_remote_annotated_tag "$tag"
+	done
+	# A listed prefix outside the set must not have a tag at this version.
+	PREFIXES="$(git cat-file blob "${HEAD_COMMIT}:config/release/release-tags.txt")" || fail "release-tags.txt is missing at ${HEAD_COMMIT}"
+	while IFS= read -r prefix; do
+		[ -n "$prefix" ] || continue
+		tag="${prefix}${VERSION}"
+		in_set "$tag" && continue
+		if git ls-remote --exit-code --tags "$REMOTE" "refs/tags/${tag}" >/dev/null 2>&1; then
+			fail "${tag} exists but the release at ${HEAD_COMMIT} does not include it"
 		fi
+	done <<<"$PREFIXES"
+	if ! in_set "bindings/go/sysprims/${EXPECTED_TAG}"; then
+		[ -n "$GO_RETAINED" ] || fail "Go skip plan has no retained_version"
 		retained="bindings/go/sysprims/v${GO_RETAINED}"
 		lines="$(git ls-remote --tags "$REMOTE" "refs/tags/${retained}" "refs/tags/${retained}^{}")"
 		printf '%s\n' "$lines" | grep -Fq "refs/tags/${retained}^{}" || fail "retained annotated Go tag ${retained} is missing"
-	else
-		fail "unknown Go disposition ${GO_DISPOSITION}"
-	fi
-	if [ "$RECURRENCE_PRESENT" = 1 ]; then
-		require_remote_annotated_tag "$RECURRENCE_TAG"
-	elif git ls-remote --exit-code --tags "$REMOTE" "refs/tags/${RECURRENCE_TAG}" >/dev/null 2>&1; then
-		fail "${RECURRENCE_TAG} exists but go/recurrence is absent from the tagged tree"
 	fi
 	node "$SCRIPT_DIR/release-integrity.mjs" provenance --root "$PROJECT_ROOT"
 	echo "[ok] post-tag guard: exact remote annotated tags, provenance, and version plan agree at ${HEAD_COMMIT}"

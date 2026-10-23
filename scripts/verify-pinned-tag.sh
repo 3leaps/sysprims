@@ -56,8 +56,10 @@ GNUPGHOME="$keyring/home" gpg --batch --quiet --import "$keyring/keys.asc" || di
 [[ "$(GNUPGHOME="$keyring/home" gpg --batch --with-colons --list-keys | awk -F: '$1=="pub" {n++} END {print n+0}')" == 1 ]] ||
 	die 'the pin must hold exactly one primary key'
 
+# The required set is decided by the tagged commit, never the checkout.
+tag_load_set "$target"
 count=0
-while IFS= read -r tag; do
+for tag in "${RELEASE_TAGS[@]}"; do
 	object="$(git rev-parse --verify --quiet "refs/tags/$tag")" || die "$tag is absent"
 	[[ "$(git cat-file -t "$object")" == tag ]] || die "$tag must be an annotated tag"
 	[[ "$(git cat-file tag "$object" | sed -n 's/^tag //p' | head -1)" == "$tag" ]] || die "$tag object names a different tag"
@@ -75,6 +77,6 @@ while IFS= read -r tag; do
 		END {if (bad || good != 1 || valid != 1 || signer_primary != primary || subkey != permitted) exit 1}
 	' "$keyring/status" || die "$tag is not signed by the committed signing subkey, or the key is expired or revoked"
 	count=$((count + 1))
-done < <(tag_set)
-[[ "$count" -ge 1 ]] || die 'empty release tag set'
+done
+[[ "$count" == "${#RELEASE_TAGS[@]}" ]] || die 'not every release tag was verified'
 echo "[ok] $count signed tag(s) verified at $target against the pin committed in that commit"

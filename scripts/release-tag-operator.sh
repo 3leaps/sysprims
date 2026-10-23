@@ -67,9 +67,10 @@ tag_selector
 	exit 1
 }
 tag_checkout
-while IFS= read -r tag; do
+tag_load_set HEAD
+for tag in "${RELEASE_TAGS[@]}"; do
 	tag_message_file "$tag" >/dev/null
-done < <(tag_set)
+done
 
 case "$mode" in
 local-tag) "$root/scripts/release-tag.sh" ;;

@@ -30,33 +30,71 @@ object="$(git rev-parse --verify --quiet "refs/tags/$SYSPRIMS_RELEASE_TAG")" || 
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || die 'clean checkout required'
 python3 "$root/scripts/release-crates.py" check
 
-indexed() {
-	"${SYSPRIMS_CARGO_INFO:-cargo}" info --registry crates-io "$1@$version" >/dev/null 2>&1
+# Publication state on crates.io, always the real registry. Prints "absent",
+# or the published checksum.
+registry_checksum() {
+	local crate="$1" body status
+	body="$(curl --proto '=https' --tlsv1.2 -sS -w '\n%{http_code}' \
+		"https://crates.io/api/v1/crates/${crate}/${version}")" || die "cannot query crates.io for $crate"
+	status="${body##*$'\n'}"
+	body="${body%$'\n'*}"
+	case "$status" in
+	404) echo absent ;;
+	200) python3 "$root/scripts/release-crates.py" registry-checksum "$crate" "$version" <<<"$body" ;;
+	*) die "crates.io returned HTTP $status for $crate@$version" ;;
+	esac
 }
 
-patches=()
+# sha256 of the crate this checkout packages, as crates.io records it.
+local_checksum() {
+	local crate="$1" file
+	cargo package --locked --no-verify -p "$crate" >/dev/null 2>&1 || die "cannot package $crate"
+	file="$root/target/package/${crate}-${version}.crate"
+	[[ -f "$file" ]] || die "packaged crate $file not found"
+	python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$file"
+}
+
+# Collect the ordered plan whole and check the producer before iterating.
+plan_output="$(python3 "$root/scripts/release-crates.py" paths)" || die 'cannot read the crate publication plan'
+crates=()
+paths=()
 while read -r crate path; do
+	[[ -n "$crate" && -n "$path" ]] || die 'malformed crate publication plan'
+	crates+=("$crate")
+	paths+=("$path")
+done <<<"$plan_output"
+[[ "${#crates[@]}" -ge 1 ]] || die 'empty crate publication plan'
+
+patches=()
+for i in "${!crates[@]}"; do
+	crate="${crates[$i]}"
+	path="${paths[$i]}"
 	if [[ "$publish" == 1 ]]; then
-		if indexed "$crate"; then
-			echo "[--] $crate@$version is already on crates.io; skipping"
-		else
-			printf 'Publish %s@%s to crates.io? Type the crate name to continue: ' "$crate" "$version"
-			read -r answer </dev/tty
-			[[ "$answer" == "$crate" ]] || die "publication of $crate not confirmed"
-			cargo publish --locked -p "$crate"
-			echo "[..] waiting for $crate@$version on the crates.io index"
-			for _ in $(seq 1 60); do
-				indexed "$crate" && break
-				sleep 10
-			done
-			indexed "$crate" || die "$crate@$version did not appear on the index; stop and investigate"
+		published="$(registry_checksum "$crate")"
+		if [[ "$published" != absent ]]; then
+			[[ "$published" == "$(local_checksum "$crate")" ]] ||
+				die "$crate@$version is on crates.io with different contents; stop and investigate"
+			echo "[--] $crate@$version is already on crates.io with these contents; skipping"
+			continue
 		fi
+		printf 'Publish %s@%s to crates.io? Type the crate name to continue: ' "$crate" "$version"
+		read -r answer </dev/tty
+		[[ "$answer" == "$crate" ]] || die "publication of $crate not confirmed"
+		cargo publish --locked -p "$crate"
+		echo "[..] waiting for $crate@$version on the crates.io index"
+		for _ in $(seq 1 60); do
+			published="$(registry_checksum "$crate")"
+			[[ "$published" != absent ]] && break
+			sleep 10
+		done
+		[[ "$published" == "$(local_checksum "$crate")" ]] ||
+			die "$crate@$version is not on crates.io with the uploaded contents; stop and investigate"
 	else
 		printf 'Dry-run crates.io: %s@%s\n' "$crate" "$version"
 		cargo publish --dry-run --locked -p "$crate" ${patches[@]+"${patches[@]}"}
 		patches+=(--config "patch.crates-io.${crate}.path=\"${path}\"")
 	fi
-done < <(python3 "$root/scripts/release-crates.py" paths)
+done
 if [[ "$publish" == 1 ]]; then
 	echo '[ok] every listed crate is on crates.io at this version'
 else
