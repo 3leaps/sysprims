@@ -12,7 +12,8 @@ origin="$fixture_dir/origin.git"
 messages="$fixture_dir/messages/v$version"
 read -r _ subkey < <(fixture_keys "$fixture_dir/gpg")
 fixture_repo "$repo" "$version" publish 1
-cp "$fixture_root/scripts/"{release-tag.sh,release-verify-tag.sh} "$repo/scripts/"
+cp "$fixture_root/scripts/"{release-tag.sh,release-verify-tag.sh,release-tag-operator.sh,release-push-tag.sh,release-verify-remote-tag.sh} "$repo/scripts/"
+cp "$fixture_root/Makefile" "$repo/Makefile"
 gpg --homedir "$fixture_dir/gpg" --batch --armor --export-options export-minimal --export "$subkey!" \
 	>"$repo/docs/security/release-signing-keys.asc"
 fixture_minisign_pub "$repo/docs/security/sysprims-minisign.pub" 1
@@ -81,6 +82,49 @@ chmod +x "$fixture_dir/bin/git"
 expect_fail tag_run PATH="$fixture_dir/bin:$PATH"
 no_tags
 
+# Through the real maintainer entry points (make release-tag / release-push-tag
+# and the operator script): a bad checker stops before any fetch, signing or
+# push. A git spy records those operations.
+mkdir -p "$fixture_dir/opspy"
+cat >"$fixture_dir/opspy/git" <<SH
+#!/usr/bin/env bash
+case "\$1" in fetch | push) echo "\$*" >>"$fixture_dir/ops.log" ;; tag) [[ " \$* " == *" -s "* ]] && echo "\$*" >>"$fixture_dir/ops.log" ;; esac
+exec "$real_git" "\$@"
+SH
+chmod +x "$fixture_dir/opspy/git"
+make_run() {
+	local unset=()
+	while [[ "${1:-}" == -u ]]; do
+		unset+=("$1" "$2")
+		shift 2
+	done
+	local target="$1"
+	shift
+	(cd "$repo" && env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG="v$version" SYSPRIMS_TAG_MESSAGE_DIR="$messages" \
+		SYSPRIMS_TAGGER_NAME='3 Leaps Infosec Team' SYSPRIMS_TAGGER_EMAIL=infosec@3leaps.net \
+		SYSPRIMS_PGP_KEY_ID="$subkey!" SYSPRIMS_GPG_HOMEDIR="$fixture_dir/gpg" SYSPRIMS_DECERNOR_BIN="$decernor" \
+		PATH="$fixture_dir/opspy:$PATH" "$@" env ${unset[@]+"${unset[@]}"} make -s "$target")
+}
+for target in release-tag release-push-tag; do
+	for bad in unset relative impostor; do
+		rm -f "$fixture_dir/ops.log"
+		case "$bad" in
+		unset) expect_fail_with 'SYSPRIMS_DECERNOR_BIN is required' make_run -u SYSPRIMS_DECERNOR_BIN "$target" ;;
+		relative) expect_fail_with 'absolute executable' make_run "$target" SYSPRIMS_DECERNOR_BIN=decernor ;;
+		impostor)
+			printf '#!/bin/sh\necho "notdecernor 9.9.9"\n' >"$fixture_dir/impostor"
+			chmod +x "$fixture_dir/impostor"
+			expect_fail_with 'does not identify as decernor' make_run "$target" SYSPRIMS_DECERNOR_BIN="$fixture_dir/impostor"
+			;;
+		esac
+		[[ ! -s "$fixture_dir/ops.log" ]] || {
+			echo "error: make $target reached $(paste -sd, "$fixture_dir/ops.log") with a bad checker ($bad)" >&2
+			exit 1
+		}
+		no_tags
+	done
+done
+
 # With valid inputs every tag in the set is signed at HEAD and verified.
 out="$(tag_run)"
 [[ "$out" == *"3 signed tag(s) created locally"* ]]
@@ -91,4 +135,13 @@ for tag in "${tags[@]}"; do
 done
 [[ -z "$(git -C "$origin" tag -l)" ]]
 expect_fail_with 'local tag v1.2.3 already exists' tag_run
+
+# Push through the real entry point, then verify the remote tags again after the
+# checkout has moved to a later VERSION: verification follows the tagged commit.
+make_run release-push-tag >/dev/null
+[[ "$(git -C "$origin" tag -l | sort | paste -sd, -)" == "bindings/go/sysprims/v$version,go/recurrence/v$version,v$version" ]]
+printf '9.9.9\n' >"$repo/VERSION"
+printf '{"surfaces":{"go":{"disposition":"publish"}}}\n' >"$repo/docs/releases/v9.9.9.json"
+fixture_commit "$repo" next-version
+(cd "$repo" && SYSPRIMS_RELEASE_TAG="v$version" SYSPRIMS_DECERNOR_BIN="$decernor" ./scripts/release-verify-remote-tag.sh) >/dev/null
 echo '[ok] release-tag controls passed'

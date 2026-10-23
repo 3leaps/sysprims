@@ -12,10 +12,10 @@ tag_die() {
 	return 1
 }
 
-# The release tag is the explicit input; it must name the canonical vX.Y.Z tag
-# for the version under release. The working-tree VERSION check here is an
-# early, cheap refusal; tag_load_set checks it again against VERSION at the
-# commit being released.
+# The release tag is the explicit input. tag_version checks its syntax only;
+# whether it matches VERSION is decided by tag_load_set against VERSION at the
+# commit being released or verified, so verifying an older tag still works
+# after the checkout's VERSION moves on.
 tag_version() {
 	[[ -n "${SYSPRIMS_RELEASE_TAG:-}" ]] || {
 		tag_die 'SYSPRIMS_RELEASE_TAG is required'
@@ -23,10 +23,6 @@ tag_version() {
 	}
 	[[ "$SYSPRIMS_RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
 		tag_die 'SYSPRIMS_RELEASE_TAG must be a canonical vX.Y.Z tag'
-		return 1
-	}
-	[[ "$SYSPRIMS_RELEASE_TAG" == "v$(tr -d '\r\n' <"$tag_root/VERSION")" ]] || {
-		tag_die 'SYSPRIMS_RELEASE_TAG does not match VERSION'
 		return 1
 	}
 }

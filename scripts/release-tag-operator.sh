@@ -59,6 +59,12 @@ export SYSPRIMS_TAGGER_NAME SYSPRIMS_TAGGER_EMAIL SYSPRIMS_PGP_KEY_ID SYSPRIMS_G
 
 # shellcheck source=scripts/release-tag-common.sh
 source "$root/scripts/release-tag-common.sh"
+# shellcheck source=scripts/release-decernor.sh
+source "$root/scripts/release-decernor.sh"
+# Every local input is checked before the first network or git side effect
+# (tag_checkout fetches): the checker, tag syntax, tagger, subkey selector,
+# branch, clean tree, the tag set at HEAD and every message.
+resolve_release_decernor
 tag_version
 tag_identity
 tag_selector
@@ -66,11 +72,12 @@ tag_selector
 	echo 'error: release tags are created from main' >&2
 	exit 1
 }
-tag_checkout
+tag_require_clean
 tag_load_set HEAD
 for tag in "${RELEASE_TAGS[@]}"; do
 	tag_message_file "$tag" >/dev/null
 done
+tag_checkout
 
 case "$mode" in
 local-tag) "$root/scripts/release-tag.sh" ;;

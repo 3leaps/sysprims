@@ -196,7 +196,7 @@ test("the required tag set is read from git blobs at the commit, not the working
   assert.throws(() => requiredTags(root, "HEAD", "9.9.9"), /does not match VERSION/);
   writeFileSync(join(root, "config/release/release-tags.txt"), "v\nother/v\n");
   commitAll("bad prefix");
-  assert.throws(() => requiredTags(root, "HEAD", "1.2.3"), /unknown tag prefix/);
+  assert.throws(() => requiredTags(root, "HEAD", "1.2.3"), /release-tags.txt must be exactly/);
 });
 
 test("commit footer rejects a non-policy coauthor email", () => {

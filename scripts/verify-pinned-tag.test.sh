@@ -127,4 +127,16 @@ expect_fail_with "bindings/go/sysprims/v$version is absent" verify --published
 sign "$fixture_dir/gpg" "$subkey" "bindings/go/sysprims/v$version" "v$version^{commit}"
 out="$(verify --published)"
 [[ "$out" == *"3 signed tag(s) verified"* ]]
+# Historical verification: after the checkout moves to a later VERSION, the
+# published tags still verify against VERSION, plan and pins at their commit.
+printf '9.9.9\n' >"$repo/VERSION"
+printf '{"surfaces":{"go":{"disposition":"publish"}}}\n' >"$repo/docs/releases/v9.9.9.json"
+fixture_commit "$repo" next-version
+out="$(verify --published)"
+[[ "$out" == *"3 signed tag(s) verified"* ]]
+# The release tag must still match VERSION at its own commit: a v9.9.9 tag
+# on the v1.2.3 commit is refused there.
+printf 'Release 9.9.9\n' >"$messages/v9.9.9.txt"
+sign "$fixture_dir/gpg" "$subkey" v9.9.9 "v$version^{commit}"
+expect_fail_with 'cannot resolve the release tag set' bash -c "cd '$repo' && SYSPRIMS_RELEASE_TAG=v9.9.9 RELEASE_DECERNOR_BIN='$decernor' ./scripts/verify-pinned-tag.sh --published"
 echo '[ok] verify-pinned-tag controls passed'

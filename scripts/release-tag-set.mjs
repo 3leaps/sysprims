@@ -14,7 +14,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const allowedPrefixes = ["v", "bindings/go/sysprims/v", "go/recurrence/v"];
+const canonicalPrefixes = ["v", "bindings/go/sysprims/v", "go/recurrence/v"];
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function fail(message) {
@@ -47,16 +47,16 @@ function blob(root, commit, path) {
   return git(root, ["cat-file", "blob", `${commit}:${path}`]);
 }
 
+// The committed prefix list must be exactly the canonical list, in order. A
+// shorter list would silently drop a companion tag from every verifier, so
+// membership comes only from the plan and the tree, never from editing this
+// file. Changing the list is a change to this resolver and its tests.
 export function parsePrefixes(text) {
-  if (!text.endsWith("\n")) fail("config/release/release-tags.txt must end with a newline");
-  const lines = text.slice(0, -1).split("\n");
-  if (lines.length === 0 || lines.some((line) => line === "")) fail("config/release/release-tags.txt has an empty line");
-  for (const line of lines) {
-    if (!allowedPrefixes.includes(line)) fail(`unknown tag prefix in config/release/release-tags.txt: ${JSON.stringify(line)}`);
+  const expected = `${canonicalPrefixes.join("\n")}\n`;
+  if (text !== expected) {
+    fail(`config/release/release-tags.txt must be exactly ${JSON.stringify(expected)}`);
   }
-  if (new Set(lines).size !== lines.length) fail("config/release/release-tags.txt repeats a prefix");
-  if (lines[0] !== "v") fail("config/release/release-tags.txt must list the canonical prefix v first");
-  return lines;
+  return [...canonicalPrefixes];
 }
 
 // The required tag set for the release at `commit`. When `releaseTag` is
