@@ -2,7 +2,7 @@
 # Install a reviewed public anchor pair. Existing anchors are never
 # overwritten; a rotation is a reviewed edit, not a re-run of this script.
 # On failure only files this invocation created are removed, and only while
-# they are still the inode it created.
+# they still hold the bytes it wrote.
 # Usage: install-release-anchors.sh <staging-dir> <dest-dir> [verify command...]
 set -euo pipefail
 staging="${1:?staging directory required}"
@@ -25,7 +25,8 @@ done
 }
 mkdir -p "$dest"
 helper="$(cd "$(dirname "$0")" && pwd -P)/write-exclusive.py"
-# Owned files as "<dev:ino> <path>", recorded from the helper's report.
+# Owned files as "<token> <path>", the helper's ownership token (device,
+# inode, size and SHA-256 of the bytes it wrote).
 owned=()
 rollback() {
 	trap - EXIT INT TERM HUP
@@ -45,7 +46,7 @@ for name in "${names[@]}"; do
 	identity="$(python3 "$helper" "$staging/$name" "$dest/$name")" || status=$?
 	case "$status" in
 	0)
-		[[ "$identity" =~ ^[0-9]+:[0-9]+$ ]] || {
+		[[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9a-f]{64}$ ]] || {
 			echo "error: no identity reported for $dest/$name; it was left in place" >&2
 			exit 1
 		}

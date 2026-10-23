@@ -18,6 +18,11 @@ if [[ "${1:-}" == --publish ]]; then
 	shift
 fi
 [[ $# -eq 0 ]] || die 'usage: release-crates-dry-run.sh [--publish]'
+# No inherited git variable (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE,
+# GIT_CONFIG_*, ...) may steer any git or cargo command below.
+for name in $(compgen -e); do
+	[[ "$name" != GIT_* ]] || unset "$name"
+done
 [[ "$publish" == 0 || -z "${CI:-}" ]] || die 'crates.io publication is a local maintainer step, never CI'
 
 : "${SYSPRIMS_RELEASE_TAG:?SYSPRIMS_RELEASE_TAG=vX.Y.Z is required}"
@@ -50,7 +55,15 @@ python3 "$root/scripts/release-export-tree.py" "$root" "$commit" "$tree" ||
 	die 'cannot export the tagged commit with its exact bytes'
 unset CARGO_BUILD_TARGET_DIR
 export CARGO_TARGET_DIR="$scratch/target"
+# cargo finds the tagged commit only through the export's own gitfile, which
+# must name the git directory the exporter created in this run's scratch.
 cd "$tree"
+[[ -f .git && ! -L .git ]] || die 'the export has no gitfile of its own'
+gitdir="$(sed -n '1s/^gitdir: //p' .git)"
+[[ "$(wc -l <.git)" -eq 1 && "$gitdir" == "$scratch"/tree.gitdir.* && -d "$gitdir" && ! -L "$gitdir" ]] ||
+	die 'the export gitfile does not name this run'"'"'s git directory'
+[[ "$(git rev-parse --absolute-git-dir)" == "$gitdir" && "$(git rev-parse HEAD)" == "$commit" ]] ||
+	die 'the export does not resolve to the tagged commit in its own git directory'
 python3 "$tree/scripts/release-crates.py" check
 
 # Publication state on crates.io, always the real registry. Prints "absent",

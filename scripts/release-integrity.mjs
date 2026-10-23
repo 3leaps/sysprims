@@ -384,6 +384,7 @@ function liveLookup(root) {
 // Registry state for the release at `commit` (the tag's commit), with the plan
 // read from that commit's blob. `lookup` and `npm` are injectable for tests.
 export function remoteRegistries(root, commit, version, lookup = liveLookup(root)) {
+  if (!/^[0-9a-f]{40}$/.test(commit)) fail(`release commit is not a full sha: ${commit}`);
   const { plan } = readReleasePlanAt(root, commit, version);
   checkRemote(remoteRequirements(root, commit, version), version, lookup);
 
@@ -394,7 +395,9 @@ export function remoteRegistries(root, commit, version, lookup = liveLookup(root
     const encoded = encodeURIComponent(name).replace("%2F", "%2f");
     const response = lookup.npm(`https://registry.npmjs.org/${encoded}/${npmVersion}`);
     if (response.version !== npmVersion || !response.dist?.integrity || !response.dist?.tarball) fail(`npm did not resolve complete metadata for ${name}@${npmVersion}`);
-    if (typescript.disposition === "publish" && response.gitHead && response.gitHead !== commit) fail(`npm gitHead mismatch for ${name}@${npmVersion}`);
+    // Exact: a published package must name the tag's commit. Missing, empty,
+    // non-string or differently written values all fail.
+    if (typescript.disposition === "publish" && (typeof response.gitHead !== "string" || !/^[0-9a-f]{40}$/.test(response.gitHead) || response.gitHead !== commit)) fail(`npm gitHead mismatch for ${name}@${npmVersion}`);
   }
   if (typescript.disposition === "skip") {
     const encoded = encodeURIComponent("@3leaps/sysprims").replace("%2F", "%2f");

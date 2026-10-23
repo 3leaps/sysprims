@@ -225,11 +225,65 @@ expect_fail_with 'replacer ran' env REPLACE_DIR="$replaced" "$fixture_root/scrip
 	echo 'error: the rollback removed a file that replaced the one it created, or kept its own' >&2
 	exit 1
 }
-# The helper's own identity removal.
-python3 "$helper" "$stage/expected-fingerprints.txt" "$fixture_dir/ex/ident" >"$fixture_dir/ex/ident.id"
-grep -Eqx '[0-9]+:[0-9]+' "$fixture_dir/ex/ident.id"
-python3 "$helper" --remove "$fixture_dir/ex/ident" 0:0 2>/dev/null
-[[ -e "$fixture_dir/ex/ident" ]]
-python3 "$helper" --remove "$fixture_dir/ex/ident" "$(cat "$fixture_dir/ex/ident.id")"
-[[ ! -e "$fixture_dir/ex/ident" ]]
+# The helper's ownership token and its rollback. Each case asserts that a
+# file this run did not write survives with its bytes.
+own="$fixture_dir/own"
+mkdir "$own"
+printf 'ours\n' >"$fixture_dir/ours.src"
+python3 "$helper" "$fixture_dir/ours.src" "$own/ours" >"$own.token"
+token="$(cat "$own.token")"
+[[ "$token" =~ ^[0-9]+:[0-9]+:5:[0-9a-f]{64}$ && "${token##*:}" == "$(shasum -a 256 <"$fixture_dir/ours.src" | awk '{print $1}')" ]]
+# Ours, unchanged: removed, and nothing is left beside it.
+python3 "$helper" --remove "$own/ours" "$token"
+[[ -z "$(ls -A "$own")" ]]
+python3 "$helper" "$fixture_dir/ours.src" "$own/ours" >"$own.token"
+token="$(cat "$own.token")"
+# (a) Replaced by a different file (another inode): left in place, bytes intact.
+rm "$own/ours"
+printf 'foreign-a\n' >"$own/ours"
+python3 "$helper" --remove "$own/ours" "$token" 2>"$own.err"
+[[ "$(cat "$own/ours")" == foreign-a && "$(ls -A "$own")" == ours ]] || {
+	echo 'error: rollback removed or moved a replacement file' >&2
+	exit 1
+}
+grep -q 'left in place' "$own.err"
+# (b) The same inode number holding other bytes (inode reuse, forced by a
+# token that names this file's device and inode with the bytes we wrote).
+rm "$own/ours"
+printf 'evil\n' >"$own/ours"
+here="$(python3 -c 'import os, sys; i = os.lstat(sys.argv[1]); print(f"{i.st_dev}:{i.st_ino}")' "$own/ours")"
+reused="$here:${token#*:*:}"
+# The token matches the file on device, inode and (same length) size; only
+# the hash of the bytes tells them apart.
+[[ "$reused" == "$here:5:"* && "$(wc -c <"$own/ours" | tr -d ' ')" == 5 ]]
+python3 "$helper" --remove "$own/ours" "$reused" 2>"$own.err"
+[[ "$(cat "$own/ours")" == evil && "$(ls -A "$own")" == ours ]] || {
+	echo 'error: rollback removed a file whose inode matched but whose bytes did not' >&2
+	exit 1
+}
+# (c) A third file appears at the destination between capture and link-back:
+# both foreign files survive, the captured one under the sibling name the
+# warning gives.
+cat >"$fixture_dir/race-link.py" <<'PY'
+import os, runpy, sys
+real_link = os.link
+def link(src, dst, **kwargs):
+    with open(os.path.join(os.path.dirname(sys.argv[2]), dst), "x") as handle:
+        handle.write("third\n")
+    return real_link(src, dst, **kwargs)
+os.link = link
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+PY
+python3 "$fixture_dir/race-link.py" "$helper" --remove "$own/ours" "$token" 2>"$own.err"
+kept="$(sed -n 's/.*the captured file is kept at //p' "$own.err")"
+[[ -n "$kept" && "$(cat "$kept")" == evil && "$(cat "$own/ours")" == third ]] || {
+	echo 'error: a race at link-back lost a file this run did not write' >&2
+	cat "$own.err" >&2
+	exit 1
+}
+[[ "$(find "$own" -mindepth 1 | wc -l | tr -d ' ')" == 2 ]]
+# A malformed token removes nothing.
+expect_fail_with 'malformed ownership token' python3 "$helper" --remove "$own/ours" 0:0
+[[ "$(cat "$own/ours")" == third ]]
 echo '[ok] anchor and checker-binding controls passed'

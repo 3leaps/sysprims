@@ -39,8 +39,9 @@ fi
 # written until they pass.
 scratch="$(mktemp -d)"
 helper="$root/scripts/write-exclusive.py"
-# Created files as "<dev:ino> <path>", recorded from the helper's report; each
-# is removed on failure only while it is still that inode.
+# Created files as "<token> <path>", the helper's ownership token (device,
+# inode, size and SHA-256 of the bytes it wrote); on failure each is removed
+# only if it still matches, and anything else is left in place.
 created=()
 cleanup() {
 	local entry
@@ -61,7 +62,7 @@ for path in "$asc" "$pub" "$subkey"; do
 	identity="$(python3 "$helper" "$scratch/$path" "$path")" || status=$?
 	case "$status" in
 	0)
-		[[ "$identity" =~ ^[0-9]+:[0-9]+$ ]] || stop "no identity reported for $path; it was left in place"
+		[[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9a-f]{64}$ ]] || stop "no identity reported for $path; it was left in place"
 		created+=("$identity $path")
 		;;
 	3) stop "$path appeared during export; nothing more was written" ;;

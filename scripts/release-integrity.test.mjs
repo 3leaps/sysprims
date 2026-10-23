@@ -388,3 +388,43 @@ test("remote and publish refuse hidden index entries before any check", () => {
     must(root, "git", ["checkout", "--", "docs/releases/v1.2.3.json"]);
   }
 });
+
+test("every published npm package must carry exactly the tag commit as gitHead", () => {
+  const { root, tagCommit } = taggedPlanFixture();
+  const bad = [
+    ["missing", undefined], ["null", null], ["empty", ""], ["number", 0], ["number sha", Number.parseInt(tagCommit.slice(0, 12), 16)],
+    ["array", [tagCommit]], ["object", { sha: tagCommit }], ["boolean", true],
+    ["padded", ` ${tagCommit} `], ["newline", `${tagCommit}\n`], ["upper case", tagCommit.toUpperCase()], ["short", tagCommit.slice(0, 12)],
+    ["other commit", "0".repeat(40)],
+  ];
+  // npmLookup(badIndex, value): every package resolves with the tag commit
+  // except the one at badIndex, which carries `value` (or no field).
+  const npmLookup = (badIndex, value) => {
+    let index = -1;
+    return {
+      crate: (_, v) => v,
+      goModule: (_, v) => `v${v}`,
+      npm(url) {
+        index += 1;
+        const response = { version: url.split("/").pop(), dist: { integrity: "x", tarball: "y" }, gitHead: tagCommit };
+        if (index === badIndex) {
+          if (value === undefined) delete response.gitHead;
+          else response.gitHead = value;
+        }
+        return response;
+      },
+      npmResolves: () => false,
+    };
+  };
+  assert.doesNotThrow(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(-1)));
+  let packages = 0;
+  const counter = npmLookup(-1);
+  const count = { ...counter, npm(url) { packages += 1; return counter.npm(url); } };
+  remoteRegistries(root, tagCommit, "1.2.3", count);
+  assert.equal(packages, 8);
+  for (let position = 0; position < packages; position += 1) {
+    for (const [label, value] of bad) {
+      assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(position, value)), /npm gitHead mismatch/, `package ${position}: ${label}`);
+    }
+  }
+});

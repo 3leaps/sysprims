@@ -293,10 +293,11 @@ ex = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ex)
 repo, commit, root = sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4])
 entries = ex.tree_entries(repo, commit)
+(git_dir,) = [p.resolve() for p in root.parent.glob(f"{root.name}.gitdir.*")]
 def refused(change, undo, needle):
     change()
     try:
-        ex.verify(repo, entries, root)
+        ex.verify(repo, entries, root, git_dir)
     except SystemExit as error:
         assert needle in str(error), (needle, str(error))
     else:
@@ -316,7 +317,16 @@ link = root / "crates/sysprims-core/src/link.rs"
 refused(lambda: link.symlink_to("lib.rs"), lambda: link.unlink(), "contains a symlink")
 up = root / "crates/sysprims-core/up"
 refused(lambda: up.symlink_to(".."), lambda: up.unlink(), "contains a symlink")
-ex.verify(repo, entries, root)
+# The same predicate applies to what is found in the export, at any depth.
+for name in (".Git", ".git.", "git~1", "a:b", "\u200c.git"):
+    planted = root / "crates/sysprims-core" / name
+    refused(lambda: planted.write_text("gitdir: /elsewhere\n"), lambda: planted.unlink(), "contains a git path")
+# The export's .git must be exactly the gitfile this run wrote.
+gitfile = root / ".git"
+written = gitfile.read_bytes()
+refused(lambda: gitfile.write_bytes(b"gitdir: /elsewhere\n"), lambda: gitfile.write_bytes(written), "not the gitfile this run wrote")
+refused(lambda: gitfile.unlink(), lambda: gitfile.write_bytes(written), "not the gitfile this run wrote")
+ex.verify(repo, entries, root, git_dir)
 PY
 # Symlinks in the tagged tree are refused before anything is written, whatever
 # they point at: cargo would follow them to bytes no blob hash covers.
@@ -358,6 +368,169 @@ fixture_commit "$pub" unlink
 git -C "$pub" tag -d "v$version" >/dev/null
 git -C "$pub" tag -a -m "Release $version" "v$version"
 git -C "$pub" checkout -q --detach "v$version"
+# A tree path that a filesystem may resolve to `.git` is refused before
+# anything is written, and the repository it points at is left untouched:
+# its HEAD, refs and config are compared before and after. The crafted trees
+# are built with mktree, since git add refuses these paths.
+# Test-local exporter variants live beside the helper they call.
+variants="$fixture_dir/variants"
+mkdir -p "$variants"
+cp "$fixture_root/scripts/write-exclusive.py" "$variants/"
+victim="$fixture_dir/victim"
+git init -q "$victim"
+git -C "$victim" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m victim
+victim_state() { (cd "$victim/.git" && cat HEAD config && git -C "$victim" for-each-ref && ls && shasum index); }
+victim_state >"$fixture_dir/victim.before"
+crafted="$fixture_dir/crafted"
+git init -q "$crafted"
+lib_blob="$(printf 'pub fn tagged() {}\n' | git -C "$crafted" hash-object -w --stdin)"
+gitfile_blob="$(printf 'gitdir: %s/.git\n' "$victim" | git -C "$crafted" hash-object -w --stdin)"
+# crafted_commit <tree line or empty>: a commit holding lib.rs and that entry.
+crafted_commit() {
+	local tree
+	tree="$({
+		printf '100644 blob %s\tlib.rs\n' "$lib_blob"
+		[[ -z "$1" ]] || printf '%s\n' "$1"
+	} | git -C "$crafted" mktree)"
+	git -C "$crafted" -c user.name=t -c user.email=t@example.invalid commit-tree -m crafted "$tree"
+}
+# crates/sysprims-core/.git, a gitfile beside a crate: cargo would find it
+# before the export root's, walking up from the crate.
+crate_tree="$(printf '100644 blob %s\t.git\n100644 blob %s\tCargo.toml\n' "$gitfile_blob" "$lib_blob" | git -C "$crafted" mktree)"
+crates_tree="$(printf '040000 tree %s\tsysprims-core\n' "$crate_tree" | git -C "$crafted" mktree)"
+# One fixture per class: case, ZWNJ, ZWJ, BOM, compatibility forms that only
+# NFKC folds (full-width g, superscript t), trailing dot, trailing space,
+# both, an 8.3 short name, and an NTFS stream.
+for entry in ".git" ".Git" \
+	".g"$'\xe2\x80\x8c'"it" ".g"$'\xe2\x80\x8d'"it" $'\xef\xbb\xbf'".git" \
+	"."$'\xef\xbd\x87'"it" ".gi"$'\xe1\xb5\x97' \
+	".git." ".git " ".GIT. ." "git~1" "GIT~12" ".git::\$INDEX_ALLOCATION"; do
+	rm -rf "$fixture_dir/crafted-export" "$fixture_dir"/crafted-export.gitdir.*
+	expect_fail_with 'names a git directory' python3 "$fixture_root/scripts/release-export-tree.py" "$crafted" \
+		"$(crafted_commit "100644 blob $gitfile_blob	$entry")" "$fixture_dir/crafted-export"
+	[[ ! -e "$fixture_dir/crafted-export" ]] && ! compgen -G "$fixture_dir/crafted-export.gitdir.*" >/dev/null
+	victim_state | cmp - "$fixture_dir/victim.before" || {
+		echo "error: exporting a tree with $(printf %q "$entry") changed another repository" >&2
+		exit 1
+	}
+done
+# Names that only resemble .git are exported normally.
+rm -rf "$fixture_dir/crafted-export"
+python3 "$fixture_root/scripts/release-export-tree.py" "$crafted" \
+	"$(crafted_commit "100644 blob $lib_blob	.gitignore")" "$fixture_dir/crafted-export"
+[[ -f "$fixture_dir/crafted-export/.gitignore" ]]
+rm -rf "$fixture_dir/crafted-export"
+expect_fail_with "names a git directory: 'crates/sysprims-core/.git'" python3 "$fixture_root/scripts/release-export-tree.py" \
+	"$crafted" "$(crafted_commit "040000 tree $crates_tree	crates")" "$fixture_dir/crafted-export"
+[[ ! -e "$fixture_dir/crafted-export" ]]
+victim_state | cmp - "$fixture_dir/victim.before" || {
+	echo 'error: exporting a crafted tree changed another repository' >&2
+	exit 1
+}
+# Past the tree check (a test-local exporter without it), the gitfile is
+# still never used: the export scan refuses it before any git command runs.
+sed 's/^        if any(names_git_dir(part) for part in name.split("\/")):$/        if False:/' \
+	"$fixture_root/scripts/release-export-tree.py" >"$variants/no-name-check.py"
+grep -q '^        if False:$' "$variants/no-name-check.py"
+rm -rf "$fixture_dir/crafted-export" "$fixture_dir"/crafted-export.gitdir.*
+expect_fail_with 'export contains a git path: .git' python3 "$variants/no-name-check.py" "$crafted" \
+	"$(crafted_commit "100644 blob $gitfile_blob	.git")" "$fixture_dir/crafted-export"
+victim_state | cmp - "$fixture_dir/victim.before"
+# With both name checks gone, git still runs only on the exporter's own git
+# directory (explicit GIT_DIR, nothing discovered), which refuses the path
+# when it builds the index; the victim is untouched.
+sed 's/^def names_git_dir(component):$/def names_git_dir(component):\n    return False/' \
+	"$fixture_root/scripts/release-export-tree.py" >"$variants/no-git-names.py"
+grep -q '^    return False$' "$variants/no-git-names.py"
+rm -rf "$fixture_dir/crafted-export" "$fixture_dir"/crafted-export.gitdir.*
+expect_fail_with "invalid path '.git'" python3 "$variants/no-git-names.py" "$crafted" \
+	"$(crafted_commit "100644 blob $gitfile_blob	.git")" "$fixture_dir/crafted-export"
+victim_state | cmp - "$fixture_dir/victim.before"
+# A `.git` directory symlink placed in the export is refused by the symlink
+# scan, which sees `.git` before anything is skipped.
+PYTHONDONTWRITEBYTECODE=1 python3 - "$fixture_root/scripts" "$crafted" "$(crafted_commit "")" "$fixture_dir/linked" "$victim/.git" <<'PY'
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("ex", pathlib.Path(sys.argv[1]) / "release-export-tree.py")
+ex = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ex)
+repo, commit, root, victim = sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4]), sys.argv[5]
+root.mkdir()
+(root / "lib.rs").write_text("pub fn tagged() {}\n")
+os.symlink(victim, root / ".git")
+try:
+    ex.verify(repo, ex.tree_entries(repo, commit), root)
+except SystemExit as error:
+    assert "contains a symlink: .git" in str(error), str(error)
+else:
+    raise SystemExit("expected the .git symlink to be refused")
+PY
+victim_state | cmp - "$fixture_dir/victim.before"
+# The attach never follows the export: with a `.git` symlink planted after
+# verification, every git command still runs on the exporter's own directory,
+# and its gitfile cannot be created over the link.
+sed 's/^    git_dir = attach_commit(repo, commit, root)$/    os.symlink(sys.argv[4], root \/ ".git"); git_dir = attach_commit(repo, commit, root)/' \
+	"$fixture_root/scripts/release-export-tree.py" >"$variants/planted.py"
+grep -q 'os.symlink(sys.argv\[4\]' "$variants/planted.py"
+sed -i.bak 's/^    repo, commit, dest = sys.argv\[1:\]$/    repo, commit, dest = sys.argv[1:4]/; s/^    if len(sys.argv) != 4:$/    if len(sys.argv) != 5:/' "$variants/planted.py"
+rm -rf "$fixture_dir/crafted-export" "$fixture_dir"/crafted-export.gitdir.*
+expect_fail_with 'File exists|exists' python3 "$variants/planted.py" "$crafted" "$(crafted_commit "")" "$fixture_dir/crafted-export" "$victim/.git"
+victim_state | cmp - "$fixture_dir/victim.before" || {
+	echo 'error: the attach step acted on a repository named by the export' >&2
+	exit 1
+}
+# Inherited git variables steer nothing: with GIT_DIR, GIT_WORK_TREE,
+# GIT_INDEX_FILE and a GIT_CONFIG_* override aimed at the victim, the export
+# reads the crafted repository, attaches to its own git directory, and leaves
+# the victim untouched.
+rm -rf "$fixture_dir/crafted-export"
+env GIT_DIR="$victim/.git" GIT_WORK_TREE="$victim" GIT_INDEX_FILE="$victim/.git/index" \
+	GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/nonexistent \
+	python3 "$fixture_root/scripts/release-export-tree.py" "$crafted" "$(crafted_commit "")" "$fixture_dir/crafted-export"
+cmp <(printf 'pub fn tagged() {}\n') "$fixture_dir/crafted-export/lib.rs"
+[[ "$(git -C "$fixture_dir/crafted-export" rev-parse --absolute-git-dir)" == "$fixture_dir"/crafted-export.gitdir.* ]]
+victim_state | cmp - "$fixture_dir/victim.before" || {
+	echo 'error: an inherited git variable steered the export into another repository' >&2
+	exit 1
+}
+# On the publish path: an inherited GIT_DIR/GIT_INDEX_FILE aimed at the victim
+# steers nothing (the run still packages the tag's bytes and the victim is
+# untouched), and an export whose gitfile names any other directory is
+# refused before cargo is called.
+tag_sum="$(python3 "$fixture_dir/fake-crate.py" "$pub" "$fixture_dir/expected.crate" "$version" "v$version^{commit}" &&
+	shasum -a 256 "$fixture_dir/expected.crate" | awk '{print $1}')"
+printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+out="$(publish_run GIT_DIR="$victim/.git" GIT_WORK_TREE="$victim" GIT_INDEX_FILE="$victim/.git/index")"
+[[ "$out" == *"already on crates.io with these contents; skipping"* ]]
+victim_state | cmp - "$fixture_dir/victim.before" || {
+	echo 'error: an inherited git variable steered the publish path into another repository' >&2
+	exit 1
+}
+# (The variants live in the ignored .variant directory, so the checkout stays
+# clean; the dry-run copy calls the variant exporter, which writes a gitfile
+# naming the victim after its own checks.)
+mkdir -p "$pub/.variant"
+cp "$pub/scripts/write-exclusive.py" "$pub/.variant/"
+python3 - "$pub/scripts/release-export-tree.py" "$pub/.variant/foreign-gitfile.py" "$victim/.git" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+for old, new in [
+    ("    return git_dir\n", f"    (root / '.git').write_text('gitdir: {sys.argv[3]}\\n')\n    return git_dir\n"),
+    ("    verify(repo, entries, root, git_dir)\n", ""),
+]:
+    assert text.count(old) == 1, old
+    text = text.replace(old, new)
+open(sys.argv[2], "w").write(text)
+PY
+# shellcheck disable=SC2016 # Literal script text substituted.
+sed 's|"$root/scripts/release-export-tree.py"|"$root/.variant/foreign-gitfile.py"|' "$pub/scripts/release-crates-dry-run.sh" \
+	>"$pub/.variant/foreign-gitfile.sh"
+grep -q 'variant/foreign-gitfile.py' "$pub/.variant/foreign-gitfile.sh"
+chmod +x "$pub/.variant/foreign-gitfile.sh"
+rm -f "$fixture_dir/cargo-calls"
+expect_fail_with "gitfile does not name this run's git directory" bash -c "cd '$pub' && env PATH='$bin:$PATH' \
+	CARGO_CALLS='$fixture_dir/cargo-calls' SYSPRIMS_RELEASE_TAG=v$version ./.variant/foreign-gitfile.sh --publish"
+[[ ! -e "$fixture_dir/cargo-calls" ]]
+victim_state | cmp - "$fixture_dir/victim.before"
 # Real cargo, offline, on a tiny crate: the export is attached to the tagged
 # commit, so cargo records it in .cargo_vcs_info.json without --allow-dirty,
 # and refuses to package if an exported byte differs from its blob.
@@ -379,7 +552,7 @@ allow_dirty "$fixture_dir/dirty-probe" >/dev/null || {
 }
 real="$fixture_dir/real"
 fixture_repo "$real" "$version" publish 0
-cp "$fixture_root/scripts/"{release-export-tree.py,release-crates.py} "$real/scripts/"
+cp "$fixture_root/scripts/"{release-export-tree.py,release-crates.py,write-exclusive.py} "$real/scripts/"
 mkdir -p "$real/crates/sysprims-core/src"
 printf '[workspace]\nmembers = ["crates/sysprims-core"]\nresolver = "2"\n' >"$real/Cargo.toml"
 printf '[package]\nname = "sysprims-core"\nversion = "%s"\nedition = "2021"\nlicense = "MIT"\ndescription = "fixture"\npublish = true\n' "$version" \
@@ -391,9 +564,11 @@ fixture_commit "$real" crate
 commit="$(git -C "$real" rev-parse HEAD)"
 export_and_package() {
 	local tree="$fixture_dir/export-$1"
-	rm -rf "$tree" "$fixture_dir/target-$1"
-	python3 "$2" "$real" "$commit" "$tree" >/dev/null
+	rm -rf "$tree" "$tree".gitdir.* "$fixture_dir/target-$1"
+	# Explicit returns: this runs under expect_fail, where errexit is off.
+	python3 "$2" "$real" "$commit" "$tree" >/dev/null || return 1
 	[[ -z "${3:-}" ]] || eval "$3"
+	[[ -f "$tree/.git" ]] || return 1
 	(cd "$tree" && CARGO_TARGET_DIR="$fixture_dir/target-$1" cargo package --locked --no-verify --offline -q -p sysprims-core)
 }
 export_and_package clean "$real/scripts/release-export-tree.py"
@@ -403,19 +578,23 @@ expect_fail_with 'records commit' python3 "$real/scripts/release-crates.py" vcs-
 	"$(printf '0%.0s' $(seq 40))" crates/sysprims-core
 expect_fail_with 'records path' python3 "$real/scripts/release-crates.py" vcs-info "$crate" sysprims-core "$version" \
 	"$commit" sysprims-core
-# A byte changed after the export (a copy of the exporter whose blob check is
-# disabled, then a CRLF rewrite) makes cargo refuse: nothing allows dirty.
-sed 's/^    verify(repo, entries, root)$/    pass/' "$real/scripts/release-export-tree.py" >"$fixture_dir/unverified-export.py"
-grep -q '^    pass$' "$fixture_dir/unverified-export.py"
-python3 - "$fixture_dir/unverified-export.py" <<'PY'
+# A byte changed after the export (a copy of the exporter whose blob checks
+# are disabled, then a CRLF rewrite) makes cargo refuse: nothing allows dirty.
+python3 - "$real/scripts/release-export-tree.py" "$variants/unverified-export.py" <<'PY'
 import sys
 text = open(sys.argv[1]).read()
-text = text.replace("    attach_commit(repo, commit, root)",
-    "    lib = root / 'crates/sysprims-core/src/lib.rs'\n    lib.write_bytes(lib.read_bytes().replace(b'\\n', b'\\r\\n'))\n    attach_commit(repo, commit, root)", 1)
-open(sys.argv[1], "w").write(text)
+for old, new in [
+    ("    verify(repo, entries, root)\n    git_dir = attach_commit(repo, commit, root)\n    verify(repo, entries, root, git_dir)\n",
+     "    lib = root / 'crates/sysprims-core/src/lib.rs'\n    lib.write_bytes(lib.read_bytes().replace(b'\\n', b'\\r\\n'))\n    attach_commit(repo, commit, root)\n"),
+]:
+    assert text.count(old) == 1, old
+    text = text.replace(old, new)
+open(sys.argv[2], "w").write(text)
 PY
-expect_fail_with 'export differs from the tagged commit' export_and_package tampered "$fixture_dir/unverified-export.py"
+expect_fail_with 'export differs from the tagged commit' export_and_package tampered "$variants/unverified-export.py"
 # Even past the exporter's own status check, cargo refuses the dirty file.
-sed -i.bak 's/^    if status:$/    if False:/' "$fixture_dir/unverified-export.py"
-expect_fail_with 'uncommitted|dirty' export_and_package tampered "$fixture_dir/unverified-export.py"
+sed -i.bak -e 's/^    if status:$/    if False:/' -e 's/^    if attached:$/    if False:/' \
+	"$variants/unverified-export.py"
+[[ "$(grep -c '^    if False:$' "$variants/unverified-export.py")" == 2 ]]
+expect_fail_with 'uncommitted|dirty' export_and_package tampered "$variants/unverified-export.py"
 echo '[ok] crate plan and publication guard controls passed'
