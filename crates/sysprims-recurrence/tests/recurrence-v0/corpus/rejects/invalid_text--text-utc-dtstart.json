@@ -1,0 +1,8 @@
+{
+  "description": "A UTC DTSTART is not the local civil form.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000Z",
+    "RRULE:FREQ=DAILY;COUNT=2"
+  ],
+  "reason": "invalid_text"
+}

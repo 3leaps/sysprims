@@ -1,0 +1,9 @@
+{
+  "description": "Exactly one RRULE.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=DAILY;COUNT=2",
+    "RRULE:FREQ=WEEKLY;COUNT=2"
+  ],
+  "reason": "unsupported_part"
+}

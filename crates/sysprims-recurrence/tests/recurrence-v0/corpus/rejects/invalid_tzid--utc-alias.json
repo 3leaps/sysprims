@@ -1,0 +1,10 @@
+{
+  "description": "UTC is written Etc/UTC.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "UTC",
+    "freq": "DAILY",
+    "count": 2
+  },
+  "reason": "invalid_tzid"
+}

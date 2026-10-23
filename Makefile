@@ -10,6 +10,8 @@
 #   make fmt        - Format code (cargo fmt + goneat assess format --fix)
 #   make build      - Build all crates and FFI
 
+
+.PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
@@ -310,6 +312,17 @@ test: ## Run test suite
 	@echo "Running tests..."
 	$(CARGO) test --workspace
 	@echo "[ok] Tests passed"
+
+recurrence-test: ## Test the recurrence crate, the Go module, and their byte-for-byte agreement
+	$(CARGO) test -p sysprims-recurrence
+	cd go/recurrence && GOWORK=off CGO_ENABLED=0 go vet ./... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./...
+	@$(MAKE) --no-print-directory recurrence-crosscheck
+
+recurrence-crosscheck: ## Compare Rust and Go recurrence outputs (corpus NDJSON and generated rules)
+	@scripts/recurrence-crosscheck.sh
+
+recurrence-tzdata-check: ## Rebuild the pinned tz bundle and require byte equality (network)
+	@scripts/recurrence-tzdata-bundle.sh --check
 
 test-diabolical: ## Run hostile process-control tests in a disposable container
 	@echo "Running isolated process-control tests with $(CONTAINER_RUNTIME)..."

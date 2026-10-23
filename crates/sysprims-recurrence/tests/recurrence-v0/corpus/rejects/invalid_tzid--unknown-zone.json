@@ -1,0 +1,9 @@
+{
+  "description": "A name absent from the pinned tzdb.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Mars/Olympus_Mons",
+    "freq": "DAILY"
+  },
+  "reason": "invalid_tzid"
+}

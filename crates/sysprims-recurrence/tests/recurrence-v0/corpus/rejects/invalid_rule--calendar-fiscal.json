@@ -1,0 +1,10 @@
+{
+  "description": "Gregorian is the only v0 calendar.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "calendar": "fiscal"
+  },
+  "reason": "invalid_rule"
+}

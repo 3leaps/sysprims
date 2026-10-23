@@ -1,0 +1,40 @@
+{
+  "description": "An RDATE at an ambiguous local time (2026-10-25 02:30) resolves to the earlier CEST instant only.",
+  "rule": {
+    "dtstart": "2026-10-18T09:00:00",
+    "tzid": "Europe/Berlin",
+    "freq": "WEEKLY",
+    "count": 2,
+    "rdate": [
+      "2026-10-25T02:30:00"
+    ]
+  },
+  "canonical": {
+    "dtstart": "2026-10-18T09:00:00",
+    "tzid": "Europe/Berlin",
+    "freq": "WEEKLY",
+    "count": 2,
+    "rdate": [
+      "2026-10-25T02:30:00"
+    ]
+  },
+  "digest": "sha256:77c51d76683f0ed8b668ae5f6ba320710c9d8c30e25d8ad202682a6e4cfd3f3d",
+  "text": [
+    "DTSTART;TZID=Europe/Berlin:20261018T090000",
+    "RRULE:FREQ=WEEKLY;COUNT=2",
+    "RDATE;TZID=Europe/Berlin:20261025T023000"
+  ],
+  "queries": [
+    {
+      "from": "2026-10-01T00:00:00Z",
+      "to": "2026-11-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-10-18T07:00:00Z",
+        "2026-10-25T00:30:00Z",
+        "2026-10-25T08:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

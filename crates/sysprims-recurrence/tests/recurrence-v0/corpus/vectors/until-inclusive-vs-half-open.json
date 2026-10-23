@@ -1,0 +1,60 @@
+{
+  "description": "UNTIL equal to an occurrence includes it; a query range ending at that instant excludes it.",
+  "rule": {
+    "dtstart": "2026-06-01T09:00:00",
+    "tzid": "Asia/Tokyo",
+    "freq": "DAILY",
+    "until": "2026-06-03T00:00:00Z"
+  },
+  "canonical": {
+    "dtstart": "2026-06-01T09:00:00",
+    "tzid": "Asia/Tokyo",
+    "freq": "DAILY",
+    "until": "2026-06-03T00:00:00Z"
+  },
+  "digest": "sha256:2ee8fc74252ff91483a7b2e8de5978d191484522443d1c4ead95170754215622",
+  "text": [
+    "DTSTART;TZID=Asia/Tokyo:20260601T090000",
+    "RRULE:FREQ=DAILY;UNTIL=20260603T000000Z"
+  ],
+  "queries": [
+    {
+      "from": "2026-06-01T00:00:00Z",
+      "to": "2026-06-03T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-06-01T00:00:00Z",
+        "2026-06-02T00:00:00Z"
+      ]
+    },
+    {
+      "from": "2026-06-01T00:00:00Z",
+      "to": "2026-06-03T00:00:01Z",
+      "limit": 10,
+      "expected": [
+        "2026-06-01T00:00:00Z",
+        "2026-06-02T00:00:00Z",
+        "2026-06-03T00:00:00Z"
+      ]
+    },
+    {
+      "from": "2026-06-01T00:00:00Z",
+      "to": "2026-07-01T00:00:00Z",
+      "limit": 2,
+      "expected": [
+        "2026-06-01T00:00:00Z",
+        "2026-06-02T00:00:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2026-06-02T00:00:00Z",
+      "expected": "2026-06-03T00:00:00Z"
+    },
+    {
+      "after": "2026-06-03T00:00:00Z",
+      "expected": null
+    }
+  ]
+}

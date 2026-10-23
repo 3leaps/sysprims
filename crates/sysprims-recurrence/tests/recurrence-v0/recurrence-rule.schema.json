@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract:recurrence/v0/recurrence-rule.schema.json",
+  "title": "Recurrence Rule",
+  "description": "Proposed canonical JSON form of a frozen RFC 5545 RRULE subset. Time-zone existence and calendar validity are semantic checks against the pinned tzdb; schema acceptance alone does not make a rule expandable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dtstart",
+    "tzid",
+    "freq"
+  ],
+  "properties": {
+    "dtstart": {
+      "$ref": "#/$defs/local_date_time"
+    },
+    "tzid": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$",
+      "maxLength": 64
+    },
+    "freq": {
+      "enum": [
+        "MINUTELY",
+        "HOURLY",
+        "DAILY",
+        "WEEKLY",
+        "MONTHLY",
+        "YEARLY"
+      ]
+    },
+    "interval": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "until": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "wkst": {
+      "$ref": "#/$defs/weekday"
+    },
+    "by_day": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "day"
+        ],
+        "properties": {
+          "day": {
+            "$ref": "#/$defs/weekday"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": -53,
+            "maximum": 53,
+            "not": {
+              "const": 0
+            }
+          }
+        }
+      }
+    },
+    "by_month": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 12
+      }
+    },
+    "by_month_day": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": -31,
+        "maximum": 31,
+        "not": {
+          "const": 0
+        }
+      }
+    },
+    "by_hour": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 23
+      }
+    },
+    "by_minute": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 59
+      }
+    },
+    "by_set_pos": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": -366,
+        "maximum": 366,
+        "not": {
+          "const": 0
+        }
+      }
+    },
+    "rdate": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/local_date_time"
+      }
+    },
+    "exdate": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/local_date_time"
+      }
+    },
+    "calendar": {
+      "const": "gregorian"
+    }
+  },
+  "not": {
+    "required": [
+      "count",
+      "until"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "by_set_pos"
+        ],
+        "properties": {
+          "by_set_pos": {
+            "minItems": 1
+          }
+        }
+      },
+      "then": {
+        "anyOf": [
+          {
+            "required": [
+              "by_day"
+            ],
+            "properties": {
+              "by_day": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "by_month_day"
+            ],
+            "properties": {
+              "by_month_day": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "by_month"
+            ],
+            "properties": {
+              "by_month": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "by_hour"
+            ],
+            "properties": {
+              "by_hour": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "by_minute"
+            ],
+            "properties": {
+              "by_minute": {
+                "minItems": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "freq": {
+            "enum": [
+              "MINUTELY",
+              "HOURLY",
+              "DAILY",
+              "WEEKLY"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "by_day": {
+            "items": {
+              "not": {
+                "required": [
+                  "ordinal"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "freq": {
+            "const": "WEEKLY"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "by_month_day"
+          ],
+          "properties": {
+            "by_month_day": {
+              "minItems": 1
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "weekday": {
+      "enum": [
+        "MO",
+        "TU",
+        "WE",
+        "TH",
+        "FR",
+        "SA",
+        "SU"
+      ]
+    },
+    "local_date_time": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$"
+    }
+  }
+}

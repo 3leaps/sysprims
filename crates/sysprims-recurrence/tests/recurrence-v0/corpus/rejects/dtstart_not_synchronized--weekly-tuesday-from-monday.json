@@ -1,0 +1,15 @@
+{
+  "description": "DTSTART must be an instance the rule generates.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "by_day": [
+      {
+        "day": "TU"
+      }
+    ],
+    "count": 2
+  },
+  "reason": "dtstart_not_synchronized"
+}

@@ -1,0 +1,33 @@
+{
+  "description": "A zone.tab location that tzdb implements as a link is accepted and kept as written.",
+  "rule": {
+    "dtstart": "2026-03-28T02:30:00",
+    "tzid": "Europe/Oslo",
+    "freq": "DAILY",
+    "count": 3
+  },
+  "canonical": {
+    "dtstart": "2026-03-28T02:30:00",
+    "tzid": "Europe/Oslo",
+    "freq": "DAILY",
+    "count": 3
+  },
+  "digest": "sha256:21402864c1cc6b5e2d78d47434f94884f08ece497e66e9d4245132d9fd0607bc",
+  "text": [
+    "DTSTART;TZID=Europe/Oslo:20260328T023000",
+    "RRULE:FREQ=DAILY;COUNT=3"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-03-28T01:30:00Z",
+        "2026-03-30T00:30:00Z",
+        "2026-03-31T00:30:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

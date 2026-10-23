@@ -1,0 +1,54 @@
+{
+  "description": "With BYMONTH, a BYDAY ordinal counts within each month, not the year.",
+  "rule": {
+    "dtstart": "2026-01-01T12:00:00",
+    "tzid": "America/New_York",
+    "freq": "YEARLY",
+    "by_month": [
+      1,
+      11
+    ],
+    "by_day": [
+      {
+        "day": "TH",
+        "ordinal": 1
+      }
+    ],
+    "count": 4
+  },
+  "canonical": {
+    "dtstart": "2026-01-01T12:00:00",
+    "tzid": "America/New_York",
+    "freq": "YEARLY",
+    "by_month": [
+      1,
+      11
+    ],
+    "by_day": [
+      {
+        "day": "TH",
+        "ordinal": 1
+      }
+    ],
+    "count": 4
+  },
+  "digest": "sha256:7409b305f7e6f584bc411e0ee9e89296633ad91c22a0d9ef71d81ec21cf60595",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260101T120000",
+    "RRULE:FREQ=YEARLY;COUNT=4;BYMONTH=1,11;BYDAY=1TH"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2028-01-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-01T17:00:00Z",
+        "2026-11-05T17:00:00Z",
+        "2027-01-07T17:00:00Z",
+        "2027-11-04T16:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

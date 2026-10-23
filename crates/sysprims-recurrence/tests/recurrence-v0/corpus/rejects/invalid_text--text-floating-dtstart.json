@@ -1,0 +1,8 @@
+{
+  "description": "A floating DTSTART has no TZID.",
+  "input_text": [
+    "DTSTART:20260105T090000",
+    "RRULE:FREQ=DAILY;COUNT=2"
+  ],
+  "reason": "invalid_text"
+}

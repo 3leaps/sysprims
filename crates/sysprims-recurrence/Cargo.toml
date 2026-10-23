@@ -1,0 +1,20 @@
+[package]
+name = "sysprims-recurrence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = true
+description = "RFC 5545 recurrence rules (contract: recurrence/v0): canonical form, digest and expansion over a pinned tzdb"
+documentation = "https://docs.rs/sysprims-recurrence"
+readme = "README.md"
+exclude = ["tests/recurrence-v0"]
+
+[dependencies]
+jiff.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+serde.workspace = true

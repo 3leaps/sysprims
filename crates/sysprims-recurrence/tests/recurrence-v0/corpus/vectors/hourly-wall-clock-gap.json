@@ -1,0 +1,45 @@
+{
+  "description": "HOURLY steps local wall-clock hours; the 02:00 slot on 2026-03-08 falls in the gap and both its minutes are skipped.",
+  "rule": {
+    "dtstart": "2026-03-07T20:00:00",
+    "tzid": "America/New_York",
+    "freq": "HOURLY",
+    "interval": 6,
+    "by_minute": [
+      0,
+      30
+    ],
+    "count": 5
+  },
+  "canonical": {
+    "dtstart": "2026-03-07T20:00:00",
+    "tzid": "America/New_York",
+    "freq": "HOURLY",
+    "interval": 6,
+    "by_minute": [
+      0,
+      30
+    ],
+    "count": 5
+  },
+  "digest": "sha256:7bd4fadc2ae08f7324e75969540d77552ed44ebf90b0098d72d87b6370eba557",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260307T200000",
+    "RRULE:FREQ=HOURLY;INTERVAL=6;COUNT=5;BYMINUTE=0,30"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-07T00:00:00Z",
+      "to": "2026-03-09T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-03-08T01:00:00Z",
+        "2026-03-08T01:30:00Z",
+        "2026-03-08T12:00:00Z",
+        "2026-03-08T12:30:00Z",
+        "2026-03-08T18:00:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

@@ -1,0 +1,15 @@
+{
+  "description": "An ordinal BYDAY is only meaningful for MONTHLY and YEARLY.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "WEEKLY",
+    "by_day": [
+      {
+        "day": "MO",
+        "ordinal": 1
+      }
+    ]
+  },
+  "reason": "invalid_rule"
+}

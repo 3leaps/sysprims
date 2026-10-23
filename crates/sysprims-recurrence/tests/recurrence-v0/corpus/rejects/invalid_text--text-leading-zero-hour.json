@@ -1,0 +1,8 @@
+{
+  "description": "A leading zero is not in the integer grammar, even when the value is in range.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=DAILY;BYHOUR=09;COUNT=2"
+  ],
+  "reason": "invalid_text"
+}

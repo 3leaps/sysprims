@@ -1,0 +1,41 @@
+{
+  "description": "RFC 5545 text input with explicit defaults and a '+' ordinal parses to the normalized JSON form.",
+  "input_text": [
+    "DTSTART;TZID=Europe/Berlin:20260105T073000",
+    "RRULE:FREQ=MONTHLY;BYDAY=-1FR,+1MO;COUNT=3;WKST=MO;INTERVAL=1"
+  ],
+  "canonical": {
+    "by_day": [
+      {
+        "day": "MO",
+        "ordinal": 1
+      },
+      {
+        "day": "FR",
+        "ordinal": -1
+      }
+    ],
+    "count": 3,
+    "dtstart": "2026-01-05T07:30:00",
+    "freq": "MONTHLY",
+    "tzid": "Europe/Berlin"
+  },
+  "digest": "sha256:90737d46cd8380cd9c18bf8a78c3a102fbdcb3cef2581865611b1496b78d26fe",
+  "text": [
+    "DTSTART;TZID=Europe/Berlin:20260105T073000",
+    "RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=1MO,-1FR"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-03-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-05T06:30:00Z",
+        "2026-01-30T06:30:00Z",
+        "2026-02-02T06:30:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

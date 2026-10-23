@@ -1,0 +1,56 @@
+{
+  "description": "UNTIL before DTSTART gives an empty RRULE, not a refusal; RDATE and EXDATE still apply.",
+  "rule": {
+    "dtstart": "2026-01-02T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "until": "2026-01-01T09:00:00Z",
+    "rdate": [
+      "2026-01-01T09:00:00",
+      "2026-01-03T09:00:00"
+    ],
+    "exdate": [
+      "2026-01-01T09:00:00"
+    ]
+  },
+  "canonical": {
+    "dtstart": "2026-01-02T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "until": "2026-01-01T09:00:00Z",
+    "rdate": [
+      "2026-01-01T09:00:00",
+      "2026-01-03T09:00:00"
+    ],
+    "exdate": [
+      "2026-01-01T09:00:00"
+    ]
+  },
+  "digest": "sha256:61b1e4d32753c73a11dd69c124785933e89ed410b03cc74ea54ceaa71123062a",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260102T090000",
+    "RRULE:FREQ=DAILY;UNTIL=20260101T090000Z",
+    "RDATE;TZID=Etc/UTC:20260101T090000,20260103T090000",
+    "EXDATE;TZID=Etc/UTC:20260101T090000"
+  ],
+  "queries": [
+    {
+      "from": "2025-12-01T00:00:00Z",
+      "to": "2026-02-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-01-03T09:00:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2025-12-31T00:00:00Z",
+      "expected": "2026-01-03T09:00:00Z"
+    },
+    {
+      "after": "2026-01-03T09:00:00Z",
+      "expected": null
+    }
+  ]
+}

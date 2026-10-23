@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract:recurrence/v0/rule-document.schema.json",
+  "title": "Recurrence Rule Document",
+  "description": "Standalone envelope for exchanging one recurrence rule. The rule's identity and digest cover only the rule member; embedding contracts reference recurrence-rule.schema.json directly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["capabilities", "rule"],
+  "properties": {
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "contains": {
+        "const": "contract: recurrence/v0"
+      }
+    },
+    "rule": {
+      "$ref": "contract:recurrence/v0/recurrence-rule.schema.json"
+    }
+  }
+}

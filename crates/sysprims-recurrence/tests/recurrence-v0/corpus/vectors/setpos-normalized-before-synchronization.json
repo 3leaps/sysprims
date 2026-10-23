@@ -1,0 +1,69 @@
+{
+  "description": "Duplicate hour/minute candidates do not consume BYSETPOS positions; January 2 and February 3 are the second weekdays.",
+  "rule": {
+    "dtstart": "2026-01-02T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "TU"
+      },
+      {
+        "day": "WE"
+      },
+      {
+        "day": "TH"
+      },
+      {
+        "day": "FR"
+      }
+    ],
+    "by_hour": [9, 9],
+    "by_minute": [0, 0],
+    "by_set_pos": [2, 2],
+    "count": 2
+  },
+  "canonical": {
+    "dtstart": "2026-01-02T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_day": [
+      {
+        "day": "MO"
+      },
+      {
+        "day": "TU"
+      },
+      {
+        "day": "WE"
+      },
+      {
+        "day": "TH"
+      },
+      {
+        "day": "FR"
+      }
+    ],
+    "by_hour": [9],
+    "by_minute": [0],
+    "by_set_pos": [2],
+    "count": 2
+  },
+  "digest": "sha256:42e69ec7215be12e51725743809d1582751d6a3b1c2c20236a5369e4393d5ccc",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260102T090000",
+    "RRULE:FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0;BYSETPOS=2"
+  ],
+  "queries": [
+    {
+      "from": "2026-01-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": ["2026-01-02T09:00:00Z", "2026-02-03T09:00:00Z"]
+    }
+  ],
+  "next_after": []
+}

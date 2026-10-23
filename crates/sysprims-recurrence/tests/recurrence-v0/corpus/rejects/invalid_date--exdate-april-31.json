@@ -1,0 +1,13 @@
+{
+  "description": "EXDATE values must be calendar-valid too.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 2,
+    "exdate": [
+      "2026-04-31T09:00:00"
+    ]
+  },
+  "reason": "invalid_date"
+}

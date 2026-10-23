@@ -1,0 +1,8 @@
+{
+  "description": "A signed zero is not in the integer grammar.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=DAILY;BYMINUTE=+0;COUNT=2"
+  ],
+  "reason": "invalid_text"
+}

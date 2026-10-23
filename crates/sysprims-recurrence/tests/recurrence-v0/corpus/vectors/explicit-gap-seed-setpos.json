@@ -1,0 +1,35 @@
+{
+  "description": "The explicit gap DTSTART remains a seed in its first-period candidate set for synchronization and position selection.",
+  "rule": {
+    "dtstart": "2026-03-08T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "by_hour": [1, 2, 3],
+    "by_minute": [30],
+    "by_set_pos": [2],
+    "count": 2
+  },
+  "canonical": {
+    "dtstart": "2026-03-08T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "by_hour": [1, 2, 3],
+    "by_minute": [30],
+    "by_set_pos": [2],
+    "count": 2
+  },
+  "digest": "sha256:25d0d1c06ac9f371c5fab13d5d0e8999f994f35944b266ba55080a176fa79bcf",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260308T023000",
+    "RRULE:FREQ=DAILY;COUNT=2;BYHOUR=1,2,3;BYMINUTE=30;BYSETPOS=2"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": ["2026-03-08T07:30:00Z", "2026-03-09T06:30:00Z"]
+    }
+  ],
+  "next_after": []
+}

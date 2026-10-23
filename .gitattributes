@@ -1,0 +1,8 @@
+# Pinned recurrence/v0 artifacts are compared by hash; keep their bytes exact.
+crates/sysprims-recurrence/tests/recurrence-v0/** -text
+crates/sysprims-recurrence/tzdata/** -text
+go/recurrence/tzdata/** -text
+
+# Scripts and Go sources keep LF on every platform.
+*.sh text eol=lf
+*.go text eol=lf

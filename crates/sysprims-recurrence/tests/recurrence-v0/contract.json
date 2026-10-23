@@ -1,0 +1,8 @@
+{
+  "capability": "contract: recurrence/v0",
+  "entry_schema": "rule-document.schema.json",
+  "object_schemas": {
+    "recurrence_rule": "recurrence-rule.schema.json"
+  },
+  "status": "proposed"
+}

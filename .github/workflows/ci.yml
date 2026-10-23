@@ -13,6 +13,7 @@ env:
   LLVM_MINGW_VERSION: '20260407'
   CBINDGEN_VERSION: '0.29.2'
   GOVULNCHECK_VERSION: 'v1.9.0'
+  GOSEC_VERSION: 'v2.29.0'
 jobs:
   format:
     name: Format Check
@@ -273,6 +274,70 @@ jobs:
           CXX: aarch64-w64-mingw32-g++
           AR: llvm-ar
         run: go test -v ./...
+  recurrence:
+    # Rust crate and pure-Go module for contract recurrence/v0: each passes the
+    # pinned corpus, and their outputs agree byte for byte (corpus NDJSON and
+    # generated rules) on every OS cell.
+    name: Recurrence Rust/Go agreement (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
+      - name: Rust crate
+        run: cargo test -p sysprims-recurrence
+      - name: Go module (standalone, pure Go)
+        working-directory: go/recurrence
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          test -z "$(gofmt -l .)"
+          if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
+            echo "go/recurrence/go.mod must not contain replace directives" >&2
+            exit 1
+          fi
+          go vet ./...
+          go test -count=1 ./...
+      # The pure-Go module sits outside go.work by design, so repo-root Go
+      # tooling does not reach it; scan it here directly.
+      - name: Go module security (gosec, govulncheck)
+        if: runner.os == 'Linux'
+        working-directory: go/recurrence
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          "$(go env GOPATH)/bin/gosec" ./...
+          "$(go env GOPATH)/bin/govulncheck" ./...
+      - name: Go module alone (outside the repository, no SKIP allowed)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          corpus="$PWD/crates/sysprims-recurrence/tests/recurrence-v0"
+          standalone="$(mktemp -d)/recurrence"
+          cp -R go/recurrence "$standalone"
+          cd "$standalone"
+          RECURRENCE_CORPUS_DIR="$corpus" go test -count=1 -v ./... | tee "$RUNNER_TEMP/go-standalone.log"
+          if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-standalone.log"; then
+            echo "standalone go/recurrence tests must not skip" >&2
+            exit 1
+          fi
+      - name: Rust/Go agreement
+        run: scripts/recurrence-crosscheck.sh
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-latest

@@ -1,0 +1,10 @@
+{
+  "description": "COUNT is bounded at 100000.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 100001
+  },
+  "reason": "invalid_rule"
+}

@@ -1,0 +1,60 @@
+{
+  "description": "EXDATE removes a generated instance and an RDATE instance; an excluded generated instance still counts toward COUNT.",
+  "rule": {
+    "dtstart": "2026-05-01T12:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 3,
+    "rdate": [
+      "2026-05-10T12:00:00",
+      "2026-05-11T08:00:00"
+    ],
+    "exdate": [
+      "2026-05-02T12:00:00",
+      "2026-05-10T12:00:00"
+    ]
+  },
+  "canonical": {
+    "dtstart": "2026-05-01T12:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "count": 3,
+    "rdate": [
+      "2026-05-10T12:00:00",
+      "2026-05-11T08:00:00"
+    ],
+    "exdate": [
+      "2026-05-02T12:00:00",
+      "2026-05-10T12:00:00"
+    ]
+  },
+  "digest": "sha256:5e8b68ece812eed033a8a973f7e0fd08030b4a3d850890a413fc3617c7437ace",
+  "text": [
+    "DTSTART;TZID=Etc/UTC:20260501T120000",
+    "RRULE:FREQ=DAILY;COUNT=3",
+    "RDATE;TZID=Etc/UTC:20260510T120000,20260511T080000",
+    "EXDATE;TZID=Etc/UTC:20260502T120000,20260510T120000"
+  ],
+  "queries": [
+    {
+      "from": "2026-05-01T00:00:00Z",
+      "to": "2026-06-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-05-01T12:00:00Z",
+        "2026-05-03T12:00:00Z",
+        "2026-05-11T08:00:00Z"
+      ]
+    }
+  ],
+  "next_after": [
+    {
+      "after": "2026-05-03T12:00:00Z",
+      "expected": "2026-05-11T08:00:00Z"
+    },
+    {
+      "after": "2026-05-11T08:00:00Z",
+      "expected": null
+    }
+  ]
+}

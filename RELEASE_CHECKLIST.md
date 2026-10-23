@@ -177,8 +177,11 @@ This document walks maintainers through the build/sign/upload flow for each sysp
   # Go submodule tag (required so Go resolves semver for subdir module)
   git tag -a "bindings/go/sysprims/v${VERSION}" --cleanup=verbatim -F "/path/to/bindings-go-sysprims-v${VERSION}.txt"
 
-  # Push both tags
-  git push origin "v${VERSION}" "bindings/go/sysprims/v${VERSION}"
+  # Pure-Go recurrence module tag (same commit; Go resolves the nested module by this prefix)
+  git tag -a "go/recurrence/v${VERSION}" --cleanup=verbatim -F "/path/to/go-recurrence-v${VERSION}.txt"
+
+  # Push all three tags
+  git push origin "v${VERSION}" "bindings/go/sysprims/v${VERSION}" "go/recurrence/v${VERSION}"
 
   # Fetch remote tag objects, then verify exact names, object types, messages,
   # version plan, and common peeled target. Nearest older tags are never used.

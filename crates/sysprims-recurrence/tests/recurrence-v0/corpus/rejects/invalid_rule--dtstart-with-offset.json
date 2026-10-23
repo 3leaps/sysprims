@@ -1,0 +1,9 @@
+{
+  "description": "DTSTART is a local civil time, never an instant.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00Z",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY"
+  },
+  "reason": "invalid_rule"
+}

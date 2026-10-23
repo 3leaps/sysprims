@@ -1,0 +1,8 @@
+{
+  "description": "The lexical limit covers BYDAY ordinals too.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=MONTHLY;BYDAY=1000000000MO;COUNT=2"
+  ],
+  "reason": "invalid_text"
+}

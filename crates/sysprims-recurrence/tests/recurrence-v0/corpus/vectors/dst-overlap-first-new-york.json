@@ -1,0 +1,34 @@
+{
+  "description": "Daily 01:30 across the 2026-11-01 fall-back overlap: the repeated local time yields only its first (EDT) instant.",
+  "rule": {
+    "dtstart": "2026-10-30T01:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "count": 4
+  },
+  "canonical": {
+    "dtstart": "2026-10-30T01:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "count": 4
+  },
+  "digest": "sha256:ee24ae0d6a9f4185d9bac2a3d21a9c4562b2ba42662d5d5e8a24cbc98d2bfb98",
+  "text": [
+    "DTSTART;TZID=America/New_York:20261030T013000",
+    "RRULE:FREQ=DAILY;COUNT=4"
+  ],
+  "queries": [
+    {
+      "from": "2026-10-01T00:00:00Z",
+      "to": "2026-12-01T00:00:00Z",
+      "limit": 10,
+      "expected": [
+        "2026-10-30T05:30:00Z",
+        "2026-10-31T05:30:00Z",
+        "2026-11-01T05:30:00Z",
+        "2026-11-02T06:30:00Z"
+      ]
+    }
+  ],
+  "next_after": []
+}

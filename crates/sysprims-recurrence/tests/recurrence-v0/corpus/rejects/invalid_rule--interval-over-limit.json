@@ -1,0 +1,10 @@
+{
+  "description": "INTERVAL is bounded at 1000.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "DAILY",
+    "interval": 1001
+  },
+  "reason": "invalid_rule"
+}

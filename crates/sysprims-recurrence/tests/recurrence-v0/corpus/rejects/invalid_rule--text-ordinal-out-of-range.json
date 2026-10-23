@@ -1,0 +1,8 @@
+{
+  "description": "A short ordinal lexeme outside +/-53 is a value-bound refusal.",
+  "input_text": [
+    "DTSTART;TZID=Etc/UTC:20260105T090000",
+    "RRULE:FREQ=YEARLY;BYDAY=100MO;COUNT=2"
+  ],
+  "reason": "invalid_rule"
+}

@@ -1,0 +1,9 @@
+{
+  "description": "SECONDLY is outside the frozen subset.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "SECONDLY"
+  },
+  "reason": "invalid_rule"
+}

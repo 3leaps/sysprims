@@ -1,0 +1,35 @@
+{
+  "description": "The explicit gap EXDATE resolves to 07:30Z and removes both local RDATE labels for that instant; the generated gap consumes no COUNT.",
+  "rule": {
+    "dtstart": "2026-03-07T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "count": 2,
+    "rdate": ["2026-03-08T02:30:00", "2026-03-08T03:30:00"],
+    "exdate": ["2026-03-08T02:30:00"]
+  },
+  "canonical": {
+    "dtstart": "2026-03-07T02:30:00",
+    "tzid": "America/New_York",
+    "freq": "DAILY",
+    "count": 2,
+    "rdate": ["2026-03-08T02:30:00", "2026-03-08T03:30:00"],
+    "exdate": ["2026-03-08T02:30:00"]
+  },
+  "digest": "sha256:ea361bfe3a3a4c887ee408db9a3a380b4637790b167d891910b3645fe3324434",
+  "text": [
+    "DTSTART;TZID=America/New_York:20260307T023000",
+    "RRULE:FREQ=DAILY;COUNT=2",
+    "RDATE;TZID=America/New_York:20260308T023000,20260308T033000",
+    "EXDATE;TZID=America/New_York:20260308T023000"
+  ],
+  "queries": [
+    {
+      "from": "2026-03-01T00:00:00Z",
+      "to": "2026-04-01T00:00:00Z",
+      "limit": 10,
+      "expected": ["2026-03-07T07:30:00Z", "2026-03-09T06:30:00Z"]
+    }
+  ],
+  "next_after": []
+}

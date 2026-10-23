@@ -1,0 +1,15 @@
+{
+  "description": "A sixth-Monday-only monthly rule cannot synchronize its DTSTART; the ordinal itself is within the supported range.",
+  "rule": {
+    "dtstart": "2026-01-05T09:00:00",
+    "tzid": "Etc/UTC",
+    "freq": "MONTHLY",
+    "by_day": [
+      {
+        "day": "MO",
+        "ordinal": 6
+      }
+    ]
+  },
+  "reason": "dtstart_not_synchronized"
+}
