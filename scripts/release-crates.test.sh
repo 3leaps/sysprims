@@ -4,6 +4,8 @@
 set -euo pipefail
 # shellcheck source=scripts/release-test-fixture.sh
 source "$(dirname "$0")/release-test-fixture.sh"
+# The publish path refuses under CI; only the explicit CI case below sets it.
+unset CI
 PYTHONDONTWRITEBYTECODE=1 python3 - "$fixture_root/scripts" <<'PY'
 import importlib.util
 import pathlib
