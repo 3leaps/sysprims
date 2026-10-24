@@ -16,7 +16,7 @@ read -r _ subkey < <(fixture_keys "$fixture_dir/gpg")
 # Signed exactly as the ceremony signs: git tag -s with the subkey.
 stag() { GNUPGHOME="$fixture_dir/gpg" git -C "$repo" tag -s -a --cleanup=verbatim -u "$subkey!" -F "$2" "$1" "${3:-HEAD}"; }
 fixture_commit "$repo"
-git init -q --bare "$origin"
+git init -q --bare -b main "$origin"
 git -C "$repo" remote set-url origin "$origin"
 tags=("v$version" "bindings/go/sysprims/v$version" "go/recurrence/v$version")
 fixture_messages "$fixture_dir/src" "$version" "${tags[@]}"

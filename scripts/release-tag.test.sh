@@ -21,7 +21,7 @@ printf '%s\n' "$subkey" >"$repo/config/release/signing-subkey.txt"
 fixture_commit "$repo" pins
 SYSPRIMS_DECERNOR_BIN="$decernor" "$repo/scripts/release-insert-anchors.sh" >/dev/null
 fixture_commit "$repo" anchors
-git init -q --bare "$origin"
+git init -q --bare -b main "$origin"
 git -C "$repo" push -q "$origin" main
 git -C "$repo" fetch -q "$origin" '+refs/heads/main:refs/remotes/origin/main'
 # The scripts require the GitHub origin URL; route it to the local bare repo.
