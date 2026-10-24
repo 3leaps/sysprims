@@ -13,6 +13,21 @@
 # Validate changes with: goneat doctor tools validate
 # See schema: schemas/tools/tools.v1.0.0.json
 scopes:
+  # make bootstrap installs only this scope: exact pins via go install or a
+  # reviewed cargo command, never a package manager. Installing other scopes
+  # can fetch package managers (brew, bun), so bootstrap only checks them.
+  bootstrap:
+    description: Exact-pinned tools installed by make bootstrap (go install or cargo install only)
+    tools:
+      - checkmake
+      - yamlfmt
+      - actionlint
+      - gitleaks
+      - cargo-deny
+      - cargo-audit
+      - cargo-edit
+      - cargo-nextest
+      - cbindgen
   all:
     description: All tools from all scopes
     tools:
@@ -35,7 +50,6 @@ scopes:
       - go
       - uv
       - bun
-      - tsc
       # Security
       - gitleaks
       - syft
@@ -67,7 +81,6 @@ scopes:
       - go
       - uv
       - bun
-      - tsc
   security:
     description: Security scanning tools
     tools:
@@ -93,6 +106,9 @@ tools:
     kind: go
     detect_command: checkmake -v
     install_package: github.com/mrtazz/checkmake/cmd/checkmake@v0.3.2
+    # Cooling checks this exact pin, not upstream latest.
+    recommended_version: 0.3.2
+    version_scheme: semver
     version_args:
       - -v
     check_args:
@@ -157,6 +173,9 @@ tools:
     kind: go
     detect_command: yamlfmt --version
     install_package: github.com/google/yamlfmt/cmd/yamlfmt@v0.21.0
+    # Cooling checks this exact pin, not upstream latest.
+    recommended_version: 0.21.0
+    version_scheme: semver
     version_args:
       - --version
     check_args:
@@ -197,6 +216,9 @@ tools:
     kind: go
     detect_command: actionlint -version
     install_package: github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+    # Cooling checks this exact pin, not upstream latest.
+    recommended_version: 1.7.12
+    version_scheme: semver
     version_args:
       - -version
     check_args:
@@ -207,76 +229,120 @@ tools:
   # ==========================================================================
   # Rust Tools
   # ==========================================================================
+  # Declared as kind: system with a manual cargo command so that detection uses
+  # detect_command (cargo-edit has no cargo-edit binary) and installs keep
+  # --locked and an exact version; goneat's kind: cargo path drops both. Each
+  # detect_command names the tool's own binary, so a missing tool fails to
+  # start instead of printing a cargo error that would read as present.
+  # goneat cannot read crates.io release ages, so cooling is alert-only here;
+  # the exact --version pin is the control and changes through review.
+  # These are developer tools built by the host's stable toolchain, not the
+  # library's MSRV (Cargo.toml rust-version): cargo-nextest 0.9.128 needs 1.89.
   cargo-deny:
     name: cargo-deny
     description: Cargo plugin for license and advisory checks (ADR-0001, ADR-0006)
-    kind: cargo
+    kind: system
     detect_command: cargo-deny --version
-    version_args:
-      - --version
-    check_args:
-      - --help
+    platforms:
+      - darwin
+      - linux
+      - windows
     installer_priority:
-      all:
-        - cargo-install
+      darwin:
+        - manual
+      linux:
+        - manual
+      windows:
+        - manual
     install_commands:
-      cargo-install: cargo install cargo-deny --locked
+      manual: cargo install cargo-deny --locked --version 0.20.2
+    cooling:
+      enabled: true
+      alert_only: true
   cargo-audit:
     name: cargo-audit
     description: Cargo plugin for security vulnerability auditing
-    kind: cargo
+    kind: system
     detect_command: cargo-audit --version
-    version_args:
-      - --version
-    check_args:
-      - --help
+    platforms:
+      - darwin
+      - linux
+      - windows
     installer_priority:
-      all:
-        - cargo-install
+      darwin:
+        - manual
+      linux:
+        - manual
+      windows:
+        - manual
     install_commands:
-      cargo-install: cargo install cargo-audit --locked
+      manual: cargo install cargo-audit --locked --version 0.22.0
+    cooling:
+      enabled: true
+      alert_only: true
   cargo-edit:
     name: cargo-edit
     description: Cargo plugin for version management (cargo set-version)
-    kind: cargo
-    detect_command: cargo set-version -V
-    version_args:
-      - -V
-    check_args:
-      - --help
+    kind: system
+    detect_command: cargo-set-version set-version -V
+    platforms:
+      - darwin
+      - linux
+      - windows
     installer_priority:
-      all:
-        - cargo-install
+      darwin:
+        - manual
+      linux:
+        - manual
+      windows:
+        - manual
     install_commands:
-      cargo-install: cargo install cargo-edit --locked
+      manual: cargo install cargo-edit --locked --version 0.13.8
+    cooling:
+      enabled: true
+      alert_only: true
   cargo-nextest:
     name: cargo-nextest
     description: Next-generation Cargo test runner (faster, better output)
-    kind: cargo
+    kind: system
     detect_command: cargo-nextest --version
-    version_args:
-      - --version
-    check_args:
-      - --help
+    platforms:
+      - darwin
+      - linux
+      - windows
     installer_priority:
-      all:
-        - cargo-install
+      darwin:
+        - manual
+      linux:
+        - manual
+      windows:
+        - manual
     install_commands:
-      cargo-install: cargo install cargo-nextest --locked
+      manual: cargo install cargo-nextest --locked --version 0.9.128
+    cooling:
+      enabled: true
+      alert_only: true
   cbindgen:
     name: cbindgen
-    description: Generate C headers from Rust FFI code
-    kind: cargo
+    description: Generate C headers from Rust FFI code (version matches CI CBINDGEN_VERSION)
+    kind: system
     detect_command: cbindgen --version
-    version_args:
-      - --version
-    check_args:
-      - --help
+    platforms:
+      - darwin
+      - linux
+      - windows
     installer_priority:
-      all:
-        - cargo-install
+      darwin:
+        - manual
+      linux:
+        - manual
+      windows:
+        - manual
     install_commands:
-      cargo-install: cargo install cbindgen --locked
+      manual: cargo install cbindgen --locked --version 0.29.2
+    cooling:
+      enabled: true
+      alert_only: true
   # ==========================================================================
   # Language Toolchains (for bindings)
   # ==========================================================================
@@ -343,6 +409,9 @@ tools:
     kind: go
     detect_command: gitleaks version
     install_package: github.com/zricethezav/gitleaks/v8@v8.30.1
+    # Cooling checks this exact pin, not upstream latest.
+    recommended_version: 8.30.1
+    version_scheme: semver
     version_args:
       - version
     check_args:
@@ -409,22 +478,3 @@ tools:
         - brew
       windows:
         - scoop
-  # ==========================================================================
-  # TypeScript Tools
-  # ==========================================================================
-  tsc:
-    name: tsc
-    description: TypeScript compiler - used for type checking TypeScript bindings
-    kind: node
-    detect_command: tsc --version
-    version_args:
-      - --version
-    check_args:
-      - --help
-    installer_priority:
-      all:
-        - npm
-        - bun
-    install_commands:
-      npm: npm install -g typescript
-      bun: bun install -g typescript

@@ -147,7 +147,7 @@ help: ## Show available targets
 # Bootstrap - Trust Anchor Chain
 # -----------------------------------------------------------------------------
 #
-# Trust chain: curl -> sfetch -> goneat -> other tools
+# Trust chain: curl -> sfetch -> goneat -> tools declared in .goneat/tools.yaml
 #
 # sfetch (3leaps/sfetch) is the trust anchor - a minimal, auditable binary fetcher.
 # goneat (fulmenhq/goneat) is installed via sfetch and manages additional tooling.
@@ -204,26 +204,23 @@ bootstrap: ## Install required tools (sfetch -> goneat)
 		echo "[!!] goneat installation failed"; exit 1; \
 	fi
 	@echo ""
-	@# Step 3: Install Rust tools via cargo (cargo-deny, cargo-audit, cargo-edit)
-	@echo "[..] Checking Rust dev tools..."
-	@if ! command -v cargo-deny >/dev/null 2>&1; then \
-		echo "[..] Installing cargo-deny..."; \
-		cargo install cargo-deny --locked; \
-	else \
-		echo "[ok] cargo-deny installed"; \
+	@# Step 3: Tools declared in .goneat/tools.yaml. Go is a developer
+	@# prerequisite (the pinned go-install tools build with it), checked first.
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo "[!!] go not found (required: pinned tools install with go install)"; exit 1; \
 	fi
-	@if ! command -v cargo-audit >/dev/null 2>&1; then \
-		echo "[..] Installing cargo-audit..."; \
-		cargo install cargo-audit --locked; \
-	else \
-		echo "[ok] cargo-audit installed"; \
-	fi
-	@if ! cargo set-version -V >/dev/null 2>&1; then \
-		echo "[..] Installing cargo-edit..."; \
-		cargo install cargo-edit --locked; \
-	else \
-		echo "[ok] cargo-edit installed"; \
-	fi
+	@# Install only the bootstrap scope: exact pins via go install or a reviewed
+	@# cargo command, so no package manager is fetched. Other scopes are checked
+	@# and never installed here; required ones fail closed with install hints.
+	@echo "[..] goneat tools: bootstrap (install pinned)"
+	@goneat doctor tools --config .goneat/tools.yaml --scope bootstrap --install --yes
+	@for scope in foundation rust security; do \
+		echo "[..] goneat tools: $$scope (check)"; \
+		goneat doctor tools --config .goneat/tools.yaml --scope $$scope --print-instructions || exit $$?; \
+	done
+	@echo "[..] goneat tools: bindings (check, advisory)"
+	@goneat doctor tools --config .goneat/tools.yaml --scope bindings --print-instructions || \
+		echo "[--] some bindings toolchains are missing on this host (continuing)"
 	@echo ""
 	@echo "[ok] Bootstrap complete"
 	@echo ""
