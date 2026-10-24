@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Synthetic release-tooling controls: throwaway keys and local fixtures only, no
-# operator keyring and no network. Needs gpg, git, node, python3 >= 3.11 and
+# operator keyring and no network. Needs gpg, minisign, git, node, python3 >= 3.11 and
 # decernor >= 0.1.8 (SYSPRIMS_DECERNOR_BIN, or decernor on PATH for tests).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
