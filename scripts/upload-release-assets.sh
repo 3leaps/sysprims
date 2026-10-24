@@ -2,7 +2,8 @@
 # Upload signed release assets to GitHub
 # Usage: upload-release-assets.sh <tag> [dir]
 #
-# Uploads checksum files, signatures, public keys, and release notes.
+# Uploads checksum files, signatures, public keys, the fingerprint anchors,
+# and release notes.
 # The release remains a draft; only `make release-publish` may promote it.
 # Requires: gh CLI authenticated with write permissions
 set -euo pipefail
@@ -30,6 +31,8 @@ REQUIRED_FILES=(
 	"SHA512SUMS.asc"
 	"sysprims-release-signing-key.asc"
 	"release-notes-${TAG}.md"
+	"expected-fingerprints.txt"
+	"expected-fingerprints.ndjson"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -53,6 +56,7 @@ UPLOAD_FILES=(
 )
 
 UPLOAD_FILES+=("SHA256SUMS.asc" "SHA512SUMS.asc" "sysprims-release-signing-key.asc")
+UPLOAD_FILES+=("expected-fingerprints.txt" "expected-fingerprints.ndjson")
 
 # Add release notes if present
 RELEASE_NOTES="release-notes-${TAG}.md"

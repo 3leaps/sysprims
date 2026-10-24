@@ -41,6 +41,35 @@ jobs:
         run: bash scripts/check-planning-hygiene.sh
       - name: npm trusted publishing runtime guard
         run: bash scripts/check-npm-trusted-publish-runtime.sh
+  release-tooling:
+    name: Release Tooling Controls
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Verify tooling prerequisites
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11)'
+          command -v gpg git node
+      - name: Install minisign
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q minisign
+          minisign -v
+      - name: Install checksum-pinned decernor
+        run: |
+          set -euo pipefail
+          tool_dir="$(mktemp -d "$RUNNER_TEMP/decernor.XXXXXX")"
+          archive="$(awk '{print $2}' config/release/decernor-ci-sha256.txt)"
+          tag="v$(sed -E 's/^decernor_([0-9.]+)_linux_amd64\.tar\.gz$/\1/' <<<"$archive")"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            "https://github.com/3leaps/decernor/releases/download/${tag}/${archive}" \
+            --output "$tool_dir/$archive"
+          (cd "$tool_dir" && sha256sum --check "$GITHUB_WORKSPACE/config/release/decernor-ci-sha256.txt")
+          tar -xzf "$tool_dir/$archive" -C "$tool_dir" decernor
+          echo "SYSPRIMS_DECERNOR_BIN=$tool_dir/decernor" >> "$GITHUB_ENV"
+      - name: Synthetic release-tooling controls
+        run: make release-tooling-test
   typescript-api-drift:
     name: TypeScript API Drift
     runs-on: ubuntu-latest

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { existsSync as existsSyncLocal } from "node:fs";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { assertInventory, expectedInventory, provenance, verifyChecksums } from "./release-integrity.mjs";
+import { ANCHORS, assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyTaggedAssets } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -21,6 +22,8 @@ function provenanceFixture(commitMessage = "commit without attribution") {
   const root = mkdtempSync(join(tmpdir(), "sysprims-provenance-test-"));
   roots.push(root);
   mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "config/release"), { recursive: true });
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
   writeFileSync(join(root, "VERSION"), "0.2.3\n");
   writeFileSync(join(root, "docs/releases/v0.2.3.json"), JSON.stringify({
     schema: "sysprims-release-plan/v1", version: "0.2.3", provenance_policy: "commit_footer",
@@ -68,13 +71,30 @@ function withTagMessageEnv(fixture, operation) {
   }
 }
 
-function createFixtureTags(fixture, wrongTag) {
-  const wrong = join(fixture.root, "wrong-tag-message.txt");
+// A throwaway signing key in a temporary GPG home; tags are signed with it
+// exactly as the ceremony signs (git tag -s), so their objects carry OpenPGP
+// armor after the message.
+function throwawaySigner() {
+  const home = mkdtempSync(join(tmpdir(), "sysprims-gpg-"));
+  roots.push(home);
+  const gpg = (args) => must(home, "gpg", ["--homedir", home, "--batch", "--pinentry-mode", "loopback", "--passphrase", "", ...args]);
+  gpg(["--quick-gen-key", "Synthetic <synthetic@example.invalid>", "ed25519", "sign", "1d"]);
+  const fingerprint = must(home, "gpg", ["--homedir", home, "--batch", "--with-colons", "--list-keys"]).split("\n").find((line) => line.startsWith("fpr:")).split(":")[9];
+  return { home, fingerprint };
+}
+
+function createFixtureTags(fixture, wrongTag, { signed = true } = {}) {
+  const wrong = join(fixture.root, "..", `wrong-tag-message-${Date.now()}.txt`);
   writeFileSync(wrong, "wrong annotation bytes\n");
+  roots.push(wrong);
+  const signer = signed ? throwawaySigner() : null;
   for (const tag of fixture.tags) {
     const message = tag === wrongTag ? wrong : join(fixture.messages, `${tag.replaceAll("/", "__")}.txt`);
-    must(fixture.root, "git", ["tag", "-a", tag, "--cleanup=verbatim", "-F", message]);
+    const args = signed ? ["tag", "-s", "-a", "-u", signer.fingerprint, tag, "--cleanup=verbatim", "-F", message] : ["tag", "-a", tag, "--cleanup=verbatim", "-F", message];
+    const result = spawnSync("git", args, { cwd: fixture.root, encoding: "utf8", env: { ...process.env, GNUPGHOME: signer?.home ?? process.env.GNUPGHOME } });
+    assert.equal(result.status, 0, result.stderr);
   }
+  if (signed) assert.match(must(fixture.root, "git", ["cat-file", "tag", fixture.tags[0]]), /BEGIN PGP SIGNATURE/);
 }
 
 function withReceiptEnv(fixture, operation) {
@@ -115,10 +135,23 @@ test("provenance receipt rejects a bad signature and generic override", () => {
   finally { delete process.env.SYSPRIMS_ALLOW_PROVENANCE_EXCEPTION; }
 });
 
-test("complete commit footer binds both stored tag messages to the intended bytes", () => {
-  const fixture = provenanceFixture(`release commit\n\n${attributionFooter}`);
+test("complete commit footer binds signed and unsigned tag messages to the intended bytes", () => {
+  for (const signed of [true, false]) {
+    const fixture = provenanceFixture(`release commit\n\n${attributionFooter}`);
+    createFixtureTags(fixture, undefined, { signed });
+    withTagMessageEnv(fixture, () => assert.doesNotThrow(() => provenance(fixture.root, "0.2.3")));
+  }
+});
+
+test("signed provenance receipt binds the message bytes of signed tags", () => {
+  const fixture = provenanceFixture();
+  fixture.sign(fixture.makeReceipt());
   createFixtureTags(fixture);
-  withTagMessageEnv(fixture, () => assert.doesNotThrow(() => provenance(fixture.root, "0.2.3")));
+  withReceiptEnv(fixture, () => assert.doesNotThrow(() => provenance(fixture.root, "0.2.3")));
+  const wrong = provenanceFixture();
+  wrong.sign(wrong.makeReceipt());
+  createFixtureTags(wrong, "v0.2.3");
+  withReceiptEnv(wrong, () => assert.throws(() => provenance(wrong.root, "0.2.3"), /attribution footer|hash mismatch/));
 });
 
 for (const tag of ["v0.2.3", "bindings/go/sysprims/v0.2.3"]) {
@@ -131,6 +164,41 @@ for (const tag of ["v0.2.3", "bindings/go/sysprims/v0.2.3"]) {
     ));
   });
 }
+
+test("the required tag set is read from git blobs at the commit, not the working tree", () => {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-required-tags-"));
+  roots.push(root);
+  const commitAll = (message) => { must(root, "git", ["add", "-A"]); must(root, "git", ["commit", "-qm", message]); };
+  const plan = (disposition) => writeFileSync(join(root, "docs/releases/v1.2.3.json"), JSON.stringify({ surfaces: { go: { disposition } } }));
+  mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "config/release"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), "1.2.3\n");
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
+  plan("publish");
+  must(root, "git", ["init", "-q", "-b", "main"]);
+  must(root, "git", ["config", "user.name", "Fixture"]);
+  must(root, "git", ["config", "user.email", "fixture@example.invalid"]);
+  commitAll("publish");
+  assert.deepEqual(requiredTags(root, "HEAD", "1.2.3"), ["v1.2.3", "bindings/go/sysprims/v1.2.3"]);
+  mkdirSync(join(root, "go/recurrence"), { recursive: true });
+  writeFileSync(join(root, "go/recurrence/go.mod"), "module github.com/3leaps/sysprims/go/recurrence\n");
+  // Uncommitted: the commit decides, not the working tree.
+  assert.deepEqual(requiredTags(root, "HEAD", "1.2.3"), ["v1.2.3", "bindings/go/sysprims/v1.2.3"]);
+  commitAll("recurrence");
+  const withModule = must(root, "git", ["rev-parse", "HEAD"]);
+  assert.deepEqual(requiredTags(root, "HEAD", "1.2.3"), ["v1.2.3", "bindings/go/sysprims/v1.2.3", "go/recurrence/v1.2.3"]);
+  plan("skip");
+  rmSync(join(root, "go"), { recursive: true });
+  // A dirty checkout with skip and no module still yields the commit's set.
+  assert.deepEqual(requiredTags(root, withModule, "1.2.3"), ["v1.2.3", "bindings/go/sysprims/v1.2.3", "go/recurrence/v1.2.3"]);
+  commitAll("skip, no module");
+  assert.deepEqual(requiredTags(root, "HEAD", "1.2.3"), ["v1.2.3"]);
+  assert.deepEqual(requiredTags(root, withModule, "1.2.3"), ["v1.2.3", "bindings/go/sysprims/v1.2.3", "go/recurrence/v1.2.3"]);
+  assert.throws(() => requiredTags(root, "HEAD", "9.9.9"), /does not match VERSION/);
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nother/v\n");
+  commitAll("bad prefix");
+  assert.throws(() => requiredTags(root, "HEAD", "1.2.3"), /release-tags.txt must be exactly/);
+});
 
 test("commit footer rejects a non-policy coauthor email", () => {
   const wrongFooter = attributionFooter.replace("noreply@3leaps.net", "model@example.invalid");
@@ -156,11 +224,12 @@ test("phase inventory and checksum manifests reject leftovers and wrong hashes",
 
 test("release leaves are guard-wired and only release-publish can undraft", () => {
   const makefile = readFileSync("Makefile", "utf8");
-  assert.match(makefile, /^release-download: release-guard-tag-version-post release-guard-provenance/m);
-  assert.match(makefile, /^release-checksums: release-guard-downloaded/m);
-  assert.match(makefile, /^release-sign: release-require-checksummed/m);
-  assert.match(makefile, /^release-upload: release-guard-tag-version-post release-guard-provenance release-guard-signed/m);
-  assert.match(makefile, /^release-publish: release-guard-tag-version-post release-guard-provenance release-guard-remote/m);
+  assert.match(makefile, /^release-download: release-require-tag release-guard-tag-version-post release-guard-provenance/m);
+  assert.match(makefile, /^release-checksums: release-require-tag release-guard-downloaded/m);
+  assert.match(makefile, /^release-sign: release-require-tag release-require-checksummed/m);
+  assert.match(makefile, /^release-upload: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed/m);
+  assert.match(makefile, /^release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-remote/m);
+  assert.match(makefile, /^release-guard-remote: release-require-tag release-guard-tag-version-post /m);
   const upload = readFileSync("scripts/upload-release-assets.sh", "utf8");
   assert.doesNotMatch(upload, /--draft=false/);
   const implementation = readFileSync("scripts/release-integrity.mjs", "utf8");
@@ -172,4 +241,366 @@ test("npm dry-run cannot enter the protected OIDC job", () => {
   assert.match(workflow, /publish:\n[\s\S]*?if: \$\{\{ !inputs\.dry_run \}\}[\s\S]*?environment: publish-npm/);
   const stageBlock = workflow.slice(workflow.indexOf("  stage:"), workflow.indexOf("  publish:"));
   assert.doesNotMatch(stageBlock, /environment:|id-token:/);
+});
+
+test("registry promotion requires every listed crate and both Go modules from the release commit", () => {
+  // The repository's own publication list and modules, at HEAD.
+  const version = readFileSync("VERSION", "utf8").trim();
+  const live = remoteRequirements(process.cwd(), "HEAD", version);
+  const listed = readFileSync("config/release/publishable-crates.txt", "utf8").split("\n").filter(Boolean);
+  assert.deepEqual(live.crates, listed);
+  assert.ok(live.crates.includes("sysprims-recurrence"));
+  assert.deepEqual(live.modules.map((module) => module.path), [
+    "github.com/3leaps/sysprims/bindings/go/sysprims",
+    "github.com/3leaps/sysprims/go/recurrence",
+  ]);
+
+  const resolved = { crates: new Set(live.crates), modules: new Set(live.modules.map((m) => `${m.path}@v${m.version}`)) };
+  const lookup = (state) => ({
+    crate: (name, v) => (state.crates.has(name) ? v : null),
+    goModule: (path, v) => (state.modules.has(`${path}@v${v}`) ? `v${v}` : null),
+  });
+  assert.doesNotThrow(() => checkRemote(live, version, lookup(resolved)));
+  for (const crate of live.crates) {
+    const missing = { crates: new Set([...resolved.crates].filter((name) => name !== crate)), modules: resolved.modules };
+    assert.throws(() => checkRemote(live, version, lookup(missing)), new RegExp(`${crate}@`));
+  }
+  for (const module of live.modules) {
+    const key = `${module.path}@v${module.version}`;
+    const missing = { crates: resolved.crates, modules: new Set([...resolved.modules].filter((name) => name !== key)) };
+    assert.throws(() => checkRemote(live, version, lookup(missing)), new RegExp(module.path.replaceAll("/", "\\/")));
+  }
+});
+
+test("registry requirements follow the release commit's plan and tree", () => {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-remote-"));
+  roots.push(root);
+  const commitAll = (message) => { must(root, "git", ["add", "-A"]); must(root, "git", ["commit", "-qm", message]); };
+  mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "config/release"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), "1.2.3\n");
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
+  writeFileSync(join(root, "config/release/publishable-crates.txt"), "sysprims-core\nsysprims-recurrence\n");
+  writeFileSync(join(root, "docs/releases/v1.2.3.json"), JSON.stringify({ surfaces: { go: { disposition: "skip", retained_version: "1.2.2" } } }));
+  must(root, "git", ["init", "-q", "-b", "main"]);
+  must(root, "git", ["config", "user.name", "Fixture"]);
+  must(root, "git", ["config", "user.email", "fixture@example.invalid"]);
+  commitAll("skip");
+  const skip = remoteRequirements(root, "HEAD", "1.2.3");
+  assert.deepEqual(skip.crates, ["sysprims-core", "sysprims-recurrence"]);
+  assert.deepEqual(skip.modules, [{ path: "github.com/3leaps/sysprims/bindings/go/sysprims", version: "1.2.2", absentAt: "1.2.3" }]);
+  const retainedOnly = { crate: (_, v) => v, goModule: (path, v) => (v === "1.2.2" ? `v${v}` : v === "1.2.3" ? "v1.2.3" : null) };
+  assert.throws(() => checkRemote(skip, "1.2.3", retainedOnly), /unexpectedly resolves/);
+  mkdirSync(join(root, "go/recurrence"), { recursive: true });
+  writeFileSync(join(root, "go/recurrence/go.mod"), "module github.com/3leaps/sysprims/go/recurrence\n");
+  assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.length, 1, "the working tree is not consulted");
+  commitAll("module");
+  assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.at(-1).path, "github.com/3leaps/sysprims/go/recurrence");
+});
+
+// The release decisions after tagging are taken at the tag's commit: the plan
+// is that commit's blob, npm gitHead and provenance are checked against that
+// commit, and an index flag that hides a working-tree edit is refused.
+function taggedPlanFixture() {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-tagged-plan-"));
+  roots.push(root);
+  const plan = (typescript) => JSON.stringify({
+    schema: "sysprims-release-plan/v1", version: "1.2.3", provenance_policy: "commit_footer",
+    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, ffi: { disposition: "publish" }, go: { disposition: "publish", lock_phase: "resolved" }, typescript },
+  });
+  mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "config/release"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), "1.2.3\n");
+  writeFileSync(join(root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
+  writeFileSync(join(root, "config/release/publishable-crates.txt"), "sysprims-core\n");
+  writeFileSync(join(root, "docs/releases/v1.2.3.json"), plan({ disposition: "publish" }));
+  must(root, "git", ["init", "-q", "-b", "main"]);
+  must(root, "git", ["config", "user.name", "Fixture"]);
+  must(root, "git", ["config", "user.email", "fixture@example.invalid"]);
+  must(root, "git", ["add", "-A"]);
+  must(root, "git", ["commit", "-qm", "release without attribution"]);
+  must(root, "git", ["tag", "-a", "-m", "Release 1.2.3", "v1.2.3"]);
+  const tagCommit = must(root, "git", ["rev-parse", "v1.2.3^{commit}"]);
+  const skipPlan = plan({ disposition: "skip", retained_version: "1.2.2" });
+  // Records which npm versions were asked for; every lookup resolves.
+  const lookup = (gitHead = tagCommit) => {
+    const asked = [];
+    return {
+      asked,
+      crate: (_, v) => v,
+      goModule: (_, v) => `v${v}`,
+      npm(url) { const v = url.split("/").pop(); asked.push(v); return { version: v, gitHead, dist: { integrity: "x", tarball: "y" } }; },
+      npmResolves: () => false,
+    };
+  };
+  return { root, tagCommit, skipPlan, lookup };
+}
+
+test("registry checks use the tag commit's plan, not the checkout's", () => {
+  const { root, tagCommit, skipPlan, lookup } = taggedPlanFixture();
+  const plain = lookup();
+  remoteRegistries(root, tagCommit, "1.2.3", plain);
+  assert.ok(plain.asked.length > 0 && plain.asked.every((v) => v === "1.2.3"));
+  // A skip-worktree, then an assume-unchanged, edit of the plan is not seen.
+  for (const flag of ["--skip-worktree", "--assume-unchanged"]) {
+    must(root, "git", ["update-index", flag, "docs/releases/v1.2.3.json"]);
+    writeFileSync(join(root, "docs/releases/v1.2.3.json"), skipPlan);
+    assert.equal(must(root, "git", ["status", "--porcelain"]), "");
+    const seen = lookup();
+    remoteRegistries(root, tagCommit, "1.2.3", seen);
+    assert.ok(seen.asked.every((v) => v === "1.2.3"), `${flag} plan edit reached the registry check`);
+    must(root, "git", ["update-index", flag.replace("--", "--no-"), "docs/releases/v1.2.3.json"]);
+    must(root, "git", ["checkout", "--", "docs/releases/v1.2.3.json"]);
+  }
+  // A later commit at the same VERSION with a different plan is not used,
+  // and npm's gitHead must name the tag's commit, not the later one.
+  writeFileSync(join(root, "docs/releases/v1.2.3.json"), skipPlan);
+  must(root, "git", ["commit", "-qam", "same version, other plan"]);
+  const head = must(root, "git", ["rev-parse", "HEAD"]);
+  assert.notEqual(head, tagCommit);
+  const later = lookup();
+  remoteRegistries(root, tagCommit, "1.2.3", later);
+  assert.ok(later.asked.every((v) => v === "1.2.3"));
+  assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", lookup(head)), /gitHead mismatch/);
+});
+
+test("provenance after tagging binds the tag commit, not HEAD", () => {
+  const { root, tagCommit } = taggedPlanFixture();
+  must(root, "git", ["commit", "-q", "--allow-empty", "-m", `later\n\n${attributionFooter}`]);
+  assert.throws(() => provenance(root, "1.2.3", tagCommit), /complete attribution footer is missing/);
+});
+
+test("remote and publish refuse hidden index entries before any check", () => {
+  const { root, skipPlan } = taggedPlanFixture();
+  must(root, "git", ["checkout", "-q", "--detach", "v1.2.3"]);
+  for (const flag of ["--skip-worktree", "--assume-unchanged"]) {
+    must(root, "git", ["update-index", flag, "docs/releases/v1.2.3.json"]);
+    writeFileSync(join(root, "docs/releases/v1.2.3.json"), skipPlan);
+    const env = { ...process.env, SYSPRIMS_RELEASE_TAG: "v1.2.3", SYSPRIMS_RELEASE_METADATA_FILE: join(root, "absent.json") };
+    delete env.RELEASE_TAG;
+    for (const command of ["remote", "publish"]) {
+      const result = spawnSync("node", ["scripts/release-integrity.mjs", command, "--root", root, "--dir", root], {
+        encoding: "utf8", env,
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /skip-worktree or assume-unchanged/, `${command} ${flag}: ${result.stderr}`);
+    }
+    must(root, "git", ["update-index", flag.replace("--", "--no-"), "docs/releases/v1.2.3.json"]);
+    must(root, "git", ["checkout", "--", "docs/releases/v1.2.3.json"]);
+  }
+});
+
+test("every published npm package must carry exactly the tag commit as gitHead", () => {
+  const { root, tagCommit } = taggedPlanFixture();
+  const bad = [
+    ["missing", undefined], ["null", null], ["empty", ""], ["number", 0], ["number sha", Number.parseInt(tagCommit.slice(0, 12), 16)],
+    ["array", [tagCommit]], ["object", { sha: tagCommit }], ["boolean", true],
+    ["padded", ` ${tagCommit} `], ["newline", `${tagCommit}\n`], ["upper case", tagCommit.toUpperCase()], ["short", tagCommit.slice(0, 12)],
+    ["other commit", "0".repeat(40)],
+  ];
+  // npmLookup(badIndex, value): every package resolves with the tag commit
+  // except the one at badIndex, which carries `value` (or no field).
+  const npmLookup = (badIndex, value) => {
+    let index = -1;
+    return {
+      crate: (_, v) => v,
+      goModule: (_, v) => `v${v}`,
+      npm(url) {
+        index += 1;
+        const response = { version: url.split("/").pop(), dist: { integrity: "x", tarball: "y" }, gitHead: tagCommit };
+        if (index === badIndex) {
+          if (value === undefined) delete response.gitHead;
+          else response.gitHead = value;
+        }
+        return response;
+      },
+      npmResolves: () => false,
+    };
+  };
+  assert.doesNotThrow(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(-1)));
+  let packages = 0;
+  const counter = npmLookup(-1);
+  const count = { ...counter, npm(url) { packages += 1; return counter.npm(url); } };
+  remoteRegistries(root, tagCommit, "1.2.3", count);
+  assert.equal(packages, 8);
+  for (let position = 0; position < packages; position += 1) {
+    for (const [label, value] of bad) {
+      assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(position, value)), /npm gitHead mismatch/, `package ${position}: ${label}`);
+    }
+  }
+});
+
+// The fingerprint anchors are release assets: in every phase's inventory,
+// covered by the checksum manifests, and equal to the tag commit's blobs.
+function anchorPhaseFixture() {
+  const root = mkdtempSync(join(tmpdir(), "sysprims-anchor-phases-"));
+  roots.push(root);
+  const version = "1.2.3";
+  mkdirSync(join(root, "docs/releases"), { recursive: true });
+  mkdirSync(join(root, "keys"), { recursive: true });
+  writeFileSync(join(root, "VERSION"), `${version}\n`);
+  writeFileSync(join(root, `docs/releases/v${version}.md`), "notes\n");
+  writeFileSync(join(root, "keys/expected-fingerprints.txt"), "gpg A\nminisign B\n");
+  writeFileSync(join(root, "keys/expected-fingerprints.ndjson"), "{\"a\":1}\n{\"b\":2}\n");
+  must(root, "git", ["init", "-q", "-b", "main"]);
+  must(root, "git", ["config", "user.name", "Fixture"]);
+  must(root, "git", ["config", "user.email", "fixture@example.invalid"]);
+  must(root, "git", ["add", "-A"]);
+  must(root, "git", ["commit", "-qm", "release"]);
+  must(root, "git", ["tag", "-a", "-m", `Release ${version}`, `v${version}`]);
+  // A later worktree edit of an anchor never counts: the tag's blob decides.
+  writeFileSync(join(root, "keys/expected-fingerprints.txt"), "gpg EDITED\n");
+  const dist = join(root, "dist");
+  mkdirSync(dist);
+  const { base, checksummed } = expectedInventory(version);
+  for (const name of base) writeFileSync(join(dist, name), `${name}\n`);
+  writeFileSync(join(dist, `release-notes-v${version}.md`), "notes\n");
+  for (const [path, name] of ANCHORS) writeFileSync(join(dist, name), must(root, "git", ["cat-file", "blob", `v${version}:${path}`]) + "\n");
+  const manifest = (algorithm) => base.map((name) => `${hash(readFileSync(join(dist, name)), algorithm)}  ${name}`).join("\n") + "\n";
+  const sums = () => {
+    writeFileSync(join(dist, "SHA256SUMS"), manifest("sha256"));
+    writeFileSync(join(dist, "SHA512SUMS"), manifest("sha512"));
+  };
+  const metadataFile = join(root, "metadata.json");
+  // GitHub's view: draft, with digests of the CI-built assets (and, once
+  // uploaded, of everything) as they are in `from`.
+  const metadata = (names, from = dist) => writeFileSync(metadataFile, JSON.stringify({
+    tagName: `v${version}`, isDraft: true,
+    assets: names.map((name) => ({ name, digest: `sha256:${hash(readFileSync(join(from, name)))}` })),
+  }));
+  const cli = (command, env = {}) => spawnSync("node", ["scripts/release-integrity.mjs", command, "--root", root, "--dir", dist], {
+    encoding: "utf8", env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${version}`, SYSPRIMS_RELEASE_METADATA_FILE: metadataFile, ...env, RELEASE_TAG: undefined },
+  });
+  return { root, version, dist, base, checksummed, sums, metadata, cli, built: base.filter((name) => !/^release-notes-|^expected-fingerprints\./.test(name)) };
+}
+
+test("anchors are base payload: in the inventory and the checksum manifests", () => {
+  const { base } = expectedInventory("1.2.3");
+  for (const [, name] of ANCHORS) assert.ok(base.includes(name), name);
+  const checksums = readFileSync("scripts/generate-checksums.sh", "utf8");
+  for (const [, name] of ANCHORS) assert.match(checksums, new RegExp(`EXPECTED=\\([\\s\\S]*${name.replace(".", "\\.")}`));
+});
+
+test("every phase requires both anchors equal to the tag commit's blobs", () => {
+  const f = anchorPhaseFixture();
+  // Each tampering, applied to a good state and undone after.
+  const tamperings = [];
+  for (const [, name] of ANCHORS) {
+    const file = join(f.dist, name);
+    tamperings.push([`${name} missing`, () => { const saved = readFileSync(file); unlinkSync(file); return () => writeFileSync(file, saved); }, /inventory mismatch|state mismatch|missing or not a regular file/]);
+    tamperings.push([`${name} altered`, () => { const saved = readFileSync(file); writeFileSync(file, Buffer.concat([saved, Buffer.from("x")])); return () => writeFileSync(file, saved); }, /does not match the immutable tag-tree blob/]);
+    tamperings.push([`${name} symlinked`, () => { const saved = readFileSync(file); const elsewhere = join(f.root, `elsewhere-${name}`); writeFileSync(elsewhere, saved); unlinkSync(file); symlinkSync(elsewhere, file); return () => { unlinkSync(file); writeFileSync(file, saved); }; }, /missing or not a regular file|inventory mismatch|state mismatch/]);
+  }
+  const phases = [
+    ["downloaded", () => f.metadata(f.built)],
+    ["checksummed", () => { f.sums(); f.metadata(f.built); }],
+    ["require-checksummed", () => { f.sums(); f.metadata(f.built); }],
+  ];
+  for (const [phase, prepare] of phases) {
+    for (const name of ["SHA256SUMS", "SHA512SUMS"]) rmSync(join(f.dist, name), { force: true });
+    prepare();
+    const good = f.cli(phase);
+    assert.equal(good.status, 0, `${phase}: ${good.stderr}`);
+    for (const [label, apply, pattern] of tamperings) {
+      const undo = apply();
+      // Re-checksummed after the tampering, so the manifests agree with the
+      // altered bytes and only the anchor checks can refuse.
+      if (phase !== "downloaded" && !label.endsWith("missing")) f.sums();
+      const result = f.cli(phase);
+      undo();
+      if (phase !== "downloaded") f.sums();
+      assert.notEqual(result.status, 0, `${phase} accepted: ${label}`);
+      assert.match(result.stderr, pattern, `${phase} ${label}: ${result.stderr}`);
+    }
+  }
+  // Uploaded: the remote copy is checked against the tag blobs, and against
+  // GitHub's digests; a remote anchor that differs from the tag commit's blob
+  // is refused even when GitHub's digest and the manifests agree with it.
+  const { signed } = expectedInventory(f.version);
+  const remote = join(f.root, "remote");
+  mkdirSync(remote);
+  f.sums();
+  for (const name of signed) {
+    if (existsSyncLocal(join(f.dist, name))) copyFileSync(join(f.dist, name), join(remote, name));
+    else writeFileSync(join(remote, name), `${name}\n`);
+  }
+  f.metadata(signed, remote);
+  const env = { SYSPRIMS_REMOTE_ASSET_DIR: remote };
+  const emptyLocal = join(f.root, "empty-local");
+  mkdirSync(emptyLocal);
+  const uploaded = () => spawnSync("node", ["scripts/release-integrity.mjs", "uploaded", "--root", f.root, "--dir", emptyLocal], {
+    encoding: "utf8", env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${f.version}`, SYSPRIMS_RELEASE_METADATA_FILE: join(f.root, "metadata.json"), ...env, RELEASE_TAG: undefined },
+  });
+  assert.equal(uploaded().status, 0, uploaded().stderr);
+  for (const [, name] of ANCHORS) {
+    const file = join(remote, name);
+    const saved = readFileSync(file);
+    writeFileSync(file, Buffer.concat([saved, Buffer.from("x")]));
+    const remoteManifest = (algorithm) => expectedInventory(f.version).base.map((n) => `${hash(readFileSync(join(remote, n)), algorithm)}  ${n}`).join("\n") + "\n";
+    writeFileSync(join(remote, "SHA256SUMS"), remoteManifest("sha256"));
+    writeFileSync(join(remote, "SHA512SUMS"), remoteManifest("sha512"));
+    f.metadata(signed, remote);
+    const result = uploaded();
+    assert.notEqual(result.status, 0, `uploaded accepted an altered ${name}`);
+    assert.match(result.stderr, /does not match the immutable tag-tree blob/, result.stderr);
+    writeFileSync(file, saved);
+    writeFileSync(join(remote, "SHA256SUMS"), remoteManifest("sha256"));
+    writeFileSync(join(remote, "SHA512SUMS"), remoteManifest("sha512"));
+    // GitHub's digest disagreeing with the downloaded bytes is refused too.
+    f.metadata(signed, remote);
+    const metadataPath = join(f.root, "metadata.json");
+    const doc = JSON.parse(readFileSync(metadataPath, "utf8"));
+    doc.assets.find((asset) => asset.name === name).digest = `sha256:${"0".repeat(64)}`;
+    writeFileSync(metadataPath, JSON.stringify(doc));
+    const digest = uploaded();
+    assert.notEqual(digest.status, 0);
+    assert.match(digest.stderr, new RegExp(`GitHub digest mismatch for ${name.replace(".", "\\.")}`));
+    f.metadata(signed, remote);
+  }
+  // The signed phase uses the same check (its other steps run the signature
+  // scripts, exercised in their own suites).
+  assert.match(readFileSync("scripts/release-integrity.mjs", "utf8"), /function signed\([^)]*\) \{[\s\S]*?verifyTaggedAssets\(root, directory, version\)/);
+  assert.doesNotThrow(() => verifyTaggedAssets(f.root, f.dist, f.version));
+  // The tag-blob check itself refuses a symlinked anchor, even one whose
+  // target holds exactly the tag's bytes (the inventory check would also
+  // refuse it; this pins the property on its own).
+  for (const [, name] of ANCHORS) {
+    const file = join(f.dist, name);
+    const saved = readFileSync(file);
+    const target = join(f.root, `same-bytes-${name}`);
+    writeFileSync(target, saved);
+    unlinkSync(file);
+    symlinkSync(target, file);
+    assert.throws(() => verifyTaggedAssets(f.root, f.dist, f.version), /missing or not a regular file/, name);
+    unlinkSync(file);
+    writeFileSync(file, saved);
+  }
+});
+
+test("the anchors are staged before the checksums and uploaded with the release", () => {
+  const makefile = readFileSync("Makefile", "utf8");
+  const release = makefile.slice(makefile.indexOf("\nrelease: "), makefile.indexOf("\n\n", makefile.indexOf("\nrelease: ")));
+  const order = [...release.matchAll(/\$\(MAKE\) (release-[a-z-]+)/g)].map((m) => m[1]);
+  assert.ok(order.includes("release-stage-anchors"), order.join(" "));
+  assert.ok(order.indexOf("release-stage-anchors") < order.indexOf("release-checksums"), order.join(" "));
+  assert.match(makefile, /^release-stage-anchors: release-require-tag [^\n]*\n\t\.\/scripts\/release-stage-public\.sh --anchors /m);
+  // The upload script, run against a stub gh, uploads both anchors.
+  const dir = mkdtempSync(join(tmpdir(), "sysprims-upload-"));
+  roots.push(dir);
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >>"${join(dir, "gh.log")}"\n`, { mode: 0o755 });
+  const dist = join(dir, "dist");
+  mkdirSync(dist);
+  for (const name of ["SHA256SUMS", "SHA256SUMS.minisig", "SHA512SUMS", "SHA512SUMS.minisig", "sysprims-minisign.pub", "SHA256SUMS.asc", "SHA512SUMS.asc", "sysprims-release-signing-key.asc", "release-notes-v1.2.3.md", "expected-fingerprints.txt", "expected-fingerprints.ndjson"]) writeFileSync(join(dist, name), "x\n");
+  const result = spawnSync("bash", ["scripts/upload-release-assets.sh", "v1.2.3", dist], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const upload = readFileSync(join(dir, "gh.log"), "utf8").split("\n").find((line) => line.startsWith("release upload"));
+  for (const [, name] of ANCHORS) assert.ok(upload.split(" ").includes(name), upload);
+  for (const [, name] of ANCHORS) {
+    rmSync(join(dist, name));
+    const missing = spawnSync("bash", ["scripts/upload-release-assets.sh", "v1.2.3", dist], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    assert.notEqual(missing.status, 0, `upload ran without ${name}`);
+    writeFileSync(join(dist, name), "x\n");
+  }
 });

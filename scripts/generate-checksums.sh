@@ -15,9 +15,22 @@ TAG=${2:-${SYSPRIMS_RELEASE_TAG:-}}
 VERSION=${TAG#v}
 cd "$DIR"
 
+# The notes and the fingerprint anchors come from the tagged commit, staged
+# before the manifests so the signed checksums cover them.
+for required in "release-notes-${TAG}.md" expected-fingerprints.txt expected-fingerprints.ndjson; do
+	if [ ! -f "$required" ] || [ -L "$required" ]; then
+		echo "Error: $required not in $DIR" >&2
+		echo "Copy notes and anchors before checksums:" >&2
+		echo "  make release-notes" >&2
+		echo "  make release-stage-anchors" >&2
+		exit 1
+	fi
+done
+
 EXPECTED=(
 	LICENSE-APACHE LICENSE-MIT
 	"release-notes-${TAG}.md"
+	expected-fingerprints.txt expected-fingerprints.ndjson
 	"sbom-${VERSION}.cdx.json"
 	"sysprims-${VERSION}-darwin-amd64.tar.gz"
 	"sysprims-${VERSION}-darwin-arm64.tar.gz"

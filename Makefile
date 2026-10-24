@@ -12,6 +12,7 @@
 
 
 .PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check
+.PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: check-windows check-windows-msvc check-windows-gnu
@@ -19,6 +20,7 @@
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
 .PHONY: release release-check release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
+.PHONY: release-stage-anchors release-fetch-anchors
 .PHONY: release-verify-keys release-notes release-upload release-preflight
 .PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
 .PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
@@ -27,7 +29,9 @@
 .PHONY: version-patch version-minor version-major version-set version-sync
 .PHONY: version-check version-tooling-test
 
-.NOTPARALLEL: release release-download release-notes release-checksums release-sign release-export-keys release-verify release-upload release-publish
+# Every target that reads the release tag runs its prerequisites serially, so
+# release-require-tag (always first) finishes before any other prerequisite.
+.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-tag release-upload release-verify release-verify-remote-tag release-verify-signatures release-verify-tag
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -107,11 +111,25 @@ help: ## Show available targets
 	@echo "  release-download      Download CI artifacts from GitHub"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
-	@echo "  release-export-keys   Export public signing keys"
+	@echo "  release-stage-anchors Stage the fingerprint anchors (release-fetch-anchors: pull, verified)"
+	@echo "  release-export-keys   Stage committed public keys from the tagged commit"
 	@echo "  release-verify        Verify checksums, signatures, and keys"
 	@echo "  release-upload        Upload signed artifacts to GitHub"
 	@echo "  release-publish       Verify remote state and publish the draft"
 	@echo "  release               Full release workflow (all of the above)"
+	@echo ""
+	@echo "Tag ceremony (maintainer; SYSPRIMS_RELEASE_TAG=vX.Y.Z required):"
+	@echo "  release-prepare-tag-message  Prepare per-tag annotation messages"
+	@echo "  release-tag                  Create every release tag, signed, local only"
+	@echo "  release-verify-tag           Verify local tags against the committed pin"
+	@echo "  release-push-tag             Push the verified tags atomically"
+	@echo "  release-verify-remote-tag    Verify the pushed tags"
+	@echo "  release-export-pin           One time: write the public pins (no overwrite)"
+	@echo "  release-validate-pin         Validate the committed pins and anchors"
+	@echo "  release-insert-anchors       Derive fingerprint anchors with decernor"
+	@echo "  release-crates-dry-run       Per-crate publish dry run from the release tag"
+	@echo "  release-crates-publish       Cued crates.io upload, one crate at a time"
+	@echo "  release-tooling-test         Synthetic release-tooling controls"
 	@echo ""
 	@echo "Version management:"
 	@echo "  version         Print current version"
@@ -659,14 +677,75 @@ version: ## Print current version
 
 DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
-# Canonical releases use the repository tag, not the path-prefixed Go module tag.
-SYSPRIMS_RELEASE_TAG ?= v$(VERSION)
 
-# Signing keys (set these environment variables)
+# The release tag is an explicit input (SYSPRIMS_RELEASE_TAG=vX.Y.Z). It is
+# never derived from VERSION, git describe, or the branch. Every release target
+# that reads the tag, directly or through a prerequisite or a script, lists
+# release-require-tag as its first prerequisite, so a bare RELEASE_TAG from any
+# origin (set or empty) or a missing SYSPRIMS_RELEASE_TAG fails before any other
+# prerequisite or recipe runs. RELEASE_TAG_FREE_TARGETS names the release
+# targets that read no tag; scripts/release-tag-controls.test.sh checks both
+# lists against the recipes. Release targets run serially (.NOTPARALLEL).
+RELEASE_TAG_ORIGIN := $(origin RELEASE_TAG)
+# The anchor-fetch trust opt-in is honoured only from the make command line.
+ANCHORS_TRUST_ORIGIN := $(origin ANCHORS_TRUST_LOCAL_TAG)
+RELEASE_TAG_FREE_TARGETS := release-clean release-tooling-test release-plan-check release-check \
+	release-crates-list release-export-pin release-validate-pin release-insert-anchors \
+	release-verify-checksums release-verify-keys release-require-tag release-guard-provenance
+
+release-require-tag:
+	@if [ "$(RELEASE_TAG_ORIGIN)" != "undefined" ]; then \
+		echo "error: RELEASE_TAG is not accepted; set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; exit 1; fi
+	@if [ -z "$(SYSPRIMS_RELEASE_TAG)" ]; then \
+		echo "error: SYSPRIMS_RELEASE_TAG=vX.Y.Z is required"; exit 1; fi
+
+# Signing keys (operator environment). The minisign public pin is the committed
+# docs/security/sysprims-minisign.pub, read from the tagged commit; there is no
+# environment override for it.
 SYSPRIMS_MINISIGN_KEY ?=
-SYSPRIMS_MINISIGN_PUB ?=
 SYSPRIMS_PGP_KEY_ID ?=
 SYSPRIMS_GPG_HOMEDIR ?=
+
+# Tag ceremony and public identity (maintainer, local). Inputs:
+#   SYSPRIMS_RELEASE_TAG      vX.Y.Z (explicit; never derived)
+#   SYSPRIMS_TAG_MESSAGE_DIR  per-release message directory ending in the tag
+#   SYSPRIMS_DECERNOR_BIN     absolute path to decernor >= 0.1.8 (no fallback)
+#   SYSPRIMS_TAGGER_NAME/EMAIL, SYSPRIMS_PGP_KEY_ID (<subkey>!), SYSPRIMS_GPG_HOMEDIR
+release-prepare-tag-message: release-require-tag ## Prepare the per-tag annotation messages (outside the repo)
+	./scripts/release-tag-operator.sh prepare-message
+
+release-tag: release-require-tag ## Create every release tag, signed and local only
+	./scripts/release-tag-operator.sh local-tag
+
+release-push-tag: release-require-tag ## Push the verified release tags atomically, then verify them
+	./scripts/release-tag-operator.sh remote-push
+
+release-verify-tag: release-require-tag ## Verify the local release tags against the committed pin
+	./scripts/release-verify-tag.sh
+
+release-verify-remote-tag: release-require-tag ## Verify the pushed release tags against the committed pin
+	./scripts/release-verify-remote-tag.sh
+
+release-export-pin: ## One time: write the public pins for review (refuses overwrite)
+	./scripts/release-export-pin.sh
+
+release-validate-pin: ## Validate the committed public pins and anchors
+	./scripts/release-validate-pin.sh
+
+release-insert-anchors: ## Derive the fingerprint anchors with decernor (refuses overwrite)
+	./scripts/release-insert-anchors.sh
+
+release-crates-list: ## List the published crates in registry order
+	@python3 scripts/release-crates.py list
+
+release-crates-dry-run: release-require-tag ## Per-crate cargo publish --dry-run from the detached release tag
+	./scripts/release-crates-dry-run.sh
+
+release-crates-publish: release-require-tag ## Maintainer-cued crates.io upload, one crate at a time
+	./scripts/release-crates-dry-run.sh --publish
+
+release-tooling-test: ## Synthetic release-tooling controls (no operator keys)
+	./scripts/release-tooling-test.sh
 
 release-clean: ## Remove dist/release contents
 	@echo "Cleaning release directory..."
@@ -678,18 +757,24 @@ dist-local-clean: ## Remove dist/local contents
 	rm -rf $(DIST_LOCAL)
 	@echo "[ok] Local dist directory cleaned"
 
-release-download: release-guard-tag-version-post release-guard-provenance ## Download release assets from GitHub
-	@if [ -z "$(SYSPRIMS_RELEASE_TAG)" ] || [ "$(SYSPRIMS_RELEASE_TAG)" = "v" ]; then \
-		echo "Error: No release tag found. Set SYSPRIMS_RELEASE_TAG=vX.Y.Z"; \
-		exit 1; \
-	fi
+release-download: release-require-tag release-guard-tag-version-post release-guard-provenance ## Download release assets from GitHub
 	./scripts/download-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
-release-checksums: release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
+release-stage-anchors: release-require-tag release-guard-tag-version-post ## Stage the fingerprint anchors from the tagged commit (before checksums)
+	./scripts/release-stage-public.sh --anchors $(DIST_RELEASE)
+
+release-fetch-anchors: release-require-tag ## Fetch a published release's verified anchors into ANCHORS_DIR (needs SYSPRIMS_DECERNOR_BIN, or ANCHORS_TRUST_LOCAL_TAG=1 after release-verify-remote-tag)
+	@test -n "$(ANCHORS_DIR)" || { echo "error: ANCHORS_DIR=<new or empty directory> is required"; exit 1; }
+	@case "$(ANCHORS_TRUST_ORIGIN)" in undefined|"command line") ;; *) \
+		echo "error: ANCHORS_TRUST_LOCAL_TAG is accepted only on the make command line, for one run (make release-fetch-anchors ... ANCHORS_TRUST_LOCAL_TAG=1)"; exit 1;; esac
+	env -u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_FETCH_TRUST_LOCAL="$(ANCHORS_TRUST_LOCAL_TAG)" \
+		./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
+
+release-checksums: release-require-tag release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)
 	@$(MAKE) release-guard-checksummed --silent
 
-release-sign: release-require-checksummed ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
+release-sign: release-require-tag release-require-checksummed ## Sign checksum manifests (requires SYSPRIMS_MINISIGN_KEY)
 	@if [ -z "$(SYSPRIMS_MINISIGN_KEY)" ]; then \
 		echo "Error: SYSPRIMS_MINISIGN_KEY not set"; \
 		echo ""; \
@@ -702,25 +787,21 @@ release-sign: release-require-checksummed ## Sign checksum manifests (requires S
 	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
 	./scripts/sign-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 
-release-export-keys: release-require-checksummed ## Export public signing keys
-	SYSPRIMS_MINISIGN_KEY=$(SYSPRIMS_MINISIGN_KEY) \
-	SYSPRIMS_MINISIGN_PUB=$(SYSPRIMS_MINISIGN_PUB) \
-	SYSPRIMS_PGP_KEY_ID=$(SYSPRIMS_PGP_KEY_ID) \
-	SYSPRIMS_GPG_HOMEDIR=$(SYSPRIMS_GPG_HOMEDIR) \
-	./scripts/export-release-keys.sh $(DIST_RELEASE)
+release-export-keys: release-require-tag release-require-checksummed release-guard-tag-version-post ## Stage committed public keys from the tagged commit
+	./scripts/release-stage-public.sh $(DIST_RELEASE)
 
 release-verify-checksums: ## Verify checksums match artifacts
 	@echo "Verifying checksums..."
 	cd $(DIST_RELEASE) && shasum -a 256 -c SHA256SUMS
 	@echo "[ok] Checksums verified"
 
-release-verify-signatures: ## Verify minisign/PGP signatures
+release-verify-signatures: release-require-tag ## Verify minisign/PGP signatures
 	./scripts/verify-signatures.sh $(DIST_RELEASE)
 
 release-verify-keys: ## Verify exported keys are public-only
 	./scripts/verify-public-keys.sh $(DIST_RELEASE)
 
-release-verify: release-guard-signed ## Run all release verification
+release-verify: release-require-tag release-guard-signed ## Run all release verification
 	@echo "[ok] All release verifications passed"
 
 release-check: version-check ## Version consistency + package check (does not publish)
@@ -735,7 +816,7 @@ release-check: version-check ## Version consistency + package check (does not pu
 	@echo "  ✓ Package check passed"
 	@echo "  ✓ cargo publish was not run"
 
-release-notes: ## Copy release notes to dist
+release-notes: release-require-tag ## Copy release notes to dist
 	@src="docs/releases/$(SYSPRIMS_RELEASE_TAG).md"; \
 	if [ -f "$$src" ]; then \
 		cp "$$src" "$(DIST_RELEASE)/release-notes-$(SYSPRIMS_RELEASE_TAG).md"; \
@@ -746,14 +827,14 @@ release-notes: ## Copy release notes to dist
 	fi
 	@$(MAKE) release-guard-downloaded --silent
 
-release-upload: release-guard-tag-version-post release-guard-provenance release-guard-signed ## Upload signed artifacts to GitHub release
+release-upload: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed ## Upload signed artifacts to GitHub release
 	./scripts/upload-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
 	@$(MAKE) release-guard-uploaded --silent
 
-release-publish: release-guard-tag-version-post release-guard-provenance release-guard-remote ## Publish the verified draft release
+release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-remote ## Publish the verified draft release
 	@node scripts/release-integrity.mjs publish --dir $(DIST_RELEASE)
 
-release-preflight: release-plan-check version-check ## Verify all pre-tag requirements (REQUIRED before tagging)
+release-preflight: release-require-tag release-plan-check version-check ## Verify all pre-tag requirements (REQUIRED before tagging)
 	@echo "Running release preflight checks..."
 	@echo ""
 	@# Check 1: Working tree must be clean
@@ -794,12 +875,13 @@ release-preflight: release-plan-check version-check ## Verify all pre-tag requir
 	echo "[ok] Local and remote are in sync"; \
 	echo ""; \
 	echo "[ok] All preflight checks passed - ready to tag"; \
-	echo "    Next: git tag \"v$$version_file\" -m \"Release $$version_file\""
+	echo "    Next: make release-prepare-tag-message, then make release-tag (every tag in the set, signed)"
 
-release: ## Prepare and upload signed assets; release remains draft
+release: release-require-tag ## Prepare and upload signed assets; release remains draft
 	@$(MAKE) release-clean
 	@$(MAKE) release-download
 	@$(MAKE) release-notes
+	@$(MAKE) release-stage-anchors
 	@$(MAKE) release-checksums
 	@$(MAKE) release-sign
 	@$(MAKE) release-export-keys
@@ -851,12 +933,12 @@ version-tooling-test: ## Run isolated version and tag-guard controls
 	@node --test scripts/version-pack.test.mjs scripts/release-integrity.test.mjs scripts/npm-release.test.mjs scripts/generate-go-prebuilt-manifest.test.mjs
 
 MODE ?= pre-tag
-release-guard-tag-version: ## Validate the explicit release tag against VERSION
+release-guard-tag-version: release-require-tag ## Validate the explicit release tag against VERSION
 	@SYSPRIMS_TAG_GUARD_MODE="$(MODE)" \
 		SYSPRIMS_RELEASE_TAG="$(SYSPRIMS_RELEASE_TAG)" \
 		bash scripts/release-guard-tag-version.sh
 
-release-guard-tag-version-post: ## Require exact annotated canonical/Go tags on HEAD
+release-guard-tag-version-post: release-require-tag ## Require exact annotated canonical/Go tags on HEAD
 	@SYSPRIMS_TAG_GUARD_MODE=post-tag \
 		SYSPRIMS_RELEASE_TAG="$(SYSPRIMS_RELEASE_TAG)" \
 		bash scripts/release-guard-tag-version.sh
@@ -864,20 +946,20 @@ release-guard-tag-version-post: ## Require exact annotated canonical/Go tags on 
 release-guard-provenance: ## Require attribution and bind stored tag messages when tags exist
 	@node scripts/release-integrity.mjs provenance
 
-release-guard-downloaded: ## Verify the exact downloaded draft payload inventory
+release-guard-downloaded: release-require-tag ## Verify the exact downloaded draft payload inventory
 	@node scripts/release-integrity.mjs downloaded --dir $(DIST_RELEASE)
 
-release-guard-checksummed: ## Verify both checksum manifests cover the exact payload
+release-guard-checksummed: release-require-tag ## Verify both checksum manifests cover the exact payload
 	@node scripts/release-integrity.mjs checksummed --dir $(DIST_RELEASE)
 
-release-require-checksummed: ## Internal prerequisite allowing known later-phase files during recovery
+release-require-checksummed: release-require-tag ## Internal prerequisite allowing known later-phase files during recovery
 	@node scripts/release-integrity.mjs require-checksummed --dir $(DIST_RELEASE)
 
-release-guard-signed: ## Verify exact signatures, public keys, and any prior remote assets
+release-guard-signed: release-require-tag ## Verify exact signatures, public keys, and any prior remote assets
 	@node scripts/release-integrity.mjs signed --dir $(DIST_RELEASE)
 
-release-guard-uploaded: ## Verify a fresh copy of the complete remote draft
+release-guard-uploaded: release-require-tag ## Verify a fresh copy of the complete remote draft
 	@node scripts/release-integrity.mjs uploaded --dir $(DIST_RELEASE)
 
-release-guard-remote: ## Verify remote registries/modules and native runtime before publish
+release-guard-remote: release-require-tag release-guard-tag-version-post ## Verify remote registries/modules and native runtime before publish
 	@node scripts/release-integrity.mjs remote --dir $(DIST_RELEASE)
