@@ -1,6 +1,6 @@
 # Release Checklist
 
-This document walks maintainers through the build/sign/upload flow for each sysprims release.
+This document walks maintainers through the build/sign/publish flow for each sysprims release.
 
 ## Prerequisites
 
@@ -247,9 +247,10 @@ the recurrence module is present), keep release execution in this order:
 1. Verify the tag-triggered release workflow and optional validation workflow.
 2. Publish the six crates.io library crates in dependency order with
    `make release-crates-publish` (from this detached tag checkout).
-3. Download, copy tagged notes, checksum, sign, verify, and upload the GitHub
-   release assets (`make release-download` / `release-sign` / `release-upload`
-   run from this detached tag checkout). Upload leaves the release as a draft.
+3. Fetch the CI payload, copy tagged notes, checksum, sign, verify, and create
+   the draft GitHub release with every asset (`make release-download` /
+   `release-sign` / `release-create-draft` run from this detached tag
+   checkout). The release stays a draft.
 4. When the plan marks TypeScript `publish`, run N-API prebuilds and resumable
    npm publication from the verified tag while the GitHub release stays draft.
 5. Run `make release-guard-remote`, then use the separately maintainer-cued
@@ -268,7 +269,10 @@ next step.
   VERSION=$(cat VERSION)
   gh workflow run "Validate Release" -f tag="v${VERSION}"
   ```
-- [ ] Check draft release has all expected artifacts:
+- [ ] Note the Release workflow run id and successful attempt for the tag
+  (`gh run list --workflow release.yml --branch vX.Y.Z`); `make release-download`
+  needs both. The workflow has read-only permissions and creates no release.
+- [ ] Check the run's `release-packages-vX.Y.Z` artifact has all expected files:
   - Eight CLI archives (darwin-amd64, darwin-arm64, linux-amd64,
     linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64,
     windows-arm64)
@@ -384,26 +388,32 @@ on HEAD.
    make release-clean
    ```
 
-2. **Download artifacts from GitHub draft release**
+2. **Fetch the CI payload artifact**
 
    ```bash
-   make release-download
+   make release-download RELEASE_RUN_ID=<run> RELEASE_RUN_ATTEMPT=<attempt>
    ```
 
-3. **Copy and verify tagged release notes**
+   Verifies the pushed tags, requires the named attempt to be a successful
+   tag-push Release run on the tagged commit, binds to the single
+   `release-packages-vX.Y.Z` artifact by id and digest, and records each file's
+   SHA-256 in `dist/release.anchor`. Later phases check the staged CI files
+   against that record.
+
+3. **Copy the tagged release notes and stage the fingerprint anchors**
 
    ```bash
    make release-notes
+   make release-stage-anchors
    make release-guard-downloaded
    ```
 
    The copied note must be byte-identical to `docs/releases/vX.Y.Z.md` in the
    immutable tag tree. It is part of both signed checksum manifests.
 
-4. **Stage the fingerprint anchors, then generate exact checksum manifests**
+4. **Generate exact checksum manifests**
 
    ```bash
-   make release-stage-anchors
    make release-checksums
    ```
 
@@ -429,7 +439,7 @@ on HEAD.
 
    Produces: `sysprims-minisign.pub`, `sysprims-release-signing-key.asc`
 
-7. **Verify everything before upload**
+7. **Verify everything before creating the draft**
 
    ```bash
    make release-verify
@@ -440,15 +450,17 @@ on HEAD.
    - Signatures verify correctly
    - Exported keys are public-only (no secret key material)
 
-8. **Upload signed artifacts to the draft GitHub release**
+8. **Create the draft GitHub release with every signed asset**
 
    ```bash
-   make release-upload
+   make release-create-draft
    ```
 
-   > **Note:** Uses `--clobber` to overwrite identical/reviewed assets. The
-   > uploaded guard downloads a fresh copy and requires exact digest parity.
-   > The release remains a draft.
+   > **Note:** One `gh release create --verify-tag --draft` call with the
+   > complete signed set, after re-verifying the pushed tags against the
+   > fetched payload's tag object. An existing release refuses; assets are
+   > never replaced. The uploaded guard then downloads a fresh copy and
+   > requires exact digest parity. The release remains a draft.
 
 9. **Keep the GitHub release draft** while completing every planned registry
    publication below. Do not invoke `gh release edit --draft=false` directly.
@@ -551,7 +563,7 @@ git push origin main
 | `make release-preflight`   | **REQUIRED**: Verify pre-tag requirements (tree, checks, version, notes, sync) |
 | `make release-clean`       | Remove dist/release contents                                                   |
 | `make release-plan-check`  | Validate the machine-readable per-cut surface plan                             |
-| `make release-download`    | Download the exact CI payload from the draft                                   |
+| `make release-download`    | Fetch the exact CI payload artifact (named run and attempt)                    |
 | `make release-stage-anchors` | Stage the fingerprint anchors from the tagged commit (before checksums)      |
 | `make release-checksums`   | Generate SHA256SUMS and SHA512SUMS                                             |
 | `make release-sign`        | Sign checksums with minisign + PGP                                             |
@@ -559,10 +571,10 @@ git push origin main
 | `make release-verify`      | Verify checksums, signatures, and keys                                         |
 | `make release-notes`       | Copy release notes to dist                                                     |
 | `make release-fetch-anchors` | Fetch a published release's anchors, verified, into `ANCHORS_DIR` (never `keys/`); needs `SYSPRIMS_DECERNOR_BIN`, or `ANCHORS_TRUST_LOCAL_TAG=1` as a command-line argument (never the environment) after `make release-verify-remote-tag` |
-| `make release-upload`      | Upload signed artifacts; keep the GitHub release draft                         |
+| `make release-create-draft`| Create the draft with every signed asset; never replaces                       |
 | `make release-guard-remote`| Verify the fresh remote draft, registries/modules, and native runtime           |
 | `make release-publish`     | Sole maintainer-cued draft → public promotion                                  |
-| `make release`             | Full preparation workflow (clean → upload; remains draft)                      |
+| `make release`             | Full preparation workflow (clean → draft; remains draft)                       |
 | `make release-prepare-tag-message` | Prepare the per-tag annotation messages                                |
 | `make release-tag`         | Create every release tag, signed, local only                                   |
 | `make release-verify-tag`  | Verify local tags against the committed pin                                    |
@@ -593,10 +605,12 @@ mkdir -p docs/releases
 
 ### CI workflow failed
 
-1. Check GitHub Actions logs
-2. Fix the issue on main
-3. Delete the tag and release draft
-4. Start over from step 1
+1. Check GitHub Actions logs.
+2. If the failure is transient, re-run the failed jobs of the same Release
+   workflow run, then fetch with the new attempt number
+   (`make release-download RELEASE_RUN_ID=<run> RELEASE_RUN_ATTEMPT=<new>`).
+3. If the source needs a fix, fix it on main and release a new version. A
+   pushed release tag is never deleted, moved, or reused.
 
 ### Signature verification failed
 

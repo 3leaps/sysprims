@@ -31,7 +31,9 @@ rollback() {
 }
 trap rollback EXIT
 for tag in "${tags[@]}"; do
-	git tag -s -a --cleanup=verbatim -u "$SYSPRIMS_PGP_KEY_ID" -F "$(tag_message_file "$tag")" "$tag" HEAD
+	# OpenPGP regardless of the host's gpg.format; the operator's gpg.program
+	# (and so their agent and card) is kept.
+	git -c gpg.format=openpgp tag -s -a --cleanup=verbatim -u "$SYSPRIMS_PGP_KEY_ID" -F "$(tag_message_file "$tag")" "$tag" HEAD
 	created+=("$tag")
 done
 "$tag_root/scripts/release-verify-tag.sh"

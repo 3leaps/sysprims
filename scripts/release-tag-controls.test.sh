@@ -80,7 +80,7 @@ fi
 # scripts they run (scripts/release-make-guard.py); each must start with
 # release-require-tag and none may be listed as tag-free.
 guarded="$(python3 "$fixture_root/scripts/release-make-guard.py" "$fixture_root")"
-for expected in release release-download release-export-keys release-upload release-publish release-preflight \
+for expected in release release-download release-export-keys release-create-draft release-publish release-preflight \
 	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-crates-publish release-guard-signed; do
 	grep -qx "$expected" <<<"$guarded" || {
 		echo "error: the guard analysis does not see $expected as tag-reading" >&2
@@ -147,7 +147,7 @@ shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-
 for target in release-guard-downloaded release-guard-checksummed release-require-checksummed \
 	release-guard-signed release-guard-uploaded release-guard-remote release-publish \
 	release-download release-checksums release-sign release-export-keys release-notes \
-	release-upload release-verify release-verify-signatures release-crates-dry-run release-crates-publish \
+	release-create-draft release-verify release-verify-signatures release-crates-dry-run release-crates-publish \
 	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-prepare-tag-message \
 	release-guard-tag-version release-guard-tag-version-post release-preflight release; do
 	for origin in bare-only missing; do
@@ -320,4 +320,60 @@ expect_fail_with 'committed tagger identity' call tag_identity SYSPRIMS_TAGGER_N
 call tag_origin
 git -C "$repo" remote set-url origin https://example.invalid/3leaps/sysprims.git
 expect_fail_with 'origin must be' call tag_origin
+# The full `make release` sequence, with every script and node replaced by a
+# recorder (node also records its integrity command): the tagged notes and the
+# anchors are staged before any phase guard reads the payload, and the draft is
+# created last, after the signed guard.
+# The integrity recorder notes whether the tagged notes were already staged.
+printf '#!/usr/bin/env bash\nif [[ "$1" == */release-integrity.mjs ]]; then n=nonotes; [[ -f %q ]] && n=notes; echo "integrity:$2:$n" >>%q; else echo node >>%q; fi\n' \
+	"$shim/dist/release/release-notes-v1.2.3.md" "$sentinel" "$sentinel" >"$fixture_dir/node"
+chmod +x "$fixture_dir/node"
+mkdir -p "$shim/docs/releases"
+printf 'notes\n' >"$shim/docs/releases/v1.2.3.md"
+rm -f "$sentinel"
+# The fetch recorder creates the staging directory, as the real fetch does.
+cp "$shim/scripts/release-fetch-ci-artifacts.sh" "$fixture_dir/fetch-recorder"
+printf '#!/usr/bin/env bash\necho release-fetch-ci-artifacts.sh >>%q\nmkdir -p "$1"\n' "$sentinel" >"$shim/scripts/release-fetch-ci-artifacts.sh"
+shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 SYSPRIMS_MINISIGN_KEY=/nonexistent make -s -C "$shim" release >/dev/null
+if grep -E '^integrity:(downloaded|checksummed|require-checksummed|signed|uploaded):nonotes$' "$sentinel"; then
+	echo 'error: make release ran a payload guard before the tagged notes were staged' >&2
+	exit 1
+fi
+order="$(sed -E 's/^(integrity:[a-z-]+):(no)?notes$/\1/' "$sentinel" | grep -v -E '^(node|integrity:provenance|release-guard-tag-version\.sh)$' | paste -sd' ' -)"
+position() {
+	local i=0 word
+	for word in $order; do
+		i=$((i + 1))
+		[[ "$word" == "$1" ]] && {
+			echo "$i"
+			return
+		}
+	done
+	echo 0
+}
+for step in release-fetch-ci-artifacts.sh release-stage-public.sh integrity:downloaded generate-checksums.sh \
+	sign-release-assets.sh integrity:signed release-create-draft.sh integrity:uploaded; do
+	[[ "$(position "$step")" -gt 0 ]] || {
+		echo "error: make release never ran $step: $order" >&2
+		exit 1
+	}
+done
+before() { [[ "$(position "$1")" -lt "$(position "$2")" ]] || {
+	echo "error: make release ran $2 before $1: $order" >&2
+	exit 1
+}; }
+before release-fetch-ci-artifacts.sh release-stage-public.sh
+before release-stage-public.sh integrity:downloaded
+before integrity:downloaded generate-checksums.sh
+before generate-checksums.sh sign-release-assets.sh
+before integrity:signed release-create-draft.sh
+before release-create-draft.sh integrity:uploaded
+[[ "$(grep -c '^release-create-draft\.sh$' "$sentinel")" == 1 ]]
+cp "$fixture_dir/fetch-recorder" "$shim/scripts/release-fetch-ci-artifacts.sh"
+# release-notes fails when the copy fails (no staging directory).
+rm -rf "$shim/dist"
+expect_fail_with 'release-notes' shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -C "$shim" release-notes
+printf '#!/usr/bin/env bash\necho node >>%q\n' "$sentinel" >"$fixture_dir/node"
+chmod +x "$fixture_dir/node"
+
 echo '[ok] tag input controls passed'

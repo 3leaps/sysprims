@@ -9,6 +9,8 @@ on:
         type: string
 env:
   CARGO_TERM_COLOR: always
+permissions:
+  contents: read
 jobs:
   validate:
     name: Validate release tag and versions
@@ -137,7 +139,7 @@ jobs:
           path: bindings/typescript/sysprims/prebuilds/*.node
   build-macos-arm64:
     name: Build macOS arm64 prebuild
-    runs-on: macos-14
+    runs-on: macos-15
     needs: validate
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7

@@ -157,6 +157,8 @@ function taggedAssets(version) {
   return [[`docs/releases/v${version}.md`, `release-notes-v${version}.md`], ...ANCHORS];
 }
 const isTaggedAsset = (version) => (name) => taggedAssets(version).some(([, asset]) => asset === name);
+// Names of the release assets taken from the tagged commit, not from CI.
+export const TAGGED_ASSET_NAMES = (version) => taggedAssets(version).map(([, asset]) => asset);
 
 export function verifyTaggedAssets(root, directory, version) {
   const commit = resolveCommit(root, `refs/tags/v${version}`);
@@ -194,24 +196,65 @@ export function verifyChecksums(directory, base) {
   }
 }
 
-function downloaded(root, directory, version) {
+// The CI payload record written by release-fetch-ci-artifacts.sh beside the
+// staging directory (never inside it, so it is never uploaded). Until the draft
+// exists, the staged CI files are checked against it: same tag object and
+// commit as the verified tag, and each file's bytes as fetched.
+export function readFetchAnchor(root, directory, version) {
+  const path = `${directory}.anchor`;
+  if (!existsSync(path) || lstatSync(path).isSymbolicLink() || !lstatSync(path).isFile()) fail(`missing ${path}; stage the CI payload with make release-download`);
+  const fields = new Map();
+  const files = new Map();
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (!line) continue;
+    const file = /^file=([0-9a-f]{64}) ([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(line);
+    if (file) {
+      if (files.has(file[2])) fail(`${path} lists ${file[2]} twice`);
+      files.set(file[2], file[1]);
+      continue;
+    }
+    const field = /^(tag|object|commit|run|attempt|artifact|digest)=(.+)$/.exec(line);
+    if (!field || fields.has(field[1])) fail(`${path} is malformed`);
+    fields.set(field[1], field[2]);
+  }
   const tag = `v${version}`;
+  if (fields.get("tag") !== tag) fail(`${path} is for ${fields.get("tag")}, expected ${tag}`);
+  const object = resolveObject(root, `refs/tags/${tag}`);
+  if (fields.get("object") !== object) fail(`${path} records tag object ${fields.get("object")}, local ${tag} is ${object}`);
+  if (fields.get("commit") !== resolveCommit(root, `refs/tags/${tag}`)) fail(`${path} records a different commit than ${tag}`);
+  return { fields, files };
+}
+
+function resolveObject(root, ref) {
+  const object = run(root, "git", ["rev-parse", "--verify", "--quiet", ref]).trim();
+  if (!/^[0-9a-f]{40}$/.test(object)) fail(`cannot resolve ${ref}`);
+  return object;
+}
+
+// The CI-built files (everything but the tag-blob assets) must be exactly the
+// fetched set and still hold the fetched bytes.
+function verifyFetchedPayload(root, directory, version) {
+  const { files } = readFetchAnchor(root, directory, version);
+  const built = expectedInventory(version).base.filter((name) => !isTaggedAsset(version)(name));
+  const recorded = [...files.keys()].sort();
+  if (JSON.stringify(recorded) !== JSON.stringify(built)) fail(`fetched CI payload does not match the expected inventory; recorded=[${recorded.join(", ")}]`);
+  for (const name of built) {
+    if (sha256(join(directory, name)) !== files.get(name)) fail(`${name} differs from the fetched CI artifact`);
+  }
+}
+
+function downloaded(root, directory, version) {
   const { base } = expectedInventory(version);
   assertInventory(directory, base, "downloaded");
   verifyTaggedAssets(root, directory, version);
-  const metadata = releaseMetadata(root, tag);
-  assertDraft(metadata, tag);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
-  return metadata;
+  verifyFetchedPayload(root, directory, version);
 }
 
 function checksummed(root, directory, version) {
   const { base, checksummed: inventory } = expectedInventory(version);
   assertInventory(directory, inventory, "checksummed");
-  const metadata = releaseMetadata(root, `v${version}`);
-  assertDraft(metadata, `v${version}`);
   verifyTaggedAssets(root, directory, version);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
+  verifyFetchedPayload(root, directory, version);
   verifyChecksums(directory, base);
 }
 
@@ -221,31 +264,19 @@ function requireChecksummed(root, directory, version) {
   const missing = required.filter((name) => !actual.includes(name));
   const extra = actual.filter((name) => !allowed.includes(name));
   if (missing.length || extra.length) fail(`required checksummed state mismatch; missing=[${missing.join(", ")}], extra=[${extra.join(", ")}]`);
-  const metadata = releaseMetadata(root, `v${version}`);
-  assertDraft(metadata, `v${version}`);
   verifyTaggedAssets(root, directory, version);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
+  verifyFetchedPayload(root, directory, version);
   verifyChecksums(directory, base);
 }
 
 function signed(root, directory, version) {
   const { base, signed: inventory } = expectedInventory(version);
   assertInventory(directory, inventory, "signed");
-  const metadata = releaseMetadata(root, `v${version}`);
-  assertDraft(metadata, `v${version}`);
   verifyTaggedAssets(root, directory, version);
-  verifyAssetDigests(directory, metadata.assets, base.filter((name) => !isTaggedAsset(version)(name)));
+  verifyFetchedPayload(root, directory, version);
   verifyChecksums(directory, base);
   run(root, "bash", ["scripts/verify-signatures.sh", directory]);
   run(root, "bash", ["scripts/verify-public-keys.sh", directory]);
-  const remoteNames = new Set((metadata.assets ?? []).map((asset) => asset.name));
-  for (const name of remoteNames) {
-    if (!inventory.includes(name)) fail(`unexpected remote asset before upload: ${name}`);
-  }
-  for (const name of inventory) {
-    if (!remoteNames.has(name)) continue;
-    verifyAssetDigests(directory, metadata.assets, [name]);
-  }
 }
 
 function uploaded(root, directory, version) {
@@ -264,6 +295,10 @@ function uploaded(root, directory, version) {
     verifyAssetDigests(remoteDir, metadata.assets, inventory);
     verifyTaggedAssets(root, remoteDir, version);
     verifyChecksums(remoteDir, expectedInventory(version).base);
+    // The remote copy itself must carry valid signatures from the committed
+    // pins and only public keys; local files are never the evidence here.
+    run(root, "bash", ["scripts/verify-signatures.sh", remoteDir]);
+    run(root, "bash", ["scripts/verify-public-keys.sh", remoteDir]);
     for (const name of inventory) {
       if (existsSync(join(directory, name)) && sha256(join(directory, name)) !== sha256(join(remoteDir, name))) fail(`remote/local mismatch for ${name}`);
     }
