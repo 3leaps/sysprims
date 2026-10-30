@@ -14,6 +14,8 @@ env:
   CBINDGEN_VERSION: '0.29.2'
   GOVULNCHECK_VERSION: 'v1.9.0'
   GOSEC_VERSION: 'v2.29.0'
+permissions:
+  contents: read
 jobs:
   format:
     name: Format Check
@@ -50,12 +52,13 @@ jobs:
         run: |
           python3 -c 'import sys; assert sys.version_info >= (3, 11)'
           command -v gpg git node
-      - name: Install minisign
+      - name: Install minisign and PyYAML
         run: |
           set -euo pipefail
           sudo apt-get update -q
-          sudo apt-get install -y -q minisign
+          sudo apt-get install -y -q minisign python3-yaml
           minisign -v
+          python3 -P -E -c 'import yaml'
       - name: Install checksum-pinned decernor
         run: |
           set -euo pipefail

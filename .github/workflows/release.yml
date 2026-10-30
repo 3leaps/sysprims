@@ -2,13 +2,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Existing release tag to build (for recovery runs)"
-        required: true
-        default: "v0.2.4"
-        type: string
 env:
   CARGO_TERM_COLOR: always
   MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -16,6 +9,8 @@ env:
   # and in go-bindings.yml / ci.yml together when advancing. See
   # docs/standards/platform-support.md for toolchain policy.
   LLVM_MINGW_VERSION: '20260407'
+permissions:
+  contents: read
 jobs:
   # Validate tag matches VERSION file
   #
@@ -31,11 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
           fetch-depth: 0
       - name: Verify and materialize tag messages
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           MESSAGE_DIR="$RUNNER_TEMP/sysprims-tag-messages"
@@ -46,7 +41,7 @@ jobs:
       - name: Guard exact tags and complete version pack
         id: version
         env:
-          SYSPRIMS_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          SYSPRIMS_RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           SYSPRIMS_TAG_GUARD_MODE=post-tag \
@@ -61,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Verify Go module contains prebuilt libs
         run: |
           set -euo pipefail
@@ -105,7 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Install Rust 1.88.0
         uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
         with:
@@ -138,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Build CLI
         run: |
           if [ -n "${{ matrix.glibc }}" ]; then
@@ -261,7 +256,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
@@ -334,7 +329,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-pc-windows-gnu
@@ -385,7 +380,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Install llvm-mingw (aarch64 ucrt, pinned)
         shell: pwsh
         run: |
@@ -460,7 +455,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -497,7 +492,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Generate C header
         run: |
           cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
@@ -517,7 +512,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Generate SBOM (CycloneDX)
         run: |
           syft dir:. -o cyclonedx-json > sbom-${{ needs.validate-version.outputs.version }}.cdx.json
@@ -586,7 +581,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Download all FFI artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
@@ -707,9 +702,12 @@ jobs:
         with:
           name: ffi-bundle
           path: sysprims-ffi-${{ needs.validate-version.outputs.version }}-libs.tar.gz
-  # Create GitHub release with all artifacts (unsigned - signing is manual)
-  publish:
-    name: Publish Release
+  # Assemble the unsigned release payload as one workflow artifact. This workflow
+  # holds read-only permissions and never creates or edits a release: the
+  # maintainer downloads this artifact, signs locally, creates the draft and
+  # publishes after verification.
+  release-packages:
+    name: Release Packages
     runs-on: ubuntu-latest
     needs:
       - validate-version
@@ -723,12 +721,10 @@ jobs:
       - package-ffi-bundle
       - build-windows-msvc
       - verify-ffi-shared-assets
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
       - name: Download all CLI artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
@@ -769,51 +765,12 @@ jobs:
           cp LICENSE-MIT LICENSE-APACHE release/
 
           ls -la release/
-      - name: Create Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+      - name: Upload release packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: release/*
-          generate_release_notes: true
-          draft: true
-          body: |
-            ## sysprims v${{ needs.validate-version.outputs.version }}
-
-            GPL-free, cross-platform process utilities with group-by-default tree management.
-
-            ### Installation
-
-            Download the appropriate archive for your platform and extract.
-
-            ### Verification
-
-            **Note:** This release is unsigned. Signed checksums will be uploaded after manual signing.
-
-            Once signed artifacts are available:
-            ```bash
-            # Verify checksum signature
-            minisign -Vm SHA256SUMS -p sysprims-minisign.pub
-
-            # Verify file checksums
-            shasum -a 256 -c SHA256SUMS
-            ```
-
-            ### Platform Matrix
-
-            | Platform | CLI | FFI | Go Bindings |
-            |----------|-----|-----|-------------|
-            | Linux x64 (glibc 2.17+) | `sysprims-*-linux-amd64.tar.gz` | In FFI bundle | Supported |
-            | Linux x64 (musl) | `sysprims-*-linux-amd64-musl.tar.gz` | In FFI bundle | Supported |
-            | Linux arm64 (glibc 2.17+) | `sysprims-*-linux-arm64.tar.gz` | In FFI bundle | Supported |
-            | Linux arm64 (musl) | `sysprims-*-linux-arm64-musl.tar.gz` | In FFI bundle | Supported |
-            | macOS x64 | `sysprims-*-darwin-amd64.tar.gz` | In FFI bundle | Supported |
-            | macOS arm64 | `sysprims-*-darwin-arm64.tar.gz` | In FFI bundle | Supported |
-            | Windows x64 | `sysprims-*-windows-amd64.zip` | In FFI bundle | Supported |
-            | Windows arm64 | `sysprims-*-windows-arm64.zip` | In FFI bundle | Supported (via llvm-mingw) |
-
-            **Note:** Windows arm64 Go bindings require [llvm-mingw](https://github.com/mstorsjo/llvm-mingw)
-            on the consumer's build host (with `aarch64-w64-mingw32-gcc` on PATH) so cgo can link.
-            Supported since v0.1.16.
+          name: release-packages-${{ github.ref_name }}
+          path: release/*
+          if-no-files-found: error
 
 # NOTE: Go bindings require committed prebuilt libs under
 # bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a so `go get` works.

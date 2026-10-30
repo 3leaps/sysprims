@@ -21,7 +21,7 @@
 .PHONY: release release-check release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-stage-anchors release-fetch-anchors
-.PHONY: release-verify-keys release-notes release-upload release-preflight
+.PHONY: release-verify-keys release-notes release-create-draft release-preflight
 .PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
 .PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
 .PHONY: release-guard-uploaded release-guard-remote release-publish
@@ -31,7 +31,7 @@
 
 # Every target that reads the release tag runs its prerequisites serially, so
 # release-require-tag (always first) finishes before any other prerequisite.
-.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-tag release-upload release-verify release-verify-remote-tag release-verify-signatures release-verify-tag
+.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-tag release-create-draft release-verify release-verify-remote-tag release-verify-signatures release-verify-tag
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -108,13 +108,13 @@ help: ## Show available targets
 	@echo "Release (manual signing workflow):"
 	@echo "  release-preflight     Verify all pre-tag requirements (REQUIRED before tagging)"
 	@echo "  release-check         Version consistency + cargo package (does not publish)"
-	@echo "  release-download      Download CI artifacts from GitHub"
+	@echo "  release-download      Fetch the CI payload artifact (RELEASE_RUN_ID, RELEASE_RUN_ATTEMPT)"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
 	@echo "  release-stage-anchors Stage the fingerprint anchors (release-fetch-anchors: pull, verified)"
 	@echo "  release-export-keys   Stage committed public keys from the tagged commit"
 	@echo "  release-verify        Verify checksums, signatures, and keys"
-	@echo "  release-upload        Upload signed artifacts to GitHub"
+	@echo "  release-create-draft  Create the draft release with every signed asset"
 	@echo "  release-publish       Verify remote state and publish the draft"
 	@echo "  release               Full release workflow (all of the above)"
 	@echo ""
@@ -661,16 +661,17 @@ version: ## Print current version
 # Release Workflow
 # -----------------------------------------------------------------------------
 #
-# Manual signing workflow (CI builds unsigned, human signs locally):
+# Manual signing workflow (CI builds unsigned with read-only permissions; the
+# maintainer verifies, signs, creates the draft and publishes locally):
 #
-# 1. CI creates draft release on tag push
-# 2. Download artifacts: make release-download
-# 3. Copy tagged notes: make release-notes
+# 1. CI uploads the unsigned payload as a workflow artifact on tag push
+# 2. Fetch it: make release-download RELEASE_RUN_ID=<run> RELEASE_RUN_ATTEMPT=<n>
+# 3. Stage tagged notes and anchors: make release-notes release-stage-anchors
 # 4. Generate checksums: make release-checksums
 # 5. Sign checksums: make release-sign (requires SYSPRIMS_MINISIGN_KEY)
 # 6. Export public keys: make release-export-keys
 # 7. Verify everything: make release-verify
-# 8. Upload signed artifacts (draft remains): make release-upload
+# 8. Create the draft with every asset (draft remains): make release-create-draft
 
 DIST_RELEASE := dist/release
 DIST_LOCAL := dist/local
@@ -746,7 +747,7 @@ release-tooling-test: ## Synthetic release-tooling controls (no operator keys)
 
 release-clean: ## Remove dist/release contents
 	@echo "Cleaning release directory..."
-	rm -rf $(DIST_RELEASE)
+	rm -rf $(DIST_RELEASE) $(DIST_RELEASE).anchor
 	@echo "[ok] Release directory cleaned"
 
 dist-local-clean: ## Remove dist/local contents
@@ -754,8 +755,8 @@ dist-local-clean: ## Remove dist/local contents
 	rm -rf $(DIST_LOCAL)
 	@echo "[ok] Local dist directory cleaned"
 
-release-download: release-require-tag release-guard-tag-version-post release-guard-provenance ## Download release assets from GitHub
-	./scripts/download-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
+release-download: release-require-tag release-guard-tag-version-post release-guard-provenance ## Fetch the CI release payload (RELEASE_RUN_ID, RELEASE_RUN_ATTEMPT)
+	./scripts/release-fetch-ci-artifacts.sh $(DIST_RELEASE)
 
 release-stage-anchors: release-require-tag release-guard-tag-version-post ## Stage the fingerprint anchors from the tagged commit (before checksums)
 	./scripts/release-stage-public.sh --anchors $(DIST_RELEASE)
@@ -816,16 +817,15 @@ release-check: version-check ## Version consistency + package check (does not pu
 release-notes: release-require-tag ## Copy release notes to dist
 	@src="docs/releases/$(SYSPRIMS_RELEASE_TAG).md"; \
 	if [ -f "$$src" ]; then \
-		cp "$$src" "$(DIST_RELEASE)/release-notes-$(SYSPRIMS_RELEASE_TAG).md"; \
+		cp "$$src" "$(DIST_RELEASE)/release-notes-$(SYSPRIMS_RELEASE_TAG).md" || exit 1; \
 		echo "[ok] Copied release notes"; \
 	else \
 		echo "[!!] No release notes found at $$src"; \
 		exit 1; \
 	fi
-	@$(MAKE) release-guard-downloaded --silent
 
-release-upload: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed ## Upload signed artifacts to GitHub release
-	./scripts/upload-release-assets.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_RELEASE)
+release-create-draft: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed ## Create the draft release with every signed asset (never replaces)
+	./scripts/release-create-draft.sh $(DIST_RELEASE)
 	@$(MAKE) release-guard-uploaded --silent
 
 release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-remote ## Publish the verified draft release
@@ -874,7 +874,7 @@ release-preflight: release-require-tag release-plan-check version-check ## Verif
 	echo "[ok] All preflight checks passed - ready to tag"; \
 	echo "    Next: make release-prepare-tag-message, then make release-tag (every tag in the set, signed)"
 
-release: release-require-tag ## Prepare and upload signed assets; release remains draft
+release: release-require-tag ## Fetch, sign and create the draft release; it remains unpublished
 	@$(MAKE) release-clean
 	@$(MAKE) release-download
 	@$(MAKE) release-notes
@@ -883,8 +883,8 @@ release: release-require-tag ## Prepare and upload signed assets; release remain
 	@$(MAKE) release-sign
 	@$(MAKE) release-export-keys
 	@$(MAKE) release-verify
-	@$(MAKE) release-upload
-	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) assets uploaded; draft remains unpublished"
+	@$(MAKE) release-create-draft
+	@echo "[ok] Release $(SYSPRIMS_RELEASE_TAG) draft created; it remains unpublished"
 
 # -----------------------------------------------------------------------------
 # Version Management

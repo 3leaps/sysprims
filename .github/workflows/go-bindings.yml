@@ -17,6 +17,8 @@ env:
   # and in release.yml / ci.yml together when advancing. See
   # docs/standards/platform-support.md for toolchain policy.
   LLVM_MINGW_VERSION: '20260407'
+permissions:
+  contents: read
 jobs:
   validate:
     name: Validate Inputs

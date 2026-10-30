@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { existsSync as existsSyncLocal } from "node:fs";
 import { tmpdir } from "node:os";
@@ -227,13 +227,22 @@ test("release leaves are guard-wired and only release-publish can undraft", () =
   assert.match(makefile, /^release-download: release-require-tag release-guard-tag-version-post release-guard-provenance/m);
   assert.match(makefile, /^release-checksums: release-require-tag release-guard-downloaded/m);
   assert.match(makefile, /^release-sign: release-require-tag release-require-checksummed/m);
-  assert.match(makefile, /^release-upload: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed/m);
+  assert.match(makefile, /^release-create-draft: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-signed/m);
   assert.match(makefile, /^release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-remote/m);
   assert.match(makefile, /^release-guard-remote: release-require-tag release-guard-tag-version-post /m);
-  const upload = readFileSync("scripts/upload-release-assets.sh", "utf8");
-  assert.doesNotMatch(upload, /--draft=false/);
+  // Draft creation never publishes and never replaces assets.
+  const draft = readFileSync("scripts/release-create-draft.sh", "utf8");
+  assert.doesNotMatch(draft, /--draft=false|--clobber|release upload|release edit/);
+  assert.match(draft, /gh release create "\$tag" --repo "\$repo" --verify-tag --draft /);
   const implementation = readFileSync("scripts/release-integrity.mjs", "utf8");
   assert.equal((implementation.match(/--draft=false/g) ?? []).length, 1);
+  // Nothing else in the tree uploads, replaces, or undrafts release assets.
+  for (const entry of readdirSync("scripts", { withFileTypes: true })) {
+    const name = entry.name;
+    if (!entry.isFile() || name.includes(".test.") || name === "release-integrity.mjs") continue;
+    const text = readFileSync(join("scripts", name), "utf8");
+    assert.doesNotMatch(text, /gh release (upload|edit)|--clobber|--draft=false/, name);
+  }
 });
 
 test("npm dry-run cannot enter the protected OIDC job", () => {
@@ -461,6 +470,24 @@ function anchorPhaseFixture() {
     writeFileSync(join(dist, "SHA256SUMS"), manifest("sha256"));
     writeFileSync(join(dist, "SHA512SUMS"), manifest("sha512"));
   };
+  // The CI payload record release-download writes beside the staging
+  // directory: the verified tag object and commit, and each fetched file.
+  const tagObject = must(root, "git", ["rev-parse", `refs/tags/v${version}`]).trim();
+  const tagCommit = must(root, "git", ["rev-parse", `v${version}^{commit}`]).trim();
+  const builtNames = base.filter((name) => !/^release-notes-|^expected-fingerprints\./.test(name));
+  const fetchRecord = () => writeFileSync(`${dist}.anchor`, [
+    `tag=v${version}`, `object=${tagObject}`, `commit=${tagCommit}`, "run=11", "attempt=1", "artifact=501", `digest=sha256:${"0".repeat(64)}`,
+    ...builtNames.map((name) => `file=${hash(readFileSync(join(dist, name)))} ${name}`),
+  ].join("\n") + "\n");
+  fetchRecord();
+  // Signature and public-key verification have their own suites; here they
+  // are recorders, so the anchor checks are what is under test and the calls
+  // themselves are observable.
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  const verifyLog = join(root, "verify.log");
+  for (const name of ["verify-signatures.sh", "verify-public-keys.sh"]) {
+    writeFileSync(join(root, "scripts", name), `#!/usr/bin/env bash\necho "${name} $1" >>"${verifyLog}"\n`, { mode: 0o755 });
+  }
   const metadataFile = join(root, "metadata.json");
   // GitHub's view: draft, with digests of the CI-built assets (and, once
   // uploaded, of everything) as they are in `from`.
@@ -471,7 +498,7 @@ function anchorPhaseFixture() {
   const cli = (command, env = {}) => spawnSync("node", ["scripts/release-integrity.mjs", command, "--root", root, "--dir", dist], {
     encoding: "utf8", env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${version}`, SYSPRIMS_RELEASE_METADATA_FILE: metadataFile, ...env, RELEASE_TAG: undefined },
   });
-  return { root, version, dist, base, checksummed, sums, metadata, cli, built: base.filter((name) => !/^release-notes-|^expected-fingerprints\./.test(name)) };
+  return { root, version, dist, base, checksummed, sums, metadata, cli, fetchRecord, verifyLog, built: builtNames };
 }
 
 test("anchors are base payload: in the inventory and the checksum manifests", () => {
@@ -531,7 +558,11 @@ test("every phase requires both anchors equal to the tag commit's blobs", () => 
   const uploaded = () => spawnSync("node", ["scripts/release-integrity.mjs", "uploaded", "--root", f.root, "--dir", emptyLocal], {
     encoding: "utf8", env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${f.version}`, SYSPRIMS_RELEASE_METADATA_FILE: join(f.root, "metadata.json"), ...env, RELEASE_TAG: undefined },
   });
-  assert.equal(uploaded().status, 0, uploaded().stderr);
+  writeFileSync(f.verifyLog, "");
+  const firstUploaded = uploaded();
+  assert.equal(firstUploaded.status, 0, firstUploaded.stderr);
+  // The remote copy itself is signature- and key-checked, not the local files.
+  assert.deepEqual(readFileSync(f.verifyLog, "utf8").trim().split("\n").sort(), [`verify-public-keys.sh ${remote}`, `verify-signatures.sh ${remote}`]);
   for (const [, name] of ANCHORS) {
     const file = join(remote, name);
     const saved = readFileSync(file);
@@ -577,30 +608,181 @@ test("every phase requires both anchors equal to the tag commit's blobs", () => 
   }
 });
 
-test("the anchors are staged before the checksums and uploaded with the release", () => {
-  const makefile = readFileSync("Makefile", "utf8");
-  const release = makefile.slice(makefile.indexOf("\nrelease: "), makefile.indexOf("\n\n", makefile.indexOf("\nrelease: ")));
-  const order = [...release.matchAll(/\$\(MAKE\) (release-[a-z-]+)/g)].map((m) => m[1]);
-  assert.ok(order.includes("release-stage-anchors"), order.join(" "));
-  assert.ok(order.indexOf("release-stage-anchors") < order.indexOf("release-checksums"), order.join(" "));
-  assert.match(makefile, /^release-stage-anchors: release-require-tag [^\n]*\n\t\.\/scripts\/release-stage-public\.sh --anchors /m);
-  // The upload script, run against a stub gh, uploads both anchors.
-  const dir = mkdtempSync(join(tmpdir(), "sysprims-upload-"));
+test("before the draft exists, every phase checks the staged CI files against the fetch record", () => {
+  const f = anchorPhaseFixture();
+  const phases = [
+    ["downloaded", () => {}],
+    ["checksummed", () => f.sums()],
+    ["require-checksummed", () => f.sums()],
+  ];
+  const victim = f.built[0];
+  const file = join(f.dist, victim);
+  const record = `${f.dist}.anchor`;
+  for (const [phase, prepare] of phases) {
+    for (const name of ["SHA256SUMS", "SHA512SUMS"]) rmSync(join(f.dist, name), { force: true });
+    f.fetchRecord();
+    prepare();
+    const good = f.cli(phase);
+    assert.equal(good.status, 0, `${phase}: ${good.stderr}`);
+    // Altered CI bytes, re-checksummed so only the fetch record can refuse.
+    const saved = readFileSync(file);
+    writeFileSync(file, Buffer.concat([saved, Buffer.from("x")]));
+    if (phase !== "downloaded") f.sums();
+    let result = f.cli(phase);
+    assert.notEqual(result.status, 0, `${phase} accepted altered ${victim}`);
+    assert.match(result.stderr, /differs from the fetched CI artifact/, `${phase}: ${result.stderr}`);
+    writeFileSync(file, saved);
+    if (phase !== "downloaded") f.sums();
+    const savedRecord = readFileSync(record, "utf8");
+    const refusals = [
+      ["record missing", () => rmSync(record), /missing .*\.anchor; stage the CI payload/],
+      ["record for another tag", () => writeFileSync(record, savedRecord.replace(/^tag=.*$/m, "tag=v9.9.9")), /is for v9\.9\.9/],
+      ["record for another tag object", () => writeFileSync(record, savedRecord.replace(/^object=.*$/m, `object=${"a".repeat(40)}`)), /records tag object/],
+      ["record for another commit", () => writeFileSync(record, savedRecord.replace(/^commit=.*$/m, `commit=${"b".repeat(40)}`)), /records a different commit/],
+      ["record omits a file", () => writeFileSync(record, savedRecord.split("\n").filter((line) => !line.endsWith(` ${victim}`)).join("\n")), /does not match the expected inventory/],
+      ["record lists a file twice", () => writeFileSync(record, savedRecord + savedRecord.split("\n").find((line) => line.endsWith(` ${victim}`)) + "\n"), /lists .* twice/],
+      ["record has an unknown line", () => writeFileSync(record, savedRecord + "extra=1\n"), /is malformed/],
+      ["record digest differs", () => writeFileSync(record, savedRecord.replace(new RegExp(`^file=[0-9a-f]{64} ${victim.replace(/\./g, "\\.")}$`, "m"), `file=${"c".repeat(64)} ${victim}`)), /differs from the fetched CI artifact/],
+    ];
+    for (const [label, apply, pattern] of refusals) {
+      apply();
+      result = f.cli(phase);
+      writeFileSync(record, savedRecord);
+      assert.notEqual(result.status, 0, `${phase} accepted: ${label}`);
+      assert.match(result.stderr, pattern, `${phase} ${label}: ${result.stderr}`);
+    }
+  }
+});
+
+test("the draft is created once, from a verified snapshot, with the complete signed set", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sysprims-draft-"));
   roots.push(dir);
   const bin = join(dir, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >>"${join(dir, "gh.log")}"\n`, { mode: 0o755 });
+  const log = join(dir, "calls.log");
   const dist = join(dir, "dist");
   mkdirSync(dist);
-  for (const name of ["SHA256SUMS", "SHA256SUMS.minisig", "SHA512SUMS", "SHA512SUMS.minisig", "sysprims-minisign.pub", "SHA256SUMS.asc", "SHA512SUMS.asc", "sysprims-release-signing-key.asc", "release-notes-v1.2.3.md", "expected-fingerprints.txt", "expected-fingerprints.ndjson"]) writeFileSync(join(dist, name), "x\n");
-  const result = spawnSync("bash", ["scripts/upload-release-assets.sh", "v1.2.3", dist], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  const { signed, base } = expectedInventory("1.2.3");
+  const built = base.filter((name) => !/^release-notes-|^expected-fingerprints\./.test(name));
+  // Stub gh: the releases list is FIXTURE_RELEASES (or fails when told to);
+  // create records its arguments and, when FIXTURE_SWAP is set, the staging
+  // directory is altered at that moment: the snapshot must be what uploads.
+  writeFileSync(join(bin, "gh"), `#!/bin/sh
+echo "gh $*" >>"${log}"
+case "$1 $2" in
+"api --paginate") [ "$FIXTURE_LIST_FAILS" = 1 ] && exit 1; printf '%s\\n' $FIXTURE_RELEASES; exit 0;;
+"release create")
+	[ -n "$FIXTURE_SWAP" ] && printf 'swapped\n' >"$FIXTURE_SWAP"
+	skip=0; for a in "$@"; do if [ "$skip" = 1 ]; then skip=0; continue; fi; case "$a" in --notes-file|--target|--title|--repo) skip=1;; /*) [ -f "$a" ] && echo "upload $(basename "$a") $(shasum -a 256 "$a" | cut -d' ' -f1)" >>"${log}";; esac; done
+	exit 0;;
+*) exit 1;;
+esac
+`, { mode: 0o755 });
+  const repo = join(dir, "repo");
+  mkdirSync(join(repo, "scripts"), { recursive: true });
+  for (const name of ["release-create-draft.sh", "release-integrity.mjs", "release-tag-set.mjs", "version-pack.mjs"]) copyFileSync(join("scripts", name), join(repo, "scripts", name));
+  must(repo, "git", ["init", "-q", "-b", "main"]);
+  must(repo, "git", ["config", "user.name", "Fixture"]);
+  must(repo, "git", ["config", "user.email", "fixture@example.invalid"]);
+  writeFileSync(join(repo, "VERSION"), "1.2.3\n");
+  must(repo, "git", ["add", "VERSION"]);
+  must(repo, "git", ["commit", "-qm", "release"]);
+  must(repo, "git", ["tag", "-a", "-m", "Release 1.2.3", "v1.2.3"]);
+  const object = must(repo, "git", ["rev-parse", "refs/tags/v1.2.3"]);
+  const commit = must(repo, "git", ["rev-parse", "v1.2.3^{commit}"]);
+  for (const name of signed) writeFileSync(join(dist, name), `${name}\n`);
+  const fileLines = () => built.map((name) => `file=${hash(readFileSync(join(dist, name)))} ${name}`);
+  const writeAnchor = (lines = fileLines()) => writeFileSync(`${dist}.anchor`, [`tag=v1.2.3`, `object=${object}`, `commit=${commit}`, "run=11", "attempt=1", "artifact=501", `digest=sha256:${"0".repeat(64)}`, ...lines].join("\n") + "\n");
+  // The GitHub-side artifact as --verify reports it, and the signed guard, are
+  // stubs that record their inputs; their own suites exercise them for real.
+  const served = join(dir, "served.txt");
+  writeFileSync(join(repo, "scripts/release-fetch-ci-artifacts.sh"), `#!/bin/sh
+echo "reverify $1 $(basename "$2")" >>"${log}"
+[ "$FIXTURE_TAG_REPLACED" = 1 ] && { echo 'error: tag replaced' >&2; exit 1; }
+cat "${served}"
+`, { mode: 0o755 });
+  writeFileSync(join(bin, "node"), `#!/bin/sh
+if [ "$2" = signed ]; then echo "guard signed $(basename "$4")" >>"${log}"; [ "$FIXTURE_UNSIGNED" != 1 ]; exit $?; fi
+exec "${process.execPath}" "$@"
+`, { mode: 0o755 });
+  const reset = () => { for (const name of signed) writeFileSync(join(dist, name), `${name}\n`); writeAnchor(); writeFileSync(served, fileLines().join("\n") + "\n"); };
+  const draft = (env = {}) => {
+    writeFileSync(log, "");
+    return spawnSync("bash", [join(repo, "scripts/release-create-draft.sh"), dist], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SYSPRIMS_RELEASE_TAG: "v1.2.3", FIXTURE_RELEASES: "v1.2.2", ...env } });
+  };
+  const lines = () => readFileSync(log, "utf8").split("\n").filter(Boolean);
+  const created = () => lines().filter((line) => line.startsWith("gh release create"));
+  reset();
+  let result = draft();
   assert.equal(result.status, 0, result.stderr + result.stdout);
-  const upload = readFileSync(join(dir, "gh.log"), "utf8").split("\n").find((line) => line.startsWith("release upload"));
-  for (const [, name] of ANCHORS) assert.ok(upload.split(" ").includes(name), upload);
-  for (const [, name] of ANCHORS) {
-    rmSync(join(dist, name));
-    const missing = spawnSync("bash", ["scripts/upload-release-assets.sh", "v1.2.3", dist], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
-    assert.notEqual(missing.status, 0, `upload ran without ${name}`);
-    writeFileSync(join(dist, name), "x\n");
+  // Order: guard on the snapshot, artifact re-download, release list, create.
+  const steps = lines().filter((line) => !line.startsWith("upload ")).map((line) => line.split(" ").slice(0, 2).join(" "));
+  assert.deepEqual(steps, ["guard signed", "reverify --verify", "gh api", "gh release"]);
+  assert.ok(!lines()[0].endsWith(" dist"), `guard ran on the staging directory: ${lines()[0]}`);
+  const create = created()[0];
+  assert.match(create, / --verify-tag --draft --target /);
+  assert.ok(create.includes(` --target ${commit} `), create);
+  assert.ok(!create.includes(`${dist}/`), "upload paths must be the snapshot, not the staging directory");
+  const uploads = lines().filter((line) => line.startsWith("upload "));
+  assert.deepEqual(uploads.map((line) => line.split(" ")[1]).sort(), [...signed].sort());
+  // Staging files altered while the release is being created never reach it.
+  reset();
+  const expectedHeader = hash(readFileSync(join(dist, "sysprims.h")));
+  result = draft({ FIXTURE_SWAP: join(dist, "sysprims.h") });
+  assert.equal(result.status, 0, result.stderr);
+  const uploadedHeader = lines().find((line) => line.startsWith("upload sysprims.h ")).split(" ")[2];
+  assert.equal(uploadedHeader, expectedHeader, "a staging-directory change reached the upload");
+  // The snapshot is removed afterwards.
+  const snapshotDir = create.split(" ").find((word) => word.endsWith("/SHA256SUMS")).replace(/\/SHA256SUMS$/, "");
+  for (const left of [snapshotDir, `${snapshotDir}.anchor`, `${snapshotDir}.remote`]) assert.ok(!existsSyncLocal(left), `snapshot residue left behind: ${left}`);
+
+  for (const [label, env, pattern] of [
+    ["release already exists", { FIXTURE_RELEASES: "v1.2.2 v1.2.3" }, /already exists; assets are never replaced/],
+    ["release list fails", { FIXTURE_LIST_FAILS: "1" }, /existence of v1\.2\.3 is unknown/],
+    ["signed state fails", { FIXTURE_UNSIGNED: "1" }, /signed release state does not verify/],
+    ["artifact re-verification fails", { FIXTURE_TAG_REPLACED: "1" }, /no longer verifies/],
+    ["no explicit tag", { SYSPRIMS_RELEASE_TAG: "" }, /SYSPRIMS_RELEASE_TAG=vX\.Y\.Z is required/],
+  ]) {
+    reset();
+    result = draft(env);
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stderr, pattern, `${label}: ${result.stderr}`);
+    assert.equal(created().length, 0, `draft created despite: ${label}`);
   }
+  // A CI file and its anchor line edited together: GitHub's copy decides.
+  reset();
+  const victim = join(dist, built[0]);
+  writeFileSync(victim, "replaced\n");
+  writeAnchor();
+  result = draft();
+  assert.notEqual(result.status, 0, "coordinated payload-plus-anchor edit accepted");
+  assert.match(result.stderr, /differs from the CI artifact as downloaded from GitHub/);
+  assert.equal(created().length, 0);
+  // GitHub's artifact lists a file the signed set does not hold, or fewer files.
+  reset();
+  writeFileSync(served, fileLines().join("\n") + `\nfile=${"a".repeat(64)} extra.bin\n`);
+  result = draft();
+  assert.match(result.stderr, /extra\.bin is not in the signed set/);
+  reset();
+  writeFileSync(served, fileLines().slice(1).join("\n") + "\n");
+  result = draft();
+  assert.match(result.stderr, /does not hold exactly the CI-built files/);
+  assert.equal(created().length, 0);
+  // Same count, one CI file swapped for a signed-set file that is not CI-built.
+  reset();
+  const swapped = fileLines().filter((line) => !line.endsWith(" sysprims.h"));
+  swapped.push(`file=${hash(readFileSync(join(dist, "sysprims-minisign.pub")))} sysprims-minisign.pub`);
+  writeFileSync(served, swapped.join("\n") + "\n");
+  result = draft();
+  assert.notEqual(result.status, 0, "equal-count substitution accepted");
+  assert.match(result.stderr, /does not hold exactly the CI-built files/);
+  assert.equal(created().length, 0);
+  // Missing or symlinked anchor; missing signed file.
+  reset();
+  rmSync(`${dist}.anchor`);
+  assert.match(draft().stderr, /missing .*\.anchor/);
+  reset();
+  rmSync(join(dist, "SHA256SUMS.asc"));
+  assert.match(draft().stderr, /missing or not a regular file: SHA256SUMS\.asc/);
+  assert.equal(created().length, 0);
 });

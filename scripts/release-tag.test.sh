@@ -47,7 +47,7 @@ real_git="$(command -v git)"
 mkdir -p "$fixture_dir/spy"
 cat >"$fixture_dir/spy/git" <<SH
 #!/usr/bin/env bash
-[[ "\$1" == tag && " \$* " == *" -s "* ]] && echo "\$*" >>"$fixture_dir/signed.log"
+[[ " \$* " == *" tag "* && " \$* " == *" -s "* ]] && echo "\$*" >>"$fixture_dir/signed.log"
 exec "$real_git" "\$@"
 SH
 chmod +x "$fixture_dir/spy/git"
@@ -72,7 +72,7 @@ mv "$fixture_dir/held.txt" "$messages/go__recurrence__v$version.txt"
 mkdir -p "$fixture_dir/bin"
 cat >"$fixture_dir/bin/git" <<SH
 #!/usr/bin/env bash
-if [[ "\$1" == tag && " \$* " == *" go/recurrence/v$version "* && " \$* " == *" -s "* ]]; then
+if [[ " \$* " == *" tag "* && " \$* " == *" go/recurrence/v$version "* && " \$* " == *" -s "* ]]; then
 	echo 'simulated signing failure' >&2
 	exit 1
 fi
@@ -125,9 +125,45 @@ for target in release-tag release-push-tag; do
 	done
 done
 
-# With valid inputs every tag in the set is signed at HEAD and verified.
-out="$(tag_run)"
+# With valid inputs every tag in the set is signed at HEAD and verified. The run
+# goes through a card-like gpg: secret keys cannot be exported (a hardware key
+# holds only stubs), and the operator's agent must not be killed. Signing must
+# happen in the operator's own home, and a host configured for SSH signing must
+# not change the format.
+real_gpg="$(command -v gpg)"
+real_gpgconf="$(command -v gpgconf)"
+mkdir -p "$fixture_dir/card"
+cat >"$fixture_dir/card/gpg" <<SH
+#!/usr/bin/env bash
+case " \$* " in
+*" --export-secret-keys "* | *" --export-secret-subkeys "*)
+	echo 'gpg: secret key export refused (card stub)' >&2
+	exit 2
+	;;
+esac
+if [[ " \$* " == *" --sign "* || " \$* " == *" -bsau "* || " \$* " == *" --detach-sign "* ]]; then
+	echo "sign GNUPGHOME=\${GNUPGHOME:-}" >>"$fixture_dir/card.log"
+fi
+exec "$real_gpg" "\$@"
+SH
+cat >"$fixture_dir/card/gpgconf" <<SH
+#!/usr/bin/env bash
+if [[ " \$* " == *" --kill "* && " \$* " == *" $fixture_dir/gpg "* ]]; then
+	echo 'gpgconf: refusing to kill the operator agent' >&2
+	exit 2
+fi
+exec "$real_gpgconf" "\$@"
+SH
+chmod +x "$fixture_dir/card/gpg" "$fixture_dir/card/gpgconf"
+git -C "$repo" config gpg.format ssh
+out="$(tag_run PATH="$fixture_dir/card:$PATH")"
+git -C "$repo" config --unset gpg.format
 [[ "$out" == *"3 signed tag(s) created locally"* ]]
+[[ "$(grep -c "^sign " "$fixture_dir/card.log")" -ge 3 ]]
+if grep -v "^sign GNUPGHOME=$fixture_dir/gpg\$" "$fixture_dir/card.log"; then
+	echo 'error: a tag was signed outside the operator GnuPG home' >&2
+	exit 1
+fi
 head="$(git -C "$repo" rev-parse HEAD)"
 for tag in "${tags[@]}"; do
 	[[ "$(git -C "$repo" rev-parse "$tag^{commit}")" == "$head" ]]
