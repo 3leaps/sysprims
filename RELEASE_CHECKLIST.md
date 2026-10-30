@@ -516,14 +516,13 @@ The workflow validates:
    - VERSION file and package.json match the tag
    - Prebuilds were built from the same commit as the tag
 
-Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The `publish-npm`
-environment only allows deployments from `v*` tag refs and
-`bindings/typescript/sysprims/v*` branch refs — `main` is deliberately **not**
-allowlisted; do not add it. If the workflow revision on the release tag cannot
-be used, create a short-lived policy branch matching
-`bindings/typescript/sysprims/v*` at the workflow-revision SHA, dispatch from
-that branch, then delete it. The publish job intentionally uses Node.js 24 even
-though validation/prebuild jobs remain on Node.js 20.
+Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow
+must be dispatched from the `v*` release tag ref (`--ref "v${VERSION}"`) so
+that the Fulcio certificate SAN, OIDC workflow extensions, and SLSA v1
+provenance statement bind `refs/tags/v${VERSION}` (`main` and branch refs are
+refused by the workflow and by `make release-verify-registries`). The publish
+job intentionally uses Node.js 24 even though validation/prebuild jobs remain
+on Node.js 20.
 
 3. After every planned registry/module surface resolves, verify crates.io, Go
    module proxy, and npm (including Sigstore SLSA v1 provenance attestations on

@@ -135,6 +135,7 @@ def make_test_cert_b64(
     signer_d: int = ca_priv_d,
     subject_cn: bytes = b"sigstore-leaf",
     include_workflow_oids: bool = True,
+    commit_sha: str = commit,
 ) -> tuple[str, bytes]:
     san_uri = f"https://github.com/{repo}/{workflow_path}@refs/tags/v{ver}".encode("ascii")
     san_ext_val = der_tlv(0x30, der_tlv(0x86, san_uri))
@@ -148,10 +149,13 @@ def make_test_cert_b64(
     if include_workflow_oids:
         exts_list.extend(
             [
+                make_ext(rvr.OID_FULCIO_WORKFLOW_SHA, commit_sha.encode("ascii")),
                 make_ext(rvr.OID_FULCIO_WORKFLOW_REPO, repo.encode("ascii")),
                 make_ext(rvr.OID_FULCIO_WORKFLOW_REF, f"refs/tags/v{ver}".encode("ascii")),
                 make_ext(rvr.OID_FULCIO_BUILD_SIGNER_URI, der_tlv(0x0C, san_uri)),
+                make_ext(rvr.OID_FULCIO_BUILD_SIGNER_DIGEST, der_tlv(0x0C, commit_sha.encode("ascii"))),
                 make_ext(rvr.OID_FULCIO_SOURCE_REPO_URI, der_tlv(0x0C, f"https://github.com/{repo}".encode("ascii"))),
+                make_ext(rvr.OID_FULCIO_SOURCE_REPO_DIGEST, der_tlv(0x0C, commit_sha.encode("ascii"))),
                 make_ext(rvr.OID_FULCIO_SOURCE_REPO_REF, der_tlv(0x0C, f"refs/tags/v{ver}".encode("ascii"))),
             ]
         )
@@ -226,14 +230,15 @@ def make_tlog_entry(
     }
     body_bytes = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
     canon_b64 = base64.b64encode(body_bytes).decode("ascii")
-    idx_val = 1
+    global_idx_val = 1001
+    tree_idx_val = 1
 
     set_payload = json.dumps(
         {
             "body": canon_b64,
             "integratedTime": integrated_time,
             "logID": rekor_log_id_hex,
-            "logIndex": idx_val,
+            "logIndex": global_idx_val,
         },
         separators=(",", ":"),
         sort_keys=True,
@@ -265,12 +270,12 @@ def make_tlog_entry(
     envelope = f"{note_body}\n\n\u2014 rekor.sigstore.dev {cp_sig_b64}\n"
 
     return {
-        "logIndex": idx_val,
+        "logIndex": global_idx_val,
         "logId": {"keyId": rekor_log_id_b64},
         "integratedTime": integrated_time,
         "inclusionPromise": {"signedEntryTimestamp": base64.b64encode(set_sig_der).decode("ascii")},
         "inclusionProof": {
-            "logIndex": idx_val,
+            "logIndex": tree_idx_val,
             "rootHash": base64.b64encode(root_bytes).decode("ascii"),
             "treeSize": tree_size,
             "hashes": [base64.b64encode(sibling_hash).decode("ascii")],
@@ -280,20 +285,34 @@ def make_tlog_entry(
     }
 
 
-def make_slsa_statement(subj_name: str, alg: str, digest_hex: str, ver: str) -> bytes:
+def make_slsa_statement(
+    subj_name: str,
+    alg: str,
+    digest_hex: str,
+    ver: str,
+    commit_sha: str = commit,
+    include_workflow: bool = True,
+) -> bytes:
+    ext_params: dict = {}
+    if include_workflow:
+        ext_params["workflow"] = {
+            "repository": "https://github.com/3leaps/sysprims",
+            "path": ".github/workflows/typescript-npm-publish.yml",
+            "ref": f"refs/tags/v{ver}",
+        }
     stmt = {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [{"name": subj_name, "digest": {alg: digest_hex}}],
         "predicateType": "https://slsa.dev/provenance/v1",
         "predicate": {
             "buildDefinition": {
-                "externalParameters": {
-                    "workflow": {
-                        "repository": "https://github.com/3leaps/sysprims",
-                        "path": ".github/workflows/typescript-npm-publish.yml",
-                        "ref": f"refs/tags/v{ver}",
+                "externalParameters": ext_params,
+                "resolvedDependencies": [
+                    {
+                        "uri": f"git+https://github.com/3leaps/sysprims@refs/tags/v{ver}",
+                        "digest": {"gitCommit": commit_sha},
                     }
-                }
+                ],
             }
         },
     }
@@ -405,6 +424,17 @@ untrusted_cert_b64, untrusted_cert_der = make_test_cert_b64(version, signer_d=29
 write_att("att.untrusted-ca.json", untrusted_cert_b64, make_tlog_entry(untrusted_cert_der, good_sig_der, good_stmt), good_stmt, good_sig_b64)
 
 write_att("att.expired-cert.json", cert_b64, make_tlog_entry(cert_der, good_sig_der, good_stmt, integrated_time=1700009999), good_stmt, good_sig_b64)
+
+bad_oid_cert_b64, bad_oid_cert_der = make_test_cert_b64(version, commit_sha="f" * 40)
+write_att("att.wrong-commit-oid.json", bad_oid_cert_b64, make_tlog_entry(bad_oid_cert_der, good_sig_der, good_stmt), good_stmt, good_sig_b64)
+
+bad_slsa_commit_stmt = make_slsa_statement(f"pkg:npm/%403leaps/sysprims@{version}", "sha512", root_tgz_sha512, version, commit_sha="f" * 40)
+bad_slsa_commit_sig_b64, bad_slsa_commit_sig_der = sign_dsse_pae(bad_slsa_commit_stmt)
+write_att("att.wrong-commit-slsa.json", cert_b64, make_tlog_entry(cert_der, bad_slsa_commit_sig_der, bad_slsa_commit_stmt), bad_slsa_commit_stmt, bad_slsa_commit_sig_b64)
+
+no_wf_stmt = make_slsa_statement(f"pkg:npm/%403leaps/sysprims@{version}", "sha512", root_tgz_sha512, version, include_workflow=False)
+no_wf_sig_b64, no_wf_sig_der = sign_dsse_pae(no_wf_stmt)
+write_att("att.no-wf.json", cert_b64, make_tlog_entry(cert_der, no_wf_sig_der, no_wf_stmt), no_wf_stmt, no_wf_sig_b64)
 PY
 
 npm_meta_file="$scratch/http/npm/@3leaps/sysprims/$version"
@@ -446,9 +476,26 @@ if SYSPRIMS_NPM_REGISTRY_URL="$npm_base" \
 fi
 grep -q "Fulcio CA certificate signature: cryptographic ECDSA signature verification failed" "$scratch/out"
 
-# Wrong gitHead, dist.integrity, dist.shasum, tarball bytes, and missing/invalid Sigstore provenance.
+# Wrong gitHead, missing gitHead (real npm pre-packed tarball behavior), dist.integrity, dist.shasum, dist.tarball, and missing/invalid Sigstore provenance.
 jq '.gitHead = "ffffffffffffffffffffffffffffffffffffffff"' "$scratch/npm.pristine.json" >"$npm_meta_file"
 refused "npm gitHead mismatch"
+jq 'del(.gitHead)' "$scratch/npm.pristine.json" >"$npm_meta_file"
+run_verify
+if SYSPRIMS_NPM_REGISTRY_URL="$npm_base" \
+	python3 -I -B "$root/scripts/release-verify-registries.py" --bootstrap-no-provenance --version "$version" --commit "$commit" >"$scratch/out" 2>&1; then
+	echo "error: accepted missing gitHead when provenance is disabled" >&2
+	exit 1
+fi
+grep -q "npm gitHead missing" "$scratch/out"
+cp "$scratch/att.wrong-commit-oid.json" "$npm_att_file"
+refused "Fulcio .* extension mismatch"
+cp "$scratch/att.wrong-commit-slsa.json" "$npm_att_file"
+refused "SLSA resolvedDependencies gitCommit mismatch"
+cp "$scratch/att.no-wf.json" "$npm_att_file"
+refused "SLSA workflow parameters mismatch"
+cp "$scratch/npm-att.pristine.json" "$npm_att_file"
+jq 'del(.dist.tarball)' "$scratch/npm.pristine.json" >"$npm_meta_file"
+refused "npm dist.tarball URL invalid"
 jq '.dist.integrity = "sha512-AAAA"' "$scratch/npm.pristine.json" >"$npm_meta_file"
 refused "npm dist.integrity must decode to 64 bytes"
 jq '.dist.shasum = "0000000000000000000000000000000000000000"' "$scratch/npm.pristine.json" >"$npm_meta_file"
@@ -526,5 +573,161 @@ if command -v npm >/dev/null 2>&1; then
 	"$root/scripts/pack-npm-redirector.sh" "$scratch/redirector" "$version" >/dev/null
 	[[ -s "$scratch/redirector/sysprims-$version.tgz" ]]
 fi
+
+# Recorded real @3leaps/sysprims@0.2.4 Sigstore SLSA bundle against DEFAULT_TRUST_ROOT
+# (verifies production Fulcio P-384 leaf cert + OIDC extensions, DSSE P-256 PAE,
+# sharded Rekor v1 SET logIndex=2903884649 vs tree-local inclusionProof.logIndex=2781980387,
+# 28-level RFC 6962 Merkle path + checkpoint, and SLSA resolvedDependencies gitCommit).
+python3 -I -B - "$root/scripts/release-verify-registries.py" <<'PY'
+import base64
+import importlib.util
+import json
+import sys
+import zlib
+
+spec = importlib.util.spec_from_file_location("rvr", sys.argv[1])
+rvr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rvr)
+
+REAL_024_ZLIB_B64 = (
+    "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"
+)
+
+rec = json.loads(zlib.decompress(base64.b64decode(REAL_024_ZLIB_B64)).decode("utf-8"))
+b = rec["slsa"]["bundle"]
+sha512_hex = base64.b64decode(rec["integrity"].removeprefix("sha512-")).hex()
+real_commit = "3eb06a0c0e9bc8c77d205492f15c94f7173b00e9"
+
+# 1. Default tag-ref expectation rejects the branch-signed 0.2.4 bundle.
+try:
+    rvr.verify_sigstore_attestation(
+        b["verificationMaterial"]["certificate"]["rawBytes"],
+        b["verificationMaterial"]["tlogEntries"],
+        b["dsseEnvelope"]["payload"],
+        b["dsseEnvelope"]["signatures"][0]["sig"],
+        "pkg:npm/%403leaps/sysprims@0.2.4",
+        "sha512",
+        sha512_hex,
+        "0.2.4",
+        rvr.DEFAULT_TRUST_ROOT,
+        "real 0.2.4 default ref",
+        expected_commit=real_commit,
+    )
+    raise AssertionError("expected branch-signed 0.2.4 bundle to be rejected under default tag ref")
+except SystemExit:
+    pass
+
+# 2. Matching branch ref + real commit verifies end-to-end against DEFAULT_TRUST_ROOT.
+rvr.verify_sigstore_attestation(
+    b["verificationMaterial"]["certificate"]["rawBytes"],
+    b["verificationMaterial"]["tlogEntries"],
+    b["dsseEnvelope"]["payload"],
+    b["dsseEnvelope"]["signatures"][0]["sig"],
+    "pkg:npm/%403leaps/sysprims@0.2.4",
+    "sha512",
+    sha512_hex,
+    "0.2.4",
+    rvr.DEFAULT_TRUST_ROOT,
+    "real 0.2.4 branch ref",
+    expected_commit=real_commit,
+    expected_ref="refs/heads/bindings/typescript/sysprims/v0.2.4",
+)
+
+# 3. Wrong commit SHA against the real 0.2.4 bundle is rejected.
+try:
+    rvr.verify_sigstore_attestation(
+        b["verificationMaterial"]["certificate"]["rawBytes"],
+        b["verificationMaterial"]["tlogEntries"],
+        b["dsseEnvelope"]["payload"],
+        b["dsseEnvelope"]["signatures"][0]["sig"],
+        "pkg:npm/%403leaps/sysprims@0.2.4",
+        "sha512",
+        sha512_hex,
+        "0.2.4",
+        rvr.DEFAULT_TRUST_ROOT,
+        "real 0.2.4 wrong commit",
+        expected_commit="0" * 40,
+        expected_ref="refs/heads/bindings/typescript/sysprims/v0.2.4",
+    )
+    raise AssertionError("expected wrong commit to be rejected against real 0.2.4 bundle")
+except SystemExit:
+    pass
+PY
 
 echo '[ok] registry verification and bare-name redirector controls passed'

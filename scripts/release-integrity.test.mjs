@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { existsSync as existsSyncLocal } from "node:fs";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { ANCHORS, assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyTaggedAssets } from "./release-integrity.mjs";
+import { ANCHORS, assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyPublishedStage, verifyTaggedAssets } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -453,6 +453,19 @@ test("every published npm package must carry exactly the tag commit as gitHead",
       assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(position, value)), /npm gitHead mismatch/, `package ${position}: ${label}`);
     }
   }
+  // When gitHead is absent (as with pre-packed tarballs), dist.attestations.url must be present.
+  const attestedLookup = {
+    crate: (_, v) => v,
+    goModule: (_, v) => `v${v}`,
+    npm(url) {
+      return {
+        version: url.split("/").pop(),
+        dist: { integrity: "x", tarball: "y", attestations: { url: "https://registry.npmjs.org/-/npm/v1/attestations/pkg" } },
+      };
+    },
+    npmResolves: () => false,
+  };
+  assert.doesNotThrow(() => remoteRegistries(root, tagCommit, "1.2.3", attestedLookup));
 });
 
 // The fingerprint anchors are release assets: in every phase's inventory,
@@ -837,7 +850,7 @@ test("publish verifies remote draft byte read-back, undrafts, and requires immut
   const ghLog = join(f.root, "gh.log");
   writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "gh $*" >>"${ghLog}"\nexit 0\n`, { mode: 0o755 });
   const pubMeta = join(f.root, "published-meta.json");
-  const runPublish = (doc) => {
+  const runPublish = (doc, extraEnv = {}) => {
     writeFileSync(ghLog, "");
     writeFileSync(pubMeta, JSON.stringify(doc));
     return f.cli("publish", {
@@ -845,6 +858,9 @@ test("publish verifies remote draft byte read-back, undrafts, and requires immut
       SYSPRIMS_TAG_MESSAGE_DIR: messages,
       SYSPRIMS_REMOTE_ASSET_DIR: remote,
       SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE: pubMeta,
+      CI: undefined,
+      GITHUB_ACTIONS: undefined,
+      ...extraEnv,
     });
   };
   let res = runPublish({ tag_name: `v${f.version}`, draft: false, immutable: false });
@@ -853,7 +869,60 @@ test("publish verifies remote draft byte read-back, undrafts, and requires immut
   res = runPublish({ tag_name: `v${f.version}`, draft: true, immutable: true });
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /is not immutable/);
+  res = runPublish({ tag_name: `v${f.version}`, draft: false, immutable: true }, { CI: "true" });
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE is not accepted under GitHub Actions or CI/);
   res = runPublish({ tag_name: `v${f.version}`, draft: false, immutable: true });
   assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /\(fixture\)/);
   assert.equal(readFileSync(ghLog, "utf8").trim(), `gh release edit v${f.version} --repo 3leaps/sysprims --draft=false`);
+
+  // Post-publish order: once promoted (isDraft: false), verifyPublishedStage and remote
+  // verify dist/published + dist/published.anchor rather than requiring a draft release.
+  const publishedDir = join(f.root, "dist-published");
+  mkdirSync(publishedDir);
+  const platform = process.platform === "darwin"
+    ? `darwin-${process.arch === "arm64" ? "arm64" : "amd64"}`
+    : process.platform === "linux"
+      ? `linux-${process.arch === "arm64" ? "arm64" : "amd64"}`
+      : null;
+  if (platform) {
+    const binDir = mkdtempSync(join(tmpdir(), "sysprims-smoke-bin-"));
+    roots.push(binDir);
+    writeFileSync(join(binDir, "sysprims"), `#!/bin/sh\necho "sysprims ${f.version}"\n`, { mode: 0o755 });
+    must(binDir, "tar", ["-czf", join(f.dist, `sysprims-${f.version}-${platform}.tar.gz`), "sysprims"]);
+    f.sums();
+  }
+  for (const name of signed) {
+    copyFileSync(join(f.dist, name), join(publishedDir, name));
+  }
+  const tagObject = must(f.root, "git", ["rev-parse", `refs/tags/v${f.version}`]).trim();
+  const tagCommit = must(f.root, "git", ["rev-parse", `v${f.version}^{commit}`]).trim();
+  const writePublishedAnchor = () => writeFileSync(`${publishedDir}.anchor`, [
+    `tag=v${f.version}`,
+    `object=${tagObject}`,
+    `commit=${tagCommit}`,
+    ...f.base.map((name) => `file=${hash(readFileSync(join(publishedDir, name)))} ${name}`),
+  ].join("\n") + "\n");
+
+  // Missing .anchor is refused by verifyPublishedStage / remote / verify-registries.
+  assert.throws(() => verifyPublishedStage(f.root, publishedDir, f.version), /stage the published release with make release-stage-published/);
+  const missingAnchorRes = spawnSync("node", ["scripts/release-integrity.mjs", "verify-registries", "--root", f.root, "--dir", publishedDir], {
+    encoding: "utf8",
+    env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${f.version}`, RELEASE_TAG: undefined },
+  });
+  assert.notEqual(missingAnchorRes.status, 0);
+  assert.match(missingAnchorRes.stderr, /stage the published release with make release-stage-published/);
+  writePublishedAnchor();
+  assert.doesNotThrow(() => verifyPublishedStage(f.root, publishedDir, f.version));
+
+  // Even when GitHub metadata now reports isDraft: false, remote --dir dist-published succeeds.
+  writeFileSync(join(f.root, "metadata.json"), JSON.stringify({ tagName: `v${f.version}`, isDraft: false, assets: [] }));
+  if (platform) {
+    const remoteRes = spawnSync("node", ["scripts/release-integrity.mjs", "remote", "--root", f.root, "--dir", publishedDir], {
+      encoding: "utf8",
+      env: { ...process.env, SYSPRIMS_RELEASE_TAG: `v${f.version}`, SYSPRIMS_RELEASE_METADATA_FILE: join(f.root, "metadata.json"), RELEASE_TAG: undefined },
+    });
+    assert.equal(remoteRes.status, 0, remoteRes.stderr);
+  }
 });

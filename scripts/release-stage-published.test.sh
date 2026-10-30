@@ -13,7 +13,10 @@ messages="$fixture_dir/messages/v$version"
 read -r _ subkey < <(fixture_keys "$fixture_dir/gpg")
 
 fixture_repo "$repo" "$version" publish 1
+cp "$fixture_root/Makefile" "$repo/Makefile"
 cp "$fixture_root/scripts/"{release-stage-published.sh,release-integrity.mjs,version-pack.mjs,verify-signatures.sh,sign-release-assets.sh,generate-checksums.sh} "$repo/scripts/"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/scripts/release-guard-tag-version.sh"
+chmod +x "$repo/scripts/release-guard-tag-version.sh"
 printf 'notes\n' >"$repo/docs/releases/v$version.md"
 gpg --homedir "$fixture_dir/gpg" --batch --armor --export-options export-minimal --export "$subkey!" \
 	>"$repo/docs/security/release-signing-keys.asc"
@@ -106,6 +109,15 @@ grep -qx "tag=v$version" "$repo/dist/published.anchor"
 grep -qx "object=$tag_object" "$repo/dist/published.anchor"
 grep -qx "commit=$commit" "$repo/dist/published.anchor"
 
-# Refuses to overwrite an existing directory or anchor.
+# Refuses to overwrite an existing directory or anchor when invoked directly.
 expect_fail_with 'already exists' bash -c "cd '$repo' && SYSPRIMS_RELEASE_TAG='v$version' SYSPRIMS_DECERNOR_BIN='$decernor' ./scripts/release-stage-published.sh '$repo/dist/published'"
+
+# Driving the Makefile target (make release-stage-published) cleans prior dist/published and stages with exact Makefile arguments.
+(cd "$repo" && env -u RELEASE_TAG SYSPRIMS_RELEASE_TAG="v$version" SYSPRIMS_DECERNOR_BIN="$decernor" \
+	SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE="$meta" SYSPRIMS_REMOTE_ASSET_DIR="$remote" \
+	make -s release-stage-published >/dev/null)
+[[ -d "$repo/dist/published" && -f "$repo/dist/published.anchor" ]]
+grep -qx "tag=v$version" "$repo/dist/published.anchor"
+grep -qx "object=$tag_object" "$repo/dist/published.anchor"
+grep -qx "commit=$commit" "$repo/dist/published.anchor"
 echo '[ok] release-stage-published controls passed'

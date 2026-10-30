@@ -56,20 +56,26 @@ SLSA_PREDICATE_V1 = "https://slsa.dev/provenance/v1"
 # - 2.5.29.17 subjectAltName: 55 1d 11
 # - 2.5.29.19 basicConstraints: 55 1d 13
 # - 1.3.6.1.4.1.57264.1.1  Fulcio OIDC Issuer (v1): 2b 06 01 04 01 83 bf 30 01 01
+# - 1.3.6.1.4.1.57264.1.3  Fulcio GitHub Workflow SHA (v1): 2b 06 01 04 01 83 bf 30 01 03
 # - 1.3.6.1.4.1.57264.1.5  Fulcio GitHub Workflow Repository (v1): 2b 06 01 04 01 83 bf 30 01 05
 # - 1.3.6.1.4.1.57264.1.6  Fulcio GitHub Workflow Ref (v1): 2b 06 01 04 01 83 bf 30 01 06
 # - 1.3.6.1.4.1.57264.1.8  Fulcio Issuer (v2): 2b 06 01 04 01 83 bf 30 01 08
 # - 1.3.6.1.4.1.57264.1.9  Fulcio Build Signer URI: 2b 06 01 04 01 83 bf 30 01 09
+# - 1.3.6.1.4.1.57264.1.10 Fulcio Build Signer Digest: 2b 06 01 04 01 83 bf 30 01 0a
 # - 1.3.6.1.4.1.57264.1.12 Fulcio Source Repository URI: 2b 06 01 04 01 83 bf 30 01 0c
+# - 1.3.6.1.4.1.57264.1.13 Fulcio Source Repository Digest: 2b 06 01 04 01 83 bf 30 01 0d
 # - 1.3.6.1.4.1.57264.1.14 Fulcio Source Repository Ref: 2b 06 01 04 01 83 bf 30 01 0e
 OID_EXT_SAN = bytes.fromhex("551d11")
 OID_EXT_BASIC_CONSTRAINTS = bytes.fromhex("551d13")
 OID_FULCIO_ISSUER_V1 = bytes.fromhex("2b0601040183bf300101")
+OID_FULCIO_WORKFLOW_SHA = bytes.fromhex("2b0601040183bf300103")
 OID_FULCIO_WORKFLOW_REPO = bytes.fromhex("2b0601040183bf300105")
 OID_FULCIO_WORKFLOW_REF = bytes.fromhex("2b0601040183bf300106")
 OID_FULCIO_ISSUER_V2 = bytes.fromhex("2b0601040183bf300108")
 OID_FULCIO_BUILD_SIGNER_URI = bytes.fromhex("2b0601040183bf300109")
+OID_FULCIO_BUILD_SIGNER_DIGEST = bytes.fromhex("2b0601040183bf30010a")
 OID_FULCIO_SOURCE_REPO_URI = bytes.fromhex("2b0601040183bf30010c")
+OID_FULCIO_SOURCE_REPO_DIGEST = bytes.fromhex("2b0601040183bf30010d")
 OID_FULCIO_SOURCE_REPO_REF = bytes.fromhex("2b0601040183bf30010e")
 
 # AlgorithmIdentifier OIDs:
@@ -350,6 +356,8 @@ def parse_and_verify_fulcio_leaf_cert(
     version: str,
     trust_root: SigstoreTrustRoot,
     label: str,
+    expected_commit: str | None = None,
+    expected_ref_str: str | None = None,
 ) -> tuple[tuple[int, int], int, int]:
     """Parse X.509v3 leaf certificate DER, verify Fulcio CA signature and OIDC extensions."""
     tag, cert_seq, end = read_der_tlv(cert_der, 0)
@@ -492,7 +500,7 @@ def parse_and_verify_fulcio_leaf_cert(
     ):
         fail(f"{label}: Fulcio OIDC issuer extension mismatch")
 
-    expected_ref = f"refs/tags/v{version}".encode("ascii")
+    expected_ref = (expected_ref_str or f"refs/tags/v{version}").encode("ascii")
     expected_repo_bytes = EXPECTED_REPO.encode("ascii")
     expected_source_uri = f"https://github.com/{EXPECTED_REPO}".encode("ascii")
 
@@ -504,9 +512,10 @@ def parse_and_verify_fulcio_leaf_cert(
             return False
         if val in allowed_raw:
             return True
-        t_str, str_body, str_end = read_der_tlv(val, 0)
-        if t_str in (0x0C, 0x16) and str_end == len(val) and str_body in allowed_raw:
-            return True
+        if len(val) >= 2 and val[0] in (0x0C, 0x16):
+            _, str_body, str_end = read_der_tlv(val, 0)
+            if str_end == len(val) and str_body in allowed_raw:
+                return True
         fail(f"{label}: Fulcio {name} extension mismatch: {val!r}")
         return False
 
@@ -527,6 +536,28 @@ def parse_and_verify_fulcio_leaf_cert(
         fail(
             f"{label}: certificate missing required Fulcio GitHub workflow OIDC extensions"
         )
+
+    if expected_commit is not None:
+        expected_commit_bytes = expected_commit.encode("ascii")
+        has_sha = (
+            require_ext_match(
+                OID_FULCIO_WORKFLOW_SHA, (expected_commit_bytes,), "workflow SHA"
+            )
+            | require_ext_match(
+                OID_FULCIO_BUILD_SIGNER_DIGEST,
+                (expected_commit_bytes,),
+                "build signer digest",
+            )
+            | require_ext_match(
+                OID_FULCIO_SOURCE_REPO_DIGEST,
+                (expected_commit_bytes,),
+                "source repository digest",
+            )
+        )
+        if not has_sha:
+            fail(
+                f"{label}: certificate missing required Fulcio commit digest extension"
+            )
 
     return leaf_q, not_before, not_after
 
@@ -693,73 +724,72 @@ def verify_rekor_tlog_entry(
         f"{label} Rekor SET",
     )
 
-    proof = entry.get("inclusionProof") or {}
-    if proof:
-        root_b64 = proof.get("rootHash")
-        hashes = proof.get("hashes")
-        tree_size = proof.get("treeSize")
-        proof_index = proof.get("logIndex", log_index)
-        if isinstance(tree_size, str) and tree_size.isdigit():
-            tree_size = int(tree_size)
-        if isinstance(proof_index, str) and proof_index.isdigit():
-            proof_index = int(proof_index)
-        checkpoint = (proof.get("checkpoint") or {}).get("envelope")
-        if (
-            not isinstance(root_b64, str)
-            or not isinstance(hashes, list)
-            or not isinstance(tree_size, int)
-            or not isinstance(proof_index, int)
-            or proof_index != log_index
-            or not isinstance(checkpoint, str)
-        ):
-            fail(f"{label}: incomplete Rekor inclusionProof")
-        root_bytes = base64.b64decode(root_b64)
-        if len(root_bytes) != 32:
-            fail(f"{label}: Rekor inclusionProof rootHash must decode to 32 bytes")
-        verify_rekor_merkle_inclusion(
-            body_bytes,
-            log_index,
-            tree_size,
-            hashes,
-            root_bytes,
-            label,
-        )
-        parts = checkpoint.split("\n\n", 1)
-        if len(parts) != 2:
-            fail(f"{label}: malformed Rekor checkpoint envelope")
-        note_body, sig_section = parts
-        note_lines = note_body.splitlines()
-        if len(note_lines) < 3 or not note_lines[1].isdigit():
-            fail(f"{label}: malformed Rekor checkpoint note body")
-        if (
-            int(note_lines[1]) != tree_size
-            or base64.b64decode(note_lines[2]) != root_bytes
-        ):
-            fail(f"{label}: Rekor checkpoint root hash does not match inclusionProof")
-        signed_note = (note_body + "\n").encode("utf-8")
-        key_hint = bytes.fromhex(trust_root.rekor_log_id_hex[:8])
-        verified_cp = False
-        for line in sig_section.splitlines():
-            line = line.strip()
-            if not line.startswith("\u2014 "):
-                continue
-            tokens = line.split()
-            if len(tokens) < 3:
-                continue
-            raw_sig = base64.b64decode(tokens[-1])
-            if len(raw_sig) > 4 and raw_sig[:4] == key_hint:
-                ecdsa_p256_verify_sha256(
-                    trust_root.rekor_p256_q,
-                    signed_note,
-                    raw_sig[4:],
-                    f"{label} Rekor checkpoint",
-                )
-                verified_cp = True
-                break
-        if not verified_cp:
-            fail(
-                f"{label}: Rekor checkpoint contains no signature from pinned Rekor log key"
+    proof = entry.get("inclusionProof")
+    if not isinstance(proof, dict) or not proof:
+        fail(f"{label}: missing Rekor inclusionProof")
+    root_b64 = proof.get("rootHash")
+    hashes = proof.get("hashes")
+    tree_size = proof.get("treeSize")
+    proof_index = proof.get("logIndex")
+    if isinstance(tree_size, str) and tree_size.isdigit():
+        tree_size = int(tree_size)
+    if isinstance(proof_index, str) and proof_index.isdigit():
+        proof_index = int(proof_index)
+    checkpoint = (proof.get("checkpoint") or {}).get("envelope")
+    if (
+        not isinstance(root_b64, str)
+        or not isinstance(hashes, list)
+        or not isinstance(tree_size, int)
+        or not isinstance(proof_index, int)
+        or proof_index < 0
+        or proof_index >= tree_size
+        or not isinstance(checkpoint, str)
+    ):
+        fail(f"{label}: incomplete Rekor inclusionProof")
+    root_bytes = base64.b64decode(root_b64)
+    if len(root_bytes) != 32:
+        fail(f"{label}: Rekor inclusionProof rootHash must decode to 32 bytes")
+    verify_rekor_merkle_inclusion(
+        body_bytes,
+        proof_index,
+        tree_size,
+        hashes,
+        root_bytes,
+        label,
+    )
+    parts = checkpoint.split("\n\n", 1)
+    if len(parts) != 2:
+        fail(f"{label}: malformed Rekor checkpoint envelope")
+    note_body, sig_section = parts
+    note_lines = note_body.splitlines()
+    if len(note_lines) < 3 or not note_lines[1].isdigit():
+        fail(f"{label}: malformed Rekor checkpoint note body")
+    if int(note_lines[1]) != tree_size or base64.b64decode(note_lines[2]) != root_bytes:
+        fail(f"{label}: Rekor checkpoint root hash does not match inclusionProof")
+    signed_note = (note_body + "\n").encode("utf-8")
+    key_hint = bytes.fromhex(trust_root.rekor_log_id_hex[:8])
+    verified_cp = False
+    for line in sig_section.splitlines():
+        line = line.strip()
+        if not line.startswith("\u2014 "):
+            continue
+        tokens = line.split()
+        if len(tokens) < 3:
+            continue
+        raw_sig = base64.b64decode(tokens[-1])
+        if len(raw_sig) > 4 and raw_sig[:4] == key_hint:
+            ecdsa_p256_verify_sha256(
+                trust_root.rekor_p256_q,
+                signed_note,
+                raw_sig[4:],
+                f"{label} Rekor checkpoint",
             )
+            verified_cp = True
+            break
+    if not verified_cp:
+        fail(
+            f"{label}: Rekor checkpoint contains no signature from pinned Rekor log key"
+        )
 
 
 def verify_sigstore_attestation(
@@ -773,6 +803,8 @@ def verify_sigstore_attestation(
     version: str,
     trust_root: SigstoreTrustRoot,
     label: str,
+    expected_commit: str | None = None,
+    expected_ref: str | None = None,
 ) -> None:
     """Verify Fulcio certificate, Rekor transparency log entry, DSSE signature, and SLSA statement."""
     if not isinstance(cert_b64, str) or not cert_b64:
@@ -784,13 +816,20 @@ def verify_sigstore_attestation(
     if not isinstance(sig_b64, str) or not sig_b64:
         fail(f"{label} missing DSSE signature")
 
+    ref_str = expected_ref or f"refs/tags/v{version}"
     cert_der = base64.b64decode(cert_b64)
     expected_san_uris = tuple(
-        f"https://github.com/{EXPECTED_REPO}/{wf}@refs/tags/v{version}".encode("ascii")
+        f"https://github.com/{EXPECTED_REPO}/{wf}@{ref_str}".encode("ascii")
         for wf in EXPECTED_WORKFLOW_PATHS
     )
     leaf_q, not_before, not_after = parse_and_verify_fulcio_leaf_cert(
-        cert_der, expected_san_uris, version, trust_root, label
+        cert_der,
+        expected_san_uris,
+        version,
+        trust_root,
+        label,
+        expected_commit=expected_commit,
+        expected_ref_str=ref_str,
     )
 
     stmt_bytes = base64.b64decode(statement_b64)
@@ -839,18 +878,39 @@ def verify_sigstore_attestation(
     predicate = stmt.get("predicate")
     if not isinstance(predicate, dict):
         fail(f"{label} SLSA statement predicate must be an object")
-    wf = (
-        (predicate.get("buildDefinition") or {})
-        .get("externalParameters", {})
-        .get("workflow")
-    )
-    if isinstance(wf, dict):
-        if (
-            wf.get("repository") != f"https://github.com/{EXPECTED_REPO}"
-            or wf.get("path") not in EXPECTED_WORKFLOW_PATHS
-            or wf.get("ref") != f"refs/tags/v{version}"
-        ):
-            fail(f"{label} SLSA workflow parameters mismatch: {wf!r}")
+    build_def = predicate.get("buildDefinition")
+    if not isinstance(build_def, dict):
+        fail(f"{label} SLSA statement buildDefinition must be an object")
+    wf = (build_def.get("externalParameters") or {}).get("workflow")
+    if (
+        not isinstance(wf, dict)
+        or wf.get("repository") != f"https://github.com/{EXPECTED_REPO}"
+        or wf.get("path") not in EXPECTED_WORKFLOW_PATHS
+        or wf.get("ref") != ref_str
+    ):
+        fail(f"{label} SLSA workflow parameters mismatch: {wf!r}")
+
+    if expected_commit is not None:
+        resolved_deps = build_def.get("resolvedDependencies")
+        if not isinstance(resolved_deps, list) or not resolved_deps:
+            fail(f"{label} SLSA buildDefinition missing resolvedDependencies")
+        repo_prefix = f"git+https://github.com/{EXPECTED_REPO}@"
+        matched_commit = False
+        for dep in resolved_deps:
+            if not isinstance(dep, dict):
+                continue
+            uri = dep.get("uri")
+            if isinstance(uri, str) and uri.startswith(repo_prefix):
+                git_commit = (dep.get("digest") or {}).get("gitCommit")
+                if git_commit != expected_commit:
+                    fail(
+                        f"{label} SLSA resolvedDependencies gitCommit mismatch: {git_commit!r} != {expected_commit}"
+                    )
+                matched_commit = True
+        if not matched_commit:
+            fail(
+                f"{label} SLSA resolvedDependencies missing gitCommit for {EXPECTED_REPO}@{expected_commit}"
+            )
 
 
 def validate_base_url(url: str, default: str, env_var: str) -> str:
@@ -941,13 +1001,18 @@ def verify_npm(
 
         if commit is not None:
             git_head = doc.get("gitHead")
-            if (
-                not isinstance(git_head, str)
-                or not re.fullmatch(r"[0-9a-f]{40}", git_head)
-                or git_head != commit
-            ):
+            if git_head is not None:
+                if (
+                    not isinstance(git_head, str)
+                    or not re.fullmatch(r"[0-9a-f]{40}", git_head)
+                    or git_head != commit
+                ):
+                    fail(
+                        f"npm gitHead mismatch for {pkg}@{version}: {git_head!r} != {commit}"
+                    )
+            elif not require_provenance:
                 fail(
-                    f"npm gitHead mismatch for {pkg}@{version}: {git_head!r} != {commit}"
+                    f"npm gitHead missing for {pkg}@{version} (required when provenance is disabled)"
                 )
 
         dist = doc.get("dist") or {}
@@ -973,24 +1038,19 @@ def verify_npm(
             )
 
         tarball_url = dist.get("tarball")
-        if tarball_url is not None:
-            if not isinstance(tarball_url, str) or not tarball_url.startswith(
-                f"{base}/"
-            ):
-                fail(
-                    f"npm dist.tarball URL invalid for {pkg}@{version}: {tarball_url!r}"
-                )
-            tgz_bytes = fetch_bytes(
-                tarball_url,
-                f"npm tarball {pkg}@{version}",
-                accept="application/octet-stream",
-            )
-            actual_sha512_hex = hashlib.sha512(tgz_bytes).hexdigest()
-            actual_sha1_hex = hashlib.sha1(tgz_bytes).hexdigest()
-            if actual_sha512_hex != expected_sha512_hex:
-                fail(f"npm tarball sha512 mismatch for {pkg}@{version}")
-            if actual_sha1_hex != shasum:
-                fail(f"npm tarball shasum mismatch for {pkg}@{version}")
+        if not isinstance(tarball_url, str) or not tarball_url.startswith(f"{base}/"):
+            fail(f"npm dist.tarball URL invalid for {pkg}@{version}: {tarball_url!r}")
+        tgz_bytes = fetch_bytes(
+            tarball_url,
+            f"npm tarball {pkg}@{version}",
+            accept="application/octet-stream",
+        )
+        actual_sha512_hex = hashlib.sha512(tgz_bytes).hexdigest()
+        actual_sha1_hex = hashlib.sha1(tgz_bytes).hexdigest()
+        if actual_sha512_hex != expected_sha512_hex:
+            fail(f"npm tarball sha512 mismatch for {pkg}@{version}")
+        if actual_sha1_hex != shasum:
+            fail(f"npm tarball shasum mismatch for {pkg}@{version}")
 
         attestations = dist.get("attestations")
         if require_provenance:
@@ -1046,6 +1106,7 @@ def verify_npm(
                 version,
                 trust_root,
                 f"npm {pkg}@{version}",
+                expected_commit=commit,
             )
 
     prov_note = (

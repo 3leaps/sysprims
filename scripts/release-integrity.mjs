@@ -451,9 +451,18 @@ export function remoteRegistries(root, commit, version, lookup = liveLookup(root
     const encoded = encodeURIComponent(name).replace("%2F", "%2f");
     const response = lookup.npm(`https://registry.npmjs.org/${encoded}/${npmVersion}`);
     if (response.version !== npmVersion || !response.dist?.integrity || !response.dist?.tarball) fail(`npm did not resolve complete metadata for ${name}@${npmVersion}`);
-    // Exact: a published package must name the tag's commit. Missing, empty,
-    // non-string or differently written values all fail.
-    if (typescript.disposition === "publish" && (typeof response.gitHead !== "string" || !/^[0-9a-f]{40}$/.test(response.gitHead) || response.gitHead !== commit)) fail(`npm gitHead mismatch for ${name}@${npmVersion}`);
+    // Exact: when gitHead is present it must name the tag's commit; when absent
+    // (as with pre-packed tarballs), Sigstore provenance attestations must be
+    // present so release-verify-registries.py binds the commit cryptographically.
+    if (typescript.disposition === "publish") {
+      if (response.gitHead !== undefined) {
+        if (typeof response.gitHead !== "string" || !/^[0-9a-f]{40}$/.test(response.gitHead) || response.gitHead !== commit) {
+          fail(`npm gitHead mismatch for ${name}@${npmVersion}`);
+        }
+      } else if (typeof response.dist?.attestations?.url !== "string" || !response.dist.attestations.url) {
+        fail(`npm gitHead mismatch for ${name}@${npmVersion}`);
+      }
+    }
   }
   if (typescript.disposition === "skip") {
     const encoded = encodeURIComponent("@3leaps/sysprims").replace("%2F", "%2f");
@@ -461,9 +470,32 @@ export function remoteRegistries(root, commit, version, lookup = liveLookup(root
   }
 }
 
+export function verifyPublishedStage(root, directory, version) {
+  const anchorPath = `${directory}.anchor`;
+  if (!existsSync(anchorPath) || lstatSync(anchorPath).isSymbolicLink() || !lstatSync(anchorPath).isFile()) {
+    fail(`missing ${anchorPath}; stage the published release with make release-stage-published`);
+  }
+  const { files } = readFetchAnchor(root, directory, version);
+  const { base, signed: inventory } = expectedInventory(version);
+  assertInventory(directory, inventory, "published");
+  const recorded = [...files.keys()].sort();
+  if (JSON.stringify(recorded) !== JSON.stringify(base)) {
+    fail(`published release anchor does not cover the exact base payload inventory; recorded=[${recorded.join(", ")}]`);
+  }
+  for (const name of base) {
+    if (sha256(join(directory, name)) !== files.get(name)) {
+      fail(`${name} differs from ${anchorPath}`);
+    }
+  }
+  verifyTaggedAssets(root, directory, version);
+  verifyChecksums(directory, base);
+  run(root, "bash", ["scripts/verify-signatures.sh", directory]);
+  run(root, "bash", ["scripts/verify-public-keys.sh", directory]);
+}
+
 function remote(root, directory, version) {
   refuseHiddenIndexEntries(root);
-  uploaded(root, directory, version);
+  verifyPublishedStage(root, directory, version);
 
   const platform = process.platform === "darwin"
     ? `darwin-${process.arch === "arm64" ? "arm64" : "amd64"}`
@@ -477,15 +509,23 @@ function remote(root, directory, version) {
   const asset = `sysprims-${version}-${platform}.${extension}`;
   const temporary = mkdtempSync(join(tmpdir(), "sysprims-native-smoke-"));
   try {
-    run(root, "gh", ["release", "download", `v${version}`, "--dir", temporary, "--pattern", asset]);
-    if (extension === "zip") run(root, "unzip", ["-q", join(temporary, asset), "-d", join(temporary, "unpacked")]);
-    else run(root, "tar", ["-xzf", join(temporary, asset), "-C", temporary]);
+    const archivePath = join(directory, asset);
+    if (extension === "zip") run(root, "unzip", ["-q", archivePath, "-d", join(temporary, "unpacked")]);
+    else run(root, "tar", ["-xzf", archivePath, "-C", temporary]);
     const binaryName = process.platform === "win32" ? "sysprims.exe" : "sysprims";
     const located = run(root, "find", [temporary, "-type", "f", "-name", binaryName]).trim().split("\n").filter(Boolean);
     if (located.length !== 1) fail(`native smoke found ${located.length} ${binaryName} files`);
     const output = run(root, located[0], ["--version"]).trim();
     if (!output.includes(version)) fail(`native binary reports ${output}, expected ${version}`);
   } finally { rmSync(temporary, { recursive: true, force: true }); }
+}
+
+function isCiEnv() {
+  for (const name of ["GITHUB_ACTIONS", "CI"]) {
+    const val = (process.env[name] ?? "").trim().toLowerCase();
+    if (val && val !== "0" && val !== "false") return true;
+  }
+  return false;
 }
 
 function publishRelease(root, directory, version, commit) {
@@ -495,16 +535,23 @@ function publishRelease(root, directory, version, commit) {
   const tag = `v${version}`;
   run(root, "gh", ["release", "edit", tag, "--repo", "3leaps/sysprims", "--draft=false"]);
   const publishedFixture = process.env.SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE;
+  if (publishedFixture && isCiEnv()) {
+    fail("SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE is not accepted under GitHub Actions or CI");
+  }
   const published = publishedFixture
     ? JSON.parse(readFileSync(publishedFixture, "utf8"))
     : JSON.parse(run(root, "gh", ["api", `repos/3leaps/sysprims/releases/tags/${tag}`]));
   if (published.tag_name !== tag || published.draft !== false || published.immutable !== true) {
     fail(`published release ${tag} is not immutable (draft=${published.draft}, immutable=${published.immutable})`);
   }
+  if (publishedFixture) {
+    console.log(`[ok] verified immutable release metadata for ${tag} (fixture)`);
+  }
 }
 
-function verifyRegistries(root, version, commit) {
+function verifyRegistries(root, directory, version, commit) {
   refuseHiddenIndexEntries(root);
+  verifyPublishedStage(root, directory, version);
   remoteRegistries(root, commit, version);
   const { plan } = readReleasePlanAt(root, commit, version);
   if (plan.surfaces.typescript?.disposition === "publish") {
@@ -537,7 +584,7 @@ function main() {
     case "uploaded": uploaded(root, directory, version); break;
     case "remote": remote(root, directory, version); break;
     case "publish": publishRelease(root, directory, version, tagged.commit); break;
-    case "verify-registries": verifyRegistries(root, version, tagged.commit); break;
+    case "verify-registries": verifyRegistries(root, directory, version, tagged.commit); break;
     default: fail("usage: release-integrity.mjs <provenance|downloaded|checksummed|require-checksummed|signed|uploaded|remote|publish|verify-registries> [--root PATH] [--dir PATH]");
   }
   console.log(`[ok] release ${command} guard passed for v${version}`);

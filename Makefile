@@ -833,7 +833,7 @@ release-publish: release-require-tag release-guard-tag-version-post release-guar
 
 release-stage-published: release-require-tag release-guard-tag-version-post ## Download and verify the published GitHub release into dist/published
 	rm -rf $(DIST_PUBLISHED) $(DIST_PUBLISHED).anchor
-	./scripts/release-stage-published.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_PUBLISHED)
+	./scripts/release-stage-published.sh $(DIST_PUBLISHED)
 
 release-verify-registries: release-require-tag release-guard-tag-version-post ## Verify crates.io, Go module proxy, and npm (with SLSA provenance) serve the exact release
 	@node scripts/release-integrity.mjs verify-registries --dir $(DIST_PUBLISHED)
@@ -968,5 +968,5 @@ release-guard-signed: release-require-tag ## Verify exact signatures, public key
 release-guard-uploaded: release-require-tag ## Verify a fresh copy of the complete remote draft
 	@node scripts/release-integrity.mjs uploaded --dir $(DIST_RELEASE)
 
-release-guard-remote: release-require-tag release-guard-tag-version-post ## Verify remote registries/modules and native runtime before publish
-	@node scripts/release-integrity.mjs remote --dir $(DIST_RELEASE)
+release-guard-remote: release-require-tag release-guard-tag-version-post ## Verify staged published release and native runtime smoke after publish
+	@node scripts/release-integrity.mjs remote --dir $(DIST_PUBLISHED)
