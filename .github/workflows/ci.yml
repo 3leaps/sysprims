@@ -41,6 +41,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: No private planning-plane references in tracked files
         run: bash scripts/check-planning-hygiene.sh
+      - name: No local paths, keys, tokens or commit markers in tracked files
+        run: python3 -I -B scripts/content-check.py
+      - name: Workflow digest pins and read-only permissions
+        run: python3 -B -E scripts/release-workflow-pin.py check
       - name: npm trusted publishing runtime guard
         run: bash scripts/check-npm-trusted-publish-runtime.sh
   release-tooling:

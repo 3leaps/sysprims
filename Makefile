@@ -15,6 +15,7 @@
 .PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
+.PHONY: content-check surface-scan workflow-pin doctor doctor-release
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
@@ -25,13 +26,14 @@
 .PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
 .PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
 .PHONY: release-guard-uploaded release-guard-remote release-publish
+.PHONY: release-stage-published release-verify-registries release-pack-npm-redirector
 .PHONY: release-require-checksummed
 .PHONY: version-patch version-minor version-major version-set version-sync
 .PHONY: version-check version-tooling-test
 
 # Every target that reads the release tag runs its prerequisites serially, so
 # release-require-tag (always first) finishes before any other prerequisite.
-.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-tag release-create-draft release-verify release-verify-remote-tag release-verify-signatures release-verify-tag
+.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-stage-published release-tag release-create-draft release-verify release-verify-registries release-verify-remote-tag release-verify-signatures release-verify-tag
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -59,6 +61,7 @@ GONEAT = $(shell command -v goneat 2>/dev/null)
 
 # Rust toolchain (assumed installed - rustup is developer responsibility)
 CARGO = cargo
+PYTHON ?= python3
 
 # -----------------------------------------------------------------------------
 # Default and Help
@@ -67,44 +70,30 @@ CARGO = cargo
 all: check
 
 help: ## Show available targets
-	@echo "sysprims - GPL-free Process Utilities"
-	@echo "Group-by-default process tree management."
-	@echo ""
+	@echo "sysprims - GPL-free Process Utilities (Group-by-default process tree management)"
 	@echo "Development:"
 	@echo "  help            Show this help message"
 	@echo "  bootstrap       Install tools (sfetch -> goneat)"
-	@echo "  build           Build all crates (debug)"
-	@echo "  build-release   Build all crates (release)"
-	@echo "  build-ffi       Build FFI library with C header"
+	@echo "  build           Build all crates (debug) | build-release (release) | build-ffi (FFI + header)"
 	@echo "  install         Install sysprims binary to ~/.local/bin"
 	@echo "  clean           Remove build artifacts"
-	@echo ""
-	@echo "Go bindings:"
-	@echo "  build-local-go      Build FFI for local Go development"
-	@echo "  build-local-ffi-shared  Build shared FFI for local consumers"
-	@echo "  go-test             Run Go binding tests"
-	@echo "  header-go           Generate C header for Go bindings"
+	@echo "Go & TypeScript bindings:"
+	@echo "  build-local-go      Build FFI for local Go development (build-local-ffi-shared: shared)"
+	@echo "  go-test             Run Go binding tests | header-go: generate C header"
 	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
-	@echo "  typescript-api-generate  Generate TypeScript public API documentation"
-	@echo "  typescript-api-check     Check TypeScript capability/export/doc drift"
-	@echo ""
+	@echo "  typescript-api-generate / typescript-api-check  Generate or check TS public API docs"
 	@echo "Quality gates:"
 	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
-	@echo "  check-windows   Fast Windows compile check (no SDK)"
-	@echo "  check-windows-msvc  cargo check for x86_64-pc-windows-msvc"
-	@echo "  check-windows-gnu   cargo check for x86_64-pc-windows-gnu"
-	@echo "  test            Run test suite"
-	@echo "  test-diabolical Run hostile process-control tests in a disposable container"
-	@echo "  fmt             Format code (cargo fmt + goneat assess format --fix)"
-	@echo "  lint            Run linting (cargo clippy + goneat lint)"
-	@echo "  precommit       Pre-commit checks (fast: fmt, clippy)"
-	@echo "  prepush         Pre-push checks (thorough: fmt, clippy, test, deny)"
-	@echo "  pr-final        Final PR merge-readiness gate (prepush + windows cross-check)"
-	@echo "  deny            Run cargo-deny license and advisory checks"
-	@echo "  audit           Run cargo-audit security scan"
-	@echo "  miri            Run Miri UB detection on unsafe code (nightly)"
-	@echo "  msrv            Verify build with MSRV (Rust 1.88.0)"
-	@echo ""
+	@echo "  check-windows   Fast Windows compile check (check-windows-msvc / check-windows-gnu)"
+	@echo "  test            Run test suite | test-diabolical: isolated container process tests"
+	@echo "  fmt / lint      Format code or run linting (cargo + goneat)"
+	@echo "  precommit / prepush / pr-final  Pre-commit, pre-push, and PR final gates"
+	@echo "  deny / audit    Run cargo-deny and cargo-audit security checks"
+	@echo "  content-check   Refuse local paths, keys, tokens and commit markers in tracked files"
+	@echo "  surface-scan    Public-surface scan when LIMENSAFE_CATALOG_PATH is set"
+	@echo "  workflow-pin    Verify every workflow matches its reviewed digest and is read-only"
+	@echo "  doctor          Report host tool versions against recommended minimums (doctor-release)"
+	@echo "  miri / msrv     Run Miri UB detection (nightly) or verify MSRV (Rust 1.88.0)"
 	@echo "Release (manual signing workflow):"
 	@echo "  release-preflight     Verify all pre-tag requirements (REQUIRED before tagging)"
 	@echo "  release-check         Version consistency + cargo package (does not publish)"
@@ -115,33 +104,23 @@ help: ## Show available targets
 	@echo "  release-export-keys   Stage committed public keys from the tagged commit"
 	@echo "  release-verify        Verify checksums, signatures, and keys"
 	@echo "  release-create-draft  Create the draft release with every signed asset"
-	@echo "  release-publish       Verify remote state and publish the draft"
+	@echo "  release-publish       Verify remote draft and promote to immutable release"
+	@echo "  release-stage-published   Download and verify the published GitHub release into dist/published"
+	@echo "  release-verify-registries Verify crates.io, Go proxy, and npm (with SLSA provenance)"
+	@echo "  release-pack-npm-redirector Build bare-name npm redirector tarball"
 	@echo "  release               Full release workflow (all of the above)"
-	@echo ""
 	@echo "Tag ceremony (maintainer; SYSPRIMS_RELEASE_TAG=vX.Y.Z required):"
 	@echo "  release-prepare-tag-message  Prepare per-tag annotation messages"
 	@echo "  release-tag                  Create every release tag, signed, local only"
 	@echo "  release-verify-tag           Verify local tags against the committed pin"
 	@echo "  release-push-tag             Push the verified tags atomically"
 	@echo "  release-verify-remote-tag    Verify the pushed tags"
-	@echo "  release-export-pin           One time: write the public pins (no overwrite)"
-	@echo "  release-validate-pin         Validate the committed pins and anchors"
-	@echo "  release-insert-anchors       Derive fingerprint anchors with decernor"
-	@echo "  release-crates-dry-run       Per-crate publish dry run from the release tag"
-	@echo "  release-crates-publish       Cued crates.io upload, one crate at a time"
+	@echo "  release-export-pin / release-validate-pin / release-insert-anchors  Public key pins & anchors"
+	@echo "  release-crates-dry-run / release-crates-publish  Per-crate dry-run or cued crates.io upload"
 	@echo "  release-tooling-test         Synthetic release-tooling controls"
-	@echo ""
-	@echo "Version management:"
-	@echo "  version         Print current version"
-	@echo "  version-patch   Bump patch version (0.1.0 -> 0.1.1)"
-	@echo "  version-minor   Bump minor version (0.1.0 -> 0.2.0)"
-	@echo "  version-major   Bump major version (0.1.0 -> 1.0.0)"
-	@echo "  version-set     Set explicit version (V=X.Y.Z)"
-	@echo "  version-sync    Sync VERSION to every authored Rust/TypeScript coordinate"
-	@echo "  version-check   Validate the complete authored version pack"
-	@echo "  version-tooling-test  Run isolated version/tag guard controls"
-	@echo ""
-	@echo "Current version: $(VERSION)"
+	@echo "Version management (Current version: $(VERSION)):"
+	@echo "  version / version-patch / version-minor / version-major / version-set (V=X.Y.Z)"
+	@echo "  version-sync / version-check / version-tooling-test"
 
 # -----------------------------------------------------------------------------
 # Bootstrap - Trust Anchor Chain
@@ -297,8 +276,27 @@ goneat-version: ## Print PATH goneat vs Makefile pin
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
 
-check: fmt-check lint test check-windows deny ## Run all quality checks
+check: fmt-check lint test check-windows content-check workflow-pin deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
+
+# The public-surface scan uses limensafe with a maintainer catalog named by
+# LIMENSAFE_CATALOG_PATH, outside this repository. It never runs in CI.
+surface-scan: ## Public-surface scan (tree, commit messages, PR text, branch) when LIMENSAFE_CATALOG_PATH is set
+	@PYTHON=$(PYTHON) ./scripts/surface-scan.sh
+
+# Vocabulary-free shapes only (local paths, keys, tokens, commit markers); runs
+# in CI as part of check.
+content-check: ## Refuse local paths, private keys, tokens and commit markers in tracked files
+	@$(PYTHON) -I -B scripts/content-check.py
+
+workflow-pin: ## Every workflow matches its reviewed digest and is read-only
+	@$(PYTHON) -B -E scripts/release-workflow-pin.py check
+
+doctor: ## Report host tool versions against the recommended minimums (DOCTOR_SCOPE=release|dev)
+	@./scripts/doctor.sh $(or $(DOCTOR_SCOPE),release)
+
+doctor-release: ## Report host tool versions for the release ceremony scope
+	@./scripts/doctor.sh release
 
 check-windows: check-windows-msvc check-windows-gnu ## Fast Windows compile checks (no SDK)
 	@echo "[ok] Windows cross-target checks passed"
@@ -631,7 +629,7 @@ precommit: ## Run pre-commit checks (fast)
 
 prepush: ## Run pre-push checks (thorough)
 	@$(MAKE) GONEAT_FORMAT_FAIL_ON=medium check
-	@$(MAKE) release-plan-check version-check version-tooling-test
+	@$(MAKE) release-plan-check version-check version-tooling-test surface-scan
 	@echo "[ok] Pre-push checks passed"
 
 pr-final: prepush ## Final PR merge-readiness gate
@@ -674,6 +672,7 @@ version: ## Print current version
 # 8. Create the draft with every asset (draft remains): make release-create-draft
 
 DIST_RELEASE := dist/release
+DIST_PUBLISHED := dist/published
 DIST_LOCAL := dist/local
 
 # The release tag is an explicit input (SYSPRIMS_RELEASE_TAG=vX.Y.Z). It is
@@ -689,7 +688,8 @@ RELEASE_TAG_ORIGIN := $(origin RELEASE_TAG)
 ANCHORS_TRUST_ORIGIN := $(origin ANCHORS_TRUST_LOCAL_TAG)
 RELEASE_TAG_FREE_TARGETS := release-clean release-tooling-test release-plan-check release-check \
 	release-crates-list release-export-pin release-validate-pin release-insert-anchors \
-	release-verify-checksums release-verify-keys release-require-tag release-guard-provenance
+	release-verify-checksums release-verify-keys release-require-tag release-guard-provenance \
+	release-pack-npm-redirector
 
 release-require-tag:
 	@if [ "$(RELEASE_TAG_ORIGIN)" != "undefined" ]; then \
@@ -745,9 +745,9 @@ release-crates-publish: release-require-tag ## Maintainer-cued crates.io upload,
 release-tooling-test: ## Synthetic release-tooling controls (no operator keys)
 	./scripts/release-tooling-test.sh
 
-release-clean: ## Remove dist/release contents
+release-clean: ## Remove dist/release and dist/published contents
 	@echo "Cleaning release directory..."
-	rm -rf $(DIST_RELEASE) $(DIST_RELEASE).anchor
+	rm -rf $(DIST_RELEASE) $(DIST_RELEASE).anchor $(DIST_PUBLISHED) $(DIST_PUBLISHED).anchor
 	@echo "[ok] Release directory cleaned"
 
 dist-local-clean: ## Remove dist/local contents
@@ -828,8 +828,18 @@ release-create-draft: release-require-tag release-guard-tag-version-post release
 	./scripts/release-create-draft.sh $(DIST_RELEASE)
 	@$(MAKE) release-guard-uploaded --silent
 
-release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance release-guard-remote ## Publish the verified draft release
+release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance ## Publish the verified draft release and require .immutable == true
 	@node scripts/release-integrity.mjs publish --dir $(DIST_RELEASE)
+
+release-stage-published: release-require-tag release-guard-tag-version-post ## Download and verify the published GitHub release into dist/published
+	rm -rf $(DIST_PUBLISHED) $(DIST_PUBLISHED).anchor
+	./scripts/release-stage-published.sh $(SYSPRIMS_RELEASE_TAG) $(DIST_PUBLISHED)
+
+release-verify-registries: release-require-tag release-guard-tag-version-post ## Verify crates.io, Go module proxy, and npm (with SLSA provenance) serve the exact release
+	@node scripts/release-integrity.mjs verify-registries --dir $(DIST_PUBLISHED)
+
+release-pack-npm-redirector: ## Build the bare-name npm redirector tarball (sysprims-<version>.tgz)
+	./scripts/pack-npm-redirector.sh dist/npm-redirector "$(VERSION)"
 
 release-preflight: release-require-tag release-plan-check version-check ## Verify all pre-tag requirements (REQUIRED before tagging)
 	@echo "Running release preflight checks..."

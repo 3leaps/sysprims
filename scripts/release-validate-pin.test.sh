@@ -53,7 +53,7 @@ gpg --homedir "$fixture_dir/gpg" --batch --armor --export >"$repo/docs/security/
 gpg --homedir "$fixture_dir/gpg-other" --batch --armor --export >>"$repo/docs/security/release-signing-keys.asc"
 fixture_commit "$repo" two-keys
 expect_fail_with 'exactly one primary and one subkey' validate
-printf -- '-----BEGIN PGP PRIVATE KEY BLOCK-----\n' >"$repo/docs/security/release-signing-keys.asc"
+printf -- '-----BEGIN PGP ''PRIVATE KEY BLOCK-----\n' >"$repo/docs/security/release-signing-keys.asc"
 fixture_commit "$repo" private
 expect_fail_with 'private material' validate
 # One-time export: every input is checked, then the pins are validated in

@@ -955,6 +955,7 @@ function main() {
 
 if (
   process.argv[1] &&
+  existsSync(process.argv[1]) &&
   realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
 ) {
   try {

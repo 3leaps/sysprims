@@ -4,10 +4,11 @@ This document walks maintainers through the build/sign/publish flow for each sys
 
 ## Prerequisites
 
-- GPG and minisign installed
+- GPG and minisign installed (`make doctor` / `make doctor-release` verifies host tool minimums)
 - Signing keys configured (see `docs/security/signing-runbook.md`)
 - Environment variables set (see step 2 below)
 - `gh` CLI authenticated with push access
+- `limensafe` and `LIMENSAFE_CATALOG_PATH` set for maintainer public-surface scans (`make surface-scan`)
 - All feature PRs for this release are merged and branch is `main`
 
 ## 1. Pre-Release Preparation
@@ -245,17 +246,22 @@ After every release tag is pushed (three when the Go binding is published and
 the recurrence module is present), keep release execution in this order:
 
 1. Verify the tag-triggered release workflow and optional validation workflow.
-2. Publish the six crates.io library crates in dependency order with
-   `make release-crates-publish` (from this detached tag checkout).
-3. Fetch the CI payload, copy tagged notes, checksum, sign, verify, and create
+2. Fetch the CI payload, copy tagged notes, checksum, sign, verify, and create
    the draft GitHub release with every asset (`make release-download` /
    `release-sign` / `release-create-draft` run from this detached tag
    checkout). The release stays a draft.
-4. When the plan marks TypeScript `publish`, run N-API prebuilds and resumable
-   npm publication from the verified tag while the GitHub release stays draft.
-5. Run `make release-guard-remote`, then use the separately maintainer-cued
-   `make release-publish` target as the only public promotion — also from the
-   detached tag checkout.
+3. Promote the verified draft to an immutable public GitHub release with
+   `make release-publish` (which re-verifies every uploaded asset digest against
+   local `dist/release`, promotes the draft, and requires `.draft == false && .immutable == true`),
+   then download and verify the published immutable release into `dist/published`
+   with `make release-stage-published`.
+4. Publish the six crates.io library crates in dependency order with
+   `make release-crates-publish` (from this detached tag checkout).
+5. When the plan marks TypeScript `publish`, run N-API prebuilds and resumable
+   npm publication from the verified tag.
+6. Run `make release-verify-registries` (and `make release-guard-remote`) to
+   verify crates.io, Go module proxy, and npm (including Sigstore SLSA v1
+   provenance attestations across all eight `@3leaps/sysprims*` packages).
 
 If any step fails or produces unexpected artifacts, pause before moving to the
 next step.
@@ -462,14 +468,23 @@ on HEAD.
    > never replaced. The uploaded guard then downloads a fresh copy and
    > requires exact digest parity. The release remains a draft.
 
-9. **Keep the GitHub release draft** while completing every planned registry
-   publication below. Do not invoke `gh release edit --draft=false` directly.
+9. **Promote the verified draft to an immutable release and verify published bytes**:
 
-### TypeScript bindings publication (after signed draft upload)
+   ```bash
+   make release-publish
+   make release-stage-published
+   ```
 
-Run these only after crates.io publication is complete and the signed GitHub
-release assets have been uploaded. Keep the GitHub release draft until npm
-publication and `make release-guard-remote` both pass.
+   Do not invoke `gh release edit --draft=false` directly; `make release-publish`
+   verifies every remote draft asset digest before promotion and requires
+   `.draft == false && .immutable == true` afterwards. `make release-stage-published`
+   downloads the published release into `dist/published` and verifies both
+   minisign and OpenPGP signing-subkey signatures and all asset checksums.
+
+### TypeScript bindings publication (after immutable release promotion)
+
+Run these only after the signed GitHub release is published and crates.io
+publication is complete:
 
 1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
 
@@ -510,14 +525,19 @@ be used, create a short-lived policy branch matching
 that branch, then delete it. The publish job intentionally uses Node.js 24 even
 though validation/prebuild jobs remain on Node.js 20.
 
-3. After every planned registry/module surface resolves exactly, verify the
-   fresh remote draft and publish through the sole promotion target — from the
-   detached tag checkout:
+3. After every planned registry/module surface resolves, verify crates.io, Go
+   module proxy, and npm (including Sigstore SLSA v1 provenance attestations on
+   all eight `@3leaps/sysprims*` packages) from the detached tag checkout:
 
    ```bash
+   make release-verify-registries
    make release-guard-remote
-   make release-publish
    ```
+
+   Optional one-time defensive bare-name redirector (`sysprims` -> `@3leaps/sysprims`):
+   `make release-pack-npm-redirector` builds `dist/npm-redirector/sysprims-X.Y.Z.tgz`;
+   if published, immediately deprecate `sysprims` so no consumer relies on the
+   unscoped name across `0.x` minor bumps.
 
 ## 3. Post-Release Verification
 
@@ -572,8 +592,11 @@ git push origin main
 | `make release-notes`       | Copy release notes to dist                                                     |
 | `make release-fetch-anchors` | Fetch a published release's anchors, verified, into `ANCHORS_DIR` (never `keys/`); needs `SYSPRIMS_DECERNOR_BIN`, or `ANCHORS_TRUST_LOCAL_TAG=1` as a command-line argument (never the environment) after `make release-verify-remote-tag` |
 | `make release-create-draft`| Create the draft with every signed asset; never replaces                       |
-| `make release-guard-remote`| Verify the fresh remote draft, registries/modules, and native runtime           |
-| `make release-publish`     | Sole maintainer-cued draft → public promotion                                  |
+| `make release-publish`     | Sole maintainer-cued draft → immutable public promotion                        |
+| `make release-stage-published` | Download and verify the published GitHub release into `dist/published`     |
+| `make release-verify-registries` | Verify crates.io, Go proxy, and npm (with SLSA provenance attestations)  |
+| `make release-pack-npm-redirector` | Build the bare-name npm redirector tarball (`sysprims-X.Y.Z.tgz`)      |
+| `make release-guard-remote`| Verify the remote release, registries/modules, and native runtime              |
 | `make release`             | Full preparation workflow (clean → draft; remains draft)                       |
 | `make release-prepare-tag-message` | Prepare the per-tag annotation messages                                |
 | `make release-tag`         | Create every release tag, signed, local only                                   |

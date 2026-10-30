@@ -13,6 +13,24 @@
 # Validate changes with: goneat doctor tools validate
 # See schema: schemas/tools/tools.v1.0.0.json
 scopes:
+  release:
+    description: Host tools the maintainer release ceremony runs
+    tools:
+      - git
+      - gh
+      - jq
+      - python3
+      - gpg
+      - minisign
+      - npm
+      - uv
+  dev:
+    description: Host tools for make check
+    tools:
+      - git
+      - jq
+      - python3
+      - go
   # make bootstrap installs only this scope: exact pins via go install or a
   # reviewed cargo command, never a package manager. Installing other scopes
   # can fetch package managers (brew, bun), so bootstrap only checks them.
@@ -150,6 +168,8 @@ tools:
       windows:
         - scoop
         - winget
+    version_scheme: semver
+    minimum_version: 1.7.0
   yq:
     name: yq
     description: YAML processor
@@ -382,6 +402,121 @@ tools:
         - brew
       windows:
         - scoop
+    version_scheme: semver
+    minimum_version: 0.5.0
+  git:
+    name: git
+    description: Version control; tags, ls-remote and archive in the release scripts
+    kind: system
+    detect_command: git --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+    version_scheme: semver
+    minimum_version: 2.38.0
+  gh:
+    name: gh
+    description: GitHub CLI; release drafts, run downloads and verification reads
+    kind: system
+    detect_command: gh --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+    version_scheme: semver
+    minimum_version: 2.40.0
+  python3:
+    name: python3
+    description: Release and corpus scripts (3.11 or newer is enforced by the scripts)
+    kind: system
+    detect_command: python3 --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+    version_scheme: semver
+    minimum_version: 3.11.0
+  gpg:
+    name: gpg
+    description: OpenPGP tag and manifest signing and verification
+    kind: system
+    detect_command: gpg --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+    version_scheme: semver
+    minimum_version: 2.2.0
+  minisign:
+    name: minisign
+    description: Release manifest signing and verification
+    kind: system
+    detect_command: minisign -v
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+    version_scheme: semver
+    minimum_version: 0.11.0
+  npm:
+    name: npm
+    description: npm registry verification and first-publish upload (OIDC workflow uses >= 11.5.1)
+    kind: system
+    detect_command: npm --version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - brew
+      linux:
+        - brew
+      windows:
+        - scoop
+        - winget
+    version_scheme: semver
+    minimum_version: 10.0.0
   bun:
     name: bun
     description: Fast JavaScript runtime - required for TypeScript bindings

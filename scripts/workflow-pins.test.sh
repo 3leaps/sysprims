@@ -96,3 +96,83 @@ for label, text, expected in controls:
         raise SystemExit(f'error: pin mutation control did not fail as intended: {label} (expected {expected!r}, got {found})')
 print(f'[ok] {len(texts)} workflows: every action SHA- or digest-pinned with a version comment; {len(controls)} raw-text controls refused')
 PY
+(cd "$root" && python3 -B -E scripts/release-workflow-pin.py check) >/dev/null
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+repo="$scratch/repo"
+mkdir -p "$repo/.github/workflows" "$repo/.github/actions/sample" "$repo/config/release"
+cp "$root"/.github/workflows/*.yml "$repo/.github/workflows/"
+cp "$root/config/release/release-workflow.sha256" "$repo/config/release/"
+git -C "$repo" init -q -b main
+git -C "$repo" config user.name fixture
+git -C "$repo" config user.email fixture@example.invalid
+git -C "$repo" config commit.gpgsign false
+git -C "$repo" add -A
+git -C "$repo" commit -qm base
+sed_in_place() {
+	local script="$1" file="$2"
+	sed "$script" "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+}
+pin() { (cd "$repo" && PYTHONDONTWRITEBYTECODE=1 python3 -B -E "$root/scripts/release-workflow-pin.py" "$@") >"$scratch/out" 2>&1; }
+refused() {
+	if pin "${@:2}"; then
+		echo "error: workflow pin accepted: $1" >&2
+		exit 1
+	fi
+	grep -q "$1" "$scratch/out" || {
+		cat "$scratch/out" >&2
+		exit 1
+	}
+}
+pin_with() {
+	(cd "$repo" && shasum -a 256 .github/workflows/*.yml) >"$repo/config/release/release-workflow.sha256"
+}
+pin check
+pin verify-commit HEAD
+printf '# unreviewed\n' >>"$repo/.github/workflows/release.yml"
+refused 'differs from its reviewed digest' check
+git -C "$repo" checkout -q -- .github
+printf 'name: x\n' >"$repo/.github/actions/sample/action.yml"
+refused 'action.yml is not pinned' check
+rm -rf "$repo/.github/actions"
+sed_in_place '1s/^./0/' "$repo/config/release/release-workflow.sha256"
+refused 'differs from its reviewed digest' check
+git -C "$repo" checkout -q -- config
+printf '# reviewed\n' >>"$repo/.github/workflows/release.yml"
+pin_with
+pin check
+git -C "$repo" checkout -q -- .
+printf 'on: push\npermissions:\n  contents: read\njobs: {}\n' >"$repo/.github/workflows/extra.yml"
+refused 'extra.yml is not pinned' check
+rm "$repo/.github/workflows/extra.yml"
+sed_in_place 's/^  contents: read$/  contents: write/' "$repo/.github/workflows/ci.yml"
+pin_with
+refused 'ci.yml must declare read-only top-level permissions' check
+git -C "$repo" checkout -q -- .
+sed_in_place 's/^    environment: publish-npm$/    environment: other-env/' "$repo/.github/workflows/typescript-npm-publish.yml"
+pin_with
+refused 'grants more than read' check
+git -C "$repo" checkout -q -- .
+sed_in_place 's/^  workflow_dispatch:$/  push:\n  workflow_dispatch:/' "$repo/.github/workflows/typescript-npm-publish.yml"
+pin_with
+refused 'must trigger on workflow_dispatch only' check
+git -C "$repo" checkout -q -- .
+mkdir "$scratch/shadow"
+cp "$root/scripts/release-workflow-pin.py" "$scratch/shadow/"
+printf 'raise SystemExit("shadow yaml imported")\n' >"$scratch/shadow/yaml.py"
+(cd "$repo" && python3 -B -E "$scratch/shadow/release-workflow-pin.py" check) >"$scratch/out" 2>&1 || true
+if grep -q 'shadow' "$scratch/out"; then
+	echo 'error: a yaml.py beside the pin checker was imported' >&2
+	exit 1
+fi
+grep -q 'every workflow matches' "$scratch/out" || {
+	cat "$scratch/out" >&2
+	exit 1
+}
+printf '# uncommitted\n' >>"$repo/.github/workflows/release.yml"
+pin verify-commit HEAD
+git -C "$repo" add .github/workflows/release.yml
+git -C "$repo" commit -qm unreviewed
+git -C "$repo" checkout -q HEAD~1 -- .github/workflows/release.yml
+refused 'differs from its reviewed digest' verify-commit HEAD
+echo '[ok] workflow digest pins and verify-commit controls passed'

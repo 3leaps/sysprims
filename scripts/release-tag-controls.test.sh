@@ -81,7 +81,8 @@ fi
 # release-require-tag and none may be listed as tag-free.
 guarded="$(python3 "$fixture_root/scripts/release-make-guard.py" "$fixture_root")"
 for expected in release release-download release-export-keys release-create-draft release-publish release-preflight \
-	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-crates-publish release-guard-signed; do
+	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-crates-publish release-guard-signed \
+	release-stage-published release-verify-registries; do
 	grep -qx "$expected" <<<"$guarded" || {
 		echo "error: the guard analysis does not see $expected as tag-reading" >&2
 		exit 1
@@ -149,7 +150,8 @@ for target in release-guard-downloaded release-guard-checksummed release-require
 	release-download release-checksums release-sign release-export-keys release-notes \
 	release-create-draft release-verify release-verify-signatures release-crates-dry-run release-crates-publish \
 	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-prepare-tag-message \
-	release-guard-tag-version release-guard-tag-version-post release-preflight release; do
+	release-guard-tag-version release-guard-tag-version-post release-preflight release \
+	release-stage-published release-verify-registries; do
 	for origin in bare-only missing; do
 		rm -f "$sentinel"
 		case "$origin" in
@@ -163,7 +165,7 @@ for target in release-guard-downloaded release-guard-checksummed release-require
 	done
 done
 # The integrity commands themselves refuse too, without make in front.
-for command in downloaded checksummed require-checksummed signed uploaded remote publish; do
+for command in downloaded checksummed require-checksummed signed uploaded remote publish verify-registries; do
 	expect_fail_with 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' env -u RELEASE_TAG -u SYSPRIMS_RELEASE_TAG \
 		node "$fixture_root/scripts/release-integrity.mjs" "$command" --root "$repo" --dir "$fixture_dir"
 	expect_fail_with 'RELEASE_TAG is not accepted' env -u SYSPRIMS_RELEASE_TAG RELEASE_TAG=v1.2.3 \
