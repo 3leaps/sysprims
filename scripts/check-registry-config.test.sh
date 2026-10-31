@@ -4,6 +4,7 @@
 # run is refused, in the environment, in configuration files, and in the
 # tagged source tree.
 set -euo pipefail
+unset RUSTFLAGS RUSTDOCFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 python3 -B - "$root/scripts/check-registry-config.py" <<'PY'
 import importlib.util

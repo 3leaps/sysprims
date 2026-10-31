@@ -6,12 +6,16 @@ set -euo pipefail
 # shellcheck source=scripts/release-test-fixture.sh
 source "$(dirname "$0")/release-test-fixture.sh"
 export PYTHONDONTWRITEBYTECODE=1
-unset CI CARGO_REGISTRY_TOKEN CARGO_REGISTRIES_CRATES_IO_TOKEN
+unset CI CARGO_REGISTRY_TOKEN CARGO_REGISTRIES_CRATES_IO_TOKEN \
+	RUSTFLAGS RUSTDOCFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS
 
 msrv="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' "$fixture_root/Cargo.toml" | head -n 1)"
-if ! command -v cargo >/dev/null || ! cargo "+$msrv" --version >/dev/null 2>&1; then
-	echo "error: this test needs cargo with the $msrv toolchain" >&2
+if ! command -v cargo >/dev/null; then
+	echo "error: this test needs cargo" >&2
 	exit 1
+fi
+if [[ -n "$msrv" ]] && ! compgen -G "${RUSTUP_HOME:-$HOME/.rustup}/toolchains/${msrv}*" >/dev/null; then
+	msrv=""
 fi
 
 prov="$fixture_root/scripts/release-cargo-provider.py"
@@ -126,7 +130,7 @@ pkg_check="$fixture_dir/pkg-check"
 python3 "$repo/scripts/release-export-tree.py" "$repo" "$commit" "$pkg_check/tree"
 (cd "$pkg_check/tree" && env -i PATH="$PATH" HOME="$pkg_check/home" CARGO_HOME="$pkg_check/home" \
 	CARGO_TARGET_DIR="$pkg_check/target" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
-	RUSTUP_TOOLCHAIN="$msrv" cargo package --locked --no-verify -p sysprims-core >/dev/null 2>&1)
+	${msrv:+RUSTUP_TOOLCHAIN="$msrv"} cargo package --locked --no-verify -p sysprims-core >/dev/null 2>&1)
 expected_crate="$pkg_check/target/package/sysprims-core-$version.crate"
 digest="$(shasum -a 256 "$expected_crate" | cut -c1-64)"
 
@@ -215,7 +219,7 @@ proc = subprocess.run(
     [f"{repo}/scripts/release-crates-dry-run.sh", "--publish", "--registry-index", index, "--registry-api", api, "--registry-dl", dl],
     cwd=repo,
     env=env,
-    stdin=subprocess.DEVNULL,
+    input=b"sysprims-core\n",
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
     start_new_session=True,
@@ -235,7 +239,7 @@ printf '{"index-url":"%s","name":"sysprims-core","vers":"%s","cksum":"%s"}' \
 	"$index" "$version" "$(printf '%064d' 0)" >"$fixture_dir/wrong-approval.json"
 if (cd "$pkg_check/tree" && env -i PATH="$PATH" HOME="$gate_home" CARGO_HOME="$gate_home" \
 	CARGO_TARGET_DIR="$pkg_check/gate-target" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
-	RUSTUP_TOOLCHAIN="$msrv" SYSPRIMS_CARGO_APPROVAL="$fixture_dir/wrong-approval.json" \
+	${msrv:+RUSTUP_TOOLCHAIN="$msrv"} SYSPRIMS_CARGO_APPROVAL="$fixture_dir/wrong-approval.json" \
 	SYSPRIMS_CARGO_TOKEN_FILE="$fixture_dir/token" \
 	cargo publish --no-verify --locked --registry testreg -p sysprims-core) >"$fixture_dir/gate.out" 2>&1; then
 	echo 'error: cargo published with a mismatched approval' >&2
@@ -254,6 +258,7 @@ grep -q 'is not approved' "$fixture_dir/gate.out" || {
 # ancestor .cargo/config.toml, release-source-check failures on the export, and
 # packaging-dirtied trees are all refused through the script.
 expect_fail_with 'unset CARGO_REGISTRY_TOKEN' publish_tty sysprims-core CARGO_REGISTRY_TOKEN=x
+expect_fail_with 'Cargo source or command environment overrides are forbidden' publish_tty sysprims-core RUSTFLAGS=-Dwarnings
 expect_fail_with 'SYSPRIMS_CARGO_TOKEN_FILE must name a file' publish_tty sysprims-core -u:SYSPRIMS_CARGO_TOKEN_FILE
 expect_fail_with 'not confirmed' publish_no_tty
 expect_fail_with 'not confirmed' publish_tty wrong-crate

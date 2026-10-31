@@ -87,6 +87,9 @@ commit="$(git rev-parse "${object}^{commit}")"
 version="$(git cat-file blob "$commit:VERSION" | tr -d '\r\n')"
 [[ "$SYSPRIMS_RELEASE_TAG" == "v$version" ]] || die 'SYSPRIMS_RELEASE_TAG does not match VERSION at the tagged commit'
 msrv="$(git cat-file blob "$commit:Cargo.toml" 2>/dev/null | sed -n 's/^rust-version = "\(.*\)"/\1/p' | head -n 1 || true)"
+if [[ -n "$msrv" ]] && ! compgen -G "${RUSTUP_HOME:-$HOME/.rustup}/toolchains/${msrv}*" >/dev/null; then
+	msrv=""
+fi
 
 # Everything that reads crate sources (plan check, dry runs, packaging,
 # publication) runs in an export of the tagged commit's blobs: no checkout
@@ -103,6 +106,9 @@ if [[ -f "$root/scripts/check-registry-config.py" ]]; then
 fi
 python3 "$root/scripts/release-export-tree.py" "$root" "$commit" "$tree" ||
 	die 'cannot export the tagged commit with its exact bytes'
+if [[ -f "$root/scripts/check-registry-config.py" ]]; then
+	CARGO_HOME="${CARGO_HOME:-$scratch/op-cargo-home}" "$python_bin" -I "$root/scripts/check-registry-config.py" --source-root "$tree" >/dev/null
+fi
 if [[ -f "$root/scripts/release-source-check.py" ]]; then
 	"$python_bin" -I "$root/scripts/release-source-check.py" "$commit" --repo "$root" --worktree "$tree" >/dev/null
 fi
