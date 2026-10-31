@@ -68,6 +68,8 @@ def registry_checksum(crate, version, text):
     record = data.get("version") or {}
     if record.get("crate") != crate or record.get("num") != version:
         raise ValueError(f"crates.io response does not describe {crate}@{version}")
+    if record.get("yanked") is True:
+        raise ValueError(f"{crate}@{version} is yanked on crates.io")
     checksum = record.get("checksum")
     if (
         not isinstance(checksum, str)

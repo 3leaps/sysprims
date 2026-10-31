@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Package or publish the library crates in registry dependency order.
 #   (no flag)  per-crate `cargo publish --dry-run`; nothing is uploaded
-#   --publish  one maintainer-cued upload per crate, in order
+#   --publish  one maintainer-cued zero-compile upload per crate, in order,
+#              gated by scripts/release-cargo-provider.py (PDR-0011)
 # Both run only from a clean detached checkout of the annotated release tag.
 # --publish also requires every earlier crate to be on the crates.io index at
 # this version before it uploads the next. CI never holds a registry token.
+# Test-only: --registry-index URL --registry-api URL --registry-dl URL select a
+# local test registry; a release run never passes them.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
@@ -13,17 +16,59 @@ die() {
 	exit 1
 }
 publish=0
-if [[ "${1:-}" == --publish ]]; then
-	publish=1
+index_url="https://github.com/rust-lang/crates.io-index"
+crates_io_index="$index_url"
+api_base="https://crates.io"
+download="https://static.crates.io/crates"
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--publish) publish=1 ;;
+	--registry-index)
+		index_url="${2:?}"
+		shift
+		;;
+	--registry-api)
+		api_base="${2:?}"
+		shift
+		;;
+	--registry-dl)
+		download="${2:?}"
+		shift
+		;;
+	*) die 'usage: release-crates-dry-run.sh [--publish]' ;;
+	esac
 	shift
-fi
-[[ $# -eq 0 ]] || die 'usage: release-crates-dry-run.sh [--publish]'
+done
 # No inherited git variable (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE,
 # GIT_CONFIG_*, ...) may steer any git or cargo command below.
 for name in $(compgen -e); do
 	[[ "$name" != GIT_* ]] || unset "$name"
 done
 [[ "$publish" == 0 || -z "${CI:-}" ]] || die 'crates.io publication is a local maintainer step, never CI'
+if [[ "$publish" == 1 ]]; then
+	[[ -z "${CARGO_REGISTRY_TOKEN+x}${CARGO_REGISTRIES_CRATES_IO_TOKEN+x}" ]] ||
+		die 'unset CARGO_REGISTRY_TOKEN: the token reaches Cargo only through the release provider'
+fi
+
+# Commands resolve only from absolute directories outside the trusted checkout:
+# an empty, dot or relative PATH entry would resolve against the tagged export
+# once the steps below change into it.
+trusted_path=
+IFS=: read -r -a path_entries <<<"$PATH"
+for entry in ${path_entries[@]+"${path_entries[@]}"}; do
+	[[ "$entry" == /* && -d "$entry" ]] || continue
+	resolved="$(cd "$entry" && pwd -P)"
+	case "$resolved" in "$root" | "$root"/*) continue ;; esac
+	trusted_path="${trusted_path:+$trusted_path:}$resolved"
+done
+[[ -n "$trusted_path" ]] || die 'no absolute PATH entry'
+PATH="$trusted_path"
+export PATH
+for tool in cargo python3 curl git shasum; do
+	command -v "$tool" >/dev/null || die "$tool not found on the trusted PATH"
+done
+python_bin="$(command -v python3)"
+[[ "$python_bin" == /* ]] || die 'python3 must resolve to an absolute path'
 
 : "${SYSPRIMS_RELEASE_TAG:?SYSPRIMS_RELEASE_TAG=vX.Y.Z is required}"
 [[ "$SYSPRIMS_RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'SYSPRIMS_RELEASE_TAG must be a canonical vX.Y.Z tag'
@@ -41,6 +86,7 @@ commit="$(git rev-parse "${object}^{commit}")"
 # VERSION at the tagged commit decides the version published.
 version="$(git cat-file blob "$commit:VERSION" | tr -d '\r\n')"
 [[ "$SYSPRIMS_RELEASE_TAG" == "v$version" ]] || die 'SYSPRIMS_RELEASE_TAG does not match VERSION at the tagged commit'
+msrv="$(git cat-file blob "$commit:Cargo.toml" 2>/dev/null | sed -n 's/^rust-version = "\(.*\)"/\1/p' | head -n 1 || true)"
 
 # Everything that reads crate sources (plan check, dry runs, packaging,
 # publication) runs in an export of the tagged commit's blobs: no checkout
@@ -48,12 +94,21 @@ version="$(git cat-file blob "$commit:VERSION" | tr -d '\r\n')"
 # and every exported file is checked against its blob before cargo runs.
 # cargo's target directory is a fresh directory, so the .crate hashed is the
 # one just written.
-scratch="$(cd "$(mktemp -d)" && pwd -P)"
+scratch="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/sysprims-publish.XXXXXX")" && pwd -P)"
 tree="$scratch/tree"
 trap 'rm -rf "$scratch"' EXIT
+unset CARGO_BUILD_TARGET_DIR CARGO_TARGET_DIR
+if [[ -f "$root/scripts/check-registry-config.py" ]]; then
+	CARGO_HOME="${CARGO_HOME:-$scratch/op-cargo-home}" "$python_bin" -I "$root/scripts/check-registry-config.py" >/dev/null
+fi
 python3 "$root/scripts/release-export-tree.py" "$root" "$commit" "$tree" ||
 	die 'cannot export the tagged commit with its exact bytes'
-unset CARGO_BUILD_TARGET_DIR
+if [[ -f "$root/scripts/release-source-check.py" ]]; then
+	"$python_bin" -I "$root/scripts/release-source-check.py" "$commit" --repo "$root" --worktree "$tree" >/dev/null
+fi
+if [[ -f "$root/scripts/check-registry-config.py" ]]; then
+	CARGO_HOME="${CARGO_HOME:-$scratch/op-cargo-home}" "$python_bin" -I "$root/scripts/check-registry-config.py" --source-root "$tree" >/dev/null
+fi
 export CARGO_TARGET_DIR="$scratch/target"
 # cargo finds the tagged commit only through the export's own gitfile, which
 # must name the git directory the exporter created in this run's scratch.
@@ -66,12 +121,22 @@ gitdir="$(sed -n '1s/^gitdir: //p' .git)"
 	die 'the export does not resolve to the tagged commit in its own git directory'
 python3 "$tree/scripts/release-crates.py" check
 
-# Publication state on crates.io, always the real registry. Prints "absent",
-# or the published checksum.
+registry_args=()
+curl_proto=(--proto '=https' --tlsv1.2)
+if [[ "$index_url" != "$crates_io_index" ]]; then
+	registry_args=(--registry testreg)
+	registry_config() { printf '[registries.testreg]\nindex = "%s"\n' "$index_url"; }
+	curl_proto=(--proto '=http,https')
+else
+	registry_config() { :; }
+fi
+
+# Publication state on crates.io (or the configured test registry). Prints
+# "absent", or the published checksum; refuses if yanked.
 registry_checksum() {
 	local crate="$1" body status
-	body="$(curl --proto '=https' --tlsv1.2 -sS -w '\n%{http_code}' \
-		"https://crates.io/api/v1/crates/${crate}/${version}")" || die "cannot query crates.io for $crate"
+	body="$(curl "${curl_proto[@]}" -sS -w '\n%{http_code}' \
+		"${api_base}/api/v1/crates/${crate}/${version}")" || die "cannot query crates.io for $crate"
 	status="${body##*$'\n'}"
 	body="${body%$'\n'*}"
 	case "$status" in
@@ -81,13 +146,23 @@ registry_checksum() {
 	esac
 }
 
-# sha256 of the crate packaged from the tagged commit. The .crate is removed
-# first so the hash is always of the file this call produced.
+# sha256 of the crate packaged from the tagged commit (zero-compile: --no-verify).
+# The .crate is removed first so the hash is always of the file this call produced.
 local_checksum() {
-	local crate="$1" file="$CARGO_TARGET_DIR/package/${1}-${version}.crate" path
+	local crate="$1" file="$CARGO_TARGET_DIR/package/${1}-${version}.crate" path pkg_home
 	rm -f "$file"
+	pkg_home="$(mktemp -d "$scratch/pkg-home.XXXXXX")"
+	registry_config >"$pkg_home/config.toml"
 	# No --allow-dirty: cargo refuses if any file differs from the tagged commit.
-	cargo package --locked --no-verify -p "$crate" >/dev/null 2>&1 || die "cannot package $crate"
+	(env -i PATH="$PATH" HOME="$pkg_home" CARGO_HOME="${CARGO_HOME:-$pkg_home}" \
+		CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
+		RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
+		${msrv:+RUSTUP_TOOLCHAIN="$msrv"} \
+		${FAKE_CRATE:+FAKE_CRATE="$FAKE_CRATE"} \
+		${FAKE_VCS_SHA:+FAKE_VCS_SHA="$FAKE_VCS_SHA"} \
+		${FAKE_VCS_PATH:+FAKE_VCS_PATH="$FAKE_VCS_PATH"} \
+		${CARGO_CALLS:+CARGO_CALLS="$CARGO_CALLS"} \
+		cargo package --locked --no-verify -p "$crate" >/dev/null 2>&1) || die "cannot package $crate"
 	[[ -f "$file" ]] || die "packaged crate $file not found"
 	path="$(python3 "$tree/scripts/release-crates.py" paths | awk -v c="$crate" '$1==c {print $2}')"
 	python3 "$tree/scripts/release-crates.py" vcs-info "$file" "$crate" "$version" "$commit" "$path" ||
@@ -112,24 +187,66 @@ for i in "${!crates[@]}"; do
 	path="${paths[$i]}"
 	if [[ "$publish" == 1 ]]; then
 		published="$(registry_checksum "$crate")"
+		expected_sum="$(local_checksum "$crate")"
 		if [[ "$published" != absent ]]; then
-			[[ "$published" == "$(local_checksum "$crate")" ]] ||
+			[[ "$published" == "$expected_sum" ]] ||
 				die "$crate@$version is on crates.io with different contents; stop and investigate"
 			echo "[--] $crate@$version is already on crates.io with these contents; skipping"
 			continue
 		fi
-		printf 'Publish %s@%s to crates.io? Type the crate name to continue: ' "$crate" "$version"
-		read -r answer </dev/tty
-		[[ "$answer" == "$crate" ]] || die "publication of $crate not confirmed"
-		cargo publish --locked -p "$crate"
+		token_file="${SYSPRIMS_CARGO_TOKEN_FILE:-}"
+		[[ "$token_file" == /* && -f "$token_file" && -s "$token_file" && ! -L "$token_file" ]] ||
+			die 'SYSPRIMS_CARGO_TOKEN_FILE must name a file holding the registry token'
+		if [[ -t 0 ]]; then
+			printf 'Publish %s@%s (sha256 %s) to crates.io? Type the crate name to continue: ' "$crate" "$version" "$expected_sum"
+			read -r answer
+			[[ "$answer" == "$crate" ]] || die "publication of $crate not confirmed"
+		else
+			grep -Fxq "$crate@$version:$expected_sum" <<<"${SYSPRIMS_CRATE_PUBLISH_CONFIRM:-}" ||
+				die "publication of $crate not confirmed: no terminal, and SYSPRIMS_CRATE_PUBLISH_CONFIRM is not $crate@$version:<verified sha256>"
+		fi
+		upload_home="$(mktemp -d "$scratch/cargo-home.XXXXXX")"
+		printf '#!/bin/bash\nexec %q -I %q "$@"\n' "$python_bin" "$root/scripts/release-cargo-provider.py" >"$upload_home/provider"
+		chmod 0700 "$upload_home/provider"
+		"$python_bin" -I - "$upload_home/approval.json" "$index_url" "$crate" "$version" "$expected_sum" <<'PY'
+import json, sys
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump({"index-url": sys.argv[2], "name": sys.argv[3], "vers": sys.argv[4], "cksum": sys.argv[5]}, handle)
+PY
+		{
+			registry_config
+			printf '[registry]\nglobal-credential-providers = ["%s"]\n' "$upload_home/provider"
+		} >"$upload_home/config.toml"
+		if [[ -f "$root/scripts/check-registry-config.py" ]]; then
+			env -u CARGO_TARGET_DIR CARGO_HOME="$upload_home/clean-check" "$python_bin" -I "$root/scripts/check-registry-config.py" --source-root "$tree" >/dev/null
+		fi
+		(env -i PATH="$PATH" HOME="$upload_home" CARGO_HOME="$upload_home" \
+			CARGO_TARGET_DIR="$scratch/upload-target" \
+			RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
+			${msrv:+RUSTUP_TOOLCHAIN="$msrv"} \
+			CARGO_REGISTRY_CREDENTIAL_PROVIDER="$upload_home/provider" \
+			CARGO_REGISTRIES_TESTREG_CREDENTIAL_PROVIDER="$upload_home/provider" \
+			SYSPRIMS_CARGO_APPROVAL="$upload_home/approval.json" \
+			SYSPRIMS_CARGO_TOKEN_FILE="$token_file" \
+			SYSPRIMS_CARGO_PROVIDER_LOG="${SYSPRIMS_CARGO_PROVIDER_LOG:-$upload_home/provider.log}" \
+			cargo publish --no-verify --locked ${registry_args[@]+"${registry_args[@]}"} -p "$crate")
+		[[ -z "$(git status --porcelain --untracked-files=all)" ]] || die 'packaging changed the release source'
 		echo "[..] waiting for $crate@$version on the crates.io index"
-		for _ in $(seq 1 60); do
+		for _ in $(seq 1 "${SYSPRIMS_INDEX_WAIT_TRIES:-60}"); do
 			published="$(registry_checksum "$crate")"
 			[[ "$published" != absent ]] && break
-			sleep 10
+			sleep "${SYSPRIMS_INDEX_WAIT_SECONDS:-10}"
 		done
-		[[ "$published" == "$(local_checksum "$crate")" ]] ||
-			die "$crate@$version is not on crates.io with the uploaded contents; stop and investigate"
+		[[ "$published" != absent ]] ||
+			die "$crate@$version did not appear on the crates.io index; stop and investigate"
+		[[ "$published" == "$expected_sum" ]] ||
+			die "the index checksum for $crate differs from the verified archive"
+		curl "${curl_proto[@]}" --fail --silent --show-error --location --retry 3 \
+			--output "$scratch/published-$crate.crate" \
+			"$download/$crate/$crate-$version.crate" || die "could not download the published $crate archive"
+		[[ "$(shasum -a 256 "$scratch/published-$crate.crate" | cut -c1-64)" == "$expected_sum" ]] ||
+			die "the published $crate archive differs from the verified one"
+		echo "[ok] $crate $version published and verified ($expected_sum)"
 	else
 		printf 'Dry-run crates.io: %s@%s\n' "$crate" "$version"
 		cargo publish --dry-run --locked -p "$crate" ${patches[@]+"${patches[@]}"}

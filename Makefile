@@ -26,7 +26,7 @@
 .PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
 .PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
 .PHONY: release-guard-uploaded release-guard-remote release-publish
-.PHONY: release-stage-published release-verify-registries release-pack-npm-redirector
+.PHONY: release-stage-published release-verify-registries release-pack-npm-redirector release-source-check
 .PHONY: release-require-checksummed
 .PHONY: version-patch version-minor version-major version-set version-sync
 .PHONY: version-check version-tooling-test
@@ -276,7 +276,7 @@ goneat-version: ## Print PATH goneat vs Makefile pin
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
 
-check: fmt-check lint test check-windows content-check workflow-pin deny ## Run all quality checks
+check: fmt-check lint test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
 
 # The public-surface scan uses limensafe with a maintainer catalog named by
@@ -687,7 +687,7 @@ RELEASE_TAG_ORIGIN := $(origin RELEASE_TAG)
 # The anchor-fetch trust opt-in is honoured only from the make command line.
 ANCHORS_TRUST_ORIGIN := $(origin ANCHORS_TRUST_LOCAL_TAG)
 RELEASE_TAG_FREE_TARGETS := release-clean release-tooling-test release-plan-check release-check \
-	release-crates-list release-export-pin release-validate-pin release-insert-anchors \
+	release-crates-list release-source-check release-export-pin release-validate-pin release-insert-anchors \
 	release-verify-checksums release-verify-keys release-require-tag release-guard-provenance \
 	release-pack-npm-redirector
 
@@ -735,6 +735,9 @@ release-insert-anchors: ## Derive the fingerprint anchors with decernor (refuses
 
 release-crates-list: ## List the published crates in registry order
 	@python3 scripts/release-crates.py list
+
+release-source-check: ## Refuse build.rs, Cargo configuration, or path/git overrides in publishable crates
+	@$(PYTHON) -I -B scripts/release-source-check.py HEAD
 
 release-crates-dry-run: release-require-tag ## Per-crate cargo publish --dry-run from the detached release tag
 	./scripts/release-crates-dry-run.sh
