@@ -91,11 +91,30 @@ printf 'pub fn core_ready() -> bool { true }\n' >"$repo/crates/sysprims-core/src
 printf 'target/\n' >"$repo/.gitignore"
 (cd "$repo" && cargo generate-lockfile --offline -q)
 
-# Poisoned cargo in the repo's bin/ directory: relative PATH entries must be stripped.
-mkdir -p "$repo/bin" "$fixture_dir/outside"
+# Poisoned cargo in the repo root, the repo's bin/ directory, and ../outside:
+# relative PATH entries and absolute PATH entries inside $root must be stripped.
+mkdir -p "$repo/bin" "$fixture_dir/outside" "$fixture_dir/cargo-wrap"
+printf '#!/usr/bin/env bash\ntouch "%s/poisoned"\nexit 0\n' "$fixture_dir" >"$repo/cargo"
 printf '#!/usr/bin/env bash\ntouch "%s/poisoned"\nexit 0\n' "$fixture_dir" >"$repo/bin/cargo"
 printf '#!/usr/bin/env bash\ntouch "%s/poisoned"\nexit 0\n' "$fixture_dir" >"$fixture_dir/outside/cargo"
-chmod +x "$repo/bin/cargo" "$fixture_dir/outside/cargo"
+chmod +x "$repo/cargo" "$repo/bin/cargo" "$fixture_dir/outside/cargo"
+real_cargo="$(command -v cargo)"
+cat >"$fixture_dir/cargo-wrap/cargo" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == publish ]]; then
+	if [[ -n "\${SYSPRIMS_CARGO_TOKEN_FILE:-}\${SYSPRIMS_CARGO_APPROVAL:-}\${SYSPRIMS_CARGO_PROVIDER_LOG:-}" ]]; then
+		echo "error: cargo publish inherited provider secret/approval env vars" >&2
+		exit 1
+	fi
+	if [[ -f $(printf '%q' "$fixture_dir/dirty-during-publish") ]]; then
+		touch "\$PWD/dirty-during-publish"
+		exit 0
+	fi
+fi
+exec $(printf '%q' "$real_cargo") "\$@"
+EOF
+chmod +x "$fixture_dir/cargo-wrap/cargo"
+printf 'target/\n/cargo\n' >"$repo/.gitignore"
 
 fixture_commit "$repo" release
 git -C "$repo" tag -a -m "Release $version" "$tag"
@@ -128,9 +147,82 @@ export SYSPRIMS_RELEASE_TAG="$tag"
 export SYSPRIMS_CARGO_TOKEN_FILE="$fixture_dir/token"
 export SYSPRIMS_INDEX_WAIT_TRIES=20 SYSPRIMS_INDEX_WAIT_SECONDS=0.2
 
-publish() {
-	(cd "$repo" && PATH="::bin:../outside:$PATH" "$repo/scripts/release-crates-dry-run.sh" \
-		--publish --registry-index "$index" --registry-api "$api" --registry-dl "$dl" "$@")
+publish_tty() {
+	local answer="$1"
+	shift
+	python3 - "$answer" "$repo" "$fixture_dir/cargo-wrap" "$index" "$api" "$dl" "$@" <<'PY'
+import fcntl, os, pty, select, subprocess, sys, termios
+
+answer, repo, wrap, index, api, dl, *extra = sys.argv[1:]
+master, slave = pty.openpty()
+env = os.environ.copy()
+env["PATH"] = f"::bin:../outside:{repo}:{repo}/bin:{wrap}:" + env["PATH"]
+for item in extra:
+    if item.startswith("-u:"):
+        env.pop(item[3:], None)
+    else:
+        k, _, v = item.partition("=")
+        env[k] = v
+
+def preexec():
+    os.setsid()
+    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+proc = subprocess.Popen(
+    [f"{repo}/scripts/release-crates-dry-run.sh", "--publish", "--registry-index", index, "--registry-api", api, "--registry-dl", dl],
+    cwd=repo,
+    env=env,
+    stdin=slave,
+    stdout=slave,
+    stderr=slave,
+    preexec_fn=preexec,
+    close_fds=True,
+)
+os.close(slave)
+sent = False
+chunks = []
+while True:
+    r, _, _ = select.select([master], [], [], 0.1)
+    if r:
+        try:
+            data = os.read(master, 4096)
+        except OSError:
+            break
+        if not data:
+            break
+        chunks.append(data)
+        joined = b"".join(chunks)
+        if not sent and b"Type the crate name to continue:" in joined:
+            if answer != "__EOF__":
+                os.write(master, (answer + "\n").encode("utf-8"))
+            sent = True
+    elif proc.poll() is not None:
+        break
+os.close(master)
+rc = proc.wait()
+sys.stdout.buffer.write(b"".join(chunks))
+sys.exit(rc)
+PY
+}
+
+publish_no_tty() {
+	python3 - "$repo" "$fixture_dir/cargo-wrap" "$index" "$api" "$dl" <<'PY'
+import os, subprocess, sys
+repo, wrap, index, api, dl = sys.argv[1:]
+env = os.environ.copy()
+env["PATH"] = f"::bin:../outside:{repo}:{repo}/bin:{wrap}:" + env["PATH"]
+proc = subprocess.run(
+    [f"{repo}/scripts/release-crates-dry-run.sh", "--publish", "--registry-index", index, "--registry-api", api, "--registry-dl", dl],
+    cwd=repo,
+    env=env,
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    start_new_session=True,
+)
+sys.stdout.buffer.write(proc.stdout)
+sys.exit(proc.returncode)
+PY
 }
 puts() { grep -c '"m": "PUT"' "$registry/requests.log" 2>/dev/null || true; }
 
@@ -158,21 +250,41 @@ grep -q 'is not approved' "$fixture_dir/gate.out" || {
 	exit 1
 }
 
-# 2. Direct environment tokens, missing token file, unconfirmed non-tty runs, and ancestor .cargo/config.toml are refused.
-expect_fail_with 'unset CARGO_REGISTRY_TOKEN' bash -c "cd '$repo' && CARGO_REGISTRY_TOKEN=x '$repo/scripts/release-crates-dry-run.sh' --publish --registry-index '$index' --registry-api '$api' --registry-dl '$dl' </dev/null"
-expect_fail_with 'SYSPRIMS_CARGO_TOKEN_FILE must name a file' bash -c "cd '$repo' && env -u SYSPRIMS_CARGO_TOKEN_FILE '$repo/scripts/release-crates-dry-run.sh' --publish --registry-index '$index' --registry-api '$api' --registry-dl '$dl' </dev/null"
-expect_fail_with 'not confirmed' publish </dev/null
-expect_fail_with 'not confirmed' bash -c "cd '$repo' && SYSPRIMS_CRATE_PUBLISH_CONFIRM='sysprims-core@$version:$(printf '%064d' 0)' '$repo/scripts/release-crates-dry-run.sh' --publish --registry-index '$index' --registry-api '$api' --registry-dl '$dl' </dev/null"
+# 2. Direct environment tokens, missing token file, non-tty or wrong tty answer,
+# ancestor .cargo/config.toml, release-source-check failures on the export, and
+# packaging-dirtied trees are all refused through the script.
+expect_fail_with 'unset CARGO_REGISTRY_TOKEN' publish_tty sysprims-core CARGO_REGISTRY_TOKEN=x
+expect_fail_with 'SYSPRIMS_CARGO_TOKEN_FILE must name a file' publish_tty sysprims-core -u:SYSPRIMS_CARGO_TOKEN_FILE
+expect_fail_with 'not confirmed' publish_no_tty
+expect_fail_with 'not confirmed' publish_tty wrong-crate
 mkdir -p "$fixture_dir/.cargo"
 printf '[registry]\nglobal-credential-providers = ["cargo:token"]\n' >"$fixture_dir/.cargo/config.toml"
-expect_fail_with 'Cargo registry configuration may not name an index or command' publish </dev/null
+expect_fail_with 'Cargo registry configuration may not name an index or command' publish_tty sysprims-core
 rm -rf "$fixture_dir/.cargo"
+mkdir -p "$fixture_dir/shared-tmp/.cargo"
+printf '[net]\nretry = 1\n' >"$fixture_dir/shared-tmp/.cargo/config.toml"
+expect_fail_with 'Cargo configuration in an ancestor of the release source is forbidden' publish_tty sysprims-core TMPDIR="$fixture_dir/shared-tmp"
+rm -rf "$fixture_dir/shared-tmp"
+touch "$fixture_dir/dirty-during-publish"
+expect_fail_with 'packaging changed the release source' publish_tty sysprims-core
+rm -f "$fixture_dir/dirty-during-publish"
+
+# Through-the-script release-source-check gate on the exported tree.
+git -C "$repo" checkout -q main
+printf '[toolchain]\nchannel = "nightly"\n' >"$repo/rust-toolchain.toml"
+fixture_commit "$repo" bad-toolchain
+git -C "$repo" tag -f -a -m "Release $version" "$tag"
+git -C "$repo" checkout -q --detach "$tag"
+expect_fail_with 'a toolchain selector is not allowed in the release source' publish_tty sysprims-core
+git -C "$repo" checkout -q main
+git -C "$repo" reset -q --hard "$commit"
+git -C "$repo" tag -f -a -m "Release $version" "$tag"
+git -C "$repo" checkout -q --detach "$tag"
 [[ "$(puts)" == 0 ]]
 
 # 3. Real publication through the release provider.
-export SYSPRIMS_CRATE_PUBLISH_CONFIRM="sysprims-core@$version:$digest"
 export SYSPRIMS_CARGO_PROVIDER_LOG="$fixture_dir/provider.log"
-publish </dev/null >"$fixture_dir/out" 2>&1 || {
+publish_tty sysprims-core >"$fixture_dir/out" 2>&1 || {
 	cat "$fixture_dir/out" >&2
 	exit 1
 }
@@ -196,17 +308,35 @@ for line in open(sys.argv[1], encoding="utf-8"):
 PY
 cmp "$registry/crates/sysprims-core-$version.crate" "$expected_crate"
 [[ ! -e "$fixture_dir/poisoned" ]] || {
-	echo 'error: relative PATH entry executed a binary inside the checkout' >&2
+	echo 'error: relative or checkout-internal PATH entry executed a binary inside the checkout' >&2
 	exit 1
 }
 
 # 4. Re-running when already published with identical contents skips without uploading again.
 puts_before="$(puts)"
-out="$(publish </dev/null)"
+out="$(publish_tty sysprims-core)"
 [[ "$out" == *"already on crates.io with these contents; skipping"* ]]
 [[ "$(puts)" == "$puts_before" ]]
 
-# 5. Corrupted download from the registry is refused after upload.
+# 5. Mismatched index checksum after upload is refused.
+kill "$registry_pid" 2>/dev/null || true
+wait "$registry_pid" 2>/dev/null || true
+registry_idx="$fixture_dir/registry-idx"
+mkdir -p "$registry_idx"
+touch "$registry_idx/wrong-index-cksum"
+python3 "$fixture_root/scripts/test-registry.py" "$registry_idx" 0 dummy-token >/dev/null 2>&1 &
+registry_pid=$!
+for _ in $(seq 1 50); do
+	[[ -f "$registry_idx/ready" ]] && break
+	sleep 0.1
+done
+port="$(cat "$registry_idx/ready")"
+index="sparse+http://127.0.0.1:$port/index/"
+api="http://127.0.0.1:$port"
+dl="http://127.0.0.1:$port/dl"
+expect_fail_with 'the index checksum for sysprims-core differs from the verified archive' publish_tty sysprims-core
+
+# 6. Corrupted download from the registry is refused after upload.
 kill "$registry_pid" 2>/dev/null || true
 wait "$registry_pid" 2>/dev/null || true
 registry2="$fixture_dir/registry2"
@@ -222,9 +352,9 @@ port="$(cat "$registry2/ready")"
 index="sparse+http://127.0.0.1:$port/index/"
 api="http://127.0.0.1:$port"
 dl="http://127.0.0.1:$port/dl"
-expect_fail_with 'published sysprims-core archive differs from the verified one' publish </dev/null
+expect_fail_with 'published sysprims-core archive differs from the verified one' publish_tty sysprims-core
 
-# 6. Yanked version on the registry is refused before any provider call or upload.
+# 7. Yanked version on the registry is refused before any provider call or upload.
 kill "$registry_pid" 2>/dev/null || true
 wait "$registry_pid" 2>/dev/null || true
 registry3="$fixture_dir/registry3"
@@ -243,7 +373,7 @@ api="http://127.0.0.1:$port"
 dl="http://127.0.0.1:$port/dl"
 rm -f "$fixture_dir/yanked-provider.log"
 export SYSPRIMS_CARGO_PROVIDER_LOG="$fixture_dir/yanked-provider.log"
-expect_fail_with "sysprims-core@$version is yanked on crates.io" publish </dev/null
+expect_fail_with "sysprims-core@$version is yanked on crates.io" publish_tty sysprims-core
 [[ ! -e "$fixture_dir/yanked-provider.log" ]] || {
 	echo 'error: a yanked version reached the credential provider' >&2
 	exit 1

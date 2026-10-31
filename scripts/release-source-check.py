@@ -44,10 +44,11 @@ ALLOWED_UNPUBLISHED_MEMBERS = {
     "bindings/typescript/sysprims/native",
 }
 ALLOWED_BUILD_SCRIPTS = {
-    "ffi/sysprims-ffi/build.rs",
     "bindings/typescript/sysprims/native/build.rs",
 }
-ALLOWED_BUILD_MANIFESTS = {f"{m}/Cargo.toml" for m in ALLOWED_UNPUBLISHED_MEMBERS}
+ALLOWED_BUILD_MANIFESTS = {
+    "bindings/typescript/sysprims/native/Cargo.toml",
+}
 
 
 def git(repo, *args):
@@ -295,7 +296,8 @@ def check(repo, commit):
         .get("package", {})
         .get("publish")
     )
-    for path in ALLOWED_BUILD_MANIFESTS:
+    for member in ALLOWED_UNPUBLISHED_MEMBERS:
+        path = f"{member}/Cargo.toml"
         if path in parsed and not is_unpublished(parsed[path], ws_publish):
             raise ValueError(
                 f"{path}: allowlisted FFI/binding crate must set publish = false"

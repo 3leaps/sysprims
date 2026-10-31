@@ -106,9 +106,6 @@ python3 "$root/scripts/release-export-tree.py" "$root" "$commit" "$tree" ||
 if [[ -f "$root/scripts/release-source-check.py" ]]; then
 	"$python_bin" -I "$root/scripts/release-source-check.py" "$commit" --repo "$root" --worktree "$tree" >/dev/null
 fi
-if [[ -f "$root/scripts/check-registry-config.py" ]]; then
-	CARGO_HOME="${CARGO_HOME:-$scratch/op-cargo-home}" "$python_bin" -I "$root/scripts/check-registry-config.py" --source-root "$tree" >/dev/null
-fi
 export CARGO_TARGET_DIR="$scratch/target"
 # cargo finds the tagged commit only through the export's own gitfile, which
 # must name the git directory the exporter created in this run's scratch.
@@ -197,16 +194,13 @@ for i in "${!crates[@]}"; do
 		token_file="${SYSPRIMS_CARGO_TOKEN_FILE:-}"
 		[[ "$token_file" == /* && -f "$token_file" && -s "$token_file" && ! -L "$token_file" ]] ||
 			die 'SYSPRIMS_CARGO_TOKEN_FILE must name a file holding the registry token'
-		if [[ -t 0 ]]; then
-			printf 'Publish %s@%s (sha256 %s) to crates.io? Type the crate name to continue: ' "$crate" "$version" "$expected_sum"
-			read -r answer
-			[[ "$answer" == "$crate" ]] || die "publication of $crate not confirmed"
-		else
-			grep -Fxq "$crate@$version:$expected_sum" <<<"${SYSPRIMS_CRATE_PUBLISH_CONFIRM:-}" ||
-				die "publication of $crate not confirmed: no terminal, and SYSPRIMS_CRATE_PUBLISH_CONFIRM is not $crate@$version:<verified sha256>"
-		fi
+		printf 'Publish %s@%s (sha256 %s) to crates.io? Type the crate name to continue: ' "$crate" "$version" "$expected_sum"
+		read -r answer </dev/tty || die "publication of $crate not confirmed"
+		[[ "$answer" == "$crate" ]] || die "publication of $crate not confirmed"
 		upload_home="$(mktemp -d "$scratch/cargo-home.XXXXXX")"
-		printf '#!/bin/bash\nexec %q -I %q "$@"\n' "$python_bin" "$root/scripts/release-cargo-provider.py" >"$upload_home/provider"
+		printf '#!/bin/bash\nexport SYSPRIMS_CARGO_APPROVAL=%q SYSPRIMS_CARGO_TOKEN_FILE=%q SYSPRIMS_CARGO_PROVIDER_LOG=%q\nexec %q -I %q "$@"\n' \
+			"$upload_home/approval.json" "$token_file" "${SYSPRIMS_CARGO_PROVIDER_LOG:-$upload_home/provider.log}" \
+			"$python_bin" "$root/scripts/release-cargo-provider.py" >"$upload_home/provider"
 		chmod 0700 "$upload_home/provider"
 		"$python_bin" -I - "$upload_home/approval.json" "$index_url" "$crate" "$version" "$expected_sum" <<'PY'
 import json, sys
@@ -226,9 +220,6 @@ PY
 			${msrv:+RUSTUP_TOOLCHAIN="$msrv"} \
 			CARGO_REGISTRY_CREDENTIAL_PROVIDER="$upload_home/provider" \
 			CARGO_REGISTRIES_TESTREG_CREDENTIAL_PROVIDER="$upload_home/provider" \
-			SYSPRIMS_CARGO_APPROVAL="$upload_home/approval.json" \
-			SYSPRIMS_CARGO_TOKEN_FILE="$token_file" \
-			SYSPRIMS_CARGO_PROVIDER_LOG="${SYSPRIMS_CARGO_PROVIDER_LOG:-$upload_home/provider.log}" \
 			cargo publish --no-verify --locked ${registry_args[@]+"${registry_args[@]}"} -p "$crate")
 		[[ -z "$(git status --porcelain --untracked-files=all)" ]] || die 'packaging changed the release source'
 		echo "[..] waiting for $crate@$version on the crates.io index"

@@ -54,6 +54,9 @@ refuse 'allowlisted FFI/binding crate must set publish = false'
 printf '[package]\nname = "sysprims-ts-napi"\npublish.workspace = true\nbuild = "tools/gen.rs"\n' >"$repo/bindings/typescript/sysprims/native/Cargo.toml"
 fixture_commit "$repo" napi-custom-build
 refuse 'build script'
+printf 'fn main() {}\n' >"$repo/ffi/sysprims-ffi/build.rs"
+fixture_commit "$repo" ffi-build-rs
+refuse 'build script'
 
 printf '[toolchain]\nchannel = "nightly"\n' >"$repo/rust-toolchain.toml"
 fixture_commit "$repo" toolchain
