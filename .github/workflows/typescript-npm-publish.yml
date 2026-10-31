@@ -55,6 +55,10 @@ jobs:
             echo "::error::Input tag must be a canonical vX.Y.Z tag"
             exit 1
           fi
+          if [[ "${GITHUB_REF:-}" != "refs/tags/$INPUT_TAG" ]]; then
+            echo "::error::Workflow must be dispatched on refs/tags/$INPUT_TAG (got ${GITHUB_REF:-unset})"
+            exit 1
+          fi
           make release-plan-check version-check
           SYSPRIMS_TAG_GUARD_MODE=post-tag \
             SYSPRIMS_RELEASE_TAG="$INPUT_TAG" \

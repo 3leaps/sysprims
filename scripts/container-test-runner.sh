@@ -91,15 +91,14 @@ mkdir -p /workspace/target/container
 chmod -R a+rwx /workspace/target/container 2>/dev/null || true
 chown -R testuser:testuser /workspace/target/container 2>/dev/null || true
 
-# Make cargo accessible to all users (root home is 700 by default)
-chmod 755 /root
-chmod -R a+rX /root/.cargo 2>/dev/null || true
-chmod -R a+rX /root/.rustup 2>/dev/null || true
+# Ensure shared toolchain directories are readable by testuser
+chmod -R a+rX /usr/local/cargo 2>/dev/null || true
+chmod -R a+rX /usr/local/rustup 2>/dev/null || true
 
 su testuser -c "
-    export PATH=\"/root/.cargo/bin:\$PATH\"
-    export CARGO_HOME=/root/.cargo
-    export RUSTUP_HOME=/root/.rustup
+    export PATH=\"/usr/local/cargo/bin:\$PATH\"
+    export CARGO_HOME=/usr/local/cargo
+    export RUSTUP_HOME=/usr/local/rustup
     export CARGO_TARGET_DIR=/workspace/target/container
     cargo test --workspace --exclude sysprims-ts-napi --target $TARGET \
         --features cross-user-tests \

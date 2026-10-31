@@ -60,6 +60,18 @@ retag "bindings/go/sysprims/v$version"
 sign "$fixture_dir/gpg" "$subkey" "bindings/go/sysprims/v$version"
 verify >/dev/null
 
+# A publishing workflow in the tagged commit that differs from its pin fails,
+# even though every tag is validly signed.
+git -C "$repo" tag -d "${tags[@]}" >/dev/null
+printf '# unreviewed\n' >>"$repo/.github/workflows/release.yml"
+fixture_commit "$repo" unreviewed-workflow
+for tag in "${tags[@]}"; do sign "$fixture_dir/gpg" "$subkey" "$tag"; done
+expect_fail_with 'publishing workflow in the tagged commit differs' verify
+git -C "$repo" tag -d "${tags[@]}" >/dev/null
+git -C "$repo" reset -q --hard HEAD~1
+for tag in "${tags[@]}"; do sign "$fixture_dir/gpg" "$subkey" "$tag"; done
+verify >/dev/null
+
 # A tag signed by a key that is not the committed subkey fails.
 retag "go/recurrence/v$version"
 sign "$fixture_dir/gpg-other" "$other_subkey" "go/recurrence/v$version"

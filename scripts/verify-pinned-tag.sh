@@ -47,6 +47,7 @@ committed config/release/tagger-identity.txt "$keyring/tagger-identity.txt"
 committed config/release/signing-subkey.txt "$keyring/signing-subkey.txt"
 "$root/scripts/validate-release-anchors.sh" "$keyring/anchors.txt" "$keyring/anchors.ndjson" \
 	"$keyring/keys.asc" "$keyring/minisign.pub" >/dev/null || die 'committed pin and anchors disagree'
+(cd "$root" && python3 -B -E "$root/scripts/release-workflow-pin.py" verify-commit "$target")
 primary="$(awk '$1=="gpg" {print $2}' "$keyring/anchors.txt")"
 permitted="$(tr -d '\r\n' <"$keyring/signing-subkey.txt")"
 [[ "$primary" =~ ^[0-9A-F]{40}$ && "$permitted" =~ ^[0-9A-F]{40}$ && "$permitted" != "$primary" ]] ||
