@@ -8,8 +8,8 @@
 //!
 //! # Group-by-Default
 //!
-//! The core differentiator of sysprims over GNU timeout. When a command times
-//! out, the acquired process group is signaled, not just the direct child:
+//! When a command times out, the acquired process group or Windows Job Object
+//! is signaled, not just the direct child:
 //!
 //! - **Unix**: Creates a new process group; child is group leader
 //! - **Windows**: Creates a Job Object with `KILL_ON_JOB_CLOSE`

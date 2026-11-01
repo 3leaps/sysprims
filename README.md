@@ -88,26 +88,27 @@ it.
 
 ## Quick Start
 
-### v0.2.4 Release Coordinates
+### v0.3.0 Release Coordinates
 
-The core release and its language packages share version `0.2.4`, but each
+The core release and its language packages share version `0.3.0`, but each
 ecosystem resolves that version through its own coordinate. Publication
 workflows run from the verified core tag.
 
 | Surface | Pin |
 | --- | --- |
-| Rust crates | `sysprims-core`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`, and `sysprims-timeout` at `0.2.4` |
-| Rust workspace | Repository tag `v0.2.4` |
-| Go module | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.4` |
-| TypeScript | `npm install @3leaps/sysprims@0.2.4` |
+| Rust crates | `sysprims-core`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and `sysprims-recurrence` at `0.3.0` |
+| Rust workspace | Repository tag `v0.3.0` |
+| Go module | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.3.0` |
+| Go recurrence module | `github.com/3leaps/sysprims/go/recurrence@v0.3.0` |
+| TypeScript | `npm install @3leaps/sysprims@0.3.0` |
 | PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release; use the core revision recorded by that companion release |
 
-The canonical `v0.2.4` and path-prefixed
-`bindings/go/sysprims/v0.2.4` tags identify the same core commit.
-`sysprims-pty` has an independent version and tag lifecycle; it is not included
-in the core tag. Only the five Rust library crates are published to crates.io;
-the CLI, C FFI crate, and TypeScript N-API crate are release-built but not
-published as Rust crates.
+The canonical `v0.3.0` and path-prefixed
+`bindings/go/sysprims/v0.3.0` and `go/recurrence/v0.3.0` tags identify the same
+core commit. `sysprims-pty` has an independent version and tag lifecycle; it is
+not included in the core tag. Only the six Rust library crates are published to
+crates.io; the CLI, C FFI crate, and TypeScript N-API crate are release-built
+but not published as Rust crates.
 
 Managed contained spawn is available in Go as `SpawnContained` and in
 TypeScript as `spawnContained`.
@@ -116,9 +117,9 @@ TypeScript as `spawnContained`.
 
 ```toml
 [dependencies]
-sysprims-timeout = "0.2.4"
-sysprims-signal = "0.2.4"
-sysprims-proc = "0.2.4"
+sysprims-timeout = "0.3.0"
+sysprims-signal = "0.3.0"
+sysprims-proc = "0.3.0"
 ```
 
 ```rust
@@ -436,9 +437,9 @@ if (err == SYSPRIMS_OK) {
 
 | Language   | Status           | Package                                                   |
 | ---------- | ---------------- | --------------------------------------------------------- |
-| Go         | Available        | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.4` |
-| TypeScript | Available        | `npm install @3leaps/sysprims@0.2.4`                      |
-| Python     | Planned (v0.2.x) | `pip install sysprims`                                    |
+| Go         | Available        | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.3.0` |
+| TypeScript | Available        | `npm install @3leaps/sysprims@0.3.0`                      |
+| Python     | Planned (v0.3.x) | `pip install sysprims`                                    |
 
 ### As a Go Library
 
@@ -551,7 +552,7 @@ sysprims integrates with the [Fulmen](https://github.com/fulmenhq) ecosystem:
 - **[rsfulmen](https://github.com/fulmenhq/rsfulmen)**: sysprims uses rsfulmen's signal constants (`SIGTERM`, `SIGKILL`, etc.) for cross-platform consistency
 - **[sysprims-pty](https://github.com/3leaps/sysprims-pty)**: separately versioned PTY adapter for prepared Unix session acquisition and create-suspended Windows Job containment
 - **Go bindings**: Available with consistent signal semantics
-- **Python bindings**: Planned for the v0.2.x series
+- **Python bindings**: Planned for the v0.3.x series
 - **TypeScript bindings**: Available through the Node-API package above
 
 This ensures signal semantics and exit codes are consistent whether you're writing Rust, Go, Python, or TypeScript.
@@ -612,7 +613,7 @@ Licensed under either of:
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-at your option.
+at your option. See [NOTICE](NOTICE) for project name and trademark terms.
 
 Apache-2.0 provides explicit patent grants, which may be valuable for enterprise adoption.
 

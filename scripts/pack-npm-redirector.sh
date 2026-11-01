@@ -51,7 +51,10 @@ cat >"$work/package.json" <<EOF
     "index.js",
     "index.cjs",
     "index.d.ts",
-    "README.md"
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "NOTICE"
   ],
   "dependencies": {
     "@3leaps/sysprims": "${version}"
@@ -86,6 +89,7 @@ printf '\n```bash\n%s %s @3leaps/sysprims\n```\n' npm install >>"$work/README.md
 
 cp "$root/LICENSE-MIT" "$work/LICENSE-MIT"
 cp "$root/LICENSE-APACHE" "$work/LICENSE-APACHE"
+cp "$root/NOTICE" "$work/NOTICE"
 
 mkdir -p "$out_dir"
 out_abs="$(cd "$out_dir" && pwd -P)"

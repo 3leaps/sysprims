@@ -1,6 +1,6 @@
 {
   "name": "@3leaps/sysprims",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "GPL-free cross-platform process utilities (TypeScript bindings via Node-API native addon)",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -16,7 +16,9 @@
     "docs/capability-intent-matrix.md",
     "docs/public-api.md",
     "README.md",
-    "LICENSE"
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=18"
