@@ -90,16 +90,18 @@ Make tree-kill the default, not opt-in.
 
 ### Rationale
 
-GNU timeout kills only the direct child. This leaves orphaned processes running when:
+Typical ungrouped subprocess spawning kills only the direct child. This leaves orphaned processes running when:
 
 - Child spawns grandchildren
 - Grandchildren ignore SIGTERM
 - Child forks and exits (orphaning the grandchild)
 
-sysprims-timeout uses process groups (Unix) or Job Objects (Windows) to target
-the acquired containment. Unix descendants can leave a cooperative group, so
-the guarantee covers acquisition and signaling eligibility rather than
-non-escape.
+While GNU coreutils 9.11 and uutils `timeout` already call `setpgid` and signal
+the process group by default on Unix, `sysprims-timeout` provides an embeddable
+MIT/Apache-2.0 library that uses process groups (Unix) or Job Objects (Windows)
+to target the acquired containment with typed reliability receipts. Unix
+descendants can leave a cooperative group, so the guarantee covers acquisition
+and signaling eligibility rather than non-escape.
 
 ### Observable Fallback
 

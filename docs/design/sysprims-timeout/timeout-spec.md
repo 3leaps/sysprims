@@ -3,7 +3,7 @@ title: "sysprims-timeout Module Spec"
 module: "sysprims-timeout"
 version: "1.3"
 status: "Active"
-last_updated: "2026-08-29"
+last_updated: "2026-11-01"
 adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 ---
 
@@ -15,11 +15,13 @@ adr_refs: ["ADR-0003", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0011"]
 CLI wrapper that match widely expected `timeout` semantics while acquiring and
 signaling a process group or Job by default, with observable fallbacks.
 
-**Core differentiator (ADR-0003):** Unlike GNU timeout, which targets only the
-direct child, sysprims-timeout acquires and signals a cooperative process group
-or owned Job. `Guaranteed` means race-free spawn-time acquisition and
-group/job-signaling eligibility. It does not claim that Unix descendants cannot
-later leave a process group.
+**Core differentiator (ADR-0003):** GNU coreutils 9.11 and uutils `timeout`
+already signal a Unix process group by default (`--foreground` opts out).
+`sysprims-timeout` provides an embeddable MIT/Apache-2.0 library across Unix
+process groups and Windows Job Objects with same-spawn `setsid` receipts and
+typed `TreeKillReliability` reporting. `Guaranteed` means race-free spawn-time
+acquisition and group/job-signaling eligibility. It does not claim that Unix
+descendants cannot later leave a process group.
 
 **In scope (v0.1.0):**
 
