@@ -15,7 +15,7 @@ You're building software that needs to spawn processes with timeouts, send signa
 
 1. **Shell out to GNU coreutils** — GPL licensed, can't statically link without license concerns
 2. **Reimplement from scratch** — Time-consuming, platform-specific edge cases everywhere
-3. **Accept incomplete behavior** — GNU `timeout` doesn't reliably kill process trees; orphaned children leak
+3. **Accept a Unix-only CLI** — GNU `timeout` 9.11 and uutils already group-signal by default, but that does not give you Windows Job Objects, typed reliability receipts, or an embeddable license-clean library
 
 ## What sysprims Offers
 
@@ -28,9 +28,20 @@ You're building software that needs to spawn processes with timeouts, send signa
 
 ### Group-by-Default: The Core Difference
 
-The fundamental reliability improvement over GNU alternatives isn't just license cleanliness—it's _correct behavior_.
+GNU coreutils 9.11 and uutils `timeout` already call `setpgid` and signal the
+process group by default (`--foreground` opts out). sysprims is not a Unix
+"GNU leaves orphans" replacement for that CLI behavior.
 
-**The problem with typical process spawning:**
+What sysprims adds:
+
+- **Windows Job Objects**: prepared, exact-process assignment before first
+  execution, with typed boundary strength (`kernel_enforced_job` vs unknown)
+- **Typed reliability receipts**: `TreeKillReliability` (including
+  `best_effort` degradation) in structured output so automation can detect it
+- **Embeddable library**: MIT/Apache-2.0, with Go, Python, and TypeScript
+  bindings — not a GPL CLI you shell out to
+
+**Typical spawn without grouping:**
 
 ```
 Parent spawns Child
@@ -57,11 +68,13 @@ signal through the retained guard with `killpg`. PID-only compatibility paths
 cannot retain that proof and report `best_effort`. A process group is
 cooperative containment: descendants can later leave it, so `guaranteed`
 describes acquisition and group-signaling eligibility rather than OS-enforced
-non-escape. On Windows, a prepared, exact-process Job assignment before first
-execution can independently report `kernel_enforced_job`; post-spawn adoption
-reports unknown boundary strength. Job Objects use
-`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` without either breakaway mode. Any
-degradation is exposed in structured output so automation can detect it.
+non-escape. Escape via `setsid` or double-fork is untested; this document does
+not claim those descendants are reaped. On Windows, a prepared, exact-process
+Job assignment before first execution can independently report
+`kernel_enforced_job`; post-spawn adoption reports unknown boundary strength.
+Job Objects use `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` without either breakaway
+mode. Any degradation is exposed in structured output so automation can detect
+it.
 
 ## Who Should Use This
 
@@ -136,6 +149,13 @@ match run_with_timeout("./build.sh", &[], Duration::from_secs(30), config)? {
 ```
 
 ### As a CLI
+
+Stock macOS does not ship `timeout`. Use `sysprims timeout 30s -- cmd`,
+[uutils coreutils](https://github.com/uutils/coreutils), or
+`brew install coreutils` (`gtimeout`; the current formula may also expose
+unprefixed `timeout`). BusyBox `timeout` is not GNU-parity. sysprims does not
+install an unprefixed `timeout` on `PATH`. See
+[Installing a timeout CLI](docs/guides/timeout-cli.md).
 
 ```bash
 # Run command with 30 second timeout

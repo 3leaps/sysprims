@@ -2,19 +2,19 @@
 
 > **Status**: Accepted  
 > **Date**: 2025-12-31  
-> **Amended**: 2026-08-27
+> **Amended**: 2026-11-01
 > **Authors**: Architecture Council
 
 ## Context
 
-Process tree management is unreliable in standard tooling:
+Process tree management is unreliable in standard application spawning:
 
-1. **GNU timeout**: Kills only the direct child; grandchildren may continue as orphans
-2. **Standard spawn**: No automatic process group creation
-3. **CI/CD impact**: Jobs "time out" but processes continue consuming resources
+1. **Standard library spawn**: No automatic process group or Windows Job Object creation; killing only the direct child leaves grandchildren running as orphans
+2. **Unix CLI tools**: GNU coreutils 9.11 and uutils `timeout` already call `setpgid` and signal the process group by default (`--foreground` opts out), but they are standalone Unix CLIs rather than an embeddable cross-platform library with Windows Job Objects and typed reliability receipts
+3. **CI/CD impact**: Uncontained subprocess trees "time out" while background descendants continue consuming resources
 4. **Container impact**: Orphaned processes prevent clean container shutdown
 
-This is sysprims's core reliability differentiator. We must get it right.
+Cross-platform containment with observable reliability receipts is sysprims's core differentiator. We must get it right.
 
 ## Decision
 
@@ -164,7 +164,7 @@ This is non-negotiable; it's the core differentiator.
 - CI jobs actually terminate on timeout
 - Containers can shut down cleanly
 - Resource leaks from cooperative in-group descendants are prevented
-- Clear improvement over GNU timeout
+- Explicit containment receipts and cross-platform Windows Job Object support beyond Unix CLI process-group defaults
 
 ### Negative
 
@@ -208,6 +208,6 @@ retain best-effort behavior with observable reliability.
 
 ## References
 
-- [GNU timeout source](https://github.com/coreutils/coreutils/blob/master/src/timeout.c)
+- [GNU coreutils timeout manual](https://www.gnu.org/software/coreutils/manual/html_node/timeout-invocation.html)
 - [Windows Job Objects](https://docs.microsoft.com/en-us/windows/win32/procthread/job-objects)
 - [POSIX Process Groups](https://pubs.opengroup.org/onlinepubs/9699919799/functions/setpgid.html)
