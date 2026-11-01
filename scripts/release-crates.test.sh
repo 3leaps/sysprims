@@ -4,8 +4,9 @@
 set -euo pipefail
 # shellcheck source=scripts/release-test-fixture.sh
 source "$(dirname "$0")/release-test-fixture.sh"
-# The publish path refuses under CI; only the explicit CI case below sets it.
-unset CI
+# The publish path refuses under CI and with Cargo command overrides (such as
+# CI's global RUSTFLAGS=-Dwarnings); only explicit cases below set them.
+unset CI RUSTFLAGS RUSTDOCFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_ENCODED_RUSTDOCFLAGS
 PYTHONDONTWRITEBYTECODE=1 python3 - "$fixture_root/scripts" <<'PY'
 import importlib.util
 import pathlib

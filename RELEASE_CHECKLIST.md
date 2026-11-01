@@ -336,7 +336,10 @@ What gets published:
 
 Workspace `publish` stays `false`. The public Rust libraries opt in.
 
-Use a crates.io token scoped to the library crate names. First upload of a
+Use a crates.io token scoped to the library crate names, stored in a local file
+named by `SYSPRIMS_CARGO_TOKEN_FILE` (with `CARGO_REGISTRY_TOKEN` and
+`CARGO_REGISTRIES_CRATES_IO_TOKEN` unset so the token is released only through
+the Cargo credential provider for the approved `.crate` digest). First upload of a
 crate name requires `publish-new` and `publish-update`; later releases should
 use update-only scope. Never store the token in this repository.
 
@@ -346,6 +349,8 @@ dependency graph (`make release-crates-list`).
 
 ```bash
 git switch --detach "$SYSPRIMS_RELEASE_TAG"
+unset CARGO_REGISTRY_TOKEN CARGO_REGISTRIES_CRATES_IO_TOKEN
+export SYSPRIMS_CARGO_TOKEN_FILE=/path/to/crates-io.token
 make release-crates-dry-run     # per-crate cargo publish --dry-run, nothing uploaded
 make release-crates-publish     # one confirmed upload per crate, waits for the index
 ```

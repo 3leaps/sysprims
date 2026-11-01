@@ -428,6 +428,9 @@ write_att("att.expired-cert.json", cert_b64, make_tlog_entry(cert_der, good_sig_
 bad_oid_cert_b64, bad_oid_cert_der = make_test_cert_b64(version, commit_sha="f" * 40)
 write_att("att.wrong-commit-oid.json", bad_oid_cert_b64, make_tlog_entry(bad_oid_cert_der, good_sig_der, good_stmt), good_stmt, good_sig_b64)
 
+no_oid_cert_b64, no_oid_cert_der = make_test_cert_b64(version, include_workflow_oids=False)
+write_att("att.no-commit-oid.json", no_oid_cert_b64, make_tlog_entry(no_oid_cert_der, good_sig_der, good_stmt), good_stmt, good_sig_b64)
+
 bad_slsa_commit_stmt = make_slsa_statement(f"pkg:npm/%403leaps/sysprims@{version}", "sha512", root_tgz_sha512, version, commit_sha="f" * 40)
 bad_slsa_commit_sig_b64, bad_slsa_commit_sig_der = sign_dsse_pae(bad_slsa_commit_stmt)
 write_att("att.wrong-commit-slsa.json", cert_b64, make_tlog_entry(cert_der, bad_slsa_commit_sig_der, bad_slsa_commit_stmt), bad_slsa_commit_stmt, bad_slsa_commit_sig_b64)
@@ -489,6 +492,8 @@ fi
 grep -q "npm gitHead missing" "$scratch/out"
 cp "$scratch/att.wrong-commit-oid.json" "$npm_att_file"
 refused "Fulcio .* extension mismatch"
+cp "$scratch/att.no-commit-oid.json" "$npm_att_file"
+refused "certificate missing required Fulcio GitHub workflow OIDC extensions"
 cp "$scratch/att.wrong-commit-slsa.json" "$npm_att_file"
 refused "SLSA resolvedDependencies gitCommit mismatch"
 cp "$scratch/att.no-wf.json" "$npm_att_file"
