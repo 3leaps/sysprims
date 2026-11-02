@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-cli"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-core"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "rsfulmen",
  "thiserror 2.0.21",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-ffi"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-proc"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "libc",
  "serde",
@@ -988,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-recurrence"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "jiff",
  "serde",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-session"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "libc",
  "sysprims-core",
@@ -1006,7 +1006,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-signal"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "libc",
  "rsfulmen",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-timeout"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "libc",
  "rsfulmen",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-ts-napi"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "napi",
  "napi-build",

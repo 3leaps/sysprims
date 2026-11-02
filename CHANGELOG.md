@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
 ### Added
 
 - `sysprims-recurrence` crate: RFC 5545 recurrence rules under
@@ -22,6 +24,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `github.com/3leaps/sysprims/go/recurrence`, no cgo, standard library only,
   same embedded tzdb bundle) that agrees with the Rust crate on the pinned
   corpus and on generated rules.
+- Committed release identity and signed tag ceremony (`docs/security/release-signing-keys.asc`,
+  `docs/security/sysprims-minisign.pub`, `keys/expected-fingerprints.*`, and
+  `decernor`-verified tag and fingerprint anchor checks).
+- Immutable GitHub Release promotion (`make release-publish`), published
+  release staging (`make release-stage-published`), and post-publish registry
+  and Sigstore SLSA v1.0 provenance verification (`make release-verify-registries`).
+- Cargo credential-provider publication gate (`scripts/release-cargo-provider.py`,
+  `make release-source-check`, and `make release-crates-publish`) enforcing
+  detached tag export, source-tree checks, immutable release verification, and
+  per-crate interactive confirmation before releasing a `crates.io` token.
+- Timeout CLI installation guide (`docs/guides/timeout-cli.md`) covering macOS,
+  Linux, and Windows options alongside embeddable library guidance.
+
+### Changed
+
+- CI release workflows (`release.yml` and `typescript-napi-prebuilds.yml`) run
+  with read-only permissions and upload unsigned workflow artifacts; draft
+  release creation and dual signing run locally through maintainer targets.
+- Bootstrap (`make bootstrap`) installs exact-pinned tools through `goneat`
+  from `.goneat/tools.yaml` (upgraded to `goneat` `v0.6.5` and `sfetch`
+  `v0.4.11`).
+- TypeScript CI workflow adds an always-running `TypeScript Gate` aggregate job
+  for branch-protection status checks.
+- Documentation (`README.md`, `ADR-0003`, and `timeout-spec.md`) clarifies that
+  GNU `timeout` 9.11 and uutils signal the process group by default on Unix and
+  positions `sysprims` around Windows Job Objects, typed reliability receipts,
+  and MIT/Apache-2.0 embeddable library bindings.
+
+### Fixed
+
+- Corrected the state of organization in the license trailer (North Carolina LLC).
+- Split verbatim SPDX `LICENSE-MIT` and `LICENSE-APACHE` texts from `NOTICE` and
+  placed matching copies in `bindings/go/sysprims`, `go/recurrence`, and
+  `bindings/typescript/sysprims` so `pkg.go.dev`, GitHub `licensee`, and npm
+  package scanners resolve the dual-license metadata cleanly.
 
 ## [0.2.4] - 2026-09-19
 
@@ -820,7 +857,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/3leaps/sysprims/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/3leaps/sysprims/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/3leaps/sysprims/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/3leaps/sysprims/compare/v0.2.1...v0.2.2

@@ -288,6 +288,11 @@ surface-scan: ## Public-surface scan (tree, commit messages, PR text, branch) wh
 # in CI as part of check.
 content-check: ## Refuse local paths, private keys, tokens and commit markers in tracked files
 	@$(PYTHON) -I -B scripts/content-check.py
+	@for dir in bindings/go/sysprims go/recurrence bindings/typescript/sysprims; do \
+		for file in LICENSE-MIT LICENSE-APACHE NOTICE; do \
+			cmp -s "$$file" "$$dir/$$file" || { echo "error: $$dir/$$file differs from root $$file" >&2; exit 1; }; \
+		done; \
+	done
 
 workflow-pin: ## Every workflow matches its reviewed digest and is read-only
 	@$(PYTHON) -B -E scripts/release-workflow-pin.py check

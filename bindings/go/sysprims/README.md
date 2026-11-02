@@ -9,11 +9,11 @@ Go bindings for the `sysprims` Rust process primitives.
 ## Install
 
 ```bash
-go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.2.4
+go get github.com/3leaps/sysprims/bindings/go/sysprims@v0.3.0
 ```
 
-The Go module resolves `v0.2.4` through the repository's path-prefixed
-`bindings/go/sysprims/v0.2.4` tag. That tag and the canonical `v0.2.4` tag
+The Go module resolves `v0.3.0` through the repository's path-prefixed
+`bindings/go/sysprims/v0.3.0` tag. That tag and the canonical `v0.3.0` tag
 identify the same reviewed commit.
 
 ### Windows toolchain
