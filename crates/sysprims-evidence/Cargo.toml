@@ -1,0 +1,22 @@
+[package]
+name = "sysprims-evidence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = true
+description = "Portable identity-evidence/v0 wire admission, report validation, and native process observation comparison over RFC 8785 canonical JSON"
+documentation = "https://docs.rs/sysprims-evidence"
+readme = "README.md"
+exclude = ["tests/"]
+
+[dependencies]
+canonprims-core.workspace = true
+canonprims-json.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time = { workspace = true, features = ["parsing"] }

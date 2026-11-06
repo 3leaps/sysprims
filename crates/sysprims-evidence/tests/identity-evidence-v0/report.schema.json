@@ -1,0 +1,1066 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/identity-evidence/v0/report.schema.json",
+  "title": "Identity Evidence Report (Draft)",
+  "description": "Shape validation only. A report does not authenticate its evaluator, verify evidence or grant authority.",
+  "type": "object",
+  "properties": {
+    "contract": {
+      "const": "identity-evidence/v0"
+    },
+    "report_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "format": "date-time"
+    },
+    "producer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "name",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "evaluator": {
+      "type": "object",
+      "properties": {
+        "software": {
+          "$ref": "#/$defs/software"
+        },
+        "principal": {
+          "$ref": "#/$defs/principal"
+        },
+        "verification_profile": {
+          "$ref": "#/$defs/profile"
+        }
+      },
+      "required": [
+        "software",
+        "principal",
+        "verification_profile"
+      ],
+      "additionalProperties": false
+    },
+    "subjects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/subject"
+      },
+      "minItems": 1,
+      "maxItems": 256
+    },
+    "identifiers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/identifier"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "assessments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assessment"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capability"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "keys": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/key"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/claim"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "input_reports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input-report"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "time_attribution": {
+      "$ref": "#/$defs/time-attribution"
+    }
+  },
+  "required": [
+    "contract",
+    "report_id",
+    "created_at",
+    "producer",
+    "subjects",
+    "identifiers",
+    "evidence",
+    "assessments",
+    "capabilities",
+    "keys",
+    "claims",
+    "input_reports"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "identity-binding": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "declared",
+        "observed",
+        "enrolled-key",
+        "attested-key"
+      ]
+    },
+    "key-custody": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "not-applicable",
+        "software",
+        "os-managed",
+        "hardware-backed",
+        "virtual-hardware-backed"
+      ]
+    },
+    "execution-isolation": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "shared-account",
+        "separate-account",
+        "os-confined",
+        "virtual-machine",
+        "confidential-workload"
+      ]
+    },
+    "platform-evidence": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "declared",
+        "locally-observed",
+        "authority-verified",
+        "hardware-attested"
+      ]
+    },
+    "subject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "physical-device",
+            "os-installation",
+            "virtual-machine",
+            "container",
+            "process",
+            "session",
+            "key-holder"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "identifier": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "derivation": {
+          "$ref": "#/$defs/profile"
+        },
+        "stability": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "process",
+            "boot",
+            "installation",
+            "enrollment",
+            "device"
+          ]
+        },
+        "clone_behavior": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "copyable",
+            "regenerated",
+            "device-bound"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "subject_ref",
+        "namespace",
+        "value",
+        "derivation",
+        "stability",
+        "clone_behavior"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "identifier_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "declaration",
+            "os-observation",
+            "enrollment",
+            "possession-proof",
+            "device-attestation",
+            "workload-attestation",
+            "authority-statement",
+            "custody-observation",
+            "isolation-observation"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "collector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "collected_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "key_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "claim_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "boundary": {
+          "$ref": "#/$defs/boundary"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "format_profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "time_attribution": {
+          "$ref": "#/$defs/time-attribution"
+        }
+      },
+      "required": [
+        "id",
+        "subject_ref",
+        "method",
+        "source",
+        "collector",
+        "collected_at",
+        "digest",
+        "format_profile"
+      ],
+      "additionalProperties": false
+    },
+    "assessment": {
+      "type": "object",
+      "properties": {
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "identifier_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "dimension": {
+          "type": "string",
+          "enum": [
+            "identity-binding",
+            "key-custody",
+            "execution-isolation",
+            "platform-evidence"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "current",
+            "stale",
+            "revoked",
+            "conflicting",
+            "unknown"
+          ]
+        },
+        "rule": {
+          "$ref": "#/$defs/profile"
+        },
+        "assessed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "valid_until": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true,
+          "maxItems": 256
+        },
+        "residuals": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "key_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "claim_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "boundary": {
+          "$ref": "#/$defs/boundary"
+        },
+        "time_attribution": {
+          "$ref": "#/$defs/time-attribution"
+        }
+      },
+      "required": [
+        "subject_ref",
+        "scope",
+        "dimension",
+        "value",
+        "state",
+        "rule",
+        "assessed_at",
+        "valid_until",
+        "evidence_refs",
+        "residuals"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "identity-binding"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/identity-binding"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "key-custody"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/key-custody"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "execution-isolation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/execution-isolation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "platform-evidence"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/platform-evidence"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "value": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "value": {
+                "not": {
+                  "enum": [
+                    "unknown",
+                    "not-applicable"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_refs": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "identity-binding"
+              },
+              "value": {
+                "not": {
+                  "const": "unknown"
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "identifier_ref"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "key-custody"
+              },
+              "value": {
+                "not": {
+                  "enum": [
+                    "unknown",
+                    "not-applicable"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "key_ref"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "identity-binding"
+              },
+              "value": {
+                "enum": [
+                  "enrolled-key",
+                  "attested-key"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "key_ref"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "execution-isolation"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "boundary"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "boundary"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "platform-evidence"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "claim_refs"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "claim_refs"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "const": "key-custody"
+              },
+              "value": {
+                "const": "not-applicable"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "key_ref"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "properties": {
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "not-present",
+            "inaccessible",
+            "unsupported",
+            "not-probed",
+            "error",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "observed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "time_attribution": {
+          "$ref": "#/$defs/time-attribution"
+        }
+      },
+      "required": [
+        "subject_ref",
+        "provider",
+        "capability",
+        "status",
+        "reason",
+        "observed_at",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "principal": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "namespace",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "software": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "name",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "key": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "representation_profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "public_key_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "subject_ref",
+        "representation_profile",
+        "public_key_digest"
+      ],
+      "additionalProperties": false
+    },
+    "claim": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "property_profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "value": {
+          "type": [
+            "string",
+            "boolean",
+            "number",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "key_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        }
+      },
+      "required": [
+        "id",
+        "subject_ref",
+        "property_profile",
+        "property",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "boundary": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "comparison_subject_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "minItems": 0,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "external_boundary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "threats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "profile",
+        "comparison_subject_refs",
+        "threats"
+      ],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "comparison_subject_refs": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "external_boundary"
+          ]
+        }
+      ]
+    },
+    "input-report": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "report_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "report_id",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "origin": {
+      "type": "object",
+      "properties": {
+        "input_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "record_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        }
+      },
+      "required": [
+        "input_ref",
+        "record_ref"
+      ],
+      "additionalProperties": false
+    },
+    "time-attribution": {
+      "type": "object",
+      "properties": {
+        "instant": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "producer_clock",
+            "trusted_time"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "format_profile": {
+              "$ref": "#/$defs/profile"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "format_profile",
+            "digest"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "instant",
+        "source"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "trusted_time"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "evidence"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "evidence"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "assessments": {
+            "minItems": 1
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "evaluator"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "evaluator"
+          ]
+        }
+      }
+    }
+  ]
+}

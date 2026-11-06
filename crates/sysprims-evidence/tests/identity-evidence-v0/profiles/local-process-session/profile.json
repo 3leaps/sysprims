@@ -1,0 +1,37 @@
+{
+  "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+  "status": "contract-fit-draft",
+  "specification": {
+    "path": "README.md",
+    "revision": "sha256:3a1536fc72c9f3339fdbe2e2ea98202bf51c3288d4551f23adc0d97701cc3f83"
+  },
+  "evidence_schema": {
+    "id": "https://schemas.3leaps.dev/identity-evidence/v0/profiles/local-process-session/evidence.schema.json",
+    "revision": "sha256:24a05f1cce3da0060f0aefc9ab90b6bfe39c6279f8ae0859fd5de9706571e2c4"
+  },
+  "transcript_domain": "3leaps.identity-evidence.local-process-session.v0",
+  "max_receipt_seconds": 300,
+  "max_challenge_seconds": 60,
+  "max_future_skew_seconds": 5,
+  "max_observation_age_seconds": 5,
+  "expiry_boundary": "now-strictly-before-expiry",
+  "crypto_profile_status": "not-selected",
+  "required_verified_bindings": [
+    "accepted-launch-issuer-to-exact-receipt-digest",
+    "exact-session-key-to-transcript-digest"
+  ],
+  "replay_key": [
+    "accepted-launch-issuer",
+    "receipt-id"
+  ],
+  "limits": {
+    "report_bytes": 262144,
+    "evidence_bytes_each": 262144,
+    "aggregate_evidence_bytes": 2097152,
+    "dependency_depth": 4,
+    "retrieval_count": 32,
+    "verification_deadline_ms": 2000,
+    "json_nesting_depth": 16,
+    "canonical_report_bytes": 262144
+  }
+}

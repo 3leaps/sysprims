@@ -12,6 +12,7 @@
 
 
 .PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check
+.PHONY: evidence-test evidence-crosscheck
 .PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
@@ -341,6 +342,14 @@ recurrence-crosscheck: ## Compare Rust and Go recurrence outputs (corpus NDJSON 
 
 recurrence-tzdata-check: ## Rebuild the pinned tz bundle and require byte equality (network)
 	@scripts/recurrence-tzdata-bundle.sh --check
+
+evidence-test: ## Test sysprims-evidence, pure-Go evidence package, and byte-for-byte parity
+	$(CARGO) test -p sysprims-evidence
+	GOWORK=off CGO_ENABLED=0 go vet ./evidence/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./evidence/...
+	@$(MAKE) --no-print-directory evidence-crosscheck
+
+evidence-crosscheck: ## Compare Rust and Go evidence NDJSON outputs and verify out-of-tree Go build
+	@bash scripts/evidence-crosscheck.sh
 
 test-diabolical: ## Run hostile process-control tests in a disposable container
 	@echo "Running isolated process-control tests with $(CONTAINER_RUNTIME)..."

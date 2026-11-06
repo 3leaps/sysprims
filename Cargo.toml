@@ -6,6 +6,7 @@ members = [
     "crates/sysprims-signal",
     "crates/sysprims-session",
     "crates/sysprims-proc",
+    "crates/sysprims-evidence",
     "crates/sysprims-recurrence",
     "crates/sysprims-cli",
     "ffi/sysprims-ffi",
@@ -27,7 +28,12 @@ sysprims-core = { version = "0.3.0", path = "crates/sysprims-core" }
 sysprims-timeout = { version = "0.3.0", path = "crates/sysprims-timeout" }
 sysprims-signal = { version = "0.3.0", path = "crates/sysprims-signal" }
 sysprims-proc = { version = "0.3.0", path = "crates/sysprims-proc" }
+sysprims-evidence = { version = "0.3.0", path = "crates/sysprims-evidence" }
 sysprims-session = { version = "0.3.0", path = "crates/sysprims-session" }
+
+# Canonical Serialization
+canonprims-core = "=0.1.4"
+canonprims-json = "=0.1.4"
 
 # Fulmen Ecosystem
 # NOTE: Pinned to ensure stable semantics across bindings and avoid accidental

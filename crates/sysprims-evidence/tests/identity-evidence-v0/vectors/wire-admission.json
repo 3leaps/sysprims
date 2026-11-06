@@ -1,0 +1,112 @@
+{
+  "profile": "report-admission/v0",
+  "status": "hand-authored-layer-vectors",
+  "cases": [
+    {
+      "id": "ordinary-object",
+      "kind": "raw",
+      "raw": " {\"b\":2,\"a\":1} ",
+      "expected": "accept",
+      "canonical": "{\"a\":1,\"b\":2}"
+    },
+    {
+      "id": "numeric-equivalence",
+      "kind": "raw",
+      "raw": "[1.0,1,-0,true,false]",
+      "expected": "accept",
+      "canonical": "[1,1,0,true,false]"
+    },
+    {
+      "id": "unicode-key-order",
+      "kind": "raw",
+      "raw": "{\"�\":2,\"😀\":1}",
+      "expected": "accept",
+      "canonical": "{\"😀\":1,\"�\":2}"
+    },
+    {
+      "id": "escaped-member-collision",
+      "kind": "raw",
+      "raw": "{\"a\":1,\"\\u0061\":2}",
+      "expected": "duplicate_member"
+    },
+    {
+      "id": "nested-member-collision",
+      "kind": "raw",
+      "raw": "{\"a\":{\"x\":1,\"x\":2}}",
+      "expected": "duplicate_member"
+    },
+    {
+      "id": "lone-surrogate",
+      "kind": "raw",
+      "raw": "\"\\ud800\"",
+      "expected": "lone_surrogate"
+    },
+    {
+      "id": "noncharacter",
+      "kind": "raw",
+      "raw": "\"\\ufdd0\"",
+      "expected": "noncharacter"
+    },
+    {
+      "id": "invalid-utf8",
+      "kind": "hex",
+      "hex": "7b2278223a22ff227d",
+      "expected": "invalid_utf8"
+    },
+    {
+      "id": "imprecise-integer",
+      "kind": "raw",
+      "raw": "9007199254740993",
+      "expected": "integer_outside_binary64"
+    },
+    {
+      "id": "nonfinite-number",
+      "kind": "raw",
+      "raw": "1e999",
+      "expected": "non_finite_number"
+    },
+    {
+      "id": "trailing-json",
+      "kind": "raw",
+      "raw": "{} {}",
+      "expected": "invalid_json"
+    },
+    {
+      "id": "empty-input",
+      "kind": "raw",
+      "raw": "",
+      "expected": "invalid_json"
+    },
+    {
+      "id": "exact-raw-cap",
+      "kind": "padded-object",
+      "bytes": 262144,
+      "expected": "accept",
+      "canonical": "{}"
+    },
+    {
+      "id": "over-raw-cap",
+      "kind": "padded-object",
+      "bytes": 262145,
+      "expected": "report-too-large"
+    },
+    {
+      "id": "exact-depth",
+      "kind": "nested-array",
+      "depth": 16,
+      "expected": "accept"
+    },
+    {
+      "id": "over-depth",
+      "kind": "nested-array",
+      "depth": 17,
+      "expected": "too_deep"
+    },
+    {
+      "id": "canonical-expansion",
+      "kind": "number-array",
+      "count": 13000,
+      "expected": "canonical-report-too-large"
+    }
+  ]
+}

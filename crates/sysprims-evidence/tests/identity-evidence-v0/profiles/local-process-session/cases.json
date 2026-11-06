@@ -1,0 +1,170 @@
+[
+  {
+    "id": "baseline",
+    "change": null,
+    "expected": "accept"
+  },
+  {
+    "id": "pid-reuse",
+    "change": {
+      "path": [
+        "current_process",
+        "start_identity",
+        "value"
+      ],
+      "value": "1234567890123456790"
+    },
+    "expected": "process-incarnation-or-context-changed"
+  },
+  {
+    "id": "key-substitution",
+    "change": {
+      "path": [
+        "expected_session",
+        "public_key_digest"
+      ],
+      "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "expected": "session-key-or-enrollment-changed"
+  },
+  {
+    "id": "receipt-replay",
+    "change": {
+      "path": [
+        "consumed_receipts"
+      ],
+      "value": [
+        {
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "launcher-a"
+          },
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c"
+        }
+      ]
+    },
+    "expected": "launch-receipt-replayed"
+  },
+  {
+    "id": "process-exited",
+    "change": {
+      "path": [
+        "process_live"
+      ],
+      "value": false
+    },
+    "expected": "process-not-live"
+  },
+  {
+    "id": "context-changed",
+    "change": {
+      "path": [
+        "current_process",
+        "execution_context",
+        "security_context_digest"
+      ],
+      "value": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "expected": "process-incarnation-or-context-changed"
+  },
+  {
+    "id": "wrong-audience",
+    "change": {
+      "path": [
+        "audience"
+      ],
+      "value": "example.test/another-consumer"
+    },
+    "expected": "challenge-audience-or-nonce-mismatch"
+  },
+  {
+    "id": "wrong-nonce",
+    "change": {
+      "path": [
+        "nonce"
+      ],
+      "value": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "expected": "challenge-audience-or-nonce-mismatch"
+  },
+  {
+    "id": "exact-expiry",
+    "change": {
+      "path": [
+        "now"
+      ],
+      "value": "2026-10-29T12:00:55Z"
+    },
+    "expected": "expired-or-invalid-window"
+  },
+  {
+    "id": "stale-observation",
+    "change": {
+      "path": [
+        "observed_at"
+      ],
+      "value": "2026-10-29T11:59:54Z"
+    },
+    "expected": "stale-process-observation"
+  },
+  {
+    "id": "unverified-receipt",
+    "change": {
+      "path": [
+        "verified_receipt_digest"
+      ],
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "expected": "receipt-verification-binding-mismatch"
+  },
+  {
+    "id": "unverified-proof",
+    "change": {
+      "path": [
+        "verified_proof_digest"
+      ],
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "expected": "possession-verification-binding-mismatch"
+  },
+  {
+    "id": "different-intent",
+    "change": {
+      "path": [
+        "expected_intent_digest"
+      ],
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "expected": "launch-intent-or-issuer-mismatch"
+  },
+  {
+    "id": "receipt-id-other-issuer",
+    "change": {
+      "path": [
+        "consumed_receipts"
+      ],
+      "value": [
+        {
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "another-launcher"
+          },
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c"
+        }
+      ]
+    },
+    "expected": "accept"
+  },
+  {
+    "id": "challenge-replay",
+    "change": {
+      "path": [
+        "consumed_challenges"
+      ],
+      "value": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ]
+    },
+    "expected": "launch-challenge-replayed"
+  }
+]

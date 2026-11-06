@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.3leaps.dev/identity-evidence/v0/profiles/local-process-session/evidence.schema.json",
+  "title": "Local process/session binding evidence (contract-fit draft)",
+  "type": "object",
+  "properties": {
+    "profile": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "properties": {
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "host_scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "boot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "pid_namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "pid": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "start_identity": {
+          "type": "object",
+          "properties": {
+            "profile": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "id",
+                "revision"
+              ],
+              "additionalProperties": false
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "profile",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "execution_context": {
+          "type": "object",
+          "properties": {
+            "security_principal": {
+              "type": "object",
+              "properties": {
+                "namespace": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "required": [
+                "namespace",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            "namespace_context_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "executable_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "arguments_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "security_context_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "security_principal",
+            "namespace_context_digest",
+            "executable_digest",
+            "arguments_digest",
+            "security_context_digest"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "subject_ref",
+        "host_scope",
+        "boot_id",
+        "pid_namespace",
+        "pid",
+        "start_identity",
+        "execution_context"
+      ],
+      "additionalProperties": false
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "subject_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "identifier_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "identifier_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "key_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "public_key_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "key_representation_profile": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "id",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "subject_ref",
+        "identifier_ref",
+        "identifier_digest",
+        "key_ref",
+        "public_key_digest",
+        "key_representation_profile"
+      ],
+      "additionalProperties": false
+    },
+    "launch": {
+      "type": "object",
+      "properties": {
+        "receipt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "issuer": {
+          "type": "object",
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "namespace",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "intent_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "process_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "session_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        }
+      },
+      "required": [
+        "receipt_id",
+        "issuer",
+        "intent_digest",
+        "process_digest",
+        "session_digest",
+        "issued_at",
+        "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "challenge": {
+      "type": "object",
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "receipt_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        }
+      },
+      "required": [
+        "nonce",
+        "audience",
+        "receipt_digest",
+        "issued_at",
+        "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "proof": {
+      "type": "object",
+      "properties": {
+        "key_ref": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "transcript_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "proof_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "key_ref",
+        "transcript_digest",
+        "proof_digest"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "profile",
+    "process",
+    "session",
+    "launch",
+    "challenge",
+    "proof"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,65 @@
+{
+  "profile": {
+    "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+    "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+  },
+  "process": {
+    "subject_ref": "process-a",
+    "host_scope": "example.test/installations/host-a",
+    "boot_id": "synthetic-boot-a",
+    "pid_namespace": "synthetic-pid-namespace-a",
+    "pid": "4242",
+    "start_identity": {
+      "profile": {
+        "id": "urn:example:native-start-counter:v0",
+        "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "value": "1234567890123456789"
+    },
+    "execution_context": {
+      "security_principal": {
+        "namespace": "example.test/local-security-principals",
+        "value": "synthetic-shared-account"
+      },
+      "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "session": {
+    "subject_ref": "subject-a",
+    "identifier_ref": "identifier-a",
+    "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+    "key_ref": "key-a",
+    "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+    "key_representation_profile": {
+      "id": "urn:example:identity:synthetic-public-key:v0",
+      "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+    }
+  },
+  "launch": {
+    "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c",
+    "issuer": {
+      "namespace": "example.test/launch-authorities",
+      "value": "launcher-a"
+    },
+    "intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "process_digest": "sha256:779df43e0a90528992f2305856bb63c6fbfe8290308b5e271fb8799e6ac594c8",
+    "session_digest": "sha256:ad63d1567c11c7e8881be4595d1beb2c01a5f5c124316ca5a4fd7fe138d77850",
+    "issued_at": "2026-10-29T11:59:30Z",
+    "expires_at": "2026-10-29T12:04:30Z"
+  },
+  "challenge": {
+    "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "audience": "example.test/local-admission",
+    "receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+    "issued_at": "2026-10-29T11:59:55Z",
+    "expires_at": "2026-10-29T12:00:55Z"
+  },
+  "proof": {
+    "key_ref": "key-a",
+    "transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+    "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "profile": {
+    "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+    "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+  },
+  "observed_at": "2026-10-29T12:00:00Z",
+  "observer": {
+    "platform_family": "macos",
+    "architecture": "aarch64",
+    "bracketed": true,
+    "time_namespace": {
+      "status": "unsupported",
+      "reason": "Darwin kernel has a single boot clock domain without time namespaces."
+    },
+    "user_namespace": {
+      "status": "unsupported",
+      "reason": "Darwin kernel has a single credential numbering domain without user namespaces."
+    }
+  },
+  "process": {
+    "subject_ref": "process-a",
+    "host_scope": {
+      "identifier_ref": "identifier-host-a",
+      "namespace": "example.test/installations",
+      "value": "host-a",
+      "derivation": {
+        "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+        "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+      },
+      "stability": "installation",
+      "clone_behavior": "copyable"
+    },
+    "boot_id": {
+      "status": "observed",
+      "value": "01234567-89ab-4cde-8f01-23456789abcd"
+    },
+    "pid_numbering_namespace": {
+      "status": "unsupported",
+      "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces."
+    },
+    "target_pid_namespace": {
+      "status": "unsupported",
+      "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces."
+    },
+    "pid": "4242",
+    "process_state": {
+      "status": "observed",
+      "value": "live"
+    },
+    "start_identity": {
+      "status": "observed",
+      "profile": {
+        "id": "urn:3leaps:identity-evidence:start-identity:macos-kinfo-starttime:v0",
+        "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+      },
+      "value": "1761739170.123456"
+    },
+    "execution_context": {
+      "security_principal": {
+        "status": "observed",
+        "derivation": {
+          "id": "urn:3leaps:identity-evidence:principal-derivation:macos-kinfo-ucred:v0",
+          "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+        },
+        "principal": {
+          "namespace": "urn:3leaps:posix-credentials:macos-kinfo:v0",
+          "value": "ruid=501;euid=501;rgid=20;egid=20"
+        }
+      },
+      "namespace_context_digest": {
+        "status": "unsupported",
+        "reason": "Darwin kernel does not implement Linux-style process namespaces."
+      },
+      "executable_digest": {
+        "status": "not-probed",
+        "reason": "Omitted under default opt-in disclosure policy."
+      },
+      "arguments_digest": {
+        "status": "not-probed",
+        "reason": "Omitted under default opt-in disclosure policy."
+      },
+      "security_context_digest": {
+        "status": "not-probed",
+        "reason": "Omitted under default opt-in disclosure policy."
+      }
+    }
+  }
+}
