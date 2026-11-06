@@ -1,5 +1,8 @@
 module github.com/3leaps/sysprims
 
-go 1.21
+go 1.26.0
 
-require github.com/3leaps/canonprims v0.1.4
+require (
+	github.com/3leaps/canonprims v0.1.4
+	golang.org/x/sys v0.49.0
+)

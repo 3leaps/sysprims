@@ -401,19 +401,21 @@ jobs:
           cache: false
       - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
       - name: Rust crate
-        run: cargo test -p sysprims-evidence
+        run: |
+          cargo test -p sysprims-evidence
+          cargo test -p sysprims-proc --test observation
       - name: Go module (standalone, pure Go)
         env:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          test -z "$(gofmt -l ./evidence)"
+          test -z "$(gofmt -l ./evidence ./procobserve)"
           if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
             echo "go.mod must not contain replace directives" >&2
             exit 1
           fi
-          go vet ./evidence/...
-          go test -count=1 ./evidence/...
+          go vet ./evidence/... ./procobserve/...
+          go test -count=1 ./evidence/... ./procobserve/...
       - name: Go module security (gosec, govulncheck)
         if: runner.os == 'Linux'
         env:
@@ -422,8 +424,8 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
           go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-          "$(go env GOPATH)/bin/gosec" ./evidence/...
-          "$(go env GOPATH)/bin/govulncheck" ./evidence/...
+          "$(go env GOPATH)/bin/gosec" ./evidence/... ./procobserve/...
+          "$(go env GOPATH)/bin/govulncheck" ./evidence/... ./procobserve/...
       - name: Go module alone (outside the repository, no SKIP allowed)
         env:
           GOWORK: 'off'
@@ -435,9 +437,10 @@ jobs:
           mkdir -p "$standalone"
           cp go.mod go.sum LICENSE-MIT LICENSE-APACHE NOTICE "$standalone/"
           cp -R evidence "$standalone/evidence"
+          cp -R procobserve "$standalone/procobserve"
           cd "$standalone"
           EVIDENCE_CORPUS_DIR="$corpus" EVIDENCE_PARITY_CASES="$parity" \
-            go test -count=1 -v ./evidence/... | tee "$RUNNER_TEMP/go-evidence-standalone.log"
+            go test -count=1 -v ./evidence/... ./procobserve/... | tee "$RUNNER_TEMP/go-evidence-standalone.log"
           if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-evidence-standalone.log"; then
             echo "standalone evidence Go tests must not skip" >&2
             exit 1

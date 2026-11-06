@@ -343,9 +343,10 @@ recurrence-crosscheck: ## Compare Rust and Go recurrence outputs (corpus NDJSON 
 recurrence-tzdata-check: ## Rebuild the pinned tz bundle and require byte equality (network)
 	@scripts/recurrence-tzdata-bundle.sh --check
 
-evidence-test: ## Test sysprims-evidence, pure-Go evidence package, and byte-for-byte parity
+evidence-test: ## Test sysprims-evidence, native process collectors, pure-Go packages, and parity
 	$(CARGO) test -p sysprims-evidence
-	GOWORK=off CGO_ENABLED=0 go vet ./evidence/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./evidence/...
+	$(CARGO) test -p sysprims-proc --test observation
+	GOWORK=off CGO_ENABLED=0 go vet ./evidence/... ./procobserve/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./evidence/... ./procobserve/...
 	@$(MAKE) --no-print-directory evidence-crosscheck
 
 evidence-crosscheck: ## Compare Rust and Go evidence NDJSON outputs and verify out-of-tree Go build

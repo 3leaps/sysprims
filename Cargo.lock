@@ -1019,8 +1019,12 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "sysprims-core",
+ "sysprims-evidence",
  "sysprims-signal",
+ "thiserror 2.0.21",
+ "time",
  "windows-sys",
 ]
 

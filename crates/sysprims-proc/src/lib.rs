@@ -62,6 +62,9 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+/// Read-only `native-process-observation:v0` OS collectors and continuity handles.
+pub mod observation;
+
 // Re-export the platform implementation
 #[cfg(target_os = "linux")]
 use linux as platform;

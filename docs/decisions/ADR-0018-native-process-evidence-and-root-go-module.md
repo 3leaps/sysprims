@@ -70,7 +70,7 @@ importing packages directly under `github.com/3leaps/sysprims/...`.
      process-inspection code or `libc`/`windows-sys` syscalls.
    - In `config/release/publishable-crates.txt`, `sysprims-evidence` precedes
      `sysprims-proc`.
-   - Continuity handles (`ProcessObservationHandle` / `ReobservedProcess`) wrap
+   - Continuity handles (`ProcessContinuityHandle`) wrap
      private file descriptors (`kqueue` on macOS, `pidfd` on Linux), expose no
      raw descriptor getter (`AsRawFd`/`IntoRawFd` are intentionally absent) and
      no signal/terminate methods, and are neither `Serialize` nor `Deserialize`.
