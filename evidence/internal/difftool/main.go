@@ -164,11 +164,18 @@ func assertEq(got, expected, msg string) {
 	}
 }
 
-func mustReadJSON(path string) any {
-	raw, err := os.ReadFile(path)
+func readFixtureBytes(path string) []byte {
+	clean := filepath.Clean(path)
+	// #nosec G304 G703 -- internal conformance harness reads local corpus fixtures selected by the test runner
+	raw, err := os.ReadFile(clean)
 	if err != nil {
-		panic(fmt.Sprintf("read %s: %v", path, err))
+		panic(fmt.Sprintf("read %s: %v", clean, err))
 	}
+	return raw
+}
+
+func mustReadJSON(path string) any {
+	raw := readFixtureBytes(path)
 	var out any
 	if err := json.Unmarshal(raw, &out); err != nil {
 		panic(fmt.Sprintf("unmarshal %s: %v", path, err))
@@ -254,11 +261,10 @@ func runAll(corpusDir, parityPath string) {
 		}
 	}
 	sort.Strings(examplePaths)
+	exampleRaw := make(map[string][]byte, len(examplePaths))
 	for _, p := range examplePaths {
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			panic(err)
-		}
+		raw := readFixtureBytes(p)
+		exampleRaw[p] = raw
 		admitted, err := evidence.AdmitReportBytes(raw)
 		if err != nil {
 			panic(fmt.Sprintf("admit example %s: %v", p, err))
@@ -270,10 +276,7 @@ func runAll(corpusDir, parityPath string) {
 	}
 	for _, p := range examplePaths {
 		stem := strings.TrimSuffix(filepath.Base(p), ".json")
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			panic(err)
-		}
+		raw := exampleRaw[p]
 		admitted, err := evidence.AdmitAndValidateReport(raw, reportInputs)
 		if err != nil {
 			panic(fmt.Sprintf("validate example %s: %v", p, err))

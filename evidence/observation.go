@@ -520,6 +520,9 @@ func ValidateObservationShape(obs any) error {
 }
 
 func appendU32BE(out []byte, n int) []byte {
+	if n < 0 || uint64(n) > math.MaxUint32 {
+		panic("framed length fits in u32")
+	}
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], uint32(n))
 	return append(out, b[:]...)
