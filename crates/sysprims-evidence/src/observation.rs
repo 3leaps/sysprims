@@ -11,7 +11,7 @@ use canonprims_core::DigestAlg;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::report::necessary_conditions;
+use crate::report::{necessary_conditions, validate_report_shape};
 use crate::wire::canonical_sha256_value;
 use crate::{
     is_local_id, is_nonempty_512, is_principal_obj, is_profile_ref_obj, is_sha256_digest,
@@ -1016,9 +1016,7 @@ fn validate_context_derivation(fact_name: &str, fact_obj: &Value, obs: &Value) -
     }
 }
 
-/// Standalone freshness and optional report-time binding gate for live
-/// `native-process-observation:v0` consumers (`admit_live_observation`).
-pub fn admit_live_observation(
+fn admit_live_observation_steps(
     obs: &Value,
     now_utc: Option<&str>,
     accepted_profile: &ProfileRef,
@@ -1082,6 +1080,19 @@ pub fn admit_live_observation(
         return Err(EvidenceError::new("stale-process-observation"));
     }
     Ok(())
+}
+
+/// Standalone freshness and optional report-time binding gate for live
+/// `native-process-observation:v0` consumers (`admit_live_observation`).
+pub fn admit_live_observation(
+    obs: &Value,
+    now_utc: Option<&str>,
+    accepted_profile: &ProfileRef,
+    report: Option<&Value>,
+    input_reports: Option<&BTreeMap<String, Value>>,
+) -> Result<(), EvidenceError> {
+    admit_live_observation_steps(obs, now_utc, accepted_profile, report, input_reports)?;
+    validate_observation_shape(obs)
 }
 
 /// Evaluate [`compare_native_observations`] when `policy` arrives as an untrusted JSON value.
@@ -1169,6 +1180,14 @@ pub fn compare_native_observations(
     }
 
     // Row 2b: host_scope (namespace, value, derivation)
+    for hs in [b_hs, c_hs] {
+        if !hs["namespace"].as_str().is_some_and(is_nonempty_512)
+            || !hs["value"].as_str().is_some_and(is_nonempty_512)
+            || !is_profile_ref_obj(&hs["derivation"])
+        {
+            return ComparisonOutcome::Insufficient("invalid-observation-shape".to_string());
+        }
+    }
     for key in ["namespace", "value", "derivation"] {
         if b_hs.get(key) != c_hs.get(key) {
             return ComparisonOutcome::Mismatch("host-scope-mismatch".to_string());
@@ -1416,6 +1435,12 @@ pub fn compare_native_observations(
         let both_obs = b_ctx[fact]["status"].as_str() == Some("observed")
             && c_ctx[fact]["status"].as_str() == Some("observed");
         if both_obs && (req_facts_set.contains(fact) || policy.detect_observed_context_drift) {
+            if fact != "security_principal"
+                && (!b_ctx[fact]["digest"].as_str().is_some_and(is_sha256_digest)
+                    || !c_ctx[fact]["digest"].as_str().is_some_and(is_sha256_digest))
+            {
+                return ComparisonOutcome::Insufficient("invalid-observation-shape".to_string());
+            }
             let payload_key = if fact == "security_principal" {
                 "principal"
             } else {
@@ -1425,6 +1450,12 @@ pub fn compare_native_observations(
                 return ComparisonOutcome::Mismatch(format!("context-changed-{fact}"));
             }
         }
+    }
+
+    if validate_observation_shape(baseline).is_err()
+        || validate_observation_shape(candidate).is_err()
+    {
+        return ComparisonOutcome::Insufficient("invalid-observation-shape".to_string());
     }
 
     // Row 9
@@ -1500,7 +1531,7 @@ pub fn project_to_local_process_session_process(
         }
     }
 
-    admit_live_observation(obs, now_utc, accepted_profile, report, input_reports)?;
+    admit_live_observation_steps(obs, now_utc, accepted_profile, report, input_reports)?;
 
     if obs["observer"]["bracketed"].as_bool() != Some(true) {
         return Err(EvidenceError::new("unbracketed-observation"));
@@ -1594,6 +1625,10 @@ pub fn project_to_local_process_session_process(
         ));
     }
 
+    if !proc_obj["pid"].as_str().is_some_and(is_valid_pid_string) {
+        return Err(EvidenceError::new("invalid-pid-range"));
+    }
+
     let ctx = &proc_obj["execution_context"];
     for &fact in CANONICAL_CONTEXT_FACTS {
         if ctx[fact]["status"].as_str() != Some("observed") {
@@ -1623,6 +1658,8 @@ pub fn project_to_local_process_session_process(
     if projected_start_value.len() > 512 {
         return Err(EvidenceError::new("projected-start-identity-too-long"));
     }
+
+    validate_observation_shape(obs)?;
 
     Ok(json!({
         "subject_ref": proc_obj["subject_ref"],
@@ -1661,11 +1698,10 @@ pub fn bind_native_observation_report(
     if obs.get("profile") != Some(&expected_prof) {
         return Err(EvidenceError::new("unsupported-evidence-profile"));
     }
-    let assessments_empty = report
-        .get("assessments")
-        .and_then(Value::as_array)
-        .is_some_and(Vec::is_empty);
-    if !assessments_empty || report.get("evaluator").is_some() {
+    let Some(assessments) = report.get("assessments").and_then(Value::as_array) else {
+        return Err(EvidenceError::new("invalid-report-shape"));
+    };
+    if !assessments.is_empty() || report.get("evaluator").is_some() {
         return Err(EvidenceError::new(
             "observation-report-not-observation-only",
         ));
@@ -1755,5 +1791,6 @@ pub fn bind_native_observation_report(
             "observation-evidence-descriptor-mismatch",
         ));
     }
-    Ok(())
+    validate_report_shape(report)?;
+    validate_observation_shape(obs)
 }

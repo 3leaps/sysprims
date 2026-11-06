@@ -140,6 +140,12 @@ fn run_all(corpus_dir: &Path, parity_path: &Path) {
         match admit_report_bytes(&raw) {
             Ok(admitted) => {
                 assert_eq!(expected, "accept", "wire case {id} expected refusal");
+                let recomputed =
+                    canonical_sha256_value(&admitted.value).expect("recompute value digest");
+                assert_eq!(
+                    recomputed, admitted.digest,
+                    "wire value-digest roundtrip mismatch on {id}"
+                );
                 if let Some(exp_can) = case.get("canonical").and_then(Value::as_str) {
                     assert_eq!(
                         std::str::from_utf8(&admitted.canonical_bytes).unwrap(),
@@ -232,7 +238,9 @@ fn run_all(corpus_dir: &Path, parity_path: &Path) {
     for case in parity["report_semantic_cases"].as_array().unwrap() {
         let id = case["id"].as_str().unwrap();
         let expected = case["expected"].as_str().unwrap();
-        validate_report_shape(&case["report"]).expect("semantic case must pass report shape");
+        if case.get("skip_shape_assert").and_then(Value::as_bool) != Some(true) {
+            validate_report_shape(&case["report"]).expect("semantic case must pass report shape");
+        }
         let inputs = parse_inputs_map(case.get("inputs"));
         let got = match necessary_conditions(&case["report"], Some(&inputs)) {
             Ok(()) => "accept".to_string(),
@@ -325,7 +333,9 @@ fn run_all(corpus_dir: &Path, parity_path: &Path) {
     for case in parity["extra_session_fit_cases"].as_array().unwrap() {
         let id = case["id"].as_str().unwrap();
         let expected = case["expected"].as_str().unwrap();
-        validate_session_bundle_shape(&case["bundle"]).unwrap();
+        if case.get("skip_shape_assert").and_then(Value::as_bool) != Some(true) {
+            validate_session_bundle_shape(&case["bundle"]).unwrap();
+        }
         let got = match process_session_fit(
             &case["report"],
             &case["bundle"],

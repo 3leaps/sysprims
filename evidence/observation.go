@@ -44,7 +44,7 @@ var (
 	factStatuses = []string{
 		"observed", "not-present", "inaccessible", "unsupported", "not-probed", "error", "unknown",
 	}
-	platformFamilies = []string{"linux", "macos", "windows"}
+	platformFamilies       = []string{"linux", "macos", "windows"}
 	establishedStabilities = []string{"boot", "installation", "enrollment", "device"}
 )
 
@@ -867,9 +867,7 @@ func validateContextDerivation(factName string, factObj map[string]any, obs map[
 	}
 }
 
-// AdmitLiveObservation enforces the standalone freshness and optional report-time
-// binding gate for live native-process-observation:v0 consumers.
-func AdmitLiveObservation(
+func admitLiveObservationSteps(
 	obs any,
 	nowUTC *string,
 	acceptedProfile ProfileRef,
@@ -950,6 +948,21 @@ func AdmitLiveObservation(
 		return newRefusal("stale-process-observation")
 	}
 	return nil
+}
+
+// AdmitLiveObservation enforces the standalone freshness and optional report-time
+// binding gate for live native-process-observation:v0 consumers.
+func AdmitLiveObservation(
+	obs any,
+	nowUTC *string,
+	acceptedProfile ProfileRef,
+	report any,
+	inputReports map[string]any,
+) error {
+	if err := admitLiveObservationSteps(obs, nowUTC, acceptedProfile, report, inputReports); err != nil {
+		return err
+	}
+	return ValidateObservationShape(obs)
 }
 
 // CompareNativeObservationsJSON evaluates CompareNativeObservations when policy
@@ -1033,6 +1046,14 @@ func CompareNativeObservations(
 	}
 
 	// Row 2b
+	for _, hs := range []map[string]any{bHS, cHS} {
+		ns, okNS := strField(hs, "namespace")
+		val, okVal := strField(hs, "value")
+		validHS := okNS && isNonEmpty512(ns) && okVal && isNonEmpty512(val) && isProfileRefObj(hs["derivation"])
+		if !validHS {
+			return outcomeInsufficient("invalid-observation-shape")
+		}
+	}
 	for _, key := range []string{"namespace", "value", "derivation"} {
 		if !JSONEqual(bHS[key], cHS[key]) {
 			return outcomeMismatch("host-scope-mismatch")
@@ -1254,6 +1275,14 @@ func CompareNativeObservations(
 		bs, _ := strField(bf, "status")
 		cs, _ := strField(cf, "status")
 		if bs == "observed" && cs == "observed" && (reqFactsSet[fact] || policy.DetectObservedContextDrift) {
+			if fact != "security_principal" {
+				bd, okB := strField(bf, "digest")
+				cd, okC := strField(cf, "digest")
+				validDigests := okB && isSHA256Digest(bd) && okC && isSHA256Digest(cd)
+				if !validDigests {
+					return outcomeInsufficient("invalid-observation-shape")
+				}
+			}
 			payloadKey := "digest"
 			if fact == "security_principal" {
 				payloadKey = "principal"
@@ -1262,6 +1291,13 @@ func CompareNativeObservations(
 				return outcomeMismatch("context-changed-" + fact)
 			}
 		}
+	}
+
+	if err := ValidateObservationShape(baseline); err != nil {
+		return outcomeInsufficient("invalid-observation-shape")
+	}
+	if err := ValidateObservationShape(candidate); err != nil {
+		return outcomeInsufficient("invalid-observation-shape")
 	}
 
 	return ComparisonOutcome{Kind: OutcomeMatch}
@@ -1333,7 +1369,7 @@ func ProjectToLocalProcessSessionProcess(
 			}
 		}
 	}
-	if err := AdmitLiveObservation(obs, nowUTC, acceptedProfile, report, inputReports); err != nil {
+	if err := admitLiveObservationSteps(obs, nowUTC, acceptedProfile, report, inputReports); err != nil {
 		return nil, err
 	}
 	obsObj, _ := obs.(map[string]any)
@@ -1412,6 +1448,11 @@ func ProjectToLocalProcessSessionProcess(
 		return nil, newRefusal("invalid-observer-user-namespace-for-session-bundle")
 	}
 
+	pidStr, okPID := strField(procObj, "pid")
+	if !okPID || !isValidPIDString(pidStr) {
+		return nil, newRefusal("invalid-pid-range")
+	}
+
 	ctx, _ := objField(procObj, "execution_context")
 	for _, fact := range CanonicalContextFacts {
 		fo, _ := objField(ctx, fact)
@@ -1438,6 +1479,10 @@ func ProjectToLocalProcessSessionProcess(
 	projectedStartVal := clockDomain + ";ticks=" + startVal
 	if len(projectedStartVal) > 512 {
 		return nil, newRefusal("projected-start-identity-too-long")
+	}
+
+	if err := ValidateObservationShape(obs); err != nil {
+		return nil, err
 	}
 
 	spFact, _ := objField(ctx, "security_principal")
@@ -1493,8 +1538,11 @@ func BindNativeObservationReport(report any, obs any, acceptedProfile ProfileRef
 		return newRefusal("invalid-report-shape")
 	}
 	assArr, ok := arrField(repObj, "assessments")
+	if !ok {
+		return newRefusal("invalid-report-shape")
+	}
 	_, hasEval := repObj["evaluator"]
-	if !ok || len(assArr) != 0 || hasEval {
+	if len(assArr) != 0 || hasEval {
 		return newRefusal("observation-report-not-observation-only")
 	}
 
@@ -1577,5 +1625,8 @@ func BindNativeObservationReport(report any, obs any, acceptedProfile ProfileRef
 		hasKey || hasIdent || hasBound {
 		return newRefusal("observation-evidence-descriptor-mismatch")
 	}
-	return nil
+	if err := ValidateReportShape(report); err != nil {
+		return err
+	}
+	return ValidateObservationShape(obs)
 }

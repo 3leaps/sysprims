@@ -66,6 +66,13 @@
       "kind": "raw",
       "raw": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":1}}}}}}}}}}}}}}}}}",
       "expected": "too_deep"
+    },
+    {
+      "id": "binary64-float-roundtrip-exact",
+      "kind": "raw",
+      "raw": "{\"x\": 2.291712365432881e-9}",
+      "canonical": "{\"x\":2.291712365432881e-9}",
+      "expected": "accept"
     }
   ],
   "report_shape_cases": [
@@ -13464,6 +13471,281 @@
       },
       "inputs": {},
       "expected": "accept"
+    },
+    {
+      "id": "missing-assessments-direct-semantic",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "native-process-observation",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-process-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "subjects": [
+          {
+            "id": "host-a",
+            "kind": "os-installation"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-host-a",
+            "subject_ref": "host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-process-observation",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-macos-sysctl-fixture",
+            "collector": "synthetic-process-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:a47eb757c96dc148988088a3c6c478e70bb865f7c83cbfdc7ae70571894b4eb6",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+              "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+            }
+          }
+        ],
+        "capabilities": [
+          {
+            "id": "cap-exit-handle",
+            "subject_ref": "process-a",
+            "provider": "macos-kqueue-proc",
+            "capability": "process-exit-observation",
+            "status": "available",
+            "reason": "Private kqueue EVFILT_PROC NOTE_EXIT handle bracketed by sysctl start-identity reads.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          },
+          {
+            "id": "cap-pid-namespace",
+            "subject_ref": "process-a",
+            "provider": "macos-sysctl-proc",
+            "capability": "pid-namespace-observation",
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          },
+          {
+            "id": "cap-arguments-digest",
+            "subject_ref": "process-a",
+            "provider": "macos-sysctl-proc",
+            "capability": "arguments-digest",
+            "status": "not-probed",
+            "reason": "Omitted under default opt-in disclosure policy.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          }
+        ],
+        "keys": [],
+        "claims": [],
+        "input_reports": []
+      },
+      "inputs": {},
+      "skip_shape_assert": true,
+      "expected": "invalid-report-shape"
+    },
+    {
+      "id": "float-roundtrip-imported-report-accept",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "float-wrapper-report",
+        "created_at": "2026-10-29T12:00:01Z",
+        "producer": {
+          "name": "synthetic-process-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "subjects": [
+          {
+            "id": "host-a",
+            "kind": "os-installation"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-host-a",
+            "subject_ref": "host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-process-observation",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-macos-sysctl-fixture",
+            "collector": "synthetic-process-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:a47eb757c96dc148988088a3c6c478e70bb865f7c83cbfdc7ae70571894b4eb6",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+              "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+            },
+            "origin": {
+              "input_ref": "in-float",
+              "record_ref": "e-process-observation"
+            }
+          }
+        ],
+        "assessments": [],
+        "capabilities": [
+          {
+            "id": "cap-exit-handle",
+            "subject_ref": "process-a",
+            "provider": "macos-kqueue-proc",
+            "capability": "process-exit-observation",
+            "status": "available",
+            "reason": "Private kqueue EVFILT_PROC NOTE_EXIT handle bracketed by sysctl start-identity reads.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          },
+          {
+            "id": "cap-pid-namespace",
+            "subject_ref": "process-a",
+            "provider": "macos-sysctl-proc",
+            "capability": "pid-namespace-observation",
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          },
+          {
+            "id": "cap-arguments-digest",
+            "subject_ref": "process-a",
+            "provider": "macos-sysctl-proc",
+            "capability": "arguments-digest",
+            "status": "not-probed",
+            "reason": "Omitted under default opt-in disclosure policy.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          }
+        ],
+        "keys": [],
+        "claims": [],
+        "input_reports": [
+          {
+            "id": "in-float",
+            "report_id": "float-source-report",
+            "digest": "sha256:dc7aeb045a1c9b59f6cbdc35908b695befe2cdf048294944fbc7510c1e5facd0"
+          }
+        ]
+      },
+      "inputs": {
+        "float-source-report": {
+          "contract": "identity-evidence/v0",
+          "report_id": "float-source-report",
+          "created_at": "2026-10-29T12:00:00Z",
+          "producer": {
+            "name": "synthetic-process-collector",
+            "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "subjects": [
+            {
+              "id": "host-a",
+              "kind": "os-installation"
+            },
+            {
+              "id": "process-a",
+              "kind": "process"
+            }
+          ],
+          "identifiers": [
+            {
+              "id": "identifier-host-a",
+              "subject_ref": "host-a",
+              "namespace": "example.test/installations",
+              "value": "host-a",
+              "derivation": {
+                "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+                "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+              },
+              "stability": "installation",
+              "clone_behavior": "copyable"
+            }
+          ],
+          "evidence": [
+            {
+              "id": "e-process-observation",
+              "subject_ref": "process-a",
+              "method": "os-observation",
+              "source": "synthetic-macos-sysctl-fixture",
+              "collector": "synthetic-process-collector",
+              "collected_at": "2026-10-29T12:00:00Z",
+              "digest": "sha256:a47eb757c96dc148988088a3c6c478e70bb865f7c83cbfdc7ae70571894b4eb6",
+              "format_profile": {
+                "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+                "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+              }
+            }
+          ],
+          "assessments": [],
+          "capabilities": [
+            {
+              "id": "cap-exit-handle",
+              "subject_ref": "process-a",
+              "provider": "macos-kqueue-proc",
+              "capability": "process-exit-observation",
+              "status": "available",
+              "reason": "Private kqueue EVFILT_PROC NOTE_EXIT handle bracketed by sysctl start-identity reads.",
+              "observed_at": "2026-10-29T12:00:00Z"
+            },
+            {
+              "id": "cap-pid-namespace",
+              "subject_ref": "process-a",
+              "provider": "macos-sysctl-proc",
+              "capability": "pid-namespace-observation",
+              "status": "unsupported",
+              "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces.",
+              "observed_at": "2026-10-29T12:00:00Z"
+            },
+            {
+              "id": "cap-arguments-digest",
+              "subject_ref": "process-a",
+              "provider": "macos-sysctl-proc",
+              "capability": "arguments-digest",
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy.",
+              "observed_at": "2026-10-29T12:00:00Z"
+            }
+          ],
+          "keys": [],
+          "claims": [
+            {
+              "id": "claim-float-v0",
+              "subject_ref": "process-a",
+              "property_profile": {
+                "id": "urn:example:identity:float-claim:v0",
+                "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "property": "calibration-threshold",
+              "value": 2.291712365432881e-09
+            }
+          ],
+          "input_reports": []
+        }
+      },
+      "expected": "accept"
     }
   ],
   "provenance_dag_cases": [
@@ -19468,6 +19750,1618 @@
         "consumed_challenges": []
       },
       "expected": "process-incarnation-or-context-changed"
+    },
+    {
+      "id": "malformed-consumed-receipts-null",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "local-process-session-launch",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "evaluator": {
+          "software": {
+            "name": "synthetic-evaluator",
+            "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "principal": {
+            "namespace": "example.test/evaluators",
+            "value": "synthetic-evaluator-a"
+          },
+          "verification_profile": {
+            "id": "urn:example:identity:synthetic-report-verification:v0",
+            "revision": "sha256:7ae90d28740da18bc58879e9653767ef4b2879457a4ced81b1c006e9b531297f"
+          }
+        },
+        "subjects": [
+          {
+            "id": "subject-a",
+            "kind": "session"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-a",
+            "subject_ref": "subject-a",
+            "namespace": "example.test/identity",
+            "value": "synthetic-value",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "enrollment",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-enroll",
+            "subject_ref": "subject-a",
+            "method": "enrollment",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-enrollment-format:v0",
+              "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+            }
+          },
+          {
+            "id": "e-pop",
+            "subject_ref": "subject-a",
+            "method": "possession-proof",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            }
+          },
+          {
+            "id": "e-custody",
+            "subject_ref": "subject-a",
+            "method": "custody-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-custody-observation-format:v0",
+              "revision": "sha256:9ab56cec6c787e94b600ad336170bd12d34f0a8682ebc730de3a4e69de10ccd9"
+            }
+          },
+          {
+            "id": "e-launch",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "assessments": [
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "identity-binding",
+            "value": "enrolled-key",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-enroll",
+              "e-pop"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "key-custody",
+            "value": "software",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-custody"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "process-a",
+            "scope": "local-process-session-binding",
+            "dimension": "platform-evidence",
+            "value": "locally-observed",
+            "state": "current",
+            "rule": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-launch"
+            ],
+            "residuals": [
+              "Contract-fit synthetic case; no native or cryptographic verification.",
+              "Launch/key binding does not establish same-account process isolation or permission."
+            ],
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "subject_ref": "subject-a",
+            "provider": "synthetic-tpm",
+            "capability": "key-attestation",
+            "status": "inaccessible",
+            "reason": "Fixture visibility result for this guest only.",
+            "observed_at": "2026-10-29T12:00:00Z",
+            "id": "capability-0"
+          }
+        ],
+        "keys": [
+          {
+            "id": "key-a",
+            "subject_ref": "subject-a",
+            "representation_profile": {
+              "id": "urn:example:identity:synthetic-public-key:v0",
+              "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+            },
+            "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4"
+          }
+        ],
+        "claims": [
+          {
+            "id": "claim-process-session",
+            "subject_ref": "process-a",
+            "property_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "property": "launch-bound-session",
+            "value": "subject-a"
+          }
+        ],
+        "input_reports": []
+      },
+      "bundle": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+          "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "launch": {
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c",
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "launcher-a"
+          },
+          "intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "process_digest": "sha256:779df43e0a90528992f2305856bb63c6fbfe8290308b5e271fb8799e6ac594c8",
+          "session_digest": "sha256:ad63d1567c11c7e8881be4595d1beb2c01a5f5c124316ca5a4fd7fe138d77850",
+          "issued_at": "2026-10-29T11:59:30Z",
+          "expires_at": "2026-10-29T12:04:30Z"
+        },
+        "challenge": {
+          "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "audience": "example.test/local-admission",
+          "receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+          "issued_at": "2026-10-29T11:59:55Z",
+          "expires_at": "2026-10-29T12:00:55Z"
+        },
+        "proof": {
+          "key_ref": "key-a",
+          "transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "context": {
+        "now": "2026-10-29T12:00:00Z",
+        "observed_at": "2026-10-29T12:00:00Z",
+        "process_live": true,
+        "current_process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "expected_session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "expected_intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "accepted_launch_issuer": {
+          "namespace": "example.test/launch-authorities",
+          "value": "launcher-a"
+        },
+        "audience": "example.test/local-admission",
+        "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verified_receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+        "verified_transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+        "verified_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+        "verified_proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "consumed_receipts": [
+          null
+        ],
+        "consumed_challenges": []
+      },
+      "expected": "launch-receipt-replayed"
+    },
+    {
+      "id": "malformed-consumed-receipts-empty-obj",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "local-process-session-launch",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "evaluator": {
+          "software": {
+            "name": "synthetic-evaluator",
+            "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "principal": {
+            "namespace": "example.test/evaluators",
+            "value": "synthetic-evaluator-a"
+          },
+          "verification_profile": {
+            "id": "urn:example:identity:synthetic-report-verification:v0",
+            "revision": "sha256:7ae90d28740da18bc58879e9653767ef4b2879457a4ced81b1c006e9b531297f"
+          }
+        },
+        "subjects": [
+          {
+            "id": "subject-a",
+            "kind": "session"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-a",
+            "subject_ref": "subject-a",
+            "namespace": "example.test/identity",
+            "value": "synthetic-value",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "enrollment",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-enroll",
+            "subject_ref": "subject-a",
+            "method": "enrollment",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-enrollment-format:v0",
+              "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+            }
+          },
+          {
+            "id": "e-pop",
+            "subject_ref": "subject-a",
+            "method": "possession-proof",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            }
+          },
+          {
+            "id": "e-custody",
+            "subject_ref": "subject-a",
+            "method": "custody-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-custody-observation-format:v0",
+              "revision": "sha256:9ab56cec6c787e94b600ad336170bd12d34f0a8682ebc730de3a4e69de10ccd9"
+            }
+          },
+          {
+            "id": "e-launch",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "assessments": [
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "identity-binding",
+            "value": "enrolled-key",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-enroll",
+              "e-pop"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "key-custody",
+            "value": "software",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-custody"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "process-a",
+            "scope": "local-process-session-binding",
+            "dimension": "platform-evidence",
+            "value": "locally-observed",
+            "state": "current",
+            "rule": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-launch"
+            ],
+            "residuals": [
+              "Contract-fit synthetic case; no native or cryptographic verification.",
+              "Launch/key binding does not establish same-account process isolation or permission."
+            ],
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "subject_ref": "subject-a",
+            "provider": "synthetic-tpm",
+            "capability": "key-attestation",
+            "status": "inaccessible",
+            "reason": "Fixture visibility result for this guest only.",
+            "observed_at": "2026-10-29T12:00:00Z",
+            "id": "capability-0"
+          }
+        ],
+        "keys": [
+          {
+            "id": "key-a",
+            "subject_ref": "subject-a",
+            "representation_profile": {
+              "id": "urn:example:identity:synthetic-public-key:v0",
+              "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+            },
+            "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4"
+          }
+        ],
+        "claims": [
+          {
+            "id": "claim-process-session",
+            "subject_ref": "process-a",
+            "property_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "property": "launch-bound-session",
+            "value": "subject-a"
+          }
+        ],
+        "input_reports": []
+      },
+      "bundle": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+          "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "launch": {
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c",
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "launcher-a"
+          },
+          "intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "process_digest": "sha256:779df43e0a90528992f2305856bb63c6fbfe8290308b5e271fb8799e6ac594c8",
+          "session_digest": "sha256:ad63d1567c11c7e8881be4595d1beb2c01a5f5c124316ca5a4fd7fe138d77850",
+          "issued_at": "2026-10-29T11:59:30Z",
+          "expires_at": "2026-10-29T12:04:30Z"
+        },
+        "challenge": {
+          "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "audience": "example.test/local-admission",
+          "receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+          "issued_at": "2026-10-29T11:59:55Z",
+          "expires_at": "2026-10-29T12:00:55Z"
+        },
+        "proof": {
+          "key_ref": "key-a",
+          "transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "context": {
+        "now": "2026-10-29T12:00:00Z",
+        "observed_at": "2026-10-29T12:00:00Z",
+        "process_live": true,
+        "current_process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "expected_session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "expected_intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "accepted_launch_issuer": {
+          "namespace": "example.test/launch-authorities",
+          "value": "launcher-a"
+        },
+        "audience": "example.test/local-admission",
+        "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verified_receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+        "verified_transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+        "verified_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+        "verified_proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "consumed_receipts": [
+          {}
+        ],
+        "consumed_challenges": []
+      },
+      "expected": "launch-receipt-replayed"
+    },
+    {
+      "id": "malformed-consumed-challenges-obj",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "local-process-session-launch",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "evaluator": {
+          "software": {
+            "name": "synthetic-evaluator",
+            "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "principal": {
+            "namespace": "example.test/evaluators",
+            "value": "synthetic-evaluator-a"
+          },
+          "verification_profile": {
+            "id": "urn:example:identity:synthetic-report-verification:v0",
+            "revision": "sha256:7ae90d28740da18bc58879e9653767ef4b2879457a4ced81b1c006e9b531297f"
+          }
+        },
+        "subjects": [
+          {
+            "id": "subject-a",
+            "kind": "session"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-a",
+            "subject_ref": "subject-a",
+            "namespace": "example.test/identity",
+            "value": "synthetic-value",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "enrollment",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-enroll",
+            "subject_ref": "subject-a",
+            "method": "enrollment",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-enrollment-format:v0",
+              "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+            }
+          },
+          {
+            "id": "e-pop",
+            "subject_ref": "subject-a",
+            "method": "possession-proof",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            }
+          },
+          {
+            "id": "e-custody",
+            "subject_ref": "subject-a",
+            "method": "custody-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-custody-observation-format:v0",
+              "revision": "sha256:9ab56cec6c787e94b600ad336170bd12d34f0a8682ebc730de3a4e69de10ccd9"
+            }
+          },
+          {
+            "id": "e-launch",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "assessments": [
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "identity-binding",
+            "value": "enrolled-key",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-enroll",
+              "e-pop"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "key-custody",
+            "value": "software",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-custody"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "process-a",
+            "scope": "local-process-session-binding",
+            "dimension": "platform-evidence",
+            "value": "locally-observed",
+            "state": "current",
+            "rule": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-launch"
+            ],
+            "residuals": [
+              "Contract-fit synthetic case; no native or cryptographic verification.",
+              "Launch/key binding does not establish same-account process isolation or permission."
+            ],
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "subject_ref": "subject-a",
+            "provider": "synthetic-tpm",
+            "capability": "key-attestation",
+            "status": "inaccessible",
+            "reason": "Fixture visibility result for this guest only.",
+            "observed_at": "2026-10-29T12:00:00Z",
+            "id": "capability-0"
+          }
+        ],
+        "keys": [
+          {
+            "id": "key-a",
+            "subject_ref": "subject-a",
+            "representation_profile": {
+              "id": "urn:example:identity:synthetic-public-key:v0",
+              "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+            },
+            "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4"
+          }
+        ],
+        "claims": [
+          {
+            "id": "claim-process-session",
+            "subject_ref": "process-a",
+            "property_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "property": "launch-bound-session",
+            "value": "subject-a"
+          }
+        ],
+        "input_reports": []
+      },
+      "bundle": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+          "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "launch": {
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c",
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "launcher-a"
+          },
+          "intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "process_digest": "sha256:779df43e0a90528992f2305856bb63c6fbfe8290308b5e271fb8799e6ac594c8",
+          "session_digest": "sha256:ad63d1567c11c7e8881be4595d1beb2c01a5f5c124316ca5a4fd7fe138d77850",
+          "issued_at": "2026-10-29T11:59:30Z",
+          "expires_at": "2026-10-29T12:04:30Z"
+        },
+        "challenge": {
+          "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "audience": "example.test/local-admission",
+          "receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+          "issued_at": "2026-10-29T11:59:55Z",
+          "expires_at": "2026-10-29T12:00:55Z"
+        },
+        "proof": {
+          "key_ref": "key-a",
+          "transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "context": {
+        "now": "2026-10-29T12:00:00Z",
+        "observed_at": "2026-10-29T12:00:00Z",
+        "process_live": true,
+        "current_process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "expected_session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "expected_intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "accepted_launch_issuer": {
+          "namespace": "example.test/launch-authorities",
+          "value": "launcher-a"
+        },
+        "audience": "example.test/local-admission",
+        "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verified_receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+        "verified_transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+        "verified_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+        "verified_proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "consumed_receipts": [],
+        "consumed_challenges": [
+          {}
+        ]
+      },
+      "expected": "launch-challenge-replayed"
+    },
+    {
+      "id": "malformed-consumed-challenges-short",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "local-process-session-launch",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "evaluator": {
+          "software": {
+            "name": "synthetic-evaluator",
+            "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "principal": {
+            "namespace": "example.test/evaluators",
+            "value": "synthetic-evaluator-a"
+          },
+          "verification_profile": {
+            "id": "urn:example:identity:synthetic-report-verification:v0",
+            "revision": "sha256:7ae90d28740da18bc58879e9653767ef4b2879457a4ced81b1c006e9b531297f"
+          }
+        },
+        "subjects": [
+          {
+            "id": "subject-a",
+            "kind": "session"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-a",
+            "subject_ref": "subject-a",
+            "namespace": "example.test/identity",
+            "value": "synthetic-value",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "enrollment",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-enroll",
+            "subject_ref": "subject-a",
+            "method": "enrollment",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-enrollment-format:v0",
+              "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+            }
+          },
+          {
+            "id": "e-pop",
+            "subject_ref": "subject-a",
+            "method": "possession-proof",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            }
+          },
+          {
+            "id": "e-custody",
+            "subject_ref": "subject-a",
+            "method": "custody-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-custody-observation-format:v0",
+              "revision": "sha256:9ab56cec6c787e94b600ad336170bd12d34f0a8682ebc730de3a4e69de10ccd9"
+            }
+          },
+          {
+            "id": "e-launch",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "assessments": [
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "identity-binding",
+            "value": "enrolled-key",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-enroll",
+              "e-pop"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "subject-a",
+            "scope": "identity-continuity",
+            "dimension": "key-custody",
+            "value": "software",
+            "state": "current",
+            "rule": {
+              "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+              "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-custody"
+            ],
+            "residuals": [
+              "Synthetic fixture; no native or cryptographic qualification."
+            ],
+            "key_ref": "key-a"
+          },
+          {
+            "subject_ref": "process-a",
+            "scope": "local-process-session-binding",
+            "dimension": "platform-evidence",
+            "value": "locally-observed",
+            "state": "current",
+            "rule": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "assessed_at": "2026-10-29T12:00:00Z",
+            "valid_until": "2026-10-29T12:00:55Z",
+            "evidence_refs": [
+              "e-launch"
+            ],
+            "residuals": [
+              "Contract-fit synthetic case; no native or cryptographic verification.",
+              "Launch/key binding does not establish same-account process isolation or permission."
+            ],
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "subject_ref": "subject-a",
+            "provider": "synthetic-tpm",
+            "capability": "key-attestation",
+            "status": "inaccessible",
+            "reason": "Fixture visibility result for this guest only.",
+            "observed_at": "2026-10-29T12:00:00Z",
+            "id": "capability-0"
+          }
+        ],
+        "keys": [
+          {
+            "id": "key-a",
+            "subject_ref": "subject-a",
+            "representation_profile": {
+              "id": "urn:example:identity:synthetic-public-key:v0",
+              "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+            },
+            "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4"
+          }
+        ],
+        "claims": [
+          {
+            "id": "claim-process-session",
+            "subject_ref": "process-a",
+            "property_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "property": "launch-bound-session",
+            "value": "subject-a"
+          }
+        ],
+        "input_reports": []
+      },
+      "bundle": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+          "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "launch": {
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c",
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "launcher-a"
+          },
+          "intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "process_digest": "sha256:779df43e0a90528992f2305856bb63c6fbfe8290308b5e271fb8799e6ac594c8",
+          "session_digest": "sha256:ad63d1567c11c7e8881be4595d1beb2c01a5f5c124316ca5a4fd7fe138d77850",
+          "issued_at": "2026-10-29T11:59:30Z",
+          "expires_at": "2026-10-29T12:04:30Z"
+        },
+        "challenge": {
+          "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "audience": "example.test/local-admission",
+          "receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+          "issued_at": "2026-10-29T11:59:55Z",
+          "expires_at": "2026-10-29T12:00:55Z"
+        },
+        "proof": {
+          "key_ref": "key-a",
+          "transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "context": {
+        "now": "2026-10-29T12:00:00Z",
+        "observed_at": "2026-10-29T12:00:00Z",
+        "process_live": true,
+        "current_process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "expected_session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "expected_intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "accepted_launch_issuer": {
+          "namespace": "example.test/launch-authorities",
+          "value": "launcher-a"
+        },
+        "audience": "example.test/local-admission",
+        "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verified_receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+        "verified_transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+        "verified_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+        "verified_proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "consumed_receipts": [],
+        "consumed_challenges": [
+          "abcd"
+        ]
+      },
+      "expected": "launch-challenge-replayed"
+    },
+    {
+      "id": "malformed-report-missing-assessments",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "local-process-session-launch",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "evaluator": {
+          "software": {
+            "name": "synthetic-evaluator",
+            "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "principal": {
+            "namespace": "example.test/evaluators",
+            "value": "synthetic-evaluator-a"
+          },
+          "verification_profile": {
+            "id": "urn:example:identity:synthetic-report-verification:v0",
+            "revision": "sha256:7ae90d28740da18bc58879e9653767ef4b2879457a4ced81b1c006e9b531297f"
+          }
+        },
+        "subjects": [
+          {
+            "id": "subject-a",
+            "kind": "session"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-a",
+            "subject_ref": "subject-a",
+            "namespace": "example.test/identity",
+            "value": "synthetic-value",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "enrollment",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-enroll",
+            "subject_ref": "subject-a",
+            "method": "enrollment",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-enrollment-format:v0",
+              "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+            }
+          },
+          {
+            "id": "e-pop",
+            "subject_ref": "subject-a",
+            "method": "possession-proof",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            }
+          },
+          {
+            "id": "e-custody",
+            "subject_ref": "subject-a",
+            "method": "custody-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "identifier_ref": "identifier-a",
+            "key_ref": "key-a",
+            "format_profile": {
+              "id": "urn:example:identity:synthetic-custody-observation-format:v0",
+              "revision": "sha256:9ab56cec6c787e94b600ad336170bd12d34f0a8682ebc730de3a4e69de10ccd9"
+            }
+          },
+          {
+            "id": "e-launch",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-fixture",
+            "collector": "synthetic-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:726436cd5c9f0850a7bc2328f7f3d91a4dd906e6e8f29b6bef571557c9048f89",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "claim_refs": [
+              "claim-process-session"
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "subject_ref": "subject-a",
+            "provider": "synthetic-tpm",
+            "capability": "key-attestation",
+            "status": "inaccessible",
+            "reason": "Fixture visibility result for this guest only.",
+            "observed_at": "2026-10-29T12:00:00Z",
+            "id": "capability-0"
+          }
+        ],
+        "keys": [
+          {
+            "id": "key-a",
+            "subject_ref": "subject-a",
+            "representation_profile": {
+              "id": "urn:example:identity:synthetic-public-key:v0",
+              "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+            },
+            "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4"
+          }
+        ],
+        "claims": [
+          {
+            "id": "claim-process-session",
+            "subject_ref": "process-a",
+            "property_profile": {
+              "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+              "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+            },
+            "property": "launch-bound-session",
+            "value": "subject-a"
+          }
+        ],
+        "input_reports": []
+      },
+      "bundle": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+          "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "launch": {
+          "receipt_id": "receipt-7b6ad09600e44d39b943e9f6164d726c",
+          "issuer": {
+            "namespace": "example.test/launch-authorities",
+            "value": "launcher-a"
+          },
+          "intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "process_digest": "sha256:779df43e0a90528992f2305856bb63c6fbfe8290308b5e271fb8799e6ac594c8",
+          "session_digest": "sha256:ad63d1567c11c7e8881be4595d1beb2c01a5f5c124316ca5a4fd7fe138d77850",
+          "issued_at": "2026-10-29T11:59:30Z",
+          "expires_at": "2026-10-29T12:04:30Z"
+        },
+        "challenge": {
+          "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "audience": "example.test/local-admission",
+          "receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+          "issued_at": "2026-10-29T11:59:55Z",
+          "expires_at": "2026-10-29T12:00:55Z"
+        },
+        "proof": {
+          "key_ref": "key-a",
+          "transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "context": {
+        "now": "2026-10-29T12:00:00Z",
+        "observed_at": "2026-10-29T12:00:00Z",
+        "process_live": true,
+        "current_process": {
+          "subject_ref": "process-a",
+          "host_scope": "example.test/installations/host-a",
+          "boot_id": "synthetic-boot-a",
+          "pid_namespace": "synthetic-pid-namespace-a",
+          "pid": "4242",
+          "start_identity": {
+            "profile": {
+              "id": "urn:example:native-start-counter:v0",
+              "revision": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "value": "1234567890123456789"
+          },
+          "execution_context": {
+            "security_principal": {
+              "namespace": "example.test/local-security-principals",
+              "value": "synthetic-shared-account"
+            },
+            "namespace_context_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "executable_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+            "arguments_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            "security_context_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "expected_session": {
+          "subject_ref": "subject-a",
+          "identifier_ref": "identifier-a",
+          "identifier_digest": "sha256:eee3c2213cbab6c1981d4f93be21fc087a728cb9faca7d8e227f4213897e0b46",
+          "key_ref": "key-a",
+          "public_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+          "key_representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          }
+        },
+        "expected_intent_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "accepted_launch_issuer": {
+          "namespace": "example.test/launch-authorities",
+          "value": "launcher-a"
+        },
+        "audience": "example.test/local-admission",
+        "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "verified_receipt_digest": "sha256:957ca422ffd9599d21c91d4d9a395e504c0250e3fd017f4e93d02e9e6e553ab4",
+        "verified_transcript_digest": "sha256:9086b683df6ccf0a317b4646a5c82a71cf603d0bd593caa79086fca5b9994d6e",
+        "verified_key_digest": "sha256:f10f781241e2246678b6b45c857069208152a53863e47fac33f607ab405006f4",
+        "verified_proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "consumed_receipts": [],
+        "consumed_challenges": []
+      },
+      "skip_shape_assert": true,
+      "expected": "invalid-report-shape"
     }
   ],
   "observation_shape_cases": [
@@ -23539,6 +25433,274 @@
         }
       },
       "expected": "stale-process-observation"
+    },
+    {
+      "id": "admit-malformed-report-missing-assessments",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "macos",
+          "architecture": "aarch64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot clock domain without time namespaces."
+          },
+          "user_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single credential numbering domain without user namespaces."
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "01234567-89ab-4cde-8f01-23456789abcd"
+          },
+          "pid_numbering_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces."
+          },
+          "target_pid_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces."
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:macos-kinfo-starttime:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "1761739170.123456"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:macos-kinfo-ucred:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:macos-kinfo:v0",
+                "value": "ruid=501;euid=501;rgid=20;egid=20"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "unsupported",
+              "reason": "Darwin kernel does not implement Linux-style process namespaces."
+            },
+            "executable_digest": {
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy."
+            },
+            "arguments_digest": {
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy."
+            },
+            "security_context_digest": {
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy."
+            }
+          }
+        }
+      },
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": {
+        "contract": "identity-evidence/v0",
+        "report_id": "native-process-observation",
+        "created_at": "2026-10-29T12:00:00Z",
+        "producer": {
+          "name": "synthetic-process-collector",
+          "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "subjects": [
+          {
+            "id": "host-a",
+            "kind": "os-installation"
+          },
+          {
+            "id": "process-a",
+            "kind": "process"
+          }
+        ],
+        "identifiers": [
+          {
+            "id": "identifier-host-a",
+            "subject_ref": "host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "e-process-observation",
+            "subject_ref": "process-a",
+            "method": "os-observation",
+            "source": "synthetic-macos-sysctl-fixture",
+            "collector": "synthetic-process-collector",
+            "collected_at": "2026-10-29T12:00:00Z",
+            "digest": "sha256:a47eb757c96dc148988088a3c6c478e70bb865f7c83cbfdc7ae70571894b4eb6",
+            "format_profile": {
+              "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+              "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+            }
+          }
+        ],
+        "capabilities": [
+          {
+            "id": "cap-exit-handle",
+            "subject_ref": "process-a",
+            "provider": "macos-kqueue-proc",
+            "capability": "process-exit-observation",
+            "status": "available",
+            "reason": "Private kqueue EVFILT_PROC NOTE_EXIT handle bracketed by sysctl start-identity reads.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          },
+          {
+            "id": "cap-pid-namespace",
+            "subject_ref": "process-a",
+            "provider": "macos-sysctl-proc",
+            "capability": "pid-namespace-observation",
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          },
+          {
+            "id": "cap-arguments-digest",
+            "subject_ref": "process-a",
+            "provider": "macos-sysctl-proc",
+            "capability": "arguments-digest",
+            "status": "not-probed",
+            "reason": "Omitted under default opt-in disclosure policy.",
+            "observed_at": "2026-10-29T12:00:00Z"
+          }
+        ],
+        "keys": [],
+        "claims": [],
+        "input_reports": []
+      },
+      "inputs": {},
+      "expected": "invalid-report-shape"
+    },
+    {
+      "id": "admit-missing-host-scope-fields",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "macos",
+          "architecture": "aarch64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot clock domain without time namespaces."
+          },
+          "user_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single credential numbering domain without user namespaces."
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "01234567-89ab-4cde-8f01-23456789abcd"
+          },
+          "pid_numbering_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces."
+          },
+          "target_pid_namespace": {
+            "status": "unsupported",
+            "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces."
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:macos-kinfo-starttime:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "1761739170.123456"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:macos-kinfo-ucred:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:macos-kinfo:v0",
+                "value": "ruid=501;euid=501;rgid=20;egid=20"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "unsupported",
+              "reason": "Darwin kernel does not implement Linux-style process namespaces."
+            },
+            "executable_digest": {
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy."
+            },
+            "arguments_digest": {
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy."
+            },
+            "security_context_digest": {
+              "status": "not-probed",
+              "reason": "Omitted under default opt-in disclosure policy."
+            }
+          }
+        }
+      },
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "expected": "invalid-observation-shape"
     }
   ],
   "observation_compare_cases": [
@@ -35252,6 +37414,434 @@
         "detect_observed_context_drift": true
       },
       "expected": "insufficient:unsupported-context-derivation-security_principal"
+    },
+    {
+      "id": "compare-missing-host-scope-fields",
+      "baseline": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "candidate": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "policy": {
+        "baseline_host_scope_trusted": true,
+        "candidate_host_scope_trusted": true,
+        "require_live": true,
+        "required_context_facts": [
+          "arguments_digest"
+        ],
+        "detect_observed_context_drift": true
+      },
+      "expected": "insufficient:invalid-observation-shape"
+    },
+    {
+      "id": "compare-missing-observed-arguments-digest",
+      "baseline": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              }
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "candidate": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              }
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "policy": {
+        "baseline_host_scope_trusted": true,
+        "candidate_host_scope_trusted": true,
+        "require_live": true,
+        "required_context_facts": [
+          "arguments_digest"
+        ],
+        "detect_observed_context_drift": true
+      },
+      "expected": "insufficient:invalid-observation-shape"
     }
   ],
   "observation_projection_cases": [
@@ -37582,6 +40172,803 @@
       "inputs": {},
       "allowed_clone_behaviors": null,
       "expected": "unsupported-context-derivation:security_principal"
+    },
+    {
+      "id": "project-pid-zero",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "0",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-pid-range",
+      "projected": null
+    },
+    {
+      "id": "project-pid-over-i32-max",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "2147483648",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-pid-range",
+      "projected": null
+    },
+    {
+      "id": "project-pid-null",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": null,
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-pid-range",
+      "projected": null
+    },
+    {
+      "id": "project-missing-arguments-digest-value",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:58b9da5ab4aede636708b24b04ccfa6946746ab58058ec2e15ebda26b0a6d909"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              }
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-observation-shape",
+      "projected": null
+    },
+    {
+      "id": "project-malformed-executable-digest",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "not-a-digest"
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-observation-shape",
+      "projected": null
+    },
+    {
+      "id": "project-null-executable-digest",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": null
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-observation-shape",
+      "projected": null
+    },
+    {
+      "id": "project-int-executable-digest",
+      "obs": {
+        "profile": {
+          "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+          "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+        },
+        "observed_at": "2026-10-29T12:00:00Z",
+        "observer": {
+          "platform_family": "linux",
+          "architecture": "x86_64",
+          "bracketed": true,
+          "time_namespace": {
+            "status": "observed",
+            "value": "timens:0:4:4026531834"
+          },
+          "user_namespace": {
+            "status": "observed",
+            "value": "userns:0:4:4026531837"
+          }
+        },
+        "process": {
+          "subject_ref": "process-a",
+          "host_scope": {
+            "identifier_ref": "identifier-host-a",
+            "namespace": "example.test/installations",
+            "value": "host-a",
+            "derivation": {
+              "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+              "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+            },
+            "stability": "installation",
+            "clone_behavior": "copyable"
+          },
+          "boot_id": {
+            "status": "observed",
+            "value": "89abcdef-0123-4567-89ab-cdef01234567"
+          },
+          "pid_numbering_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "target_pid_namespace": {
+            "status": "observed",
+            "value": "pidns:0:4:4026531836"
+          },
+          "pid": "4242",
+          "process_state": {
+            "status": "observed",
+            "value": "live"
+          },
+          "start_identity": {
+            "status": "observed",
+            "profile": {
+              "id": "urn:3leaps:identity-evidence:start-identity:linux-procfs-stat:v0",
+              "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+            },
+            "value": "987654321"
+          },
+          "execution_context": {
+            "security_principal": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:principal-derivation:linux-procfs-status-uidgid:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "principal": {
+                "namespace": "urn:3leaps:posix-credentials:linux-procfs-status:v0:userns:0:4:4026531837",
+                "value": "ruid=1000;euid=1000;suid=1000;fsuid=1000;rgid=1000;egid=1000;sgid=1000;fsgid=1000"
+              }
+            },
+            "namespace_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-ns-inum-set:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:c74496ded4d8d5b0f0e11bfed4c3643e2496880b26502f885880355ec117bded"
+            },
+            "executable_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:executable-file-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": 1
+            },
+            "arguments_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:argv-bytes:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:3846a65c6cdc97a8388e79fad49c2837d9e0abacec2bdeef7f4b54d361b970f1"
+            },
+            "security_context_digest": {
+              "status": "observed",
+              "derivation": {
+                "id": "urn:3leaps:identity-evidence:context-derivation:linux-procfs-status-secctx:v0",
+                "revision": "sha256:8a4347fcec0ad51874f28c6c1dfc6ca0888e9ccf2e25f239ba46b9be9d3749cb"
+              },
+              "digest": "sha256:954107c2e47b6b4406093ee4e6cf14a66ee9c7350d6550f606b9995104d44976"
+            }
+          }
+        }
+      },
+      "host_scope_trusted": true,
+      "now_utc": "2026-10-29T12:00:00Z",
+      "report": null,
+      "inputs": {},
+      "allowed_clone_behaviors": null,
+      "expected": "invalid-observation-shape",
+      "projected": null
     }
   ],
   "observation_bind_cases": [

@@ -380,6 +380,70 @@ jobs:
           fi
       - name: Rust/Go agreement
         run: scripts/recurrence-crosscheck.sh
+  evidence:
+    # Rust crate and pure-Go root module for identity-evidence/v0 and
+    # native-process-observation:v0: each passes the pinned corpus and their
+    # NDJSON outputs agree byte for byte on every OS cell.
+    name: Evidence Rust/Go agreement (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
+      - name: Rust crate
+        run: cargo test -p sysprims-evidence
+      - name: Go module (standalone, pure Go)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          test -z "$(gofmt -l ./evidence)"
+          if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
+            echo "go.mod must not contain replace directives" >&2
+            exit 1
+          fi
+          go vet ./evidence/...
+          go test -count=1 ./evidence/...
+      - name: Go module security (gosec, govulncheck)
+        if: runner.os == 'Linux'
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          "$(go env GOPATH)/bin/gosec" ./evidence/...
+          "$(go env GOPATH)/bin/govulncheck" ./evidence/...
+      - name: Go module alone (outside the repository, no SKIP allowed)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          corpus="$PWD/crates/sysprims-evidence/tests/identity-evidence-v0"
+          parity="$PWD/crates/sysprims-evidence/tests/parity-cases.json"
+          standalone="$(mktemp -d)/sysprims-evidence-go"
+          mkdir -p "$standalone"
+          cp go.mod go.sum LICENSE-MIT LICENSE-APACHE NOTICE "$standalone/"
+          cp -R evidence "$standalone/evidence"
+          cd "$standalone"
+          EVIDENCE_CORPUS_DIR="$corpus" EVIDENCE_PARITY_CASES="$parity" \
+            go test -count=1 -v ./evidence/... | tee "$RUNNER_TEMP/go-evidence-standalone.log"
+          if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-evidence-standalone.log"; then
+            echo "standalone evidence Go tests must not skip" >&2
+            exit 1
+          fi
+      - name: Rust/Go agreement
+        run: bash scripts/evidence-crosscheck.sh
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-latest

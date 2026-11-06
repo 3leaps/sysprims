@@ -592,6 +592,9 @@ func stripOrigin(rec map[string]any) map[string]any {
 // NecessaryConditions enforces identity-evidence/v0 reference, time,
 // assessment-method, and input_reports carry-forward rules.
 func NecessaryConditions(report any, inputReports map[string]any) error {
+	if err := ValidateReportShape(report); err != nil {
+		return err
+	}
 	obj, ok := report.(map[string]any)
 	if !ok {
 		return newRefusal("invalid-report-shape")
@@ -792,6 +795,9 @@ func NecessaryConditions(report any, inputReports map[string]any) error {
 		}
 		if !JSONEqual(actualDig, source["digest"]) {
 			return newRefusal("input-report-digest-mismatch")
+		}
+		if err := ValidateReportShape(orig); err != nil {
+			return newRefusal("invalid-input-report")
 		}
 		origCreatedStr, ok := strField(orig, "created_at")
 		if !ok {
@@ -1072,6 +1078,9 @@ func CheckImportCollisions(reports []any) error {
 	}
 	seen := make(map[string]any)
 	for _, rep := range reports {
+		if err := ValidateReportShape(rep); err != nil {
+			return err
+		}
 		obj, ok := rep.(map[string]any)
 		if !ok {
 			return newRefusal("invalid-report-shape")
@@ -1111,6 +1120,9 @@ func ValidateProvenanceDAG(rootReport any, inputReports map[string]any, maxDepth
 	dfs = func(cur any, depth int) error {
 		if depth > maxDepth {
 			return newRefusal("provenance-depth-exceeded")
+		}
+		if err := ValidateReportShape(cur); err != nil {
+			return err
 		}
 		obj, ok := cur.(map[string]any)
 		if !ok {

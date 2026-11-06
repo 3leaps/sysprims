@@ -177,17 +177,9 @@ func ValidateSessionBundleShape(bundle any) error {
 // ProcessSessionFit evaluates local-process-session:v0 contract fit over a
 // validated report, evidence bundle, and caller-supplied trusted evaluation context.
 func ProcessSessionFit(report any, bundle any, context any, acceptedProfile ProfileRef) error {
-	repObj, ok := report.(map[string]any)
-	if !ok {
-		return newRefusal("invalid-report-shape")
-	}
 	bunObj, ok := bundle.(map[string]any)
 	if !ok {
-		return newRefusal("invalid-session-bundle-shape")
-	}
-	ctxObj, ok := context.(map[string]any)
-	if !ok {
-		return newRefusal("trusted-clock-unavailable")
+		return newRefusal("unsupported-evidence-profile")
 	}
 	expectedProf := map[string]any{
 		"id":       acceptedProfile.ID,
@@ -195,6 +187,20 @@ func ProcessSessionFit(report any, bundle any, context any, acceptedProfile Prof
 	}
 	if !JSONEqual(bunObj["profile"], expectedProf) {
 		return newRefusal("unsupported-evidence-profile")
+	}
+	if err := ValidateReportShape(report); err != nil {
+		return err
+	}
+	if err := ValidateSessionBundleShape(bundle); err != nil {
+		return err
+	}
+	repObj, ok := report.(map[string]any)
+	if !ok {
+		return newRefusal("invalid-report-shape")
+	}
+	ctxObj, ok := context.(map[string]any)
+	if !ok {
+		return newRefusal("trusted-clock-unavailable")
 	}
 
 	process, _ := objField(bunObj, "process")
@@ -340,10 +346,16 @@ func ProcessSessionFit(report any, bundle any, context any, acceptedProfile Prof
 		return newRefusal("launch-receipt-replayed")
 	}
 	for _, item := range consumedReceipts {
-		if cm, ok := item.(map[string]any); ok {
-			if JSONEqual(cm["issuer"], receipt["issuer"]) && JSONEqual(cm["receipt_id"], receipt["receipt_id"]) {
-				return newRefusal("launch-receipt-replayed")
-			}
+		cm, ok := item.(map[string]any)
+		if !ok || !checkExactKeys(cm, []string{"issuer", "receipt_id"}) || !isPrincipalObj(cm["issuer"]) {
+			return newRefusal("launch-receipt-replayed")
+		}
+		rid, ok := strField(cm, "receipt_id")
+		if !ok || !isLocalID(rid) {
+			return newRefusal("launch-receipt-replayed")
+		}
+		if JSONEqual(cm["issuer"], receipt["issuer"]) && JSONEqual(rid, receipt["receipt_id"]) {
+			return newRefusal("launch-receipt-replayed")
 		}
 	}
 	consumedChallenges, ok := arrField(ctxObj, "consumed_challenges")
@@ -351,7 +363,11 @@ func ProcessSessionFit(report any, bundle any, context any, acceptedProfile Prof
 		return newRefusal("launch-challenge-replayed")
 	}
 	for _, item := range consumedChallenges {
-		if JSONEqual(item, challenge["nonce"]) {
+		ns, ok := item.(string)
+		if !ok || !isHex64(ns) {
+			return newRefusal("launch-challenge-replayed")
+		}
+		if JSONEqual(ns, challenge["nonce"]) {
 			return newRefusal("launch-challenge-replayed")
 		}
 	}

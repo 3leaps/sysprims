@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::wire::canonical_sha256_value;
 use crate::{
     is_local_id, is_nonempty_512, is_principal_obj, is_profile_ref_obj, is_sha256_digest,
-    json_equal, parse_strict_utc_unix, EvidenceError, ProfileRef,
+    json_equal, parse_strict_utc_unix, validate_report_shape, EvidenceError, ProfileRef,
 };
 
 /// `local-process-session:v0` profile identifier.
@@ -307,6 +307,8 @@ pub fn process_session_fit(
         bundle.get("profile") == Some(&expected_prof),
         "unsupported-evidence-profile",
     )?;
+    validate_report_shape(report)?;
+    validate_session_bundle_shape(bundle)?;
 
     let process = &bundle["process"];
     let session = &bundle["session"];
@@ -415,7 +417,9 @@ pub fn process_session_fit(
             && ident_digest.as_deref() == session.get("identifier_digest").and_then(Value::as_str),
         "report-session-key-mismatch",
     )?;
-    let key = key.unwrap();
+    let Some(key) = key else {
+        return Err(EvidenceError::new("report-session-key-mismatch"));
+    };
 
     let proc_digest = canonical_sha256_value(process).map_err(|w| EvidenceError::new(w.code))?;
     let sess_digest = canonical_sha256_value(session).map_err(|w| EvidenceError::new(w.code))?;
@@ -436,24 +440,33 @@ pub fn process_session_fit(
         .get("consumed_receipts")
         .and_then(Value::as_array)
         .ok_or_else(|| EvidenceError::new("launch-receipt-replayed"))?;
-    req(
-        !consumed_receipts.iter().any(|item| {
-            item.get("issuer")
-                .is_some_and(|iss| json_equal(iss, &receipt["issuer"]))
-                && item.get("receipt_id") == receipt.get("receipt_id")
-        }),
-        "launch-receipt-replayed",
-    )?;
+    for item in consumed_receipts {
+        let valid_entry = item.as_object().is_some_and(|m| {
+            check_exact_keys(m, &["issuer", "receipt_id"])
+                && is_principal_obj(&m["issuer"])
+                && m["receipt_id"].as_str().is_some_and(is_local_id)
+        });
+        req(valid_entry, "launch-receipt-replayed")?;
+        req(
+            !(json_equal(&item["issuer"], &receipt["issuer"])
+                && item.get("receipt_id") == receipt.get("receipt_id")),
+            "launch-receipt-replayed",
+        )?;
+    }
     let consumed_challenges = context
         .get("consumed_challenges")
         .and_then(Value::as_array)
         .ok_or_else(|| EvidenceError::new("launch-challenge-replayed"))?;
-    req(
-        !consumed_challenges
-            .iter()
-            .any(|n| Some(n) == challenge.get("nonce")),
-        "launch-challenge-replayed",
-    )?;
+    for n in consumed_challenges {
+        req(
+            n.as_str().is_some_and(is_hex64),
+            "launch-challenge-replayed",
+        )?;
+        req(
+            Some(n) != challenge.get("nonce"),
+            "launch-challenge-replayed",
+        )?;
+    }
 
     let receipt_digest = canonical_sha256_value(receipt).map_err(|w| EvidenceError::new(w.code))?;
     req(
@@ -498,7 +511,7 @@ pub fn process_session_fit(
 
     let claims: HashMap<&str, &Value> = report["claims"]
         .as_array()
-        .unwrap()
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?
         .iter()
         .filter_map(|c| Some((c.get("id")?.as_str()?, c)))
         .collect();
@@ -513,7 +526,10 @@ pub fn process_session_fit(
     };
 
     let mut bound: HashMap<&str, &Value> = HashMap::new();
-    for e in report["evidence"].as_array().unwrap() {
+    let evidence_arr = report["evidence"]
+        .as_array()
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+    for e in evidence_arr {
         let fp_matches = e.get("format_profile") == Some(&expected_prof);
         let dig_matches = e.get("digest").and_then(Value::as_str) == Some(bundle_digest.as_str());
         if !fp_matches && !dig_matches {
@@ -559,14 +575,20 @@ pub fn process_session_fit(
             }
             _ => return Err(EvidenceError::new("report-evidence-method-mismatch")),
         }
-        bound.insert(e["id"].as_str().unwrap(), e);
+        let eid = e["id"]
+            .as_str()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        bound.insert(eid, e);
     }
 
+    let assessments = report["assessments"]
+        .as_array()
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
     let mut used_methods: HashSet<&str> = HashSet::new();
-    for a in report["assessments"].as_array().unwrap() {
+    for a in assessments {
         let selected: Vec<&Value> = a["evidence_refs"]
             .as_array()
-            .unwrap()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?
             .iter()
             .filter_map(|er| er.as_str().and_then(|id| bound.get(id).copied()))
             .collect();
@@ -590,7 +612,9 @@ pub fn process_session_fit(
             continue;
         }
         for e in selected {
-            let method = e["method"].as_str().unwrap();
+            let method = e["method"]
+                .as_str()
+                .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
             if method == "possession-proof" {
                 req(
                     a.get("dimension").and_then(Value::as_str) == Some("identity-binding")
@@ -612,7 +636,7 @@ pub fn process_session_fit(
                 )?;
                 let e_claims: HashSet<&str> = e["claim_refs"]
                     .as_array()
-                    .unwrap()
+                    .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?
                     .iter()
                     .filter_map(Value::as_str)
                     .collect();
@@ -638,17 +662,15 @@ pub fn process_session_fit(
         "process-session-assessments-required",
     )?;
 
-    let expiry = receipt["expires_at"]
+    let receipt_exp = receipt["expires_at"]
         .as_str()
         .and_then(parse_strict_utc_unix)
-        .unwrap()
-        .min(
-            challenge["expires_at"]
-                .as_str()
-                .and_then(parse_strict_utc_unix)
-                .unwrap(),
-        );
-    let assessments = report["assessments"].as_array().unwrap();
+        .ok_or_else(|| EvidenceError::new("invalid-session-bundle-shape"))?;
+    let challenge_exp = challenge["expires_at"]
+        .as_str()
+        .and_then(parse_strict_utc_unix)
+        .ok_or_else(|| EvidenceError::new("invalid-session-bundle-shape"))?;
+    let expiry = receipt_exp.min(challenge_exp);
     req(
         assessments.iter().all(|a| {
             a["valid_until"]

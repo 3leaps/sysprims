@@ -214,6 +214,11 @@ func runAll(corpusDir, parityPath string) {
 		admitted, err := evidence.AdmitReportBytes(raw)
 		if err == nil {
 			assertEq("accept", expected, "wire case "+id)
+			recomputed, rErr := evidence.CanonicalSHA256Value(admitted.Value)
+			if rErr != nil {
+				panic(fmt.Sprintf("recompute value digest %s: %v", id, rErr))
+			}
+			assertEq(recomputed, admitted.Digest, "wire value-digest roundtrip "+id)
 			if expCan, ok := c["canonical"].(string); ok {
 				assertEq(string(admitted.CanonicalBytes), expCan, "wire canonical "+id)
 			}
@@ -321,8 +326,10 @@ func runAll(corpusDir, parityPath string) {
 		c := item.(map[string]any)
 		id := c["id"].(string)
 		expected := c["expected"].(string)
-		if err := evidence.ValidateReportShape(c["report"]); err != nil {
-			panic(fmt.Sprintf("semantic case %s failed shape: %v", id, err))
+		if skip, _ := c["skip_shape_assert"].(bool); !skip {
+			if err := evidence.ValidateReportShape(c["report"]); err != nil {
+				panic(fmt.Sprintf("semantic case %s failed shape: %v", id, err))
+			}
 		}
 		inputs := parseInputsMap(c["inputs"])
 		got := "accept"
@@ -403,8 +410,10 @@ func runAll(corpusDir, parityPath string) {
 		c := item.(map[string]any)
 		id := c["id"].(string)
 		expected := c["expected"].(string)
-		if err := evidence.ValidateSessionBundleShape(c["bundle"]); err != nil {
-			panic(fmt.Sprintf("extra session fit %s bundle shape: %v", id, err))
+		if skip, _ := c["skip_shape_assert"].(bool); !skip {
+			if err := evidence.ValidateSessionBundleShape(c["bundle"]); err != nil {
+				panic(fmt.Sprintf("extra session fit %s bundle shape: %v", id, err))
+			}
 		}
 		got := "accept"
 		if err := evidence.ProcessSessionFit(c["report"], c["bundle"], c["context"], sessProf); err != nil {

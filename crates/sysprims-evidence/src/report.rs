@@ -899,6 +899,7 @@ pub fn necessary_conditions(
     report: &Value,
     input_reports: Option<&BTreeMap<String, Value>>,
 ) -> Result<(), EvidenceError> {
+    validate_report_shape(report)?;
     let req = |ok: bool, code: &str| -> Result<(), EvidenceError> {
         if ok {
             Ok(())
@@ -936,7 +937,10 @@ pub fn necessary_conditions(
         indexes.insert(coll, map);
     }
 
-    let input_arr = obj["input_reports"].as_array().unwrap();
+    let input_arr = obj
+        .get("input_reports")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
     let mut seen_report_ids = HashSet::new();
     for r in input_arr {
         let rid = r
@@ -957,7 +961,11 @@ pub fn necessary_conditions(
         ("assessments", "assessed_at"),
         ("capabilities", "observed_at"),
     ] {
-        for rec in obj[coll].as_array().unwrap() {
+        let arr = obj
+            .get(coll)
+            .and_then(Value::as_array)
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        for rec in arr {
             if let Some(ta) = rec.get("time_attribution") {
                 req(
                     ta.get("instant") == rec.get(field),
@@ -973,7 +981,11 @@ pub fn necessary_conditions(
         .and_then(parse_strict_utc_unix)
         .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
 
-    for a in obj["assessments"].as_array().unwrap() {
+    let assessments_arr = obj
+        .get("assessments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+    for a in assessments_arr {
         if a.get("dimension").and_then(Value::as_str) == Some("key-custody")
             && a.get("value").and_then(Value::as_str) == Some("not-applicable")
         {
@@ -995,7 +1007,11 @@ pub fn necessary_conditions(
         "assessments",
         "capabilities",
     ] {
-        for r in obj[coll].as_array().unwrap() {
+        let arr = obj
+            .get(coll)
+            .and_then(Value::as_array)
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        for r in arr {
             let subj = r
                 .get("subject_ref")
                 .and_then(Value::as_str)
@@ -1024,14 +1040,13 @@ pub fn necessary_conditions(
                     let cr = cr_v
                         .as_str()
                         .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
-                    let c = claims.get(cr);
+                    let Some(c) = claims.get(cr).copied() else {
+                        return Err(EvidenceError::new("claim-subject-mismatch"));
+                    };
                     req(
-                        c.is_some_and(|x| {
-                            x.get("subject_ref").and_then(Value::as_str) == Some(subj)
-                        }),
+                        c.get("subject_ref").and_then(Value::as_str) == Some(subj),
                         "claim-subject-mismatch",
                     )?;
-                    let c = c.unwrap();
                     if let Some(ck) = c.get("key_ref") {
                         if coll == "evidence" || r.get("key_ref").is_some() {
                             req(Some(ck) == r.get("key_ref"), "claim-key-mismatch")?;
@@ -1055,14 +1070,22 @@ pub fn necessary_conditions(
         }
     }
 
-    for e in obj["evidence"].as_array().unwrap() {
+    let evidence_arr = obj
+        .get("evidence")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+    for e in evidence_arr {
         let ts = e["collected_at"]
             .as_str()
             .and_then(parse_strict_utc_unix)
             .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
         req(ts <= created, "future-evidence")?;
     }
-    for c in obj["capabilities"].as_array().unwrap() {
+    let caps_arr = obj
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+    for c in caps_arr {
         let ts = c["observed_at"]
             .as_str()
             .and_then(parse_strict_utc_unix)
@@ -1091,6 +1114,7 @@ pub fn necessary_conditions(
             Some(actual_digest.as_str()) == source.get("digest").and_then(Value::as_str),
             "input-report-digest-mismatch",
         )?;
+        validate_report_shape(original).map_err(|_| EvidenceError::new("invalid-input-report"))?;
         let orig_created = original
             .get("created_at")
             .and_then(Value::as_str)
@@ -1107,7 +1131,11 @@ pub fn necessary_conditions(
     }
 
     for coll in ["evidence", "capabilities"] {
-        for r in obj[coll].as_array().unwrap() {
+        let arr = obj
+            .get(coll)
+            .and_then(Value::as_array)
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        for r in arr {
             let Some(origin) = r.get("origin") else {
                 continue;
             };
@@ -1129,8 +1157,10 @@ pub fn necessary_conditions(
                 old.is_some_and(|o| json_equal(&strip_origin(r), &strip_origin(o))),
                 "input-observation-changed",
             )?;
-            let mut refs: Vec<(&str, &str)> =
-                vec![("subjects", r["subject_ref"].as_str().unwrap())];
+            let r_subj = r["subject_ref"]
+                .as_str()
+                .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+            let mut refs: Vec<(&str, &str)> = vec![("subjects", r_subj)];
             if let Some(ir) = r.get("identifier_ref").and_then(Value::as_str) {
                 refs.push(("identifiers", ir));
             }
@@ -1139,7 +1169,10 @@ pub fn necessary_conditions(
             }
             if let Some(crs) = r.get("claim_refs").and_then(Value::as_array) {
                 for x in crs {
-                    refs.push(("claims", x.as_str().unwrap()));
+                    let cid = x
+                        .as_str()
+                        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+                    refs.push(("claims", cid));
                 }
             }
             if let Some(comp) = r
@@ -1148,7 +1181,10 @@ pub fn necessary_conditions(
                 .and_then(Value::as_array)
             {
                 for x in comp {
-                    refs.push(("subjects", x.as_str().unwrap()));
+                    let sid = x
+                        .as_str()
+                        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+                    refs.push(("subjects", sid));
                 }
             }
             for (rc, rid) in refs {
@@ -1158,9 +1194,7 @@ pub fn necessary_conditions(
                 });
                 let cur_item = indexes[rc].get(rid).copied();
                 req(
-                    old_item.is_some()
-                        && cur_item.is_some()
-                        && json_equal(old_item.unwrap(), cur_item.unwrap()),
+                    matches!((old_item, cur_item), (Some(oi), Some(ci)) if json_equal(oi, ci)),
                     "input-reference-changed",
                 )?;
             }
@@ -1178,7 +1212,7 @@ pub fn necessary_conditions(
     );
     let mut seen_scopes: HashSet<AssessmentScopeKey> = HashSet::new();
 
-    for a in obj["assessments"].as_array().unwrap() {
+    for a in assessments_arr {
         let mut sorted_claims: Vec<String> = a
             .get("claim_refs")
             .and_then(Value::as_array)
@@ -1190,14 +1224,26 @@ pub fn necessary_conditions(
             })
             .unwrap_or_default();
         sorted_claims.sort();
+        let a_subj = a["subject_ref"]
+            .as_str()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        let dim = a["dimension"]
+            .as_str()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        let scope = a["scope"]
+            .as_str()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+        let value = a["value"]
+            .as_str()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
         let scope_key = (
-            a["subject_ref"].as_str().unwrap().to_owned(),
+            a_subj.to_owned(),
             a.get("identifier_ref")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             a.get("key_ref").and_then(Value::as_str).map(str::to_owned),
-            a["dimension"].as_str().unwrap().to_owned(),
-            a["scope"].as_str().unwrap().to_owned(),
+            dim.to_owned(),
+            scope.to_owned(),
             boundary_identity(a.get("boundary")),
             sorted_claims,
         );
@@ -1215,17 +1261,20 @@ pub fn necessary_conditions(
         if a["state"].as_str() == Some("current") {
             req(created < end, "expired-current-assessment")?;
         }
-        let refs = a["evidence_refs"].as_array().unwrap();
+        let refs = a["evidence_refs"]
+            .as_array()
+            .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
         let mut es: Vec<&Value> = Vec::with_capacity(refs.len());
         for er in refs {
-            let er_id = er.as_str().unwrap();
+            let er_id = er
+                .as_str()
+                .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
             let ev = evidence
                 .get(er_id)
                 .copied()
                 .ok_or_else(|| EvidenceError::new("unknown-evidence"))?;
             es.push(ev);
         }
-        let a_subj = a["subject_ref"].as_str().unwrap();
         req(
             es.iter().all(|e| e["subject_ref"].as_str() == Some(a_subj)),
             "evidence-subject-mismatch",
@@ -1259,8 +1308,6 @@ pub fn necessary_conditions(
             .filter_map(|e| e["method"].as_str())
             .collect();
 
-        let dim = a["dimension"].as_str().unwrap();
-        let value = a["value"].as_str().unwrap();
         match dim {
             "identity-binding" => match value {
                 "declared" => req(named.contains("declaration"), "declaration-required")?,
@@ -1325,8 +1372,13 @@ pub fn necessary_conditions(
                     "hardware-attested" => &["device-attestation", "workload-attestation"],
                     _ => &[],
                 };
-                for cr_v in a["claim_refs"].as_array().unwrap() {
-                    let cr = cr_v.as_str().unwrap();
+                let claim_refs = a["claim_refs"]
+                    .as_array()
+                    .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
+                for cr_v in claim_refs {
+                    let cr = cr_v
+                        .as_str()
+                        .ok_or_else(|| EvidenceError::new("invalid-report-shape"))?;
                     let covered = es.iter().any(|e| {
                         let m = e["method"].as_str().unwrap_or("");
                         allowed_methods.contains(&m)
@@ -1360,6 +1412,7 @@ pub fn check_import_collisions<'a>(
         "input_reports",
     ];
     for report in reports {
+        validate_report_shape(report)?;
         for &coll in &collections {
             let arr = report
                 .get(coll)
@@ -1400,6 +1453,7 @@ pub fn validate_provenance_dag(
         if depth > max_depth {
             return Err(EvidenceError::new("provenance-depth-exceeded"));
         }
+        validate_report_shape(cur)?;
         let rid = cur
             .get("report_id")
             .and_then(Value::as_str)
