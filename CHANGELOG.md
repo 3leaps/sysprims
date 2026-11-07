@@ -10,6 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
+### Added
+
+- `sysprims-evidence` crate and pure-Go `evidence` package
+  (`github.com/3leaps/sysprims/evidence`): `contract: identity-evidence/v0` wire
+  admission, report construction, `local-process-session:v0`, and
+  `native-process-observation:v0` derivation with RFC 8785 canonical JSON (JCS),
+  SHA-256 digests, and cross-language conformance parity.
+- `sysprims-proc::observation` module and pure-Go `procobserve` package
+  (`github.com/3leaps/sysprims/procobserve`): native process snapshots,
+  executable hashing, 64-bit Darwin `KERN_PROCARGS2` and Linux `/proc/<pid>`
+  `openat2` (`RESOLVE_NO_XDEV | RESOLVE_NO_MAGICLINKS`) collectors, and
+  `ProcessContinuityHandle` (`pidfd` on Linux, `kqueue` `EVFILT_PROC` on macOS)
+  for exit waiting and identity re-verification.
+- Python `cp310-abi3` bindings (`bindings/python`, PyPI `sysprims`): PyO3 and
+  maturin extension covering process inspection, signals, session and group
+  spawn, contained spawn (`spawn_contained`), timeout execution, and
+  `recurrence/v0` evaluation, with typed `.pyi` stubs (`py.typed`), offline
+  source-distribution checks, multi-platform wheels, signed GitHub Release
+  inventory integration, and PyPI PEP 740 attestation verification.
+- Centralized CI runner-label and Rust toolchain pin registry
+  (`config/ci/pins.toml`, `scripts/ci-pins.py`), composite
+  `.github/actions/setup-rust`, and `scripts/release-index-entry.py` for
+  `crates.io` sparse-index checksum queries.
+
+### Changed
+
+- Cargo publication dry-run (`scripts/release-crates-dry-run.sh`) and registry
+  integrity checks (`scripts/release-integrity.mjs`) query `index.crates.io`
+  directly via `scripts/release-index-entry.py` instead of the cached
+  `crates.io` REST API.
+- TypeScript release packaging stages verified `.tgz` archives with tar-header
+  and manifest validation during `release-stage-published`.
+- CI adds cross-platform Linux, macOS, and Windows jobs for `evidence` and
+  `python-bindings` (including Windows `NOT_SUPPORTED` Python test parity) and
+  normalizes `windows-arm64` Go version-probe line endings.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added

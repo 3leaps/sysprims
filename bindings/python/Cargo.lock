@@ -535,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rsfulmen",
  "thiserror 2.0.21",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-evidence"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "canonprims-core",
  "canonprims-json",
@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-proc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "serde",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-py"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "pyo3",
  "serde",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-recurrence"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "jiff",
  "serde",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-session"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "sysprims-core",
@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-signal"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "rsfulmen",
@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-timeout"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "rsfulmen",

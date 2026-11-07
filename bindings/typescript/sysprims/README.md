@@ -18,11 +18,11 @@ Runtime support:
 ## Installation
 
 ```bash
-npm install @3leaps/sysprims@0.3.0
+npm install @3leaps/sysprims@0.4.0
 ```
 
 The package and its platform-specific native packages are published from the
-verified `v0.3.0` repository tag.
+verified `v0.4.0` repository tag.
 
 For local development from this repository:
 
