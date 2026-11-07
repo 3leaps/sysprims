@@ -245,6 +245,11 @@ expect_fail_with 'cannot query sparse index' bash -c \
 	"cd '$pub' && env PATH='$bin:$PATH' FAKE_CRATE='$fixture_dir/fake-crate.py' UPLOAD_LOG='$fixture_dir/uploads' SYSPRIMS_RELEASE_TAG='v$version' ./scripts/release-crates-dry-run.sh --publish --registry-index 'sparse+http://127.0.0.1:$trunc_port/'"
 kill "$trunc_pid" 2>/dev/null || true
 [[ ! -e "$fixture_dir/uploads" ]]
+# A deeply nested JSON index row (RecursionError) also exits 2 and halts before
+# any cargo publish attempt rather than reading as absent.
+python3 -c 'print("[" * 10000 + "]" * 10000)' >"$sparse_dir/sy/sp/sysprims-core"
+expect_fail_with 'cannot query sparse index' publish_run
+[[ ! -e "$fixture_dir/uploads" ]]
 set_index_sum "$tag_sum"
 
 # A packaged crate that records another commit or another path is refused

@@ -208,6 +208,35 @@ ci_pin_controls = [
         'floating Rust channel in run step',
     ),
     (
+        'double-quoted plus cargo floating channel',
+        base + marked_job + '      - run: cargo "+nightly" check\n',
+        'floating Rust channel in run step',
+    ),
+    (
+        'single-quoted plus cargo floating channel',
+        base + marked_job + "      - run: cargo '+nightly' check\n",
+        'floating Rust channel in run step',
+    ),
+    (
+        'same-line flow setup-rust decoy',
+        base
+        + marked_job
+        + '      - {uses: ./.github/actions/setup-rust, with: {toolchain: 1.98.1}, env: {DECOY: 1.98.1  # pin:rust=stable\n        }}\n',
+        'lacks # pin:rust=<key> marker',
+    ),
+    (
+        'same-line flow runs-on decoy',
+        base
+        + '\n  pinctl: {runs-on: ubuntu-24.04, env: {DECOY: ubuntu-24.04  # pin:runner=linux-x64\n  }, steps: [{run: echo ok}]}\n',
+        'lacks # pin:runner=<key> marker',
+    ),
+    (
+        'same-line flow matrix decoy',
+        base
+        + '\n  pinctl:\n    runs-on: ${{ matrix.os }}\n    strategy: {matrix: {other: [ubuntu-24.04], os: [ubuntu-24.04  # pin:runner=linux-x64\n    ]}}\n    steps:\n      - run: echo ok\n',
+        'lacks # pin:runner=<key> marker',
+    ),
+    (
         'node20 checkout pin',
         base
         + marked_job

@@ -119,7 +119,7 @@ export function parseRegistryMetadata(value, label = "npm package") {
 	return { tarball, integrity };
 }
 
-function registryState(entry, registryDirectory) {
+function registryState(entry, registryDirectory, { timeoutMs } = {}) {
 	if (registryDirectory) {
 		const path = join(registryDirectory, entry.filename);
 		if (!existsSync(path)) return { state: "absent" };
@@ -129,13 +129,25 @@ function registryState(entry, registryDirectory) {
 			sri: `sha512-${digest(path, "sha512")}`,
 		};
 	}
-	const viewed = run("npm", [
-		"view",
-		`${entry.name}@${entry.version}`,
-		"dist.tarball",
-		"dist.integrity",
-		"--json",
-	]);
+	const runOptions =
+		Number.isFinite(timeoutMs) && timeoutMs > 0
+			? { timeout: Math.max(1, Math.floor(timeoutMs)) }
+			: {};
+	const viewed = run(
+		"npm",
+		[
+			"view",
+			`${entry.name}@${entry.version}`,
+			"dist.tarball",
+			"dist.integrity",
+			"--json",
+		],
+		runOptions,
+	);
+	if (viewed.signal)
+		fail(
+			`npm registry query timed out or was terminated (${viewed.signal}) for ${entry.name}@${entry.version}`,
+		);
 	if (viewed.status !== 0) {
 		if (/E404|not found/i.test(`${viewed.stderr}${viewed.stdout}`))
 			return { state: "absent" };
@@ -158,7 +170,12 @@ function defaultSleep(ms) {
 	if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function assertPresentIdentical(entry, state, stageDirectory) {
+function assertPresentIdentical(
+	entry,
+	state,
+	stageDirectory,
+	{ timeoutMs } = {},
+) {
 	if (state.sri !== entry.sri)
 		fail(
 			`hostile same-version registry content for ${entry.name}@${entry.version}`,
@@ -168,23 +185,34 @@ function assertPresentIdentical(entry, state, stageDirectory) {
 			`hostile same-version registry bytes for ${entry.name}@${entry.version}`,
 		);
 	if (state.tarball) {
+		const hasTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
+		const curlMaxSec = hasTimeout
+			? Math.max(1, Math.ceil(timeoutMs / 1000))
+			: 60;
+		const runOptions = hasTimeout
+			? { timeout: Math.max(1, Math.floor(timeoutMs)) }
+			: {};
 		const temporary = join(stageDirectory, `.registry-${entry.filename}`);
 		try {
-			mustRun("curl", [
-				"--proto",
-				"=https",
-				"--tlsv1.2",
-				"--max-time",
-				"60",
-				"-fsSL",
-				"--retry",
-				"3",
-				"-A",
-				VERIFY_USER_AGENT,
-				"-o",
-				temporary,
-				state.tarball,
-			]);
+			mustRun(
+				"curl",
+				[
+					"--proto",
+					"=https",
+					"--tlsv1.2",
+					"--max-time",
+					String(curlMaxSec),
+					"-fsSL",
+					"--retry",
+					hasTimeout ? "0" : "3",
+					"-A",
+					VERIFY_USER_AGENT,
+					"-o",
+					temporary,
+					state.tarball,
+				],
+				runOptions,
+			);
 			if (digest(temporary, "sha256") !== entry.sha256)
 				fail(
 					`hostile same-version registry bytes for ${entry.name}@${entry.version}`,
@@ -234,7 +262,10 @@ export function publishResumably(
 			fail(
 				"root package cannot publish before all native packages are verified",
 			);
-		let state = queryState(entry, registryDirectory);
+		let state = queryState(entry, registryDirectory, {
+			timeoutMs: pollDeadlineMs,
+		});
+		let verifyDeadline = null;
 		if (state.state === "absent") {
 			if (!publish) {
 				completed.push({ name: entry.name, state: "absent" });
@@ -251,8 +282,20 @@ export function publishResumably(
 					"--provenance",
 				]);
 			const deadline = nowFn() + pollDeadlineMs;
+			verifyDeadline = deadline;
 			for (let attempt = 1; attempt <= pollAttempts; attempt += 1) {
-				state = queryState(entry, registryDirectory);
+				const remainingBeforeQuery = deadline - nowFn();
+				if (remainingBeforeQuery <= 0)
+					fail(
+						`npm package remained absent past ${pollDeadlineMs}ms deadline: ${entry.name}@${entry.version}`,
+					);
+				state = queryState(entry, registryDirectory, {
+					timeoutMs: remainingBeforeQuery,
+				});
+				if (nowFn() > deadline)
+					fail(
+						`npm package verification exceeded ${pollDeadlineMs}ms deadline: ${entry.name}@${entry.version}`,
+					);
 				if (state.state === "present") break;
 				if (nowFn() >= deadline)
 					fail(
@@ -266,7 +309,19 @@ export function publishResumably(
 					`npm package remained absent after publish (${pollAttempts} poll attempts): ${entry.name}@${entry.version}`,
 				);
 		}
-		assertPresentIdentical(entry, state, stageDirectory);
+		const verifyOptions =
+			verifyDeadline !== null
+				? { timeoutMs: Math.max(1, verifyDeadline - nowFn()) }
+				: { timeoutMs: pollDeadlineMs };
+		if (verifyDeadline !== null && nowFn() > verifyDeadline)
+			fail(
+				`npm package verification exceeded ${pollDeadlineMs}ms deadline: ${entry.name}@${entry.version}`,
+			);
+		assertPresentIdentical(entry, state, stageDirectory, verifyOptions);
+		if (verifyDeadline !== null && nowFn() > verifyDeadline)
+			fail(
+				`npm package verification exceeded ${pollDeadlineMs}ms deadline: ${entry.name}@${entry.version}`,
+			);
 		completed.push({ name: entry.name, state: "identical" });
 	}
 	return completed;

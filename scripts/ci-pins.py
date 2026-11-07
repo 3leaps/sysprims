@@ -55,7 +55,7 @@ SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 MARKER_COMMENT_RE = re.compile(r"#\s*pin:(runner|rust)=([A-Za-z0-9_-]+)\s*$")
 SYNC_LINE_RE = re.compile(
     r"^(?P<prefix>.*?(?:[:=]\s*|-\s+))"
-    r"(?P<quote>['\"]?)(?P<val>[A-Za-z0-9._-]+)(?P=quote)"
+    r"(?P<token>(?P<quote>['\"]?)(?P<val>[A-Za-z0-9._-]+)(?P=quote))"
     r"(?P<ws>\s+)#\s*pin:(?P<kind>runner|rust)=(?P<key>[A-Za-z0-9_-]+)\s*$"
 )
 MATRIX_EXPR_RE = re.compile(r"^\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}$")
@@ -69,7 +69,7 @@ NODE20_DENYLIST = {
 FLOATING_RUST_RE = re.compile(
     r"(?:--default-toolchain(?:\s+|=)['\"]?(?:stable|beta|nightly)(?:-[A-Za-z0-9._-]+)?['\"]?(?=$|[\s;|&)])|"
     r"\brustup\s+(?:toolchain\s+install|default|install|run)\s+['\"]?(?:stable|beta|nightly)(?:-[A-Za-z0-9._-]+)?['\"]?(?=$|[\s;|&)])|"
-    r"(?:^|[\s;|&(])cargo\s+\+['\"]?(?:stable|beta|nightly)(?:-[A-Za-z0-9._-]+)?['\"]?(?=$|[\s;|&)])|"
+    r"(?:^|[\s;|&(])cargo\s+(?:['\"]\s*)?\+['\"]?(?:stable|beta|nightly)(?:-[A-Za-z0-9._-]+)?['\"]?(?=$|[\s;|&)])|"
     r"\bRUSTUP_TOOLCHAIN=['\"]?(?:stable|beta|nightly)(?:-[A-Za-z0-9._-]+)?['\"]?(?=$|[\s;|&)]))"
 )
 DIRECT_RUSTUP_RE = re.compile(
@@ -316,8 +316,8 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
     rust_values = set(rust_pins.values())
 
     lines = text.splitlines()
-    marked_runner_keys: dict[int, str] = {}
-    marked_rust_keys: dict[int, str] = {}
+    marked_runner_keys: dict[int, tuple[str, tuple[int, int]]] = {}
+    marked_rust_keys: dict[int, tuple[str, tuple[int, int]]] = {}
 
     # 1. Validate every `# pin:...` marker line in raw text.
     for lineno, line in enumerate(lines, 1):
@@ -336,8 +336,9 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
         kind = match.group("kind")
         key = match.group("key")
         val = match.group("val")
+        token_span = (match.start("token"), match.end("token"))
         if kind == "runner":
-            marked_runner_keys[lineno] = key
+            marked_runner_keys[lineno] = (key, token_span)
             if key not in hosted:
                 errors.append(f"{name}:{lineno}: unknown runner pin key {key!r}")
             elif val != hosted[key]:
@@ -345,7 +346,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                     f"{name}:{lineno}: runner pin {key!r} is {val!r}, expected {hosted[key]!r} (run make ci-pins-sync)"
                 )
         elif kind == "rust":
-            marked_rust_keys[lineno] = key
+            marked_rust_keys[lineno] = (key, token_span)
             if key not in rust_pins:
                 errors.append(f"{name}:{lineno}: unknown rust pin key {key!r}")
             elif val != rust_pins[key]:
@@ -355,12 +356,17 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
 
     consumed_runner_lines: set[int] = set()
     consumed_rust_lines: set[int] = set()
+    visited_runner_nodes: set[int] = set()
 
     def require_runner_marker(snode: _yaml.ScalarNode, where: str) -> None:
+        visited_runner_nodes.add(id(snode))
         lineno = snode.start_mark.line + 1
+        node_span = (snode.start_mark.column, snode.end_mark.column)
         if (
             snode.start_mark.line != snode.end_mark.line
+            or snode.style not in (None, "", "'", '"')
             or lineno not in marked_runner_keys
+            or marked_runner_keys[lineno][1] != node_span
         ):
             errors.append(
                 f"{name}:{lineno}: {where} hosted runner {snode.value!r} lacks # pin:runner=<key> marker"
@@ -372,7 +378,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
             )
             return
         consumed_runner_lines.add(lineno)
-        key = marked_runner_keys[lineno]
+        key, _ = marked_runner_keys[lineno]
         if key in hosted and hosted[key] != snode.value:
             errors.append(
                 f"{name}:{lineno}: {where} value {snode.value!r} does not match # pin:runner={key} ({hosted[key]!r})"
@@ -380,9 +386,12 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
 
     def require_rust_marker(snode: _yaml.ScalarNode, where: str) -> None:
         lineno = snode.start_mark.line + 1
+        node_span = (snode.start_mark.column, snode.end_mark.column)
         if (
             snode.start_mark.line != snode.end_mark.line
+            or snode.style not in (None, "", "'", '"')
             or lineno not in marked_rust_keys
+            or marked_rust_keys[lineno][1] != node_span
         ):
             errors.append(
                 f"{name}:{lineno}: {where} toolchain {snode.value!r} lacks # pin:rust=<key> marker"
@@ -394,7 +403,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
             )
             return
         consumed_rust_lines.add(lineno)
-        key = marked_rust_keys[lineno]
+        key, _ = marked_rust_keys[lineno]
         if key in rust_pins and rust_pins[key] != snode.value:
             errors.append(
                 f"{name}:{lineno}: {where} value {snode.value!r} does not match # pin:rust={key} ({rust_pins[key]!r})"
@@ -492,7 +501,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                 if (
                     snode.tag == "tag:yaml.org,2002:str"
                     and snode.value in hosted_values
-                    and (snode.start_mark.line + 1) not in consumed_runner_lines
+                    and id(snode) not in visited_runner_nodes
                 ):
                     require_runner_marker(snode, f"job {job_id} matrix")
 

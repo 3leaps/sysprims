@@ -303,3 +303,71 @@ test("npm publish fails when post-publish polling exceeds overall deadline", () 
 		/remained absent past 150ms deadline/,
 	);
 });
+
+test("npm publish rejects late present query that overruns post-publish deadline", () => {
+	const { stage, manifest } = fixture();
+	let clock = 1000;
+	let publishedFirst = false;
+	const seenTimeouts = [];
+	assert.throws(
+		() =>
+			publishResumably(stage, manifest, {
+				pollAttempts: 5,
+				pollSleepMs: 10,
+				pollDeadlineMs: 20,
+				nowFn() {
+					return clock;
+				},
+				sleepFn(ms) {
+					clock += ms;
+				},
+				publishPackage() {
+					publishedFirst = true;
+				},
+				queryState(entry, _registryDir, options) {
+					seenTimeouts.push(options?.timeoutMs);
+					if (!publishedFirst) return { state: "absent" };
+					clock += 150;
+					return {
+						state: "present",
+						sha256: entry.sha256,
+						sri: entry.sri,
+					};
+				},
+			}),
+		/exceeded 20ms deadline/,
+	);
+	assert.deepEqual(seenTimeouts, [20, 20]);
+});
+
+test("npm live registry query kills hung npm view subprocess at deadline", () => {
+	const { stage, manifest } = fixture();
+	const bin = join(dirname(stage), "hung-bin");
+	mkdirSync(bin);
+	writeFileSync(
+		join(bin, "npm"),
+		`#!/usr/bin/env node
+if (process.argv[2] === "view") {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+}
+process.exit(44);
+`,
+	);
+	chmodSync(join(bin, "npm"), 0o755);
+	const previousPath = process.env.PATH;
+	process.env.PATH = `${bin}:${previousPath}`;
+	const started = Date.now();
+	try {
+		assert.throws(
+			() =>
+				publishResumably(stage, manifest, {
+					publish: false,
+					pollDeadlineMs: 120,
+				}),
+			/timed out|ETIMEDOUT/,
+		);
+		assert.equal(Date.now() - started < 1000, true);
+	} finally {
+		process.env.PATH = previousPath;
+	}
+});

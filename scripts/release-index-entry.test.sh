@@ -37,13 +37,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            for _ in range(10):
+            for _ in range(40):
                 try:
                     self.wfile.write(b" ")
                     self.wfile.flush()
-                except BrokenPipeError:
+                except OSError:
                     return
-                time.sleep(0.1)
+                time.sleep(0.05)
+            return
+        if self.path.endswith("/slowhdr"):
+            self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+            self.wfile.flush()
+            for idx in range(40):
+                try:
+                    self.wfile.write(f"X-Slow-{idx}: 1\r\n".encode("ascii"))
+                    self.wfile.flush()
+                except OSError:
+                    return
+                time.sleep(0.05)
             return
         if self.path.endswith("/redirfile"):
             self.send_response(302)
@@ -150,11 +161,31 @@ PY
 # Truncated HTTP 200 response (Content-Length 4096, 23 bytes delivered) exits 2, never 1.
 expect_exit2 --allow-http "$base" trunc 1.0.0
 
+# Deeply nested JSON (RecursionError) exits 2, never 1.
+python3 -c 'print("[" * 10000 + "]" * 10000)' >"$scratch/ab/cd/abcdef"
+expect_exit2 --allow-http "$base" abcdef 1.0.0
+
 # Oversized total response, oversized single line, and overall deadline all exit 2.
 printf '%s\n%s\n' "$live" "$live" >"$scratch/ab/cd/abcdef"
 expect_exit2 --allow-http --max-bytes 64 "$base" abcdef 1.0.0
 expect_exit2 --allow-http --max-line-bytes 32 "$base" abcdef 1.0.0
-expect_exit2 --allow-http --timeout 0.25 "$base" slow 1.0.0
+
+# Trickle body and trickle headers must both abort near --timeout 0.2 (well under 0.8s).
+for slow_crate in slow slowhdr; do
+	python3 -I - "$root/scripts/release-index-entry.py" "$base" "$slow_crate" <<'PY'
+import subprocess, sys, time
+script, base, crate = sys.argv[1:4]
+t0 = time.monotonic()
+proc = subprocess.run(
+    [sys.executable, "-I", script, "--allow-http", "--timeout", "0.2", base, crate, "1.0.0"],
+    capture_output=True,
+    text=True,
+)
+elapsed = time.monotonic() - t0
+assert proc.returncode == 2, (crate, proc.returncode, proc.stderr)
+assert elapsed < 0.8, f"{crate} took {elapsed:.3f}s despite --timeout 0.2"
+PY
+done
 
 # No server: an error, not absent.
 expect_exit2 --allow-http "http://127.0.0.1:9/" abcdef 1.0.0

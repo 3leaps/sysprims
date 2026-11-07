@@ -16,6 +16,7 @@ import http.client
 import json
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +32,10 @@ MAX_REDIRECTS = 5
 
 
 class IndexFetchError(Exception):
+    pass
+
+
+class _AbsentEntry(Exception):
     pass
 
 
@@ -130,7 +135,13 @@ def read_bounded_lines(
         if remaining <= 0:
             raise TimeoutError("sparse-index request exceeded overall deadline")
         _set_socket_timeout(response, remaining)
-        chunk = response.read(min(CHUNK_BYTES, max_bytes - total + 1))
+        max_chunk = min(CHUNK_BYTES, max_bytes - total + 1)
+        read_once = getattr(response, "read1", None)
+        chunk = (
+            read_once(max_chunk) if callable(read_once) else response.read(max_chunk)
+        )
+        if time.monotonic() > deadline:
+            raise TimeoutError("sparse-index request exceeded overall deadline")
         if not chunk:
             break
         total += len(chunk)
@@ -221,6 +232,67 @@ def parse_args(argv: list[str]) -> tuple[bool, int, int, float, str, str, str]:
     )
 
 
+def _fetch_index_lines(
+    target_url: str,
+    *,
+    allow_http: bool,
+    deadline: float,
+    max_bytes: int,
+    max_line_bytes: int,
+) -> list[str]:
+    opener = urllib.request.build_opener(_SafeRedirectHandler(allow_http=allow_http))
+    request = urllib.request.Request(
+        target_url,
+        headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"},
+    )
+    state: dict[str, object] = {"lines": None, "error": None, "response": None}
+
+    def worker() -> None:
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("sparse-index request exceeded overall deadline")
+            response = opener.open(request, timeout=remaining)
+            state["response"] = response
+            try:
+                state["lines"] = read_bounded_lines(
+                    response,
+                    deadline=deadline,
+                    max_bytes=max_bytes,
+                    max_line_bytes=max_line_bytes,
+                )
+            finally:
+                response.close()
+        except urllib.error.HTTPError as error:
+            if error.code in (404, 410):
+                state["error"] = _AbsentEntry()
+            else:
+                state["error"] = IndexFetchError(f"HTTP {error.code}")
+        except BaseException as error:  # noqa: BLE001
+            state["error"] = error
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    if thread.is_alive():
+        resp = state.get("response")
+        if resp is not None:
+            try:
+                _set_socket_timeout(resp, 0.0)
+                resp.close()  # type: ignore[attr-defined]
+            except OSError:
+                pass
+        raise TimeoutError("sparse-index request exceeded overall deadline")
+
+    err = state.get("error")
+    if isinstance(err, BaseException):
+        raise err
+    lines = state.get("lines")
+    if not isinstance(lines, list):
+        raise IndexFetchError("sparse-index fetch returned no lines")
+    return lines
+
+
 def main() -> int:
     try:
         (
@@ -241,27 +313,16 @@ def main() -> int:
         return 2
 
     deadline = time.monotonic() + timeout_sec
-    opener = urllib.request.build_opener(_SafeRedirectHandler(allow_http=allow_http))
-    request = urllib.request.Request(
-        target_url,
-        headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"},
-    )
     try:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("sparse-index request exceeded overall deadline")
-        with opener.open(request, timeout=remaining) as response:
-            lines = read_bounded_lines(
-                response,
-                deadline=deadline,
-                max_bytes=max_bytes,
-                max_line_bytes=max_line_bytes,
-            )
-    except urllib.error.HTTPError as error:
-        if error.code in (404, 410):
-            return 1
-        print(f"error: index request failed: HTTP {error.code}", file=sys.stderr)
-        return 2
+        lines = _fetch_index_lines(
+            target_url,
+            allow_http=allow_http,
+            deadline=deadline,
+            max_bytes=max_bytes,
+            max_line_bytes=max_line_bytes,
+        )
+    except _AbsentEntry:
+        return 1
     except (
         IndexFetchError,
         urllib.error.URLError,
@@ -276,20 +337,25 @@ def main() -> int:
     # Cargo keeps the last line for a version (a yank or edit is appended), so
     # the last matching line is authoritative.
     found = None
-    for line in lines:
-        if not line.strip():
-            continue
-        entry = json.loads(line)
-        if (
-            not isinstance(entry, dict)
-            or not isinstance(entry.get("name"), str)
-            or not isinstance(entry.get("vers"), str)
-        ):
-            raise ValueError("an index line is not a version entry")
-        if entry["name"].lower() == crate.lower() and entry["vers"] == version:
-            if not isinstance(entry.get("cksum"), str):
-                raise ValueError("cksum is not a string")
-            found = entry
+    try:
+        for line in lines:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("name"), str)
+                or not isinstance(entry.get("vers"), str)
+            ):
+                raise ValueError("an index line is not a version entry")
+            if entry["name"].lower() == crate.lower() and entry["vers"] == version:
+                if not isinstance(entry.get("cksum"), str):
+                    raise ValueError("cksum is not a string")
+                found = entry
+    except (json.JSONDecodeError, RecursionError, ValueError, KeyError) as error:
+        print(f"error: malformed index entry: {error}", file=sys.stderr)
+        return 2
+
     if found is None:
         return 1
     if found.get("yanked"):
@@ -303,7 +369,10 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
-    except (ValueError, KeyError) as error:
-        print(f"error: malformed index entry: {error}", file=sys.stderr)
+        exit_code = main()
+    except SystemExit:
+        raise
+    except BaseException as error:  # noqa: BLE001
+        print(f"error: unexpected sparse-index failure: {error}", file=sys.stderr)
         sys.exit(2)
+    sys.exit(exit_code)
