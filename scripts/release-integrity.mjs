@@ -384,19 +384,27 @@ export function provenance(root, version, commit = run(root, "git", ["rev-parse"
 }
 
 // What must be on the registries for the release at `commit`, read from git
-// blobs there: every crate in config/release/publishable-crates.txt, the Go
-// binding (published or retained), and the recurrence module when present.
+// blobs there: every crate in config/release/publishable-crates.txt, the root
+// pure-Go module when evidence/doc.go is present, the Go binding (published or
+// retained), and the recurrence module when present.
 export function remoteRequirements(root, commit, version) {
   const set = releaseTagSet(root, commit, `v${version}`);
   const crates = run(root, "git", ["cat-file", "blob", `${set.commit}:config/release/publishable-crates.txt`]).split("\n").filter(Boolean);
   if (crates.length === 0) fail("publishable-crates.txt is empty");
   const plan = JSON.parse(run(root, "git", ["cat-file", "blob", `${set.commit}:docs/releases/v${version}.json`]));
   const go = plan.surfaces.go;
-  const modules = [{
+  const modules = [];
+  const rootEvidence = run(root, "git", ["ls-tree", set.commit, "--", "evidence/doc.go"]).trim();
+  if (rootEvidence) {
+    const [mode, type] = rootEvidence.split(/\s+/);
+    if (type !== "blob" || (mode !== "100644" && mode !== "100755")) fail(`evidence/doc.go at ${set.commit} is not a regular file`);
+    modules.push({ path: "github.com/3leaps/sysprims", version, absentAt: null });
+  }
+  modules.push({
     path: "github.com/3leaps/sysprims/bindings/go/sysprims",
     version: go.disposition === "publish" ? version : go.retained_version,
     absentAt: go.disposition === "publish" ? null : version,
-  }];
+  });
   if (set.recurrence) modules.push({ path: "github.com/3leaps/sysprims/go/recurrence", version, absentAt: null });
   return { crates, modules };
 }
@@ -416,12 +424,19 @@ export function checkRemote(requirements, version, lookup) {
   }
 }
 
+const VERIFY_USER_AGENT = "sysprims-release-verify/1.0 (+https://github.com/3leaps/sysprims)";
+
 function liveLookup(root) {
+  const indexReader = join(scriptDir, "release-index-entry.py");
   return {
     crate(name, version) {
-      const result = spawnSync("curl", ["-fsSL", `https://crates.io/api/v1/crates/${name}/${version}`], { cwd: root, encoding: "utf8" });
-      if (result.status !== 0) return null;
-      return JSON.parse(result.stdout).version?.num ?? null;
+      const indexUrl = process.env.SYSPRIMS_SPARSE_INDEX_URL ?? "https://index.crates.io/";
+      const result = spawnSync("python3", ["-I", indexReader, indexUrl, name, version], { cwd: root, encoding: "utf8" });
+      if (result.error) fail(`cannot run python3 for sparse-index lookup: ${result.error.message}`);
+      if (result.status === 0) return /^[0-9a-f]{64}$/.test(result.stdout.trim()) ? version : null;
+      if (result.status === 1 || result.status === 3) return null;
+      const detail = `${result.stderr || ""}${result.stdout || ""}`.trim();
+      fail(`sparse-index query failed for ${name}@${version}${detail ? `: ${detail}` : ""}`);
     },
     goModule(path, version) {
       const result = spawnSync("go", ["list", "-m", "-json", `${path}@v${version}`], { cwd: root, encoding: "utf8" });
@@ -429,10 +444,10 @@ function liveLookup(root) {
       return JSON.parse(result.stdout).Version ?? null;
     },
     npm(url) {
-      return JSON.parse(run(root, "curl", ["-fsSL", url]));
+      return JSON.parse(run(root, "curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, url]));
     },
     npmResolves(url) {
-      return spawnSync("curl", ["-fsSL", url], { cwd: root, encoding: "utf8" }).status === 0;
+      return spawnSync("curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, url], { cwd: root, encoding: "utf8" }).status === 0;
     },
   };
 }

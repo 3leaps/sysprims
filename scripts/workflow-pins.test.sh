@@ -3,17 +3,24 @@
 # action by image digest, and each pinned line carries a comment naming the
 # version or channel the pin was taken from. `uses` values are read from the
 # parsed workflow (scripts/workflow_yaml.py), so quoting and flow style do not
-# hide one. Runner images and the Rust toolchain channel are governed
-# separately.
+# hide one. Runner images and Rust toolchain versions are governed by
+# config/ci/pins.toml and scripts/ci-pins.py.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
-python3 -B -P -E - "$root/scripts" "$root/.github/workflows" <<'PY'
+python3 -B -P -E - "$root/scripts" "$root/.github/workflows" "$root" <<'PY'
+import importlib.util
 import pathlib
 import re
 import sys
 
 sys.path.insert(0, sys.argv[1])
 import workflow_yaml as wy  # noqa: E402
+
+spec = importlib.util.spec_from_file_location(
+    'ci_pins', pathlib.Path(sys.argv[1]) / 'ci-pins.py'
+)
+ci_pins = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ci_pins)
 
 SHA_REF = re.compile(r'[\w.-]+/[\w./-]+@[0-9a-f]{40}')
 DOCKER_REF = re.compile(r'docker://[\w./:-]+@sha256:[0-9a-f]{64}')
@@ -94,14 +101,113 @@ for label, text, expected in controls:
     found = check('ci.yml', text)
     if not any(expected in error for error in found):
         raise SystemExit(f'error: pin mutation control did not fail as intended: {label} (expected {expected!r}, got {found})')
-print(f'[ok] {len(texts)} workflows: every action SHA- or digest-pinned with a version comment; {len(controls)} raw-text controls refused')
+
+repo_root = pathlib.Path(sys.argv[3])
+pins = ci_pins.load_pins(repo_root)
+ci_pins.run_check(repo_root)
+
+marked_job = '\n  pinctl:\n    runs-on: ubuntu-24.04  # pin:runner=linux-x64\n    steps:\n'
+ci_pin_controls = [
+    (
+        'moving runner label',
+        base + '\n  pinctl:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n',
+        'unapproved or moving runner label',
+    ),
+    (
+        'unmarked hosted runner',
+        base + '\n  pinctl:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n',
+        'lacks # pin:runner=<key> marker',
+    ),
+    (
+        'expression runs-on',
+        base + '\n  pinctl:\n    runs-on: ${{ vars.RUNNER }}\n    steps:\n      - run: echo ok\n',
+        'expression-valued runs-on cannot be checked',
+    ),
+    (
+        'matrix moving runner',
+        base
+        + '\n  pinctl:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os:\n          - ubuntu-latest\n    steps:\n      - run: echo ok\n',
+        'unapproved or moving runner label',
+    ),
+    (
+        'dtolnay rust-toolchain',
+        base
+        + marked_job
+        + '      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable\n',
+        'third-party Rust toolchain action is forbidden',
+    ),
+    (
+        'floating rust channel',
+        base + marked_job + '      - run: cargo +stable check\n',
+        'floating Rust channel in run step',
+    ),
+    (
+        'direct rustup target add',
+        base + marked_job + '      - run: rustup target add x86_64-pc-windows-gnu\n',
+        'direct rustup invocation in workflow step',
+    ),
+    (
+        'setup-rust drifted version',
+        base
+        + marked_job
+        + '      - uses: ./.github/actions/setup-rust\n        with:\n          toolchain: 1.97.0  # pin:rust=stable\n',
+        'rust pin \'stable\' is \'1.97.0\'',
+    ),
+    (
+        'setup-rust missing marker',
+        base
+        + marked_job
+        + '      - uses: ./.github/actions/setup-rust\n        with:\n          toolchain: 1.98.1\n',
+        'lacks # pin:rust=<key> marker',
+    ),
+    (
+        'setup-rust flow-style missing marker',
+        base
+        + marked_job
+        + '      - {uses: ./.github/actions/setup-rust, with: {toolchain: 1.98.1}}\n',
+        '# pin:rust=<key> marker line(s)',
+    ),
+    (
+        'node20 checkout pin',
+        base
+        + marked_job
+        + '      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4\n',
+        'deprecated Node 20',
+    ),
+]
+for label, text, expected in ci_pin_controls:
+    found = ci_pins.check_workflow_text('ci.yml', text, pins)
+    if not any(expected in error for error in found):
+        raise SystemExit(
+            f'error: ci-pins mutation control did not fail as intended: {label} '
+            f'(expected {expected!r}, got {found})'
+        )
+
+bumped_pins = {
+    'hosted': dict(pins['hosted'], **{'linux-x64': 'ubuntu-26.04'}),
+    'allowlist': set(pins['allowlist']),
+    'rust': dict(pins['rust'], stable='1.99.0'),
+}
+synced_ci, updated_count = ci_pins.sync_text(base, bumped_pins, 'ci.yml')
+if updated_count == 0 or 'ubuntu-26.04  # pin:runner=linux-x64' not in synced_ci or '1.99.0  # pin:rust=stable' not in synced_ci:
+    raise SystemExit('error: ci-pins sync_text did not propagate bumped runner and rust pins')
+post_sync_errors = ci_pins.check_workflow_text('ci.yml', synced_ci, bumped_pins)
+if post_sync_errors:
+    raise SystemExit(f'error: synced workflow failed ci-pins check: {post_sync_errors}')
+
+print(
+    f'[ok] {len(texts)} workflows: every action SHA- or digest-pinned with a version comment; '
+    f'{len(controls)} raw-text controls and {len(ci_pin_controls)} CI-pin controls refused'
+)
 PY
 (cd "$root" && python3 -B -E scripts/release-workflow-pin.py check) >/dev/null
+(cd "$root" && python3 -B -P -E scripts/ci-pins.py check) >/dev/null
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 repo="$scratch/repo"
-mkdir -p "$repo/.github/workflows" "$repo/.github/actions/sample" "$repo/config/release"
+mkdir -p "$repo/.github/workflows" "$repo/.github/actions/setup-rust" "$repo/.github/actions/sample" "$repo/config/release"
 cp "$root"/.github/workflows/*.yml "$repo/.github/workflows/"
+cp "$root/.github/actions/setup-rust/action.yml" "$repo/.github/actions/setup-rust/action.yml"
 cp "$root/config/release/release-workflow.sha256" "$repo/config/release/"
 git -C "$repo" init -q -b main
 git -C "$repo" config user.name fixture
@@ -125,7 +231,7 @@ refused() {
 	}
 }
 pin_with() {
-	(cd "$repo" && shasum -a 256 .github/workflows/*.yml) >"$repo/config/release/release-workflow.sha256"
+	(cd "$repo" && LC_ALL=C shasum -a 256 .github/actions/*/*.yml .github/workflows/*.yml) >"$repo/config/release/release-workflow.sha256"
 }
 pin check
 pin verify-commit HEAD
@@ -134,7 +240,7 @@ refused 'differs from its reviewed digest' check
 git -C "$repo" checkout -q -- .github
 printf 'name: x\n' >"$repo/.github/actions/sample/action.yml"
 refused 'action.yml is not pinned' check
-rm -rf "$repo/.github/actions"
+rm -rf "$repo/.github/actions/sample"
 sed_in_place '1s/^./0/' "$repo/config/release/release-workflow.sha256"
 refused 'differs from its reviewed digest' check
 git -C "$repo" checkout -q -- config

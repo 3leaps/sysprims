@@ -1,0 +1,20 @@
+# Single source of truth for GitHub Actions runner labels and Rust toolchains.
+# Edit values here, then run `make ci-pins-sync` to propagate markers and
+# refresh `config/release/release-workflow.sha256`.
+# `make ci-pins-check` verifies zero drift across all workflows.
+
+[runners]
+# Estate-managed GitHub-hosted larger runners (image governed in runner-group settings).
+estate_allowlist = [
+  "ubuntu-latest-arm64-s",
+  "windows-latest-arm64-s",
+]
+
+[runners.hosted]
+linux-x64 = "ubuntu-24.04"
+macos-arm64 = "macos-15"
+windows-x64 = "windows-2025"
+
+[rust]
+msrv = "1.88.0"
+stable = "1.98.1"

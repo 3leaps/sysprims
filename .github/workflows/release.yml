@@ -20,7 +20,7 @@ jobs:
   # incorrect version resolution.
   validate-version:
     name: Validate Version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -51,7 +51,7 @@ jobs:
           echo "Version validated: $FILE_VERSION"
   verify-go-bindings-assets:
     name: Verify Go Binding Assets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs: validate-version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -95,22 +95,22 @@ jobs:
           echo "Go binding assets verified."
   verify-cargo-package:
     name: Verify Core Cargo Package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs: validate-version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.ref }}
-      - name: Install Rust 1.88.0
-        uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: 1.88.0
+          toolchain: 1.88.0  # pin:rust=msrv
       - name: Package dependency root without publishing
         run: cargo package -p sysprims-core --no-verify
   # Build Linux targets using cargo-zigbuild for glibc version targeting
   build-linux:
     name: Build Linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
@@ -249,7 +249,7 @@ jobs:
   # Build macOS targets (cross-compile both from arm64 runner)
   build-macos:
     name: Build macOS
-    runs-on: macos-latest
+    runs-on: macos-15  # pin:runner=macos-arm64
     needs: validate-version
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -257,8 +257,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.ref }}
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build CLI (both targets)
         run: |
@@ -324,14 +326,16 @@ jobs:
   # CGo requires MinGW, so we build with x86_64-pc-windows-gnu target
   build-windows:
     name: Build Windows
-    runs-on: windows-latest
+    runs-on: windows-2025  # pin:runner=windows-x64
     needs: validate-version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.ref }}
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: x86_64-pc-windows-gnu
       - name: Install MinGW
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
@@ -397,8 +401,10 @@ jobs:
           $binDir = Join-Path $topDir.FullName 'bin'
           if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: aarch64-pc-windows-msvc,aarch64-pc-windows-gnullvm
       - name: Build CLI (MSVC)
         shell: pwsh
@@ -450,14 +456,16 @@ jobs:
   # This lane is intended for non-cgo shared-lib consumers.
   build-windows-msvc:
     name: Build Windows x64 (MSVC, shared)
-    runs-on: windows-latest
+    runs-on: windows-2025  # pin:runner=windows-x64
     needs: validate-version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.ref }}
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: x86_64-pc-windows-msvc
       - name: Build FFI (MSVC target)
         shell: pwsh
@@ -484,7 +492,7 @@ jobs:
   # Generate C header via cbindgen
   cbindgen:
     name: Generate C Header
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
@@ -504,7 +512,7 @@ jobs:
   # Generate SBOM for compliance (CycloneDX format via Syft)
   sbom:
     name: Generate SBOM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/sbom-tools@sha256:954267f9aca809b89af42bb97471a3c4d7b93c385c5625829b244b17b252fbde
       options: --user 1001
@@ -524,7 +532,7 @@ jobs:
   # Package all FFI libs into single bundle
   verify-ffi-shared-assets:
     name: Verify FFI Shared Artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs: [validate-version, build-linux, build-macos, build-windows-msvc, build-windows-arm64]
     steps:
       - name: Download shared-lib artifacts
@@ -568,7 +576,7 @@ jobs:
           echo "[ok] Shared-lib artifacts verified"
   package-ffi-bundle:
     name: Package FFI Bundle
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs:
       - validate-version
       - build-linux
@@ -708,7 +716,7 @@ jobs:
   # publishes after verification.
   release-packages:
     name: Release Packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs:
       - validate-version
       - verify-go-bindings-assets

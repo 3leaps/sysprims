@@ -64,7 +64,7 @@ expect_fail_with 'empty token' bash -c "printf '%s\n' '{\"v\":1,\"registry\":$re
 # End-to-end integration with real Cargo against the local sparse registry.
 repo="$fixture_dir/repo"
 fixture_repo "$repo" "$version" publish 0
-cp "$fixture_root"/scripts/{release-crates-dry-run.sh,release-crates.py,release-export-tree.py,release-cargo-provider.py,release-source-check.py,check-registry-config.py,write-exclusive.py} "$repo/scripts/"
+cp "$fixture_root"/scripts/{release-crates-dry-run.sh,release-crates.py,release-index-entry.py,release-export-tree.py,release-cargo-provider.py,release-source-check.py,check-registry-config.py,write-exclusive.py} "$repo/scripts/"
 printf 'sysprims-core\n' >"$repo/config/release/publishable-crates.txt"
 mkdir -p "$repo/crates/sysprims-core/src"
 cat >"$repo/Cargo.toml" <<'TOML'

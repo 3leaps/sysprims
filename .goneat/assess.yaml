@@ -31,18 +31,21 @@ lint:
     enabled: true
     strict: true
     paths:
+      - ".github/actions/**/*.yml"
+      - ".github/actions/**/*.yaml"
       - ".github/workflows/**/*.yml"
       - ".github/workflows/**/*.yaml"
       - ".goneat/**/*.yaml"
     ignore: []
   # Go linting note:
-  # goneat currently runs golangci-lint from the repo root. To support that while keeping
-  # Go bindings in a submodule, we include:
-  # - a minimal root go.mod
-  # - a root go.work referencing bindings/go/sysprims
-  # - a tiny placeholder Go package (internal/gowork) so repo-root ./... resolves
+  # goneat runs golangci-lint from the repo root. Root go.work includes:
+  # - the root pure-Go module (.)
+  # - bindings/go/sysprims
+  # - go/recurrence
   #
-  # CI still runs Go tests from bindings/go/sysprims directly.
+  # CI and Makefile module tests explicitly set GOWORK=off (and CGO_ENABLED=0
+  # for the pure-Go modules) and run out-of-tree standalone copies to guarantee
+  # zero workspace coupling.
 
   # Shell script linting
   shell:

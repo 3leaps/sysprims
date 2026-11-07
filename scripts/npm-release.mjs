@@ -86,29 +86,49 @@ function registryState(entry, registryDirectory) {
   return { state: "present", sri: parsed.integrity, tarball: parsed.tarball };
 }
 
+const VERIFY_USER_AGENT = "sysprims-release-verify/1.0 (+https://github.com/3leaps/sysprims)";
+
+function defaultSleep(ms) {
+  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function assertPresentIdentical(entry, state, stageDirectory) {
   if (state.sri !== entry.sri) fail(`hostile same-version registry content for ${entry.name}@${entry.version}`);
   if (state.sha256 && state.sha256 !== entry.sha256) fail(`hostile same-version registry bytes for ${entry.name}@${entry.version}`);
   if (state.tarball) {
     const temporary = join(stageDirectory, `.registry-${entry.filename}`);
     try {
-      mustRun("curl", ["-fsSL", "--retry", "3", "-o", temporary, state.tarball]);
+      mustRun("curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, "-o", temporary, state.tarball]);
       if (digest(temporary, "sha256") !== entry.sha256) fail(`hostile same-version registry bytes for ${entry.name}@${entry.version}`);
     } finally { rmSync(temporary, { force: true }); }
   }
 }
 
-export function publishResumably(stageDirectory, manifest, { registryDirectory, publish = true, publishPackage } = {}) {
+export function publishResumably(stageDirectory, manifest, {
+  registryDirectory,
+  publish = true,
+  publishPackage,
+  queryState = registryState,
+  sleepFn = defaultSleep,
+  pollAttempts = Number.parseInt(process.env.SYSPRIMS_NPM_POLL_ATTEMPTS ?? "12", 10),
+  pollSleepMs = Number.parseInt(process.env.SYSPRIMS_NPM_POLL_SLEEP_MS ?? "5000", 10),
+} = {}) {
+  if (!Number.isInteger(pollAttempts) || pollAttempts < 1) fail("SYSPRIMS_NPM_POLL_ATTEMPTS must be a positive integer");
+  if (!Number.isInteger(pollSleepMs) || pollSleepMs < 0) fail("SYSPRIMS_NPM_POLL_SLEEP_MS must be a non-negative integer");
   const completed = [];
   for (const entry of manifest.packages) {
     if (entry.name === "@3leaps/sysprims" && completed.length !== nativeOrder.length) fail("root package cannot publish before all native packages are verified");
-    let state = registryState(entry, registryDirectory);
+    let state = queryState(entry, registryDirectory);
     if (state.state === "absent") {
       if (!publish) { completed.push({ name: entry.name, state: "absent" }); continue; }
       if (publishPackage) publishPackage(entry, join(stageDirectory, "packages", entry.filename));
       else mustRun("npm", ["publish", join(stageDirectory, "packages", entry.filename), "--access", "public", "--provenance"]);
-      state = registryState(entry, registryDirectory);
-      if (state.state !== "present") fail(`npm package remained absent after publish: ${entry.name}@${entry.version}`);
+      for (let attempt = 1; attempt <= pollAttempts; attempt += 1) {
+        state = queryState(entry, registryDirectory);
+        if (state.state === "present") break;
+        if (attempt < pollAttempts) sleepFn(pollSleepMs);
+      }
+      if (state.state !== "present") fail(`npm package remained absent after publish (${pollAttempts} poll attempts): ${entry.name}@${entry.version}`);
     }
     assertPresentIdentical(entry, state, stageDirectory);
     completed.push({ name: entry.name, state: "identical" });

@@ -268,14 +268,16 @@ test("npm dry-run cannot enter the protected OIDC job", () => {
   assert.doesNotMatch(stageBlock, /environment:|id-token:/);
 });
 
-test("registry promotion requires every listed crate and both Go modules from the release commit", () => {
+test("registry promotion requires every listed crate and all Go modules from the release commit", () => {
   // The repository's own publication list and modules, at HEAD.
   const version = readFileSync("VERSION", "utf8").trim();
   const live = remoteRequirements(process.cwd(), "HEAD", version);
   const listed = readFileSync("config/release/publishable-crates.txt", "utf8").split("\n").filter(Boolean);
   assert.deepEqual(live.crates, listed);
+  assert.ok(live.crates.includes("sysprims-evidence"));
   assert.ok(live.crates.includes("sysprims-recurrence"));
   assert.deepEqual(live.modules.map((module) => module.path), [
+    "github.com/3leaps/sysprims",
     "github.com/3leaps/sysprims/bindings/go/sysprims",
     "github.com/3leaps/sysprims/go/recurrence",
   ]);
@@ -321,6 +323,11 @@ test("registry requirements follow the release commit's plan and tree", () => {
   assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.length, 1, "the working tree is not consulted");
   commitAll("module");
   assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.at(-1).path, "github.com/3leaps/sysprims/go/recurrence");
+  mkdirSync(join(root, "evidence"), { recursive: true });
+  writeFileSync(join(root, "evidence/doc.go"), "package evidence\n");
+  assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.length, 2, "uncommitted evidence/doc.go is ignored");
+  commitAll("evidence");
+  assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules[0].path, "github.com/3leaps/sysprims");
 });
 
 // The release decisions after tagging are taken at the tag's commit: the plan

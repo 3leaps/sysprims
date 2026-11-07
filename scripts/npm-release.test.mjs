@@ -126,3 +126,46 @@ fs.copyFileSync(source, out);
     else process.env.FAKE_NPM_MAPPING = previous.mapping;
   }
 });
+
+test("npm publish polls past eventual-consistency lag before verifying bytes", () => {
+  const { stage, registry, manifest } = fixture();
+  for (const entry of manifest.packages.slice(1)) copyFileSync(join(stage, "packages", entry.filename), join(registry, entry.filename));
+  const sleeps = [];
+  let postPublishReads = 0;
+  let publishedFirst = false;
+  const result = publishResumably(stage, manifest, {
+    registryDirectory: registry,
+    pollAttempts: 5,
+    pollSleepMs: 250,
+    sleepFn(ms) { sleeps.push(ms); },
+    publishPackage(entry, path) {
+      assert.equal(entry.name, manifest.packages[0].name);
+      publishedFirst = true;
+      copyFileSync(path, join(registry, entry.filename));
+    },
+    queryState(entry) {
+      if (entry.name === manifest.packages[0].name) {
+        if (!publishedFirst) return { state: "absent" };
+        postPublishReads += 1;
+        if (postPublishReads < 3) return { state: "absent" };
+      }
+      return { state: "present", sha256: entry.sha256, sri: entry.sri };
+    },
+  });
+  assert.equal(result.length, 8);
+  assert.equal(postPublishReads, 3);
+  assert.deepEqual(sleeps, [250, 250]);
+});
+
+test("npm publish fails after exhausting bounded post-publish poll attempts", () => {
+  const { stage, manifest } = fixture();
+  const sleeps = [];
+  assert.throws(() => publishResumably(stage, manifest, {
+    pollAttempts: 3,
+    pollSleepMs: 100,
+    sleepFn(ms) { sleeps.push(ms); },
+    publishPackage() {},
+    queryState() { return { state: "absent" }; },
+  }), /remained absent after publish \(3 poll attempts\)/);
+  assert.deepEqual(sleeps, [100, 100]);
+});

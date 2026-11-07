@@ -50,7 +50,7 @@ rc.validate(with_rec, order + ['sysprims-recurrence'], manifests(order + ['syspr
 
 plan = pathlib.Path(sys.argv[1]).parent / 'config/release/publishable-crates.txt'
 names = rc.read_plan(plan)
-expected_plan = [
+assert names == [
     'sysprims-core',
     'sysprims-evidence',
     'sysprims-signal',
@@ -58,8 +58,7 @@ expected_plan = [
     'sysprims-proc',
     'sysprims-timeout',
     'sysprims-recurrence',
-]
-assert names == expected_plan, names
+], names
 for bad in ('sysprims-core\n\nsysprims-proc\n', 'sysprims-core\nsysprims-core\n', ' sysprims-core\n', 'other-crate\n'):
     tmp = pathlib.Path(sys.argv[1]).parent / '.release-crates-test-plan'
     try:
@@ -127,7 +126,7 @@ grep -q "plan_output=\"\$(python3 \"\$tree/scripts/release-crates.py\" paths)\" 
 pub="$fixture_dir/pub"
 fixture_repo "$pub" "$version" publish 0
 cp "$fixture_root/scripts/release-crates-dry-run.sh" "$fixture_root/scripts/release-crates.py" \
-	"$fixture_root/scripts/release-export-tree.py" "$pub/scripts/"
+	"$fixture_root/scripts/release-index-entry.py" "$fixture_root/scripts/release-export-tree.py" "$pub/scripts/"
 printf 'sysprims-core\n' >"$pub/config/release/publishable-crates.txt"
 mkdir -p "$pub/crates/sysprims-core/src"
 printf '[package]\nname = "sysprims-core"\npublish = true\n' >"$pub/crates/sysprims-core/Cargo.toml"
@@ -182,25 +181,39 @@ publish) echo "UPLOAD $PWD" >>"$UPLOAD_LOG" ;;
 *) exit 1 ;;
 esac
 SH
-cat >"$bin/curl" <<SH
-#!/usr/bin/env bash
-printf '{"version":{"crate":"sysprims-core","num":"$version","checksum":"%s"}}\n200' "\$(cat "$fixture_dir/index-sum")"
-SH
-chmod +x "$bin/cargo" "$bin/curl"
+chmod +x "$bin/cargo"
+sparse_dir="$fixture_dir/sparse-index"
+mkdir -p "$sparse_dir/sy/sp"
+python3 -u -m http.server -d "$sparse_dir" -b 127.0.0.1 0 >"$fixture_dir/sparse-server.log" 2>&1 &
+sparse_pid=$!
+trap 'kill "$sparse_pid" 2>/dev/null || true; fixture_cleanup' EXIT
+for _ in $(seq 1 50); do
+	grep -q 'Serving HTTP' "$fixture_dir/sparse-server.log" && break
+	sleep 0.1
+done
+sparse_port="$(sed -n 's/.*port \([0-9]*\).*/\1/p' "$fixture_dir/sparse-server.log" | head -1)"
+[[ -n "$sparse_port" ]] || {
+	echo "error: sparse test server did not start" >&2
+	exit 1
+}
+sparse_url="sparse+http://127.0.0.1:$sparse_port/"
+set_index_sum() {
+	printf '{"name":"sysprims-core","vers":"%s","cksum":"%s"}\n' "$version" "$1" >"$sparse_dir/sy/sp/sysprims-core"
+}
 # The checksum of the crate built from the tagged commit's own bytes.
 tag_sum="$(python3 "$fixture_dir/fake-crate.py" "$pub" "$fixture_dir/expected.crate" "$version" "v$version^{commit}" &&
 	shasum -a 256 "$fixture_dir/expected.crate" | awk '{print $1}')"
 publish_run() {
 	(cd "$pub" && env PATH="$bin:$PATH" FAKE_CRATE="$fixture_dir/fake-crate.py" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" "$@" \
-		./scripts/release-crates-dry-run.sh --publish)
+		./scripts/release-crates-dry-run.sh --publish --registry-index "$sparse_url")
 }
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 out="$(publish_run)"
 [[ "$out" == *"already on crates.io with these contents; skipping"* ]]
-printf '%s' "$(printf 'b%.0s' $(seq 64))" >"$fixture_dir/index-sum"
+set_index_sum "$(printf 'b%.0s' $(seq 64))"
 expect_fail_with 'on crates.io with different contents' publish_run
 [[ ! -e "$fixture_dir/uploads" ]]
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 
 # A packaged crate that records another commit or another path is refused
 # before its checksum is trusted.
@@ -231,9 +244,9 @@ sed '/index entries hide working-tree changes/d' "$pub/scripts/release-crates-dr
 chmod +x "$pub/.variant/no-flag-check.sh"
 git -C "$pub" update-index --skip-worktree "$lib"
 printf 'pub fn tampered() {}\n' >"$pub/$lib"
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 out="$(cd "$pub" && env PATH="$bin:$PATH" FAKE_CRATE="$fixture_dir/fake-crate.py" UPLOAD_LOG="$fixture_dir/uploads" SYSPRIMS_RELEASE_TAG="v$version" \
-	./.variant/no-flag-check.sh --publish)"
+	./.variant/no-flag-check.sh --publish --registry-index "$sparse_url")"
 [[ "$out" == *"already on crates.io with these contents; skipping"* ]]
 git -C "$pub" update-index --no-skip-worktree "$lib"
 git -C "$pub" checkout -q -- "$lib"
@@ -241,23 +254,23 @@ git -C "$pub" checkout -q -- "$lib"
 # A caller's CARGO_TARGET_DIR, and a stale .crate at the default path whose
 # checksum matches the index, are both ignored: the hash is of the crate just
 # packaged from the tagged commit into a fresh directory.
-printf '%s' "$(printf 'c%.0s' $(seq 64))" >"$fixture_dir/index-sum"
+set_index_sum "$(printf 'c%.0s' $(seq 64))"
 mkdir -p "$pub/target/package" "$fixture_dir/caller-target/package"
 printf 'stale\n' >"$pub/target/package/sysprims-core-$version.crate"
 printf 'stale\n' >"$fixture_dir/caller-target/package/sysprims-core-$version.crate"
 stale_sum="$(shasum -a 256 "$pub/target/package/sysprims-core-$version.crate" | awk '{print $1}')"
-printf '%s' "$stale_sum" >"$fixture_dir/index-sum"
+set_index_sum "$stale_sum"
 expect_fail_with 'on crates.io with different contents' publish_run CARGO_TARGET_DIR="$fixture_dir/caller-target"
 expect_fail_with 'on crates.io with different contents' publish_run CARGO_BUILD_TARGET_DIR="$fixture_dir/caller-target"
 expect_fail_with 'on crates.io with different contents' publish_run
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 publish_run CARGO_TARGET_DIR="$fixture_dir/caller-target" >/dev/null
 # Checkout settings never change the packaged bytes: with autocrlf on, an
 # eol=crlf attribute, export-ignore/export-subst attributes and a sparse
 # checkout configured, publication still packages the tag's exact blobs (the
 # index checksum of the tag's bytes matches) or refuses; it never packages
 # different bytes.
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 git -C "$pub" checkout -q main
 printf 'crates/** text eol=crlf\ncrates/sysprims-core/src/lib.rs export-subst\ncrates/sysprims-core/Cargo.toml export-ignore\n' >"$pub/.gitattributes"
 # shellcheck disable=SC2016 # A literal export-subst marker.
@@ -268,7 +281,7 @@ git -C "$pub" tag -a -m "Release $version" "v$version"
 git -C "$pub" checkout -q --detach "v$version"
 tag_sum="$(python3 "$fixture_dir/fake-crate.py" "$pub" "$fixture_dir/expected.crate" "$version" "v$version^{commit}" &&
 	shasum -a 256 "$fixture_dir/expected.crate" | awk '{print $1}')"
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 for setting in plain autocrlf sparse; do
 	case "$setting" in
 	autocrlf) git -C "$pub" config core.autocrlf true ;;
@@ -510,7 +523,7 @@ victim_state | cmp - "$fixture_dir/victim.before" || {
 # refused before cargo is called.
 tag_sum="$(python3 "$fixture_dir/fake-crate.py" "$pub" "$fixture_dir/expected.crate" "$version" "v$version^{commit}" &&
 	shasum -a 256 "$fixture_dir/expected.crate" | awk '{print $1}')"
-printf '%s' "$tag_sum" >"$fixture_dir/index-sum"
+set_index_sum "$tag_sum"
 out="$(publish_run GIT_DIR="$victim/.git" GIT_WORK_TREE="$victim" GIT_INDEX_FILE="$victim/.git/index")"
 [[ "$out" == *"already on crates.io with these contents; skipping"* ]]
 victim_state | cmp - "$fixture_dir/victim.before" || {

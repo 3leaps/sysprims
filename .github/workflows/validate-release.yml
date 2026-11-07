@@ -13,12 +13,26 @@ permissions:
 jobs:
   validate-go:
     name: Validate Go Bindings
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22.23.4'
+      - name: Verify and materialize tag messages
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          MESSAGE_DIR="$RUNNER_TEMP/sysprims-tag-messages"
+          export MESSAGE_DIR RELEASE_TAG
+          mkdir -p "$MESSAGE_DIR"
+          node scripts/release-materialize-tag-messages.mjs
+          echo "SYSPRIMS_TAG_MESSAGE_DIR=$MESSAGE_DIR" >> "$GITHUB_ENV"
       - name: Guard exact canonical and Go tags
         env:
           SYSPRIMS_RELEASE_TAG: ${{ inputs.tag }}
@@ -28,23 +42,28 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.26.10'
-      - name: Test Go module is fetchable
+      - name: Test Go modules are fetchable
         run: |
           set -euo pipefail
           TAG="${{ inputs.tag }}"
           VERSION="${TAG#v}"
-
-          # Go bindings are tagged as bindings/go/sysprims/vX.Y.Z
-          GO_MODULE="github.com/3leaps/sysprims/bindings/go/sysprims"
           GO_VERSION="v${VERSION}"
 
-          echo "Testing: go get ${GO_MODULE}@${GO_VERSION}"
-          WORKDIR="$(mktemp -d)"
-          cd "${WORKDIR}"
-          go mod init test-sysprims
-          go get "${GO_MODULE}@${GO_VERSION}"
+          for GO_MODULE in \
+            "github.com/3leaps/sysprims/bindings/go/sysprims" \
+            "github.com/3leaps/sysprims/go/recurrence" \
+            "github.com/3leaps/sysprims"
+          do
+            echo "Testing: go get ${GO_MODULE}@${GO_VERSION}"
+            WORKDIR="$(mktemp -d)"
+            (
+              cd "${WORKDIR}"
+              go mod init test-sysprims
+              go get "${GO_MODULE}@${GO_VERSION}"
+            )
+          done
 
-          echo "Go binding fetch: OK"
+          echo "Go module fetch: OK"
   validate-typescript:
     name: Validate TypeScript (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -54,17 +73,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04  # pin:runner=linux-x64
           - os: ubuntu-latest-arm64-s
-          - os: macos-15
-          - os: windows-latest
+          - os: macos-15  # pin:runner=macos-arm64
+          - os: windows-2025  # pin:runner=windows-x64
           - os: windows-latest-arm64-s
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ inputs.tag }}
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.98.1  # pin:rust=stable
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
         with:
@@ -77,7 +98,7 @@ jobs:
         run: npm run test:ci
   validate-typescript-musl:
     name: Validate TypeScript (linux-musl, alpine)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
     steps:
@@ -91,9 +112,12 @@ jobs:
           apk add --no-cache bash curl build-base python3 git
       - name: Install Rust (rustup)
         shell: bash
+        env:
+          RUST_TOOLCHAIN: 1.88.0  # pin:rust=msrv
         run: |
           set -euo pipefail
-          curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.88.0
+          curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf \
+            | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
           . "$HOME/.cargo/env"
           rustc -V
           cargo -V

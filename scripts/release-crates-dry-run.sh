@@ -126,26 +126,30 @@ python3 "$tree/scripts/release-crates.py" check
 
 registry_args=()
 curl_proto=(--proto '=https' --tlsv1.2)
+user_agent='sysprims-release-verify/1.0 (+https://github.com/3leaps/sysprims)'
 if [[ "$index_url" != "$crates_io_index" ]]; then
 	registry_args=(--registry testreg)
 	registry_config() { printf '[registries.testreg]\nindex = "%s"\n' "$index_url"; }
+	sparse_index="$index_url"
 	curl_proto=(--proto '=http,https')
 else
 	registry_config() { :; }
+	sparse_index="https://index.crates.io/"
 fi
 
-# Publication state on crates.io (or the configured test registry). Prints
-# "absent", or the published checksum; refuses if yanked.
+# Publication state on the Cargo sparse index (or configured test registry).
+# Prints "absent", or the published checksum; refuses if yanked or unreadable.
 registry_checksum() {
-	local crate="$1" body status
-	body="$(curl "${curl_proto[@]}" -sS -w '\n%{http_code}' \
-		"${api_base}/api/v1/crates/${crate}/${version}")" || die "cannot query crates.io for $crate"
-	status="${body##*$'\n'}"
-	body="${body%$'\n'*}"
-	case "$status" in
-	404) echo absent ;;
-	200) python3 "$tree/scripts/release-crates.py" registry-checksum "$crate" "$version" <<<"$body" ;;
-	*) die "crates.io returned HTTP $status for $crate@$version" ;;
+	local crate="$1" out rc=0
+	out="$("$python_bin" -I "$root/scripts/release-index-entry.py" "$sparse_index" "$crate" "$version")" || rc=$?
+	case "$rc" in
+	0)
+		[[ "$out" =~ ^[0-9a-f]{64}$ ]] || die "malformed sparse-index checksum for $crate@$version"
+		printf '%s\n' "$out"
+		;;
+	1) echo absent ;;
+	3) die "$crate@$version is yanked on crates.io; stop and investigate" ;;
+	*) die "cannot query sparse index for $crate@$version" ;;
 	esac
 }
 
@@ -239,6 +243,7 @@ PY
 		[[ "$published" == "$expected_sum" ]] ||
 			die "the index checksum for $crate differs from the verified archive"
 		curl "${curl_proto[@]}" --fail --silent --show-error --location --retry 3 \
+			-A "$user_agent" \
 			--output "$scratch/published-$crate.crate" \
 			"$download/$crate/$crate-$version.crate" || die "could not download the published $crate archive"
 		[[ "$(shasum -a 256 "$scratch/published-$crate.crate" | cut -c1-64)" == "$expected_sum" ]] ||

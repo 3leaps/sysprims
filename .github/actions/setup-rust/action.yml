@@ -1,0 +1,66 @@
+name: Setup Pinned Rust Toolchain
+description: Install an exact X.Y.Z Rust toolchain via rustup without third-party actions.
+inputs:
+  toolchain:
+    description: Exact X.Y.Z Rust toolchain version from config/ci/pins.toml.
+    required: true
+  targets:
+    description: Optional comma- or whitespace-separated Rust target triples.
+    required: false
+    default: ""
+  components:
+    description: Optional comma- or whitespace-separated rustup components.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Rust toolchain
+      shell: bash
+      env:
+        INPUT_TOOLCHAIN: ${{ inputs.toolchain }}
+        INPUT_TARGETS: ${{ inputs.targets }}
+        INPUT_COMPONENTS: ${{ inputs.components }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$INPUT_TOOLCHAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "error: setup-rust requires an exact X.Y.Z toolchain version, got: ${INPUT_TOOLCHAIN}" >&2
+          exit 1
+        fi
+        cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+        export PATH="${cargo_bin}:$PATH"
+        echo "${cargo_bin}" >> "$GITHUB_PATH"
+
+        rustup toolchain install "$INPUT_TOOLCHAIN" --profile minimal --no-self-update
+        rustup default "$INPUT_TOOLCHAIN"
+        echo "RUSTUP_TOOLCHAIN=${INPUT_TOOLCHAIN}" >> "$GITHUB_ENV"
+
+        if [[ -n "${INPUT_COMPONENTS// /}" ]]; then
+          IFS=', ' read -r -a comps <<< "$INPUT_COMPONENTS"
+          filtered_comps=()
+          for c in "${comps[@]}"; do
+            [[ -n "$c" ]] && filtered_comps+=("$c")
+          done
+          if [[ "${#filtered_comps[@]}" -gt 0 ]]; then
+            rustup component add --toolchain "$INPUT_TOOLCHAIN" "${filtered_comps[@]}"
+          fi
+        fi
+
+        if [[ -n "${INPUT_TARGETS// /}" ]]; then
+          IFS=', ' read -r -a tgts <<< "$INPUT_TARGETS"
+          filtered_tgts=()
+          for t in "${tgts[@]}"; do
+            [[ -n "$t" ]] && filtered_tgts+=("$t")
+          done
+          if [[ "${#filtered_tgts[@]}" -gt 0 ]]; then
+            rustup target add --toolchain "$INPUT_TOOLCHAIN" "${filtered_tgts[@]}"
+          fi
+        fi
+
+        actual_rustc="$(rustc --version)"
+        echo "$actual_rustc"
+        cargo --version
+        if [[ "$actual_rustc" != "rustc ${INPUT_TOOLCHAIN} "* ]]; then
+          echo "error: expected rustc ${INPUT_TOOLCHAIN}, got: ${actual_rustc}" >&2
+          exit 1
+        fi

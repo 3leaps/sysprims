@@ -22,7 +22,7 @@ permissions:
 jobs:
   validate:
     name: Validate Inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -42,7 +42,7 @@ jobs:
           echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
   build-linux:
     name: Build FFI (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
@@ -134,7 +134,7 @@ jobs:
       matrix:
         include:
           - platform: linux-amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04  # pin:runner=linux-x64
           - platform: linux-arm64
             runner: ubuntu-latest-arm64-s
     steps:
@@ -175,7 +175,7 @@ jobs:
           path: ${{ runner.temp }}/${{ matrix.platform }}.json
   build-macos:
     name: Build FFI (macOS)
-    runs-on: macos-15
+    runs-on: macos-15  # pin:runner=macos-arm64
     needs: validate
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -184,8 +184,10 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.26.10'
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build FFI (both targets)
         run: |
@@ -287,15 +289,17 @@ jobs:
           path: dist/ffi-shared/darwin-arm64
   build-windows:
     name: Build FFI (Windows GNU)
-    runs-on: windows-latest
+    runs-on: windows-2025  # pin:runner=windows-x64
     needs: validate
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.26.10'
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: x86_64-pc-windows-gnu
       - name: Install MinGW
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
@@ -375,8 +379,10 @@ jobs:
           $binDir = Join-Path $topDir.FullName 'bin'
           if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
           Add-Content -Path $env:GITHUB_PATH -Value $binDir
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: aarch64-pc-windows-gnullvm
       - name: Build FFI (gnullvm target)
         shell: pwsh
@@ -409,7 +415,9 @@ jobs:
           try {
             go test -run '^TestVersion$' .
             $env:SYSPRIMS_PROBE_PLATFORM = 'windows-arm64'
-            go run ./cmd/version-probe | Out-File -Encoding utf8 "$env:RUNNER_TEMP/windows-arm64.json"
+            $probe = (go run ./cmd/version-probe) -join "`n"
+            $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+            [System.IO.File]::WriteAllText("$env:RUNNER_TEMP/windows-arm64.json", "$probe`n", $utf8NoBom)
             $env:PATH = "$(Resolve-Path lib-shared/windows-arm64);$env:PATH"
             go test -run '^TestVersion$' -tags=sysprims_shared .
           } finally {
@@ -432,7 +440,7 @@ jobs:
           path: dist/ffi-shared/windows-arm64
   test-musl-shared-go:
     name: Smoke Go Runtime (linux-amd64-musl, static + shared)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: golang:1.22-alpine
     needs: [validate, build-linux]
@@ -538,7 +546,7 @@ jobs:
           path: ${{ runner.temp }}/linux-arm64-musl.json
   cbindgen:
     name: Generate C Header
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
@@ -557,7 +565,7 @@ jobs:
           path: sysprims.h
   update-go-bindings:
     name: Create Go Bindings PR
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs:
       - validate
       - build-linux

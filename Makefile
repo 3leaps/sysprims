@@ -16,7 +16,7 @@
 .PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
-.PHONY: content-check surface-scan workflow-pin doctor doctor-release
+.PHONY: content-check surface-scan workflow-pin ci-pins-sync ci-pins-check doctor doctor-release
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
@@ -93,6 +93,7 @@ help: ## Show available targets
 	@echo "  content-check   Refuse local paths, keys, tokens and commit markers in tracked files"
 	@echo "  surface-scan    Public-surface scan when LIMENSAFE_CATALOG_PATH is set"
 	@echo "  workflow-pin    Verify every workflow matches its reviewed digest and is read-only"
+	@echo "  ci-pins-sync / ci-pins-check  Synchronize or verify CI runner labels and Rust pins"
 	@echo "  doctor          Report host tool versions against recommended minimums (doctor-release)"
 	@echo "  miri / msrv     Run Miri UB detection (nightly) or verify MSRV (Rust 1.88.0)"
 	@echo "Release (manual signing workflow):"
@@ -295,8 +296,15 @@ content-check: ## Refuse local paths, private keys, tokens and commit markers in
 		done; \
 	done
 
-workflow-pin: ## Every workflow matches its reviewed digest and is read-only
+workflow-pin: ## Every workflow matches its reviewed digest, CI pins, and read-only policy
 	@$(PYTHON) -B -E scripts/release-workflow-pin.py check
+	@$(PYTHON) -B -P -E scripts/ci-pins.py check
+
+ci-pins-sync: ## Propagate config/ci/pins.toml to workflow pin markers and refresh workflow digests
+	@$(PYTHON) -B -P -E scripts/ci-pins.py sync
+
+ci-pins-check: ## Verify CI runner labels and Rust toolchain pins match config/ci/pins.toml
+	@$(PYTHON) -B -P -E scripts/ci-pins.py check
 
 doctor: ## Report host tool versions against the recommended minimums (DOCTOR_SCOPE=release|dev)
 	@./scripts/doctor.sh $(or $(DOCTOR_SCOPE),release)
