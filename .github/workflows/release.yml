@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-24.04  # pin:runner=linux-x64
     outputs:
       version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      python_disposition: ${{ steps.version.outputs.python_disposition }}
+      typescript_disposition: ${{ steps.version.outputs.typescript_disposition }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -47,8 +50,26 @@ jobs:
           SYSPRIMS_TAG_GUARD_MODE=post-tag \
             bash scripts/release-guard-tag-version.sh
           FILE_VERSION="$(cat VERSION)"
-          echo "version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version validated: $FILE_VERSION"
+          COMMIT_SHA="$(git rev-parse 'HEAD^{commit}')"
+          eval "$(python3 -I - "$FILE_VERSION" <<'PY'
+          import json, pathlib, sys
+          plan_path = pathlib.Path(f"docs/releases/v{sys.argv[1]}.json")
+          raw = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.is_file() else {}
+          surfaces = raw.get("surfaces", {})
+          py_disp = (surfaces.get("python") or {}).get("disposition", "skip")
+          ts_cfg = surfaces.get("typescript") or {}
+          ts_disp = "publish" if ("python" in surfaces and ts_cfg.get("disposition") == "publish") else "skip"
+          print(f"PY_DISP={py_disp}")
+          print(f"TS_DISP={ts_disp}")
+          PY
+          )"
+          {
+            echo "version=$FILE_VERSION"
+            echo "commit=$COMMIT_SHA"
+            echo "python_disposition=$PY_DISP"
+            echo "typescript_disposition=$TS_DISP"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version validated: $FILE_VERSION (python=$PY_DISP, typescript=$TS_DISP)"
   verify-go-bindings-assets:
     name: Verify Go Binding Assets
     runs-on: ubuntu-24.04  # pin:runner=linux-x64
@@ -710,12 +731,418 @@ jobs:
         with:
           name: ffi-bundle
           path: sysprims-ffi-${{ needs.validate-version.outputs.version }}-libs.tar.gz
+  # Build Python abi3 wheels (macOS arm64 + x86_64 cross, Windows x64, Linux manylinux2014) and sdist
+  build-wheels:
+    name: Build Python Wheel (${{ matrix.artifact_suffix }})
+    if: needs.validate-version.outputs.python_disposition == 'publish'
+    needs: validate-version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15  # pin:runner=macos-arm64
+            target: aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+            artifact_suffix: darwin-arm64
+          - runner: macos-15  # pin:runner=macos-arm64
+            target: x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+            artifact_suffix: darwin-amd64
+          - runner: windows-2025  # pin:runner=windows-x64
+            target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
+            artifact_suffix: windows-amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.14'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+          targets: ${{ matrix.rust_targets }}
+      - name: Build and verify wheel
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: ./scripts/build-wheel.sh "$TARGET" dist/wheel
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: wheel-${{ matrix.artifact_suffix }}
+          path: dist/wheel/*.whl
+          if-no-files-found: error
+  build-wheel-linux-amd64:
+    name: Build Python Wheel (linux-amd64)
+    if: needs.validate-version.outputs.python_disposition == 'publish'
+    needs: validate-version
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Build and test wheel in pinned manylinux2014 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$PWD/dist/wheel"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home \
+            -v "$PWD:/src" -v "$PWD/dist/wheel:/out" -w /src \
+            quay.io/pypa/manylinux2014_x86_64@sha256:d6b5342c73e51b8eacd114cb41733798b749494d0a749cef0bd76c99fb47d5c6 \
+            bash -c 'mkdir -p "$HOME" && git config --global --add safe.directory /src &&
+              ./scripts/build-wheel.sh x86_64-unknown-linux-gnu /out'
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: wheel-linux-amd64
+          path: dist/wheel/*.whl
+          if-no-files-found: error
+  build-wheel-linux-arm64:
+    name: Build Python Wheel (linux-arm64)
+    if: needs.validate-version.outputs.python_disposition == 'publish'
+    needs: validate-version
+    runs-on: ubuntu-latest-arm64-s
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Build and test wheel in pinned manylinux2014 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$PWD/dist/wheel"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home \
+            -v "$PWD:/src" -v "$PWD/dist/wheel:/out" -w /src \
+            quay.io/pypa/manylinux2014_aarch64@sha256:d41ea3e9c9ad7a47e393673d0e8acba58fa411ceff58bc6b88bca38795ec938e \
+            bash -c 'mkdir -p "$HOME" && git config --global --add safe.directory /src &&
+              ./scripts/build-wheel.sh aarch64-unknown-linux-gnu /out'
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: wheel-linux-arm64
+          path: dist/wheel/*.whl
+          if-no-files-found: error
+  build-python-sdist:
+    name: Build Python sdist
+    if: needs.validate-version.outputs.python_disposition == 'publish'
+    needs: validate-version
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.14'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+      - name: Build and verify sdist
+        shell: bash
+        run: ./scripts/build-wheel.sh sdist dist/sdist
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: python-sdist
+          path: dist/sdist/sysprims-${{ needs.validate-version.outputs.version }}.tar.gz
+          if-no-files-found: error
+  # Build TypeScript N-API prebuilds and stage all 8 npm tarballs for signed GitHub Release attachment
+  build-ts-linux:
+    name: Build TypeScript Linux Prebuilds
+    if: needs.validate-version.outputs.typescript_disposition == 'publish'
+    needs: validate-version
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22.23.4'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406  # v2
+        with:
+          version: 0.12.0
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked --version 0.23.4
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm ci --ignore-scripts
+      - name: Build Linux .node files
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sysprims.*.node
+          mkdir -p prebuilds
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip \
+            --output-dir prebuilds --target x86_64-unknown-linux-gnu --use-napi-cross
+          test -f prebuilds/sysprims.linux-x64-gnu.node
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip \
+            --output-dir prebuilds --target x86_64-unknown-linux-musl --cross-compile
+          test -f prebuilds/sysprims.linux-x64-musl.node
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip \
+            --output-dir prebuilds --target aarch64-unknown-linux-musl --cross-compile
+          test -f prebuilds/sysprims.linux-arm64-musl.node
+      - name: Upload Linux prebuilds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ts-prebuilds-linux
+          path: bindings/typescript/sysprims/prebuilds/*.node
+          if-no-files-found: error
+  build-ts-linux-arm64:
+    name: Build TypeScript Linux arm64 Prebuild
+    if: needs.validate-version.outputs.typescript_disposition == 'publish'
+    needs: validate-version
+    runs-on: ubuntu-latest-arm64-s
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22.23.4'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm ci --ignore-scripts
+      - name: Build Linux arm64 .node file
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sysprims.*.node
+          mkdir -p prebuilds
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          test -f prebuilds/sysprims.linux-arm64-gnu.node
+      - name: Upload Linux arm64 prebuild
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ts-prebuilds-linux-arm64-gnu-native
+          path: bindings/typescript/sysprims/prebuilds/*.node
+          if-no-files-found: error
+  build-ts-macos-arm64:
+    name: Build TypeScript macOS arm64 Prebuild
+    if: needs.validate-version.outputs.typescript_disposition == 'publish'
+    needs: validate-version
+    runs-on: macos-15  # pin:runner=macos-arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22.23.4'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm ci --ignore-scripts
+      - name: Build macOS arm64 .node file
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f sysprims.*.node
+          mkdir -p prebuilds
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          test -f prebuilds/sysprims.darwin-arm64.node
+      - name: Upload macOS arm64 prebuild
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ts-prebuilds-darwin-arm64
+          path: bindings/typescript/sysprims/prebuilds/*.node
+          if-no-files-found: error
+  build-ts-windows:
+    name: Build TypeScript Windows x64 Prebuild
+    if: needs.validate-version.outputs.typescript_disposition == 'publish'
+    needs: validate-version
+    runs-on: windows-2025  # pin:runner=windows-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22.23.4'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm ci --ignore-scripts
+      - name: Build Windows x64 .node file
+        working-directory: bindings/typescript/sysprims
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Force sysprims.*.node -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          $node = 'prebuilds/sysprims.win32-x64-msvc.node'
+          if (-not (Test-Path $node)) { throw "missing $node" }
+      - name: Upload Windows x64 prebuild
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ts-prebuilds-win32-x64-msvc
+          path: bindings/typescript/sysprims/prebuilds/*.node
+          if-no-files-found: error
+  build-ts-windows-arm64:
+    name: Build TypeScript Windows arm64 Prebuild
+    if: needs.validate-version.outputs.typescript_disposition == 'publish'
+    needs: validate-version
+    runs-on: windows-latest-arm64-s
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22.23.4'
+      - name: Install Rust MSRV toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+      - name: Install Node dependencies
+        working-directory: bindings/typescript/sysprims
+        run: npm ci --ignore-scripts
+      - name: Build Windows arm64 .node file
+        working-directory: bindings/typescript/sysprims
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Force sysprims.*.node -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path prebuilds | Out-Null
+          npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+          $node = 'prebuilds/sysprims.win32-arm64-msvc.node'
+          if (-not (Test-Path $node)) { throw "missing $node" }
+      - name: Upload Windows arm64 prebuild
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: ts-prebuilds-win32-arm64-msvc
+          path: bindings/typescript/sysprims/prebuilds/*.node
+          if-no-files-found: error
+  package-npm-tarballs:
+    name: Package npm Tarballs
+    if: needs.validate-version.outputs.typescript_disposition == 'publish'
+    needs:
+      - validate-version
+      - build-ts-linux
+      - build-ts-linux-arm64
+      - build-ts-macos-arm64
+      - build-ts-windows
+      - build-ts-windows-arm64
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '24.22.1'
+      - name: Install Node dependencies and build JS dist
+        working-directory: bindings/typescript/sysprims
+        run: |
+          npm ci --ignore-scripts
+          npm run clean
+          npm run build
+      - name: Download N-API prebuilds
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          pattern: ts-prebuilds-*
+          path: downloaded-prebuilds
+      - name: Assemble platform packages and verify metadata
+        working-directory: bindings/typescript/sysprims
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf npm
+          npx napi create-npm-dirs
+          rm -rf npm/darwin-x64
+          shopt -s nullglob globstar
+          for f in ../../../downloaded-prebuilds/**/*.node; do
+            base="$(basename "$f")"
+            plat="${base#sysprims.}"
+            plat="${plat%.node}"
+            dest="npm/${plat}/${base}"
+            mkdir -p "$(dirname "$dest")"
+            cp "$f" "$dest"
+          done
+          npm run platform-packages:check
+          node scripts/set-platform-packages.js npm
+      - name: Stage and compare all 8 npm tarballs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/npm-release.mjs stage \
+            --stage dist/npm-stage \
+            --native-dir bindings/typescript/sysprims/npm \
+            --root-package bindings/typescript/sysprims \
+            --tag "${{ github.ref_name }}" \
+            --commit "${{ needs.validate-version.outputs.commit }}"
+          node scripts/npm-release.mjs compare \
+            --stage dist/npm-stage \
+            --tag "${{ github.ref_name }}" \
+            --commit "${{ needs.validate-version.outputs.commit }}"
+      - name: Upload npm tarballs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: npm-tarballs
+          path: dist/npm-stage/packages/*.tgz
+          if-no-files-found: error
   # Assemble the unsigned release payload as one workflow artifact. This workflow
   # holds read-only permissions and never creates or edits a release: the
   # maintainer downloads this artifact, signs locally, creates the draft and
   # publishes after verification.
   release-packages:
     name: Release Packages
+    if: |
+      always() &&
+      needs.validate-version.result == 'success' &&
+      needs.verify-go-bindings-assets.result == 'success' &&
+      needs.build-linux.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-windows.result == 'success' &&
+      needs.build-windows-arm64.result == 'success' &&
+      needs.cbindgen.result == 'success' &&
+      needs.sbom.result == 'success' &&
+      needs.package-ffi-bundle.result == 'success' &&
+      needs.build-windows-msvc.result == 'success' &&
+      needs.verify-ffi-shared-assets.result == 'success' &&
+      (needs.validate-version.outputs.python_disposition != 'publish' || (
+        needs.build-wheels.result == 'success' &&
+        needs.build-wheel-linux-amd64.result == 'success' &&
+        needs.build-wheel-linux-arm64.result == 'success' &&
+        needs.build-python-sdist.result == 'success'
+      )) &&
+      (
+        needs.validate-version.outputs.typescript_disposition != 'publish' ||
+        needs.package-npm-tarballs.result == 'success'
+      )
     runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs:
       - validate-version
@@ -729,6 +1156,11 @@ jobs:
       - package-ffi-bundle
       - build-windows-msvc
       - verify-ffi-shared-assets
+      - build-wheels
+      - build-wheel-linux-amd64
+      - build-wheel-linux-arm64
+      - build-python-sdist
+      - package-npm-tarballs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -753,6 +1185,24 @@ jobs:
         with:
           name: sbom
           path: release-sbom
+      - name: Download Python wheels
+        if: needs.validate-version.outputs.python_disposition == 'publish'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          pattern: wheel-*
+          path: release-wheels
+      - name: Download Python sdist
+        if: needs.validate-version.outputs.python_disposition == 'publish'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: python-sdist
+          path: release-sdist
+      - name: Download npm tarballs
+        if: needs.validate-version.outputs.typescript_disposition == 'publish'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: npm-tarballs
+          path: release-npm
       - name: Organize release files
         run: |
           mkdir -p release
@@ -768,6 +1218,19 @@ jobs:
 
           # SBOM
           mv release-sbom/*.json release/
+
+          # Python wheels and sdist
+          if [ -d release-wheels ]; then
+            find release-wheels -type f -name '*.whl' -exec mv {} release/ \;
+          fi
+          if [ -d release-sdist ]; then
+            mv release-sdist/*.tar.gz release/
+          fi
+
+          # npm tarballs
+          if [ -d release-npm ]; then
+            mv release-npm/*.tgz release/
+          fi
 
           # Licenses
           cp LICENSE-MIT LICENSE-APACHE release/

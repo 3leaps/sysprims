@@ -65,18 +65,34 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", retained = "0.2.1" } = {}) {
+function requiresPythonSurface(version) {
+  const core = String(version).split(/[+-]/)[0] ?? "";
+  const parts = core.split(".").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) return true;
+  const [major, minor, patch] = parts;
+  if (major > 0 || minor > 3) return true;
+  return minor === 3 && patch >= 1;
+}
+
+function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", python = undefined, retained = "0.2.1" } = {}) {
+  const surfaces = {
+    rust: { disposition: "publish" },
+    cli: { disposition: "publish" },
+    ffi: { disposition: "publish" },
+    go: go === "publish" ? { disposition: "publish", lock_phase: goLockPhase } : { disposition: "skip", retained_version: retained, lock_phase: "resolved" },
+    typescript: typescript === "publish" ? { disposition: "publish" } : { disposition: "skip", retained_version: retained },
+  };
+  const pythonDisposition = python ?? (requiresPythonSurface(version) ? "publish" : undefined);
+  if (pythonDisposition !== undefined) {
+    surfaces.python = pythonDisposition === "publish"
+      ? { disposition: "publish" }
+      : { disposition: "skip", retained_version: retained };
+  }
   writeJson(join(root, `docs/releases/v${version}.json`), {
     schema: "sysprims-release-plan/v1",
     version,
     provenance_policy: "commit_footer",
-    surfaces: {
-      rust: { disposition: "publish" },
-      cli: { disposition: "publish" },
-      ffi: { disposition: "publish" },
-      go: go === "publish" ? { disposition: "publish", lock_phase: goLockPhase } : { disposition: "skip", retained_version: retained, lock_phase: "resolved" },
-      typescript: typescript === "publish" ? { disposition: "publish" } : { disposition: "skip", retained_version: retained },
-    },
+    surfaces,
   });
 }
 
@@ -150,6 +166,37 @@ path = "src/lib.rs"
   );
   writeFileSync(join(root, "crate", "src", "lib.rs"), "pub fn fixture() {}\n");
   mustRun(root, "cargo", ["generate-lockfile"]);
+  mkdirSync(join(root, "bindings/python/src"), { recursive: true });
+  writeFileSync(
+    join(root, "bindings/python/pyproject.toml"),
+    `[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "sysprims"
+version = "0.2.1"
+requires-python = ">=3.10"
+`,
+  );
+  writeFileSync(
+    join(root, "bindings/python/Cargo.toml"),
+    `[workspace]
+
+[package]
+name = "sysprims-py"
+version = "0.2.1"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+sysprims-fixture = { path = "../../crate" }
+`,
+  );
+  writeFileSync(join(root, "bindings/python/src/lib.rs"), "pub fn py_fixture() { sysprims_fixture::fixture(); }\n");
+  mustRun(root, "cargo", ["generate-lockfile", "--manifest-path", "bindings/python/Cargo.toml"]);
   mkdirSync(join(root, "bindings/go/sysprims"), { recursive: true });
   writePlan(root, "0.2.1");
   writeFileSync(
@@ -1046,4 +1093,61 @@ test("CI and release npm installs and packs pass --ignore-scripts", () => {
     });
   }
   assert.deepEqual(offenders, []);
+});
+
+test("Python surfaces require plan entry from 0.3.1 onward and support publish and skip", () => {
+  const missingPython = createFixture();
+  writeJson(join(missingPython, "docs/releases/v0.4.0.json"), {
+    schema: "sysprims-release-plan/v1",
+    version: "0.4.0",
+    provenance_policy: "commit_footer",
+    surfaces: {
+      rust: { disposition: "publish" },
+      cli: { disposition: "publish" },
+      ffi: { disposition: "publish" },
+      go: { disposition: "skip", retained_version: "0.2.1", lock_phase: "resolved" },
+      typescript: { disposition: "publish" },
+    },
+  });
+  assert.match(version(missingPython, "set", "0.4.0").stderr, /release plan surface set must be exactly cli, ffi, go, python, rust, typescript/);
+
+  const published = createFixture();
+  writePlan(published, "0.4.0", { go: "skip", python: "publish", retained: "0.2.1" });
+  const pubRes = version(published, "set", "0.4.0");
+  assert.equal(pubRes.status, 0, `${pubRes.stderr}${pubRes.stdout}`);
+  assert.match(readFileSync(join(published, "bindings/python/pyproject.toml"), "utf8"), /version = "0\.4\.0"/);
+  assert.match(readFileSync(join(published, "bindings/python/Cargo.toml"), "utf8"), /version = "0\.4\.0"/);
+  assert.match(readFileSync(join(published, "bindings/python/Cargo.lock"), "utf8"), /name = "sysprims-py"\nversion = "0\.4\.0"/);
+  assert.equal(version(published, "check").status, 0);
+
+  // Skipping Python retains pyproject/Cargo.toml at retained_version while
+  // updating workspace path crate versions in bindings/python/Cargo.lock.
+  writeJson(join(published, "docs/releases/v0.4.1.json"), {
+    schema: "sysprims-release-plan/v1",
+    version: "0.4.1",
+    provenance_policy: "commit_footer",
+    surfaces: {
+      rust: { disposition: "publish" },
+      cli: { disposition: "publish" },
+      ffi: { disposition: "publish" },
+      go: { disposition: "skip", retained_version: "0.2.1", lock_phase: "resolved" },
+      python: { disposition: "skip", retained_version: "0.4.0" },
+      typescript: { disposition: "publish" },
+    },
+  });
+  const skipRes = version(published, "set", "0.4.1");
+  assert.equal(skipRes.status, 0, `${skipRes.stderr}${skipRes.stdout}`);
+  assert.match(readFileSync(join(published, "bindings/python/pyproject.toml"), "utf8"), /version = "0\.4\.0"/);
+  assert.match(readFileSync(join(published, "bindings/python/Cargo.toml"), "utf8"), /version = "0\.4\.0"/);
+  const pyLock = readFileSync(join(published, "bindings/python/Cargo.lock"), "utf8");
+  assert.match(pyLock, /name = "sysprims-py"\nversion = "0\.4\.0"/);
+  assert.match(pyLock, /name = "sysprims-fixture"\nversion = "0\.4\.1"/);
+  assert.equal(version(published, "check").status, 0);
+
+  // Drift in pyproject.toml is caught by check.
+  writeFileSync(
+    join(published, "bindings/python/pyproject.toml"),
+    readFileSync(join(published, "bindings/python/pyproject.toml"), "utf8").replace('version = "0.4.0"', 'version = "0.3.9"'),
+  );
+  assert.match(version(published, "check").stderr, /Python pyproject \[project\]\.version is 0\.3\.9, expected 0\.4\.0/);
 });

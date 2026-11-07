@@ -75,7 +75,38 @@ function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-export function expectedInventory(version) {
+export const PYTHON_WHEEL_TAGS = [
+  "cp310-abi3-macosx_11_0_arm64",
+  "cp310-abi3-macosx_11_0_x86_64",
+  "cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64",
+  "cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64",
+  "cp310-abi3-win_amd64",
+];
+
+export const NPM_TARBALL_PACKAGES = [
+  ["3leaps-sysprims", "@3leaps/sysprims"],
+  ["3leaps-sysprims-darwin-arm64", "@3leaps/sysprims-darwin-arm64"],
+  ["3leaps-sysprims-linux-arm64-gnu", "@3leaps/sysprims-linux-arm64-gnu"],
+  ["3leaps-sysprims-linux-arm64-musl", "@3leaps/sysprims-linux-arm64-musl"],
+  ["3leaps-sysprims-linux-x64-gnu", "@3leaps/sysprims-linux-x64-gnu"],
+  ["3leaps-sysprims-linux-x64-musl", "@3leaps/sysprims-linux-x64-musl"],
+  ["3leaps-sysprims-win32-arm64-msvc", "@3leaps/sysprims-win32-arm64-msvc"],
+  ["3leaps-sysprims-win32-x64-msvc", "@3leaps/sysprims-win32-x64-msvc"],
+];
+
+export function expectedInventory(version, surfaces = undefined) {
+  const extra = [];
+  if (surfaces?.python?.disposition === "publish") {
+    for (const tag of PYTHON_WHEEL_TAGS) {
+      extra.push(`sysprims-${version}-${tag}.whl`);
+    }
+    extra.push(`sysprims-${version}.tar.gz`);
+  }
+  if (surfaces?.python !== undefined && surfaces?.typescript?.disposition === "publish") {
+    for (const [prefix] of NPM_TARBALL_PACKAGES) {
+      extra.push(`${prefix}-${version}.tgz`);
+    }
+  }
   const base = [
     "LICENSE-APACHE",
     "LICENSE-MIT",
@@ -92,6 +123,7 @@ export function expectedInventory(version) {
     `sysprims-${version}-windows-arm64.zip`,
     `sysprims-ffi-${version}-libs.tar.gz`,
     "sysprims.h",
+    ...extra,
   ].sort();
   const checksummed = [...base, "SHA256SUMS", "SHA512SUMS"].sort();
   const signed = [
@@ -104,6 +136,25 @@ export function expectedInventory(version) {
     "sysprims-release-signing-key.asc",
   ].sort();
   return { base, checksummed, signed };
+}
+
+export function surfacesAtCommit(root, commit, version) {
+  const planPath = `docs/releases/v${version}.json`;
+  const ls = spawnSync("git", ["ls-tree", commit, "--", planPath], { cwd: root, encoding: "utf8" });
+  if (ls.status !== 0 || !ls.stdout.trim()) return undefined;
+  const blob = run(root, "git", ["cat-file", "blob", `${commit}:${planPath}`]);
+  return JSON.parse(blob).surfaces;
+}
+
+export function inventoryForCommit(root, commit, version) {
+  return expectedInventory(version, surfacesAtCommit(root, commit, version));
+}
+
+export function inventoryForTag(root, tag) {
+  if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) fail(`tag must be canonical vX.Y.Z: ${tag}`);
+  const version = tag.slice(1);
+  const commit = resolveCommit(root, `refs/tags/${tag}`);
+  return inventoryForCommit(root, commit, version);
 }
 
 function filesIn(directory) {
@@ -235,7 +286,7 @@ function resolveObject(root, ref) {
 // fetched set and still hold the fetched bytes.
 function verifyFetchedPayload(root, directory, version) {
   const { files } = readFetchAnchor(root, directory, version);
-  const built = expectedInventory(version).base.filter((name) => !isTaggedAsset(version)(name));
+  const built = inventoryForTag(root, `v${version}`).base.filter((name) => !isTaggedAsset(version)(name));
   const recorded = [...files.keys()].sort();
   if (JSON.stringify(recorded) !== JSON.stringify(built)) fail(`fetched CI payload does not match the expected inventory; recorded=[${recorded.join(", ")}]`);
   for (const name of built) {
@@ -244,14 +295,14 @@ function verifyFetchedPayload(root, directory, version) {
 }
 
 function downloaded(root, directory, version) {
-  const { base } = expectedInventory(version);
+  const { base } = inventoryForTag(root, `v${version}`);
   assertInventory(directory, base, "downloaded");
   verifyTaggedAssets(root, directory, version);
   verifyFetchedPayload(root, directory, version);
 }
 
 function checksummed(root, directory, version) {
-  const { base, checksummed: inventory } = expectedInventory(version);
+  const { base, checksummed: inventory } = inventoryForTag(root, `v${version}`);
   assertInventory(directory, inventory, "checksummed");
   verifyTaggedAssets(root, directory, version);
   verifyFetchedPayload(root, directory, version);
@@ -259,7 +310,7 @@ function checksummed(root, directory, version) {
 }
 
 function requireChecksummed(root, directory, version) {
-  const { base, checksummed: required, signed: allowed } = expectedInventory(version);
+  const { base, checksummed: required, signed: allowed } = inventoryForTag(root, `v${version}`);
   const actual = filesIn(directory);
   const missing = required.filter((name) => !actual.includes(name));
   const extra = actual.filter((name) => !allowed.includes(name));
@@ -270,7 +321,7 @@ function requireChecksummed(root, directory, version) {
 }
 
 function signed(root, directory, version) {
-  const { base, signed: inventory } = expectedInventory(version);
+  const { base, signed: inventory } = inventoryForTag(root, `v${version}`);
   assertInventory(directory, inventory, "signed");
   verifyTaggedAssets(root, directory, version);
   verifyFetchedPayload(root, directory, version);
@@ -281,7 +332,7 @@ function signed(root, directory, version) {
 
 function uploaded(root, directory, version) {
   const tag = `v${version}`;
-  const { signed: inventory } = expectedInventory(version);
+  const { base, signed: inventory } = inventoryForTag(root, tag);
   const metadata = releaseMetadata(root, tag);
   assertDraft(metadata, tag);
   const remoteNames = (metadata.assets ?? []).map((asset) => asset.name).sort();
@@ -294,7 +345,7 @@ function uploaded(root, directory, version) {
     assertInventory(remoteDir, inventory, "remote uploaded");
     verifyAssetDigests(remoteDir, metadata.assets, inventory);
     verifyTaggedAssets(root, remoteDir, version);
-    verifyChecksums(remoteDir, expectedInventory(version).base);
+    verifyChecksums(remoteDir, base);
     // The remote copy itself must carry valid signatures from the committed
     // pins and only public keys; local files are never the evidence here.
     run(root, "bash", ["scripts/verify-signatures.sh", remoteDir]);
@@ -449,6 +500,18 @@ function liveLookup(root) {
     npmResolves(url) {
       return spawnSync("curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, url], { cwd: root, encoding: "utf8" }).status === 0;
     },
+    pypi(pyVersion) {
+      const baseUrl = (process.env.SYSPRIMS_PYPI_JSON_BASE_URL && !isCiEnv())
+        ? process.env.SYSPRIMS_PYPI_JSON_BASE_URL.replace(/\/$/, "")
+        : "https://pypi.org/pypi";
+      return JSON.parse(run(root, "curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, `${baseUrl}/sysprims/${pyVersion}/json`]));
+    },
+    pypiResolves(pyVersion) {
+      const baseUrl = (process.env.SYSPRIMS_PYPI_JSON_BASE_URL && !isCiEnv())
+        ? process.env.SYSPRIMS_PYPI_JSON_BASE_URL.replace(/\/$/, "")
+        : "https://pypi.org/pypi";
+      return spawnSync("curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, `${baseUrl}/sysprims/${pyVersion}/json`], { cwd: root, encoding: "utf8" }).status === 0;
+    },
   };
 }
 
@@ -483,6 +546,28 @@ export function remoteRegistries(root, commit, version, lookup = liveLookup(root
     const encoded = encodeURIComponent("@3leaps/sysprims").replace("%2F", "%2f");
     if (lookup.npmResolves(`https://registry.npmjs.org/${encoded}/${version}`)) fail(`skipped npm surface unexpectedly resolves at ${version}`);
   }
+
+  const python = plan.surfaces.python;
+  if (python) {
+    const pyVersion = python.disposition === "publish" ? version : python.retained_version;
+    const pyResponse = lookup.pypi(pyVersion);
+    if (pyResponse?.info?.name !== "sysprims" || pyResponse?.info?.version !== pyVersion) {
+      fail(`PyPI did not resolve complete metadata for sysprims==${pyVersion}`);
+    }
+    const expectedPyFiles = [
+      ...PYTHON_WHEEL_TAGS.map((tag) => `sysprims-${pyVersion}-${tag}.whl`),
+      `sysprims-${pyVersion}.tar.gz`,
+    ];
+    const pyByFilename = new Map((pyResponse.urls ?? []).map((entry) => [entry.filename, entry]));
+    for (const filename of expectedPyFiles) {
+      const entry = pyByFilename.get(filename);
+      if (!entry || !entry.digests?.sha256) fail(`PyPI release sysprims==${pyVersion} is missing ${filename}`);
+      if (entry.yanked === true) fail(`PyPI release file ${filename} is yanked`);
+    }
+    if (python.disposition === "skip") {
+      if (lookup.pypiResolves(version)) fail(`skipped Python surface unexpectedly resolves on PyPI at ${version}`);
+    }
+  }
 }
 
 export function verifyPublishedStage(root, directory, version) {
@@ -491,7 +576,7 @@ export function verifyPublishedStage(root, directory, version) {
     fail(`missing ${anchorPath}; stage the published release with make release-stage-published`);
   }
   const { files } = readFetchAnchor(root, directory, version);
-  const { base, signed: inventory } = expectedInventory(version);
+  const { base, signed: inventory } = inventoryForTag(root, `v${version}`);
   assertInventory(directory, inventory, "published");
   const recorded = [...files.keys()].sort();
   if (JSON.stringify(recorded) !== JSON.stringify(base)) {
@@ -569,8 +654,16 @@ function verifyRegistries(root, directory, version, commit) {
   verifyPublishedStage(root, directory, version);
   remoteRegistries(root, commit, version);
   const { plan } = readReleasePlanAt(root, commit, version);
-  if (plan.surfaces.typescript?.disposition === "publish") {
-    run(root, "python3", ["-I", "-B", "scripts/release-verify-registries.py", "--version", version, "--commit", commit]);
+  const pyPublish = plan.surfaces.python?.disposition === "publish";
+  const tsPublish = plan.surfaces.typescript?.disposition === "publish";
+  const scope = pyPublish && tsPublish ? "all" : pyPublish ? "pypi" : tsPublish ? "npm" : null;
+  if (scope) {
+    const args = ["-I", "-B", "scripts/release-verify-registries.py", "--stage-dir", directory, "--version", version, "--commit", commit, scope];
+    if (pyPublish && process.env.SYSPRIMS_BOOTSTRAP_PYPI_NO_PROVENANCE === "1") {
+      if (isCiEnv()) fail("SYSPRIMS_BOOTSTRAP_PYPI_NO_PROVENANCE is not accepted under GitHub Actions or CI");
+      args.push("--pypi-bootstrap-no-provenance");
+    }
+    run(root, "python3", args);
   }
 }
 

@@ -38,7 +38,9 @@ jobs:
           toolchain: 1.98.1  # pin:rust=stable
           components: clippy
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: |
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --manifest-path bindings/python/Cargo.toml -- -D warnings
   planning-hygiene:
     name: Planning Reference Guard
     runs-on: ubuntu-24.04  # pin:runner=linux-x64
@@ -483,9 +485,13 @@ jobs:
       - name: Report Goneat version
         run: goneat version
       - name: License check
-        run: cargo deny check licenses
+        run: |
+          cargo deny check licenses
+          cargo deny --manifest-path bindings/python/Cargo.toml check licenses
       - name: Advisory check
-        run: cargo deny check advisories
+        run: |
+          cargo deny check advisories
+          cargo deny --manifest-path bindings/python/Cargo.toml check advisories
       - name: Dependency assessment
         run: goneat assess --categories dependencies --check --fail-on high
   security-audit:
@@ -500,7 +506,66 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Security audit
-        run: cargo audit
+        run: |
+          cargo audit
+          cargo audit --file bindings/python/Cargo.lock
+  python-bindings:
+    name: Test Python Bindings (${{ matrix.target }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04  # pin:runner=linux-x64
+            target: x86_64-unknown-linux-gnu
+            python: '3.10'
+          - os: ubuntu-24.04  # pin:runner=linux-x64
+            target: x86_64-unknown-linux-gnu
+            python: '3.14'
+          - os: macos-15  # pin:runner=macos-arm64
+            target: aarch64-apple-darwin
+            python: '3.14'
+          - os: windows-2025  # pin:runner=windows-x64
+            target: x86_64-pc-windows-msvc
+            python: '3.14'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+          targets: ${{ matrix.target }}
+      - name: Build and verify Python wheel and sdist
+        run: make python-check PYTHON=python
+  python-bindings-arm64:
+    name: Test Python Bindings (aarch64-unknown-linux-gnu, 3.14)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest-arm64-s
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: '3.14'
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+          targets: aarch64-unknown-linux-gnu
+      - name: Build and verify Python wheel and sdist
+        run: make python-check PYTHON=python
   # Container-based privileged tests
   # These tests require isolation because they verify dangerous signal behaviors
   # See: ADR-0011

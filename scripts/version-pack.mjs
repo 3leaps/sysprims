@@ -44,6 +44,9 @@ const baseOwnedPaths = [
   "bindings/go/sysprims/README.md",
   "bindings/go/sysprims/go.mod",
   "bindings/go/sysprims/prebuilt-manifest.json",
+  "bindings/python/pyproject.toml",
+  "bindings/python/Cargo.toml",
+  "bindings/python/Cargo.lock",
   "bindings/typescript/sysprims/package.json",
   "bindings/typescript/sysprims/package-lock.json",
   ...nativeDirectories.map(
@@ -123,6 +126,15 @@ export function readReleasePlanAt(root, commit, version) {
   return { plan: validateReleasePlan(plan, version), relativePath };
 }
 
+function requiresPythonSurface(version) {
+  const core = String(version).split(/[+-]/)[0] ?? "";
+  const parts = core.split(".").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) return true;
+  const [major, minor, patch] = parts;
+  if (major > 0 || minor > 3) return true;
+  return minor === 3 && patch >= 1;
+}
+
 function validateReleasePlan(plan, version) {
   const errors = [];
   if (plan.schema !== "sysprims-release-plan/v1") errors.push("unknown release plan schema");
@@ -132,7 +144,10 @@ function validateReleasePlan(plan, version) {
   if (!surfaces || typeof surfaces !== "object" || Array.isArray(surfaces)) {
     errors.push("release plan surfaces object is missing");
   } else {
-    const expectedSurfaceNames = ["cli", "ffi", "go", "rust", "typescript"];
+    const hasPython = Object.hasOwn(surfaces, "python") || requiresPythonSurface(version);
+    const expectedSurfaceNames = hasPython
+      ? ["cli", "ffi", "go", "python", "rust", "typescript"]
+      : ["cli", "ffi", "go", "rust", "typescript"];
     const actualSurfaceNames = Object.keys(surfaces).sort();
     if (JSON.stringify(actualSurfaceNames) !== JSON.stringify(expectedSurfaceNames)) {
       errors.push(`release plan surface set must be exactly ${expectedSurfaceNames.join(", ")}`);
@@ -140,7 +155,8 @@ function validateReleasePlan(plan, version) {
     for (const name of ["rust", "cli", "ffi"]) {
       if (surfaces[name]?.disposition !== "publish") errors.push(`${name} disposition must be publish`);
     }
-    for (const name of ["go", "typescript"]) {
+    const optionalSkipSurfaces = hasPython ? ["go", "python", "typescript"] : ["go", "typescript"];
+    for (const name of optionalSkipSurfaces) {
       const surface = surfaces[name];
       if (!surface || !["publish", "skip"].includes(surface.disposition)) {
         errors.push(`${name} disposition must be publish or skip`);
@@ -153,6 +169,9 @@ function validateReleasePlan(plan, version) {
       } else if ("retained_version" in surface) {
         errors.push(`${name} retained_version is only valid for skip`);
       }
+    }
+    if (surfaces.python?.lock_phase !== undefined) {
+      errors.push("python lock_phase is not supported; omit it");
     }
     if (surfaces.go && !["pre_build", "resolved"].includes(surfaces.go.lock_phase)) {
       errors.push("go lock_phase must be pre_build or resolved");
@@ -708,6 +727,187 @@ function checkGoReadme(root, expected, errors) {
   );
 }
 
+function parsePyprojectMeta(text) {
+  let section = "";
+  const names = [];
+  const versions = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const header = trimmed.match(/^\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (header) {
+      section = header[1].trim();
+      continue;
+    }
+    if (section !== "project") continue;
+    const nameMatch = trimmed.match(/^name\s*=\s*"([^"]*)"\s*(?:#.*)?$/);
+    if (nameMatch) names.push(nameMatch[1]);
+    const versionMatch = trimmed.match(/^version\s*=\s*"([^"]*)"\s*(?:#.*)?$/);
+    if (versionMatch) versions.push(versionMatch[1]);
+  }
+  return { names, versions };
+}
+
+function replacePyprojectVersion(text, version) {
+  let section = "";
+  let replaced = 0;
+  const lines = text.split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    const header = trimmed.match(/^\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (header) {
+      section = header[1].trim();
+      return line;
+    }
+    if (section === "project" && /^\s*version\s*=\s*"[^"]*"\s*(?:#.*)?$/.test(line)) {
+      replaced += 1;
+      return line.replace(/(version\s*=\s*)"[^"]*"/, `$1"${version}"`);
+    }
+    return line;
+  });
+  if (replaced !== 1) {
+    fail(`expected exactly one [project].version in bindings/python/pyproject.toml, found ${replaced}`);
+  }
+  return lines.join("\n");
+}
+
+function parseCargoLockPathPackages(lockText) {
+  const parts = lockText.split(/\n(?=\[\[package\]\]\n)/);
+  const entries = [];
+  for (const part of parts) {
+    if (!part.startsWith("[[package]]\n")) continue;
+    if (/^source\s*=/m.test(part)) continue;
+    const nameMatch = part.match(/^name\s*=\s*"([^"]+)"$/m);
+    const versionMatch = part.match(/^version\s*=\s*"([^"]+)"$/m);
+    if (nameMatch && versionMatch) {
+      entries.push({ name: nameMatch[1], version: versionMatch[1] });
+    }
+  }
+  return entries;
+}
+
+function rewriteCargoLockPathVersions(lockText, workspaceVersion, pythonVersion) {
+  const parts = lockText.split(/\n(?=\[\[package\]\]\n)/);
+  let sawPy = false;
+  let sawWorkspace = false;
+  const updated = parts.map((part) => {
+    if (!part.startsWith("[[package]]\n") || /^source\s*=/m.test(part)) {
+      return part;
+    }
+    const nameMatch = part.match(/^name\s*=\s*"([^"]+)"$/m);
+    if (!nameMatch) return part;
+    const name = nameMatch[1];
+    if (name === "sysprims-py") {
+      sawPy = true;
+      return part.replace(/^version\s*=\s*"[^"]+"$/m, `version = "${pythonVersion}"`);
+    }
+    if (name.startsWith("sysprims-")) {
+      sawWorkspace = true;
+      return part.replace(/^version\s*=\s*"[^"]+"$/m, `version = "${workspaceVersion}"`);
+    }
+    return part;
+  });
+  if (!sawPy || !sawWorkspace) {
+    fail("bindings/python/Cargo.lock is missing sysprims-py or workspace sysprims-* path packages");
+  }
+  return updated.join("\n");
+}
+
+function checkPython(root, expected, plan, errors) {
+  const pythonVersion = plan.surfaces.python
+    ? plannedVersion(plan.surfaces.python, expected)
+    : expected;
+  const pyprojectText = readFileSync(
+    join(root, "bindings/python/pyproject.toml"),
+    "utf8",
+  );
+  const { names, versions } = parsePyprojectMeta(pyprojectText);
+  if (names.length !== 1 || names[0] !== "sysprims") {
+    errors.push(
+      `Python pyproject [project].name must be exactly "sysprims" (found ${JSON.stringify(names)})`,
+    );
+  }
+  if (versions.length !== 1) {
+    errors.push(
+      `Python pyproject [project].version must appear once (found ${versions.length})`,
+    );
+  } else if (versions[0] !== pythonVersion) {
+    errors.push(
+      `Python pyproject [project].version is ${versions[0]}, expected ${pythonVersion}`,
+    );
+  }
+
+  let metadata;
+  try {
+    metadata = JSON.parse(
+      run(root, "cargo", [
+        "metadata",
+        "--manifest-path",
+        "bindings/python/Cargo.toml",
+        "--no-deps",
+        "--format-version",
+        "1",
+        "--locked",
+      ]),
+    );
+  } catch (error) {
+    errors.push(`Python Cargo metadata/lock is stale: ${error.message}`);
+    return;
+  }
+
+  const pyPkg = metadata.packages.find((pkg) => pkg.name === "sysprims-py");
+  if (!pyPkg) {
+    errors.push("bindings/python/Cargo.toml did not declare package sysprims-py");
+    return;
+  }
+  if (pyPkg.version !== pythonVersion) {
+    errors.push(
+      `Python Cargo package sysprims-py is ${pyPkg.version}, expected ${pythonVersion}`,
+    );
+  }
+  for (const dependency of pyPkg.dependencies) {
+    if (
+      dependency.name.startsWith("sysprims-") &&
+      dependency.source === null &&
+      dependency.req !== "*" &&
+      dependency.req !== expected &&
+      dependency.req !== `=${expected}` &&
+      dependency.req !== `^${expected}`
+    ) {
+      errors.push(
+        `Python Cargo internal dependency sysprims-py -> ${dependency.name} pins ${dependency.req}, expected ${expected}`,
+      );
+    }
+  }
+
+  const lockText = readFileSync(
+    join(root, "bindings/python/Cargo.lock"),
+    "utf8",
+  );
+  const pathPackages = parseCargoLockPathPackages(lockText);
+  const lockPy = pathPackages.filter((pkg) => pkg.name === "sysprims-py");
+  if (lockPy.length !== 1) {
+    errors.push("bindings/python/Cargo.lock must contain one path package sysprims-py");
+  } else if (lockPy[0].version !== pythonVersion) {
+    errors.push(
+      `bindings/python/Cargo.lock sysprims-py is ${lockPy[0].version}, expected ${pythonVersion}`,
+    );
+  }
+  const workspaceDeps = pathPackages.filter(
+    (pkg) => pkg.name !== "sysprims-py" && pkg.name.startsWith("sysprims-"),
+  );
+  if (workspaceDeps.length === 0) {
+    errors.push("bindings/python/Cargo.lock lists no workspace sysprims-* path packages");
+  }
+  for (const pkg of workspaceDeps) {
+    if (pkg.version !== expected) {
+      errors.push(
+        `bindings/python/Cargo.lock path package ${pkg.name} is ${pkg.version}, expected ${expected}`,
+      );
+    }
+  }
+}
+
 function collectErrors(root) {
   const errors = [];
   let expected;
@@ -722,6 +922,7 @@ function collectErrors(root) {
     checkCargo(root, expected, errors);
     checkJson(root, expected, plan, errors);
     checkGo(root, expected, plan, errors);
+    checkPython(root, expected, plan, errors);
   } catch (error) {
     errors.push(error.message);
   }
@@ -866,6 +1067,30 @@ function withRollback(root, paths, operation) {
   }
 }
 
+function updatePythonSurfaces(root, version) {
+  const { plan } = readReleasePlan(root, version);
+  const pythonVersion = plan.surfaces.python
+    ? plannedVersion(plan.surfaces.python, version)
+    : version;
+  if (plan.surfaces.python?.disposition !== "skip") {
+    const pyprojectPath = join(root, "bindings/python/pyproject.toml");
+    const pyprojectText = readFileSync(pyprojectPath, "utf8");
+    writeTextAtomic(pyprojectPath, replacePyprojectVersion(pyprojectText, version));
+    run(
+      root,
+      "cargo",
+      ["set-version", "--manifest-path", "bindings/python/Cargo.toml", version],
+      { stdio: "inherit" },
+    );
+  }
+  const lockPath = join(root, "bindings/python/Cargo.lock");
+  const lockText = readFileSync(lockPath, "utf8");
+  writeTextAtomic(
+    lockPath,
+    rewriteCargoLockPathVersions(lockText, version, pythonVersion),
+  );
+}
+
 export function synchronize(
   root,
   requestedVersion,
@@ -886,6 +1111,7 @@ export function synchronize(
     afterCargoSetVersion?.();
     updateJsonSurfaces(root, version);
     updateGoReadme(root, version);
+    updatePythonSurfaces(root, version);
     check(root, true);
   });
 

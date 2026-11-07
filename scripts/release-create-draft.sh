@@ -29,8 +29,8 @@ snapshot="$(mktemp -d)"
 chmod 700 "$snapshot"
 trap 'rm -rf "$snapshot"' EXIT
 inventory="$(node --input-type=module -e "
-	import { expectedInventory } from '$root/scripts/release-integrity.mjs';
-	console.log(expectedInventory('${tag#v}').signed.join('\\n'));")" || die 'could not resolve the signed inventory'
+	import { inventoryForTag } from '$root/scripts/release-integrity.mjs';
+	console.log(inventoryForTag('$root', '$tag').signed.join('\\n'));")" || die 'could not resolve the signed inventory'
 count=0
 for name in $inventory; do
 	[[ -f "$dir/$name" && ! -L "$dir/$name" ]] || die "missing or not a regular file: $name"
@@ -53,9 +53,9 @@ trap 'rm -rf "$snapshot" "$snapshot.anchor" "$snapshot.remote"' EXIT
 # The downloaded artifact holds exactly the CI-built files (by name), and each
 # equals the snapshot's copy.
 built="$(node --input-type=module -e "
-	import { expectedInventory, TAGGED_ASSET_NAMES } from '$root/scripts/release-integrity.mjs';
+	import { inventoryForTag, TAGGED_ASSET_NAMES } from '$root/scripts/release-integrity.mjs';
 	const v = '${tag#v}';
-	console.log(expectedInventory(v).base.filter((n) => !TAGGED_ASSET_NAMES(v).includes(n)).join('\\n'));")" ||
+	console.log(inventoryForTag('$root', '$tag').base.filter((n) => !TAGGED_ASSET_NAMES(v).includes(n)).join('\\n'));")" ||
 	die 'could not resolve the CI-built inventory'
 names=""
 while IFS= read -r line; do
