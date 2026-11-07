@@ -504,6 +504,11 @@ fn run_all(corpus_dir: &Path, parity_path: &Path) {
             run_extra_observation_pack(Path::new(&extra_path), &obs_prof);
         }
     }
+    if let Ok(extra_deriv_path) = env::var("EVIDENCE_EXTRA_DERIVATION_CASES") {
+        if !extra_deriv_path.is_empty() {
+            run_extra_derivation_pack(Path::new(&extra_deriv_path));
+        }
+    }
 }
 
 fn run_extra_observation_pack(path: &Path, obs_prof: &ProfileRef) {
@@ -545,18 +550,25 @@ fn run_extra_observation_pack(path: &Path, obs_prof: &ProfileRef) {
                 let rep_opt = case.get("report").filter(|v| !v.is_null());
                 let inputs =
                     parse_inputs_map(case.get("inputs").or_else(|| case.get("input_reports")));
-                let got = match admit_live_observation(
+                match admit_live_observation(
                     &case["obs"],
                     now_opt,
                     obs_prof,
                     rep_opt,
                     Some(&inputs),
                 ) {
-                    Ok(()) => "accept".to_string(),
-                    Err(e) => e.code,
-                };
-                assert_eq!(got, expected, "extra admit case {id}");
-                emit_line(&json!({ "suite": "extra-obs", "id": id, "outcome": got }));
+                    Ok(()) => {
+                        assert_eq!("accept", expected, "extra admit case {id}");
+                        emit_line(&json!({ "suite": "extra-obs", "id": id, "outcome": "accept" }));
+                    }
+                    Err(e) => {
+                        assert!(!e.code().is_empty(), "empty refusal code on {id}");
+                        if expected != "refusal" && expected != "refuse" {
+                            assert_eq!(e.code(), expected, "extra admit case {id}");
+                        }
+                        emit_line(&json!({ "suite": "extra-obs", "id": id, "outcome": e.code() }));
+                    }
+                }
             }
             "project" | "projection" => {
                 let expected = case["expected"].as_str().unwrap();
@@ -590,7 +602,10 @@ fn run_extra_observation_pack(path: &Path, obs_prof: &ProfileRef) {
                         }));
                     }
                     Err(e) => {
-                        assert_eq!(e.code(), expected, "extra projection refusal {id}");
+                        assert!(!e.code().is_empty(), "empty refusal code on {id}");
+                        if expected != "refusal" && expected != "refuse" {
+                            assert_eq!(e.code(), expected, "extra projection refusal {id}");
+                        }
                         emit_line(&json!({
                             "suite": "extra-obs",
                             "id": id,
@@ -601,14 +616,129 @@ fn run_extra_observation_pack(path: &Path, obs_prof: &ProfileRef) {
             }
             "shape" => {
                 let expected = case["expected"].as_str().unwrap();
-                let got = match validate_observation_shape(&case["obs"]) {
-                    Ok(()) => "accept".to_string(),
-                    Err(e) => e.code,
-                };
-                assert_eq!(got, expected, "extra shape case {id}");
-                emit_line(&json!({ "suite": "extra-obs", "id": id, "outcome": got }));
+                match validate_observation_shape(&case["obs"]) {
+                    Ok(()) => {
+                        assert_eq!("accept", expected, "extra shape case {id}");
+                        emit_line(&json!({ "suite": "extra-obs", "id": id, "outcome": "accept" }));
+                    }
+                    Err(e) => {
+                        assert!(!e.code().is_empty(), "empty refusal code on {id}");
+                        if expected != "refusal" && expected != "refuse" {
+                            assert_eq!(e.code(), expected, "extra shape case {id}");
+                        }
+                        emit_line(&json!({ "suite": "extra-obs", "id": id, "outcome": e.code() }));
+                    }
+                }
             }
             other => panic!("unsupported extra case kind {other} on {id}"),
+        }
+    }
+}
+
+fn run_extra_derivation_pack(path: &Path) {
+    let doc: Value = serde_json::from_slice(&fs::read(path).expect("read extra derivation cases"))
+        .expect("parse extra derivation cases");
+    let vectors = if let Some(arr) = doc.as_array() {
+        arr.clone()
+    } else if let Some(arr) = doc.get("derivation_vectors").and_then(Value::as_array) {
+        arr.clone()
+    } else if let Some(arr) = doc.get("cases").and_then(Value::as_array) {
+        arr.clone()
+    } else {
+        Vec::new()
+    };
+    for vec_case in &vectors {
+        let id = vec_case["id"].as_str().unwrap_or("unnamed");
+        let kind = vec_case["kind"].as_str().expect("derivation vector kind");
+        let deriv = vec_case["derivation"]
+            .as_str()
+            .expect("derivation vector derivation");
+        let input = &vec_case["input"];
+        let res: Result<String, String> = match deriv {
+            "arguments_digest" => {
+                let argv: Vec<Vec<u8>> = input["argv_hex"]
+                    .as_array()
+                    .expect("argv_hex array")
+                    .iter()
+                    .map(|v| decode_hex(v.as_str().expect("argv_hex item")))
+                    .collect();
+                Ok(derive_arguments_digest(&argv))
+            }
+            "executable_digest" => {
+                let img = decode_hex(input["image_hex"].as_str().expect("image_hex"));
+                Ok(derive_executable_digest(&img))
+            }
+            "namespace_context_digest" => {
+                let mut ns_map = BTreeMap::new();
+                let mut dup = false;
+                if let Some(obj) = input["entries"].as_object() {
+                    for (k, v) in obj {
+                        ns_map.insert(k.clone(), v.as_str().expect("ns entry string").to_string());
+                    }
+                } else if let Some(arr) = input["entries"].as_array() {
+                    for pair in arr {
+                        let p = pair.as_array().expect("ns entry [k, v] pair");
+                        assert_eq!(p.len(), 2, "ns entry pair len on {id}");
+                        let k = p[0].as_str().expect("ns entry key").to_string();
+                        let v = p[1].as_str().expect("ns entry value").to_string();
+                        if ns_map.insert(k, v).is_some() {
+                            dup = true;
+                        }
+                    }
+                } else {
+                    panic!("unsupported entries shape on {id}");
+                }
+                if dup {
+                    Err("duplicate-linux-ns-entry".to_string())
+                } else {
+                    derive_linux_namespace_context_digest(&ns_map).map_err(|e| e.code)
+                }
+            }
+            "security_context_digest" => {
+                let raw = input["canonical_context_ascii"]
+                    .as_str()
+                    .expect("canonical_context_ascii");
+                derive_linux_security_context_digest(raw.as_bytes()).map_err(|e| e.code)
+            }
+            "host_scope_urn" => {
+                let hs = if input.get("derivation").is_some() {
+                    input.clone()
+                } else {
+                    json!({
+                        "namespace": input["namespace"],
+                        "value": input["value"],
+                        "derivation": {
+                            "id": input["derivation_id"],
+                            "revision": input["derivation_revision"],
+                        },
+                        "stability": input["stability"],
+                        "clone_behavior": input["clone_behavior"],
+                    })
+                };
+                project_host_scope_urn(&hs).map_err(|e| e.code)
+            }
+            other => panic!("unsupported derivation kind {other} on {id}"),
+        };
+        match kind {
+            "derive" => {
+                let expected = vec_case["expected"].as_str().expect("expected digest/urn");
+                let got = res.unwrap_or_else(|e| panic!("unexpected refusal {e} on {id}"));
+                assert_eq!(got, expected, "extra derive mismatch {id}");
+                emit_line(&json!({ "suite": "extra-derive", "id": id, "outcome": got }));
+            }
+            "derive-refuse" => {
+                let expected = vec_case
+                    .get("expected")
+                    .and_then(Value::as_str)
+                    .unwrap_or("refuse");
+                let code = res.expect_err(&format!("expected refusal on {id}"));
+                assert!(!code.is_empty(), "empty refusal code on {id}");
+                if expected != "refuse" && expected != "refusal" {
+                    assert_eq!(code, expected, "extra derive-refuse mismatch {id}");
+                }
+                emit_line(&json!({ "suite": "extra-derive", "id": id, "outcome": code }));
+            }
+            other => panic!("unsupported derivation vector kind {other} on {id}"),
         }
     }
 }

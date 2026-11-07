@@ -581,6 +581,9 @@ func runAll(corpusDir, parityPath string) {
 	if extraPath := os.Getenv("EVIDENCE_EXTRA_OBSERVATION_CASES"); extraPath != "" {
 		runExtraObservationPack(extraPath, obsProf)
 	}
+	if extraDerivPath := os.Getenv("EVIDENCE_EXTRA_DERIVATION_CASES"); extraDerivPath != "" {
+		runExtraDerivationPack(extraDerivPath)
+	}
 }
 
 func runExtraObservationPack(path string, obsProf evidence.ProfileRef) {
@@ -629,12 +632,19 @@ func runExtraObservationPack(path string, obsProf evidence.ProfileRef) {
 				inRaw = c["input_reports"]
 			}
 			inputs := parseInputsMap(inRaw)
-			got := "accept"
 			if err := evidence.AdmitLiveObservation(c["obs"], nowPtr, obsProf, repOpt, inputs); err != nil {
-				got, _ = evidence.RefusalCode(err)
+				code, ok := evidence.RefusalCode(err)
+				if !ok || code == "" {
+					panic("empty refusal code on extra admit " + id)
+				}
+				if expected != "refusal" && expected != "refuse" {
+					assertEq(code, expected, "extra admit "+id)
+				}
+				emitLine(map[string]any{"suite": "extra-obs", "id": id, "outcome": code})
+			} else {
+				assertEq("accept", expected, "extra admit "+id)
+				emitLine(map[string]any{"suite": "extra-obs", "id": id, "outcome": "accept"})
 			}
-			assertEq(got, expected, "extra admit "+id)
-			emitLine(map[string]any{"suite": "extra-obs", "id": id, "outcome": got})
 		case "project", "projection":
 			expected := c["expected"].(string)
 			nowVal, ok := c["now_utc"]
@@ -677,8 +687,13 @@ func runExtraObservationPack(path string, obsProf evidence.ProfileRef) {
 					"digest":  digest,
 				})
 			} else {
-				code, _ := evidence.RefusalCode(err)
-				assertEq(code, expected, "extra projection refusal "+id)
+				code, ok := evidence.RefusalCode(err)
+				if !ok || code == "" {
+					panic("empty refusal code on extra projection " + id)
+				}
+				if expected != "refusal" && expected != "refuse" {
+					assertEq(code, expected, "extra projection refusal "+id)
+				}
 				emitLine(map[string]any{
 					"suite":   "extra-obs",
 					"id":      id,
@@ -687,14 +702,141 @@ func runExtraObservationPack(path string, obsProf evidence.ProfileRef) {
 			}
 		case "shape":
 			expected := c["expected"].(string)
-			got := "accept"
 			if err := evidence.ValidateObservationShape(c["obs"]); err != nil {
-				got, _ = evidence.RefusalCode(err)
+				code, ok := evidence.RefusalCode(err)
+				if !ok || code == "" {
+					panic("empty refusal code on extra shape " + id)
+				}
+				if expected != "refusal" && expected != "refuse" {
+					assertEq(code, expected, "extra shape "+id)
+				}
+				emitLine(map[string]any{"suite": "extra-obs", "id": id, "outcome": code})
+			} else {
+				assertEq("accept", expected, "extra shape "+id)
+				emitLine(map[string]any{"suite": "extra-obs", "id": id, "outcome": "accept"})
 			}
-			assertEq(got, expected, "extra shape "+id)
-			emitLine(map[string]any{"suite": "extra-obs", "id": id, "outcome": got})
 		default:
 			panic("unsupported extra case kind " + kind + " on " + id)
+		}
+	}
+}
+
+func runExtraDerivationPack(path string) {
+	doc := mustReadJSON(path)
+	var vectors []any
+	if arr, ok := doc.([]any); ok {
+		vectors = arr
+	} else if m, ok := doc.(map[string]any); ok {
+		if arr, ok := m["derivation_vectors"].([]any); ok {
+			vectors = arr
+		} else if arr, ok := m["cases"].([]any); ok {
+			vectors = arr
+		}
+	}
+	for _, item := range vectors {
+		vc := item.(map[string]any)
+		id, _ := vc["id"].(string)
+		if id == "" {
+			id = "unnamed"
+		}
+		kind := vc["kind"].(string)
+		deriv := vc["derivation"].(string)
+		input := vc["input"].(map[string]any)
+
+		var got string
+		var dErr error
+		switch deriv {
+		case "arguments_digest":
+			rawArgv := input["argv_hex"].([]any)
+			argv := make([][]byte, 0, len(rawArgv))
+			for _, elem := range rawArgv {
+				b, err := hex.DecodeString(elem.(string))
+				if err != nil {
+					panic(fmt.Sprintf("decode argv_hex on %s: %v", id, err))
+				}
+				argv = append(argv, b)
+			}
+			got = evidence.DeriveArgumentsDigest(argv)
+		case "executable_digest":
+			img, err := hex.DecodeString(input["image_hex"].(string))
+			if err != nil {
+				panic(fmt.Sprintf("decode image_hex on %s: %v", id, err))
+			}
+			got = evidence.DeriveExecutableDigest(img)
+		case "namespace_context_digest":
+			nsMap := make(map[string]string)
+			dup := false
+			switch entries := input["entries"].(type) {
+			case map[string]any:
+				for k, v := range entries {
+					nsMap[k] = v.(string)
+				}
+			case []any:
+				for _, item := range entries {
+					pair := item.([]any)
+					if len(pair) != 2 {
+						panic("ns entry pair len != 2 on " + id)
+					}
+					k := pair[0].(string)
+					v := pair[1].(string)
+					if _, exists := nsMap[k]; exists {
+						dup = true
+					}
+					nsMap[k] = v
+				}
+			default:
+				panic(fmt.Sprintf("unsupported entries shape %T on %s", input["entries"], id))
+			}
+			if dup {
+				dErr = &evidence.RefusalError{Code: "duplicate-linux-ns-entry"}
+			} else {
+				got, dErr = evidence.DeriveLinuxNamespaceContextDigest(nsMap)
+			}
+		case "security_context_digest":
+			raw := input["canonical_context_ascii"].(string)
+			got, dErr = evidence.DeriveLinuxSecurityContextDigest([]byte(raw))
+		case "host_scope_urn":
+			var hs any = input
+			if _, hasNested := input["derivation"]; !hasNested {
+				hs = map[string]any{
+					"namespace": input["namespace"],
+					"value":     input["value"],
+					"derivation": map[string]any{
+						"id":       input["derivation_id"],
+						"revision": input["derivation_revision"],
+					},
+					"stability":      input["stability"],
+					"clone_behavior": input["clone_behavior"],
+				}
+			}
+			got, dErr = evidence.ProjectHostScopeURN(hs)
+		default:
+			panic("unsupported derivation " + deriv + " on " + id)
+		}
+
+		switch kind {
+		case "derive":
+			if dErr != nil {
+				panic(fmt.Sprintf("unexpected derivation refusal on %s: %v", id, dErr))
+			}
+			expected := vc["expected"].(string)
+			assertEq(got, expected, "extra derive "+id)
+			emitLine(map[string]any{"suite": "extra-derive", "id": id, "outcome": got})
+		case "derive-refuse":
+			if dErr == nil {
+				panic("expected derivation refusal on " + id + ", got " + got)
+			}
+			code, ok := evidence.RefusalCode(dErr)
+			if !ok || code == "" {
+				panic("empty derivation refusal code on " + id)
+			}
+			expected, _ := vc["expected"].(string)
+			if expected != "" && expected != "refuse" && expected != "refusal" {
+				assertEq(code, expected, "extra derive-refuse "+id)
+			}
+			emitLine(map[string]any{"suite": "extra-derive", "id": id, "outcome": code})
+		default:
+			panic("unsupported derivation vector kind " + kind + " on " + id)
 		}
 	}
 }

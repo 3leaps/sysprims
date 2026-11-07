@@ -313,15 +313,25 @@ impl Default for ReportMetadata {
 /// `NOTE_EXIT` on macOS; `pidfd` on Linux) bracketed at registration against
 /// kernel start-identity metadata.
 ///
-/// This type intentionally exposes no raw file descriptor accessor, implements
-/// neither `Serialize` nor `Deserialize`, and provides no signal delivery API.
-#[derive(Debug)]
+/// This type intentionally exposes no raw file descriptor accessor, redacts OS
+/// descriptors from [`std::fmt::Debug`], implements neither `Serialize` nor
+/// `Deserialize`, and provides no signal delivery API.
 pub struct ProcessContinuityHandle {
     pid: u32,
     baseline: Value,
     host_scope: HostScope,
     options: ObservationOptions,
     inner: imp::PlatformHandle,
+}
+
+impl std::fmt::Debug for ProcessContinuityHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessContinuityHandle")
+            .field("pid", &self.pid)
+            .field("subject_ref", &self.options.subject_ref)
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ProcessContinuityHandle {
@@ -897,5 +907,324 @@ pub(crate) fn errno_to_digest_fact(errno: i32, fallback_reason: &str) -> Value {
         libc::EPERM | libc::EACCES => fact_non_observed("inaccessible", "permission-denied"),
         libc::ENOENT | libc::ESRCH => fact_non_observed("not-present", "backing-entry-absent"),
         _ => fact_non_observed("error", fallback_reason),
+    }
+}
+
+/// Split non-empty Linux `/proc/<pid>/cmdline` bytes per `native-process-observation:v0` §4:
+/// - If `raw` ends with `0x00`, strip exactly one trailing `0x00` and split on `0x00`.
+/// - If `raw` does not end with `0x00` (e.g., a process rewrote its `argv` stack without
+///   NUL terminators), yield the single element `[raw]` without splitting on interior `0x00`.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn parse_linux_cmdline_argv(raw: &[u8]) -> Vec<&[u8]> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    if let Some(trimmed) = raw.strip_suffix(b"\0") {
+        trimmed.split(|&b| b == 0).collect()
+    } else {
+        vec![raw]
+    }
+}
+
+/// Parse a 64-bit XNU `sysctl` `KERN_PROCARGS2` buffer into `argc` raw argument slices.
+///
+/// Qualified layout (`macos/aarch64`, `macos/x86_64` with 64-bit `P_LP64` target):
+/// XNU `exec_save_path` (`bsd/kern/kern_exec.c`) pads `exec_path + '\0'` to the 8-byte
+/// target pointer boundary (`4 + align_up(exec_path_len + 1, 8)`) before `ip_startargv`.
+/// All bounded padding bytes must be `0x00`. For `argc > 0`, a leading `0x00` byte at
+/// that boundary refuses fail-closed with `"ambiguous-kern-procargs2-padding"` rather
+/// than scanning onward across empty `argv[0]` into environment strings.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn parse_procargs2_argv_64(
+    buf: &[u8],
+    max_bytes: usize,
+) -> Result<Vec<&[u8]>, &'static str> {
+    if max_bytes == 0 || buf.len() > max_bytes {
+        return Err("arguments-exceed-cap");
+    }
+    if buf.len() < 4 {
+        return Err("malformed-kern-procargs2");
+    }
+    let argc_i32 = i32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if argc_i32 < 0 {
+        return Err("negative-kern-procargs2-argc");
+    }
+    let argc = usize::try_from(argc_i32).map_err(|_| "negative-kern-procargs2-argc")?;
+    if argc > max_bytes {
+        return Err("arguments-exceed-cap");
+    }
+
+    let Some(exec_rel_nul) = buf[4..].iter().position(|&b| b == 0) else {
+        return Err("malformed-kern-procargs2-execpath");
+    };
+    if exec_rel_nul == 0 {
+        return Err("malformed-kern-procargs2-execpath");
+    }
+    let exec_end = 4usize
+        .checked_add(exec_rel_nul)
+        .ok_or("malformed-kern-procargs2-execpath")?;
+    let path_with_nul = exec_rel_nul
+        .checked_add(1)
+        .ok_or("malformed-kern-procargs2-execpath")?;
+    let rem = path_with_nul % 8;
+    let pad_extra = if rem == 0 { 0 } else { 8 - rem };
+    let padded_len = path_with_nul
+        .checked_add(pad_extra)
+        .ok_or("malformed-kern-procargs2-execpath")?;
+    let aligned_off = 4usize
+        .checked_add(padded_len)
+        .ok_or("malformed-kern-procargs2-execpath")?;
+    if aligned_off > buf.len() {
+        return Err("truncated-kern-procargs2-padding");
+    }
+    if buf[exec_end..aligned_off].iter().any(|&b| b != 0) {
+        return Err("malformed-kern-procargs2-padding");
+    }
+
+    if argc == 0 {
+        return Ok(Vec::new());
+    }
+    if aligned_off >= buf.len() {
+        return Err("truncated-kern-procargs2-argv");
+    }
+    if buf[aligned_off] == 0 {
+        return Err("ambiguous-kern-procargs2-padding");
+    }
+
+    let mut argv = Vec::with_capacity(argc.min(256));
+    let mut pos = aligned_off;
+    for _ in 0..argc {
+        if pos >= buf.len() {
+            return Err("truncated-kern-procargs2-argv");
+        }
+        let Some(arg_nul) = buf[pos..].iter().position(|&b| b == 0) else {
+            return Err("unterminated-kern-procargs2-arg");
+        };
+        let end = pos
+            .checked_add(arg_nul)
+            .ok_or("unterminated-kern-procargs2-arg")?;
+        argv.push(&buf[pos..end]);
+        pos = end.checked_add(1).ok_or("truncated-kern-procargs2-argv")?;
+    }
+    Ok(argv)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use sysprims_evidence::derive_arguments_digest;
+
+    use super::*;
+
+    fn build_procargs2_64(exec_path: &[u8], argc: i32, argv: &[&[u8]], envp: &[&[u8]]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&argc.to_le_bytes());
+        out.extend_from_slice(exec_path);
+        out.push(0);
+        let path_with_nul = exec_path.len() + 1;
+        let pad = (8 - (path_with_nul % 8)) % 8;
+        out.resize(out.len() + pad, 0);
+        for a in argv {
+            out.extend_from_slice(a);
+            out.push(0);
+        }
+        for e in envp {
+            out.extend_from_slice(e);
+            out.push(0);
+        }
+        out
+    }
+
+    #[test]
+    fn debug_formatting_redacts_internal_os_descriptors() {
+        let mut handle = ProcessContinuityHandle {
+            pid: 7777,
+            baseline: json!({"profile": {"id": "test", "revision": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}}),
+            host_scope: HostScope {
+                identifier_ref: None,
+                namespace: "urn:test:host".to_string(),
+                value: "node-1".to_string(),
+                derivation: ProfileRef::new(
+                    "urn:test:drv",
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+                stability: "boot".to_string(),
+                clone_behavior: "regenerated".to_string(),
+            },
+            options: ObservationOptions::default(),
+            inner: imp::PlatformHandle::new_sentinel_for_debug_test(424_242),
+        };
+
+        let compact = format!("{handle:?}");
+        let pretty = format!("{handle:#?}");
+        handle.inner.disarm_for_debug_test();
+
+        assert!(compact.contains("ProcessContinuityHandle"));
+        assert!(compact.contains("7777"));
+        for rendered in [&compact, &pretty] {
+            assert!(!rendered.contains("424242"), "leaked raw fd: {rendered}");
+            assert!(
+                !rendered.contains("kq_fd"),
+                "leaked kq_fd field: {rendered}"
+            );
+            let scrubbed = rendered.replace("linux-pidfd", "");
+            assert!(
+                !scrubbed.contains("pidfd"),
+                "leaked pidfd field name: {rendered}"
+            );
+        }
+        assert!(!compact.contains("424_242"));
+    }
+
+    #[test]
+    fn linux_cmdline_parser_preserves_unterminated_single_element_and_splits_nul_terminated() {
+        assert_eq!(parse_linux_cmdline_argv(b""), Vec::<&[u8]>::new());
+        assert_eq!(
+            parse_linux_cmdline_argv(b"alpha\0beta"),
+            vec![&b"alpha\0beta"[..]]
+        );
+        assert_eq!(
+            derive_arguments_digest(&parse_linux_cmdline_argv(b"alpha\0beta")),
+            derive_arguments_digest(&[&b"alpha\0beta"[..]])
+        );
+        assert_eq!(
+            parse_linux_cmdline_argv(b"alpha\0beta\0"),
+            vec![&b"alpha"[..], &b"beta"[..]]
+        );
+        assert_eq!(parse_linux_cmdline_argv(b"\0"), vec![&b""[..]]);
+        assert_eq!(parse_linux_cmdline_argv(b"\0\0"), vec![&b""[..], &b""[..]]);
+        assert_eq!(
+            parse_linux_cmdline_argv(b"\xff\0\xfe\xfd\0"),
+            vec![&b"\xff"[..], &b"\xfe\xfd"[..]]
+        );
+    }
+
+    #[test]
+    fn procargs2_64_parser_handles_all_eight_residues_and_refuses_empty_argv0() {
+        for extra in 0..8usize {
+            let mut exec_path = b"/usr/local/bin/worker-".to_vec();
+            exec_path.resize(exec_path.len() + extra, b'x');
+            assert_eq!((exec_path.len() + 1) % 8, (23 + extra) % 8);
+
+            // 1. Ordinary non-empty argv[0] across all 8 residues: unchanged, env excluded.
+            let normal_buf = build_procargs2_64(
+                &exec_path,
+                3,
+                &[exec_path.as_slice(), b"--mode", b"strict"],
+                &[b"SECRET_ENV=MUST_NOT_APPEAR"],
+            );
+            let parsed = parse_procargs2_argv_64(&normal_buf, MAX_ARGUMENTS_RAW_BYTES)
+                .expect("ordinary argv[0] must parse");
+            assert_eq!(
+                parsed,
+                vec![exec_path.as_slice(), &b"--mode"[..], &b"strict"[..]]
+            );
+
+            // 2. Empty leading argv[0] = "" across all 8 residues: refuses fail-closed,
+            // never shifting SECRET_ENV into argv.
+            let empty_argv0_buf = build_procargs2_64(
+                &exec_path,
+                2,
+                &[b"", b"arg1"],
+                &[b"SECRET_ENV=NEVER_IN_ARGV"],
+            );
+            let err = parse_procargs2_argv_64(&empty_argv0_buf, MAX_ARGUMENTS_RAW_BYTES)
+                .expect_err("empty argv[0] must refuse fail-closed");
+            assert_eq!(err, "ambiguous-kern-procargs2-padding");
+
+            // 3. Later empty arguments and non-UTF-8 bytes are preserved verbatim.
+            let later_empty_buf = build_procargs2_64(
+                &exec_path,
+                4,
+                &[b"prog", b"", b"\xff\xfe", b""],
+                &[b"SECRET_ENV=NEVER_IN_ARGV"],
+            );
+            let parsed_later = parse_procargs2_argv_64(&later_empty_buf, MAX_ARGUMENTS_RAW_BYTES)
+                .expect("later empty args must succeed");
+            assert_eq!(
+                parsed_later,
+                vec![&b"prog"[..], &b""[..], &b"\xff\xfe"[..], &b""[..]]
+            );
+
+            // 4. argc == 0 never inspects argv[0] or consumes environment bytes.
+            let argc_zero_buf =
+                build_procargs2_64(&exec_path, 0, &[], &[b"SECRET_ENV=NEVER_IN_ARGV"]);
+            let parsed_zero = parse_procargs2_argv_64(&argc_zero_buf, MAX_ARGUMENTS_RAW_BYTES)
+                .expect("argc=0 must succeed");
+            assert!(parsed_zero.is_empty());
+
+            let mut argc_zero_with_nul = build_procargs2_64(&exec_path, 0, &[], &[]);
+            argc_zero_with_nul.extend_from_slice(b"\0SECRET_ENV=NEVER\0");
+            assert!(
+                parse_procargs2_argv_64(&argc_zero_with_nul, MAX_ARGUMENTS_RAW_BYTES)
+                    .expect("argc=0 with trailing NUL/env must succeed")
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn procargs2_64_parser_rejects_malformed_negative_truncated_nonzero_padding_and_cap() {
+        // Too short (< 4 bytes)
+        assert_eq!(
+            parse_procargs2_argv_64(&[1, 0, 0], MAX_ARGUMENTS_RAW_BYTES),
+            Err("malformed-kern-procargs2")
+        );
+        // Oversized buffer and zero cap
+        let small_valid = build_procargs2_64(b"/bin/ls", 1, &[b"ls"], &[]);
+        assert_eq!(
+            parse_procargs2_argv_64(&small_valid, 0),
+            Err("arguments-exceed-cap")
+        );
+        assert_eq!(
+            parse_procargs2_argv_64(&small_valid, small_valid.len() - 1),
+            Err("arguments-exceed-cap")
+        );
+        // Negative argc
+        for neg in [-1i32, i32::MIN] {
+            let neg_buf = build_procargs2_64(b"/bin/ls", neg, &[b"ls"], &[]);
+            assert_eq!(
+                parse_procargs2_argv_64(&neg_buf, MAX_ARGUMENTS_RAW_BYTES),
+                Err("negative-kern-procargs2-argc")
+            );
+        }
+        // Empty or unterminated exec_path
+        let empty_exec = build_procargs2_64(b"", 1, &[b"ls"], &[]);
+        assert_eq!(
+            parse_procargs2_argv_64(&empty_exec, MAX_ARGUMENTS_RAW_BYTES),
+            Err("malformed-kern-procargs2-execpath")
+        );
+        assert_eq!(
+            parse_procargs2_argv_64(
+                b"\x01\x00\x00\x00/bin/unterminated",
+                MAX_ARGUMENTS_RAW_BYTES
+            ),
+            Err("malformed-kern-procargs2-execpath")
+        );
+        // Truncated alignment padding (exec_path = "/a", len 2 -> path_with_nul 3 -> needs 5 extra NULs = 12 total)
+        assert_eq!(
+            parse_procargs2_argv_64(b"\x00\x00\x00\x00/a\x00\x00", MAX_ARGUMENTS_RAW_BYTES),
+            Err("truncated-kern-procargs2-padding")
+        );
+        // Nonzero byte inside bounded alignment padding
+        let mut bad_pad = build_procargs2_64(b"/a", 1, &[b"a"], &[]);
+        bad_pad[8] = b'X'; // inside [6..12) padding region
+        assert_eq!(
+            parse_procargs2_argv_64(&bad_pad, MAX_ARGUMENTS_RAW_BYTES),
+            Err("malformed-kern-procargs2-padding")
+        );
+        // Truncated argv (argc=2 but only 1 arg present)
+        let trunc_argv = build_procargs2_64(b"/bin/ls", 2, &[b"ls"], &[]);
+        assert_eq!(
+            parse_procargs2_argv_64(&trunc_argv, MAX_ARGUMENTS_RAW_BYTES),
+            Err("truncated-kern-procargs2-argv")
+        );
+        // Unterminated argument slice
+        let mut unterm_arg = build_procargs2_64(b"/bin/ls", 1, &[b"ls"], &[]);
+        unterm_arg.pop(); // remove final NUL
+        assert_eq!(
+            parse_procargs2_argv_64(&unterm_arg, MAX_ARGUMENTS_RAW_BYTES),
+            Err("unterminated-kern-procargs2-arg")
+        );
     }
 }

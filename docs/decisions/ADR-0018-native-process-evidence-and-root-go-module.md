@@ -113,6 +113,39 @@ importing packages directly under `github.com/3leaps/sysprims/...`.
    digests, refusal codes, and evaluation results between `sysprims-evidence`
    and `github.com/3leaps/sysprims/evidence`.
 
+### 3. Platform Collector Confinement and Qualification Boundaries
+
+1. **Linux procfs mount-confinement boundary (`RESOLVE_NO_XDEV`)**:
+   - All procfs subpaths under the verified `/proc` root descriptor (including
+     `sys/kernel/random/boot_id`, `sys/kernel/overflowuid`, and
+     `sys/kernel/overflowgid`) are opened with `openat2` Class B flags
+     (`RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`).
+   - Standard OCI container runtimes that mask or remount `/proc/sys` via
+     `readonlyPaths` bind mounts introduce a mount-ID boundary beneath `/proc`,
+     causing `openat2` to return `EXDEV` and the collector to refuse fail-closed
+     with `procfs-confinement-violation`. Unmasked host and root-procfs
+     environments satisfy single-mount procfs confinement directly; container
+     submount qualification requires an explicit future profile revision rather
+     than relaxing `RESOLVE_NO_XDEV`.
+2. **macOS 64-bit `KERN_PROCARGS2` pointer-alignment boundary**:
+   - Live `arguments_digest` collection via `sysctl` `KERN_PROCARGS2` is
+     qualified for 64-bit Darwin (`macos/aarch64` and `macos/x86_64`) against
+     64-bit targets (`kinfo_proc.kp_proc.p_flag & P_LP64 != 0`); targets outside
+     that cell report `status: "unsupported"` (`unqualified-kern-procargs2-layout`).
+   - Under 64-bit XNU (`exec_save_path`), `exec_path + '\0'` is NUL-padded to an
+     8-byte boundary (`4 + align_up(exec_path_len + 1, 8)`) before `argv[0]`.
+     When `argc > 0` and the byte at that boundary is `0x00` (empty `argv[0]`),
+     both Rust and Go collectors refuse `arguments_digest` fail-closed with
+     `status: "error"`, `reason: "ambiguous-kern-procargs2-padding"` rather than
+     scanning past leading NUL bytes into subsequent arguments or environment
+     strings.
+3. **Continuity-handle representation**:
+   - Rust `ProcessContinuityHandle` implements manual `Debug` formatting that
+     redacts internal `kqueue`/`pidfd` descriptor numbers.
+   - Go `ProcessContinuityHandle` stores mutable state and mutexes behind an
+     unexported pointer indirection and refuses `json.Marshal`, `json.Unmarshal`,
+     `MarshalText`, and `UnmarshalText` on both value and pointer forms.
+
 ## Consequences
 
 ### Positive

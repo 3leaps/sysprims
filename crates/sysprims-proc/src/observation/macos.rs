@@ -3,7 +3,9 @@
 //! macOS (`macos/aarch64`, `macos/x86_64`) collector and `kqueue` `EVFILT_PROC`
 //! `NOTE_EXIT` continuity handle for `native-process-observation:v0`.
 
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, OsStr};
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -26,6 +28,7 @@ use super::{
 const KINFO_PROC_SIZE_64: usize = 648;
 const OFF_P_STARTTIME_SEC: usize = 0;
 const OFF_P_STARTTIME_USEC: usize = 8;
+const OFF_P_FLAG: usize = 32;
 const OFF_P_STAT: usize = 36;
 const OFF_P_PID: usize = 40;
 const OFF_P_RUID: usize = 392;
@@ -33,6 +36,8 @@ const OFF_P_RGID: usize = 400;
 const OFF_CR_UID: usize = 420;
 const OFF_CR_NGROUPS: usize = 424;
 const OFF_CR_GROUPS0: usize = 428;
+
+const P_LP64: u32 = 0x0000_0004;
 
 const SIDL: u8 = 1;
 const SRUN: u8 = 2;
@@ -77,10 +82,18 @@ impl OwnedFd {
     }
 }
 
-#[derive(Debug)]
 pub(super) struct PlatformHandle {
     kq_fd: c_int,
     exited: AtomicBool,
+}
+
+impl std::fmt::Debug for PlatformHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlatformHandle")
+            .field("backend", &"macos-kqueue")
+            .field("exited", &self.exited.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for PlatformHandle {
@@ -94,6 +107,19 @@ impl Drop for PlatformHandle {
 }
 
 impl PlatformHandle {
+    #[cfg(test)]
+    pub(super) fn new_sentinel_for_debug_test(fd: c_int) -> Self {
+        Self {
+            kq_fd: fd,
+            exited: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn disarm_for_debug_test(&mut self) {
+        self.kq_fd = -1;
+    }
+
     pub(super) fn poll_exited(&self) -> Result<bool, CollectorRefusal> {
         self.wait_exit(Duration::ZERO)
     }
@@ -183,6 +209,7 @@ impl ProcState {
 struct KinfoSnapshot {
     start_identity: String,
     state: ProcState,
+    is_lp64: bool,
     principal: Result<String, &'static str>,
 }
 
@@ -278,6 +305,7 @@ fn read_kinfo_proc(pid: u32) -> KinfoOutcome {
             .try_into()
             .unwrap(),
     );
+    let p_flag = u32::from_ne_bytes(buf[OFF_P_FLAG..OFF_P_FLAG + 4].try_into().unwrap());
     let p_stat = buf[OFF_P_STAT];
     let p_pid = i32::from_ne_bytes(buf[OFF_P_PID..OFF_P_PID + 4].try_into().unwrap());
     let p_ruid = u32::from_ne_bytes(buf[OFF_P_RUID..OFF_P_RUID + 4].try_into().unwrap());
@@ -312,6 +340,7 @@ fn read_kinfo_proc(pid: u32) -> KinfoOutcome {
     KinfoOutcome::Observed(KinfoSnapshot {
         start_identity: format!("{tv_sec}.{tv_usec:06}"),
         state,
+        is_lp64: (p_flag & P_LP64) != 0,
         principal,
     })
 }
@@ -363,54 +392,12 @@ fn read_procargs2_raw(pid: u32, max_bytes: usize) -> Result<Vec<u8>, (i32, &'sta
     Ok(buf)
 }
 
-fn parse_procargs2_argv(buf: &[u8]) -> Result<Vec<&[u8]>, &'static str> {
-    if buf.len() < 4 {
-        return Err("malformed-kern-procargs2");
+fn probe_macos_arguments_digest(pid: u32, is_zombie: bool, is_lp64: bool) -> Value {
+    if !matches!(observer_architecture(), "aarch64" | "x86_64") || !is_lp64 {
+        return fact_non_observed("unsupported", "unqualified-kern-procargs2-layout");
     }
-    let argc = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    if argc < 0 {
-        return Err("negative-kern-procargs2-argc");
-    }
-    let argc_usize = argc as usize;
-    if argc_usize > MAX_ARGUMENTS_RAW_BYTES {
-        return Err("arguments-exceed-cap");
-    }
-    // Skip exec_path NUL-terminated string starting at offset 4.
-    let mut pos = 4usize;
-    while pos < buf.len() && buf[pos] != 0 {
-        pos += 1;
-    }
-    if pos == 4 || pos >= buf.len() {
-        return Err("malformed-kern-procargs2-execpath");
-    }
-    // Skip alignment/padding NUL bytes after exec_path.
-    while pos < buf.len() && buf[pos] == 0 {
-        pos += 1;
-    }
-    if argc_usize == 0 {
-        return Ok(Vec::new());
-    }
-    let mut argv = Vec::with_capacity(argc_usize.min(256));
-    for _ in 0..argc_usize {
-        if pos >= buf.len() {
-            return Err("truncated-kern-procargs2-argv");
-        }
-        let start = pos;
-        while pos < buf.len() && buf[pos] != 0 {
-            pos += 1;
-        }
-        if pos >= buf.len() {
-            return Err("unterminated-kern-procargs2-arg");
-        }
-        argv.push(&buf[start..pos]);
-        pos += 1; // consume terminating NUL
-    }
-    Ok(argv)
-}
-
-fn probe_macos_arguments_digest(pid: u32, is_zombie: bool) -> Value {
     match read_procargs2_raw(pid, MAX_ARGUMENTS_RAW_BYTES) {
-        Ok(buf) => match parse_procargs2_argv(&buf) {
+        Ok(buf) => match super::parse_procargs2_argv_64(&buf, MAX_ARGUMENTS_RAW_BYTES) {
             Ok(argv) => digest_observed(ARGV_DIGEST_DERIVATION_ID, derive_arguments_digest(&argv)),
             Err(reason) => fact_non_observed("error", reason),
         },
@@ -428,7 +415,13 @@ fn probe_macos_arguments_digest(pid: u32, is_zombie: bool) -> Value {
     }
 }
 
-fn resolve_macos_exec_path(pid: u32) -> Result<CString, (i32, &'static str)> {
+enum ExecPathResolution {
+    Resolved(CString),
+    BackingOpenError(i32),
+    PidResolutionError(i32, &'static str),
+}
+
+fn resolve_macos_exec_path(pid: u32) -> ExecPathResolution {
     let mut path_buf = [0u8; MACOS_PROC_PIDPATH_MAX];
     let rc = unsafe {
         proc_pidpath(
@@ -440,33 +433,47 @@ fn resolve_macos_exec_path(pid: u32) -> Result<CString, (i32, &'static str)> {
     if rc > 0 {
         if let Ok(cstr) = CStr::from_bytes_until_nul(&path_buf) {
             if !cstr.to_bytes().is_empty() && cstr.to_bytes()[0] == b'/' {
-                return Ok(cstr.to_owned());
+                return ExecPathResolution::Resolved(cstr.to_owned());
             }
         }
     }
     let pidpath_errno = last_errno();
 
-    // Fallback to KERN_PROCARGS2 exec_path when proc_pidpath did not resolve.
+    // Fallback to KERN_PROCARGS2 exec_path when proc_pidpath did not resolve,
+    // canonicalizing symlinks before opening with O_NOFOLLOW | O_NONBLOCK.
     if let Ok(buf) = read_procargs2_raw(pid, 1_048_576) {
         if buf.len() > 4 {
             if let Some(nul_off) = buf[4..].iter().position(|&b| b == 0) {
                 let exec_slice = &buf[4..4 + nul_off];
                 if !exec_slice.is_empty() && exec_slice[0] == b'/' {
-                    if let Ok(cstr) = CString::new(exec_slice) {
-                        return Ok(cstr);
+                    match std::fs::canonicalize(Path::new(OsStr::from_bytes(exec_slice))) {
+                        Ok(canon) => {
+                            if let Ok(cstr) = CString::new(canon.as_os_str().as_bytes()) {
+                                return ExecPathResolution::Resolved(cstr);
+                            }
+                            return ExecPathResolution::BackingOpenError(libc::EINVAL);
+                        }
+                        Err(err) => {
+                            return ExecPathResolution::BackingOpenError(
+                                err.raw_os_error().unwrap_or(libc::EIO),
+                            );
+                        }
                     }
                 }
             }
         }
     }
 
-    Err((pidpath_errno, "proc-pidpath-failed"))
+    ExecPathResolution::PidResolutionError(pidpath_errno, "proc-pidpath-failed")
 }
 
 fn probe_macos_executable_digest(pid: u32, is_zombie: bool) -> Value {
     let c_path = match resolve_macos_exec_path(pid) {
-        Ok(p) => p,
-        Err((errno, reason)) => {
+        ExecPathResolution::Resolved(p) => p,
+        ExecPathResolution::BackingOpenError(errno) => {
+            return errno_to_digest_fact(errno, "executable-open-failed");
+        }
+        ExecPathResolution::PidResolutionError(errno, reason) => {
             return match errno {
                 libc::EPERM | libc::EACCES => {
                     fact_non_observed("inaccessible", "proc-pidpath-denied")
@@ -481,7 +488,12 @@ fn probe_macos_executable_digest(pid: u32, is_zombie: bool) -> Value {
     };
 
     let fd = loop {
-        let rc = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+        let rc = unsafe {
+            libc::open(
+                c_path.as_ptr(),
+                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+            )
+        };
         if rc >= 0 {
             break rc;
         }
@@ -666,7 +678,7 @@ pub(super) fn observe_process_impl(
                     fact_non_observed("not-probed", DEFAULT_NOT_PROBED_REASON)
                 };
                 let args_fact = if options.include_arguments_digest {
-                    probe_macos_arguments_digest(pid, is_zombie)
+                    probe_macos_arguments_digest(pid, is_zombie, snap0.is_lp64)
                 } else {
                     fact_non_observed("not-probed", DEFAULT_NOT_PROBED_REASON)
                 };
@@ -841,7 +853,7 @@ pub(super) fn open_continuity_handle_impl(
         fact_non_observed("not-probed", DEFAULT_NOT_PROBED_REASON)
     };
     let args_fact = if options.include_arguments_digest {
-        probe_macos_arguments_digest(pid, false)
+        probe_macos_arguments_digest(pid, false, snap0.is_lp64)
     } else {
         fact_non_observed("not-probed", DEFAULT_NOT_PROBED_REASON)
     };

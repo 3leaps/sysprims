@@ -5,6 +5,7 @@
 package procobserve_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -192,6 +193,16 @@ func TestContinuityHandleLiveZombieReapedAndPIDReuse(t *testing.T) {
 	if handle.PID() != pid {
 		t.Fatalf("PID() = %d, want %d", handle.PID(), pid)
 	}
+	// Live value/pointer JSON and text serialization/deserialization must refuse without clobbering state.
+	_, mValErr := json.Marshal(*handle)
+	assertRefusalCode(t, mValErr, "continuity-handle-not-serializable")
+	_, mPtrErr := json.Marshal(handle)
+	assertRefusalCode(t, mPtrErr, "continuity-handle-not-serializable")
+	assertRefusalCode(t, json.Unmarshal([]byte(`{}`), handle), "continuity-handle-not-serializable")
+	_, mtErr := (*handle).MarshalText()
+	assertRefusalCode(t, mtErr, "continuity-handle-not-serializable")
+	assertRefusalCode(t, handle.UnmarshalText([]byte("bad")), "continuity-handle-not-serializable")
+
 	exited, err := handle.PollExited()
 	if err != nil || exited {
 		t.Fatalf("alive child PollExited() = (%v, %v), want (false, nil)", exited, err)
@@ -274,7 +285,7 @@ func TestContinuityHandleLiveZombieReapedAndPIDReuse(t *testing.T) {
 		t.Fatalf("expected not-present refusal reopening reaped PID, got %v", reopenErr)
 	}
 
-	// Close is idempotent; WaitExit after Close refuses.
+	// Close is idempotent; WaitExit, Reobserve, and Reverify after Close refuse.
 	if err := handle.Close(); err != nil {
 		t.Fatalf("first Close: %v", err)
 	}
@@ -283,6 +294,10 @@ func TestContinuityHandleLiveZombieReapedAndPIDReuse(t *testing.T) {
 	}
 	_, closedWaitErr := handle.WaitExit(0)
 	assertRefusalCode(t, closedWaitErr, "continuity-handle-closed")
+	_, closedReobsErr := handle.Reobserve("2026-11-06T12:00:04Z")
+	assertRefusalCode(t, closedReobsErr, "continuity-handle-closed")
+	_, _, closedRevErr := handle.Reverify(strictPolicy, "2026-11-06T12:00:04Z")
+	assertRefusalCode(t, closedRevErr, "continuity-handle-closed")
 
 	// PID reuse check using a distinct live child incarnation placed at the baseline PID.
 	child2 := spawnOwnedSleep(t)

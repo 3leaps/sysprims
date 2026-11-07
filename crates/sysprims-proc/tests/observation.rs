@@ -526,4 +526,152 @@ mod unix_qualification {
         let _ = done_tx.send(());
         worker.join().expect("join worker thread");
     }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_symlinked_executable_and_live_empty_argv0_all_eight_residues() {
+        use std::ffi::{CStr, CString};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::symlink;
+        use std::path::PathBuf;
+
+        struct ScopedTempDir(PathBuf);
+        impl ScopedTempDir {
+            fn new() -> Self {
+                let mut tmpl = std::env::temp_dir();
+                tmpl.push("sysprims-obs-XXXXXX");
+                let mut raw = tmpl.as_os_str().as_bytes().to_vec();
+                raw.push(0);
+                let ptr = unsafe { libc::mkdtemp(raw.as_mut_ptr() as *mut libc::c_char) };
+                assert!(!ptr.is_null(), "mkdtemp failed");
+                let cstr = unsafe { CStr::from_ptr(ptr) };
+                Self(PathBuf::from(std::ffi::OsStr::from_bytes(cstr.to_bytes())))
+            }
+            fn path(&self) -> &Path {
+                &self.0
+            }
+        }
+        impl Drop for ScopedTempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let sleep_path = ["/bin/sleep", "/usr/bin/sleep"]
+            .into_iter()
+            .find(|p| Path::new(p).exists())
+            .expect("sleep binary present at /bin/sleep or /usr/bin/sleep");
+        let expected_exe_digest =
+            derive_executable_digest(&std::fs::read(sleep_path).expect("read sleep binary"));
+
+        let tmp = ScopedTempDir::new();
+        let hs = sample_host_scope();
+        let opts = ObservationOptions {
+            observed_at: Some("2026-11-06T12:00:00Z".to_string()),
+            ..ObservationOptions::default()
+        }
+        .with_all_context_facts();
+
+        // 1. Symlinked executable resolves cleanly and hashes target image under O_NOFOLLOW | O_NONBLOCK.
+        let sym_path = tmp.path().join("sleep-symlink");
+        symlink(sleep_path, &sym_path).expect("create sleep symlink");
+        let mut sym_child = Command::new(&sym_path)
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn symlink child");
+        let sym_obs = observe_process(sym_child.id(), &hs, &opts).expect("observe symlink child");
+        let _ = sym_child.kill();
+        let _ = sym_child.wait();
+
+        assert_eq!(
+            sym_obs["process"]["execution_context"]["executable_digest"]["status"],
+            "observed"
+        );
+        assert_eq!(
+            sym_obs["process"]["execution_context"]["executable_digest"]["digest"],
+            expected_exe_digest
+        );
+        let expected_sym_args = derive_arguments_digest(&[sym_path.as_os_str().as_bytes(), b"30"]);
+        assert_eq!(
+            sym_obs["process"]["execution_context"]["arguments_digest"]["status"],
+            "observed"
+        );
+        assert_eq!(
+            sym_obs["process"]["execution_context"]["arguments_digest"]["digest"],
+            expected_sym_args
+        );
+
+        // 2. Live kernel execve with empty argv[0] = "" across all 8 exec_path length residues
+        // refuses arguments_digest fail-closed with ambiguous-kern-procargs2-padding without
+        // consuming subsequent argv or SECRET_ENV bytes.
+        for residue in 0..8usize {
+            let base_name = format!("s{}", "x".repeat(residue));
+            let mut link_path = tmp.path().join(base_name);
+            let cur_len = link_path.as_os_str().as_bytes().len();
+            let extra = (8 + residue - (cur_len % 8)) % 8;
+            if extra > 0 {
+                let mut os = link_path.into_os_string();
+                os.push("y".repeat(extra));
+                link_path = std::path::PathBuf::from(os);
+            }
+            assert_eq!(link_path.as_os_str().as_bytes().len() % 8, residue);
+            symlink(sleep_path, &link_path).expect("create residue symlink");
+
+            let c_exec = CString::new(link_path.as_os_str().as_bytes()).expect("c_exec");
+            let c_arg0 = CString::new("").expect("empty arg0");
+            let c_arg1 = CString::new("30").expect("arg1");
+            let c_env0 = CString::new("SECRET_ENV=NEVER_IN_ARGV").expect("env0");
+            let argv_ptrs: [*const libc::c_char; 3] =
+                [c_arg0.as_ptr(), c_arg1.as_ptr(), std::ptr::null()];
+            let envp_ptrs: [*const libc::c_char; 2] = [c_env0.as_ptr(), std::ptr::null()];
+
+            let raw_pid = unsafe { libc::fork() };
+            assert!(raw_pid >= 0, "fork failed for residue {residue}");
+            if raw_pid == 0 {
+                unsafe {
+                    libc::execve(c_exec.as_ptr(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
+                    libc::_exit(127);
+                }
+            }
+
+            // Wait briefly until child has completed execve into sleep (or observe directly
+            // once exec image matches sleep_path).
+            let child_pid = raw_pid as u32;
+            let mut final_obs = None;
+            for _ in 0..50 {
+                let obs =
+                    observe_process(child_pid, &hs, &opts).expect("observe empty-argv0 child");
+                if obs["process"]["execution_context"]["executable_digest"]["digest"]
+                    == expected_exe_digest
+                {
+                    final_obs = Some(obs);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            unsafe {
+                let _ = libc::kill(raw_pid, libc::SIGKILL);
+                let mut status: libc::c_int = 0;
+                let _ = libc::waitpid(raw_pid, &mut status, 0);
+            }
+
+            let obs = final_obs.expect("child completed execve into sleep");
+            assert_eq!(
+                obs["process"]["execution_context"]["arguments_digest"],
+                json!({
+                    "status": "error",
+                    "reason": "ambiguous-kern-procargs2-padding",
+                }),
+                "residue {residue} must refuse empty argv[0] fail-closed"
+            );
+            assert_eq!(
+                obs["process"]["execution_context"]["executable_digest"]["digest"],
+                expected_exe_digest
+            );
+        }
+    }
 }

@@ -9,10 +9,25 @@ use serde_json::Value;
 
 use super::{CollectorRefusal, ObservationOptions};
 
-#[derive(Debug)]
 pub(super) struct PlatformHandle;
 
+impl std::fmt::Debug for PlatformHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlatformHandle")
+            .field("backend", &"unsupported")
+            .finish_non_exhaustive()
+    }
+}
+
 impl PlatformHandle {
+    #[cfg(test)]
+    pub(super) fn new_sentinel_for_debug_test(_fd: i32) -> Self {
+        Self
+    }
+
+    #[cfg(test)]
+    pub(super) fn disarm_for_debug_test(&mut self) {}
+
     pub(super) fn poll_exited(&self) -> Result<bool, CollectorRefusal> {
         Err(unqualified_refusal())
     }

@@ -531,10 +531,10 @@ pub fn validate_observation_shape(obs: &Value) -> Result<(), EvidenceError> {
     };
     if !check_allowed_keys(obj, &["profile", "observed_at", "observer", "process"], &[])
         || !obj.get("profile").is_some_and(is_profile_ref_obj)
-        || !obj
+        || obj
             .get("observed_at")
             .and_then(Value::as_str)
-            .is_some_and(|s| parse_strict_utc_unix(s).is_some())
+            .is_none_or(|s| parse_strict_utc_unix(s).is_none())
     {
         return Err(err_obs_shape());
     }

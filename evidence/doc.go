@@ -59,9 +59,10 @@ func RefusalCode(err error) (string, bool) {
 	return "", false
 }
 
-// ParseStrictUTCUnix parses a strict YYYY-MM-DDTHH:MM:SSZ UTC instant into
-// Unix whole seconds, rejecting sub-second fractions, non-Z offsets, lowercase
-// t/z, leap-second 60, and invalid calendar dates.
+// ParseStrictUTCUnix parses a strict YYYY-MM-DDTHH:MM:SSZ UTC instant (years
+// 0001..=9999) into Unix whole seconds, rejecting year 0000, sub-second
+// fractions, non-Z offsets, lowercase t/z, leap-second 60, and invalid
+// calendar dates.
 func ParseStrictUTCUnix(text string) (int64, bool) {
 	if len(text) != 20 {
 		return 0, false
@@ -71,6 +72,9 @@ func ParseStrictUTCUnix(text string) (int64, bool) {
 		if text[idx] < '0' || text[idx] > '9' {
 			return 0, false
 		}
+	}
+	if text[0:4] == "0000" {
+		return 0, false
 	}
 	if text[4] != '-' || text[7] != '-' || text[10] != 'T' || text[13] != ':' || text[16] != ':' || text[19] != 'Z' {
 		return 0, false

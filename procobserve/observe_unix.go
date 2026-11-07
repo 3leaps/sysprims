@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 
 	"github.com/3leaps/sysprims/evidence"
 	"golang.org/x/sys/unix"
@@ -91,10 +92,10 @@ func digestObserved(derivationID, digest string) map[string]any {
 }
 
 func errnoToDigestFact(err error, fallbackReason string) map[string]any {
-	if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+	if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, os.ErrPermission) {
 		return factNonObserved("inaccessible", "permission-denied")
 	}
-	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
+	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) || errors.Is(err, os.ErrNotExist) {
 		return factNonObserved("not-present", "backing-entry-absent")
 	}
 	return factNonObserved("error", fallbackReason)

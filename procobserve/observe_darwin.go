@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ const (
 	kinfoProcSize64   = 648
 	offPStarttimeSec  = 0
 	offPStarttimeUsec = 8
+	offPFlag          = 32
 	offPStat          = 36
 	offPPID           = 40
 	offPRuid          = 392
@@ -29,6 +32,8 @@ const (
 	offCrUID          = 420
 	offCrNgroups      = 424
 	offCrGroups0      = 428
+
+	darwinPLP64 uint32 = 0x4
 
 	darwinSIDL   byte = 1
 	darwinSRUN   byte = 2
@@ -104,6 +109,7 @@ func (p *platformHandle) waitExit(timeout time.Duration) (bool, error) {
 type kinfoSnapshot struct {
 	startIdentity   string
 	state           string
+	isLP64          bool
 	principalValue  string
 	principalErrStr string
 }
@@ -152,6 +158,7 @@ func readKinfoProc(pid uint32) kinfoOutcome {
 
 	tvSecBits := binary.LittleEndian.Uint64(buf[offPStarttimeSec : offPStarttimeSec+8])
 	tvUsecBits := binary.LittleEndian.Uint32(buf[offPStarttimeUsec : offPStarttimeUsec+4])
+	pFlag := binary.LittleEndian.Uint32(buf[offPFlag : offPFlag+4])
 	pStat := buf[offPStat]
 	pPIDBits := binary.LittleEndian.Uint32(buf[offPPID : offPPID+4])
 	pRuid := binary.LittleEndian.Uint32(buf[offPRuid : offPRuid+4])
@@ -182,6 +189,7 @@ func readKinfoProc(pid uint32) kinfoOutcome {
 	snap := kinfoSnapshot{
 		startIdentity: fmt.Sprintf("%s.%06d", strconv.FormatUint(tvSecBits, 10), tvUsecBits),
 		state:         state,
+		isLP64:        (pFlag & darwinPLP64) != 0,
 	}
 	if crNgroupsBits == 0 || crNgroupsBits > 0x7fff {
 		snap.principalErrStr = "empty-kinfo-groups"
@@ -191,48 +199,10 @@ func readKinfoProc(pid uint32) kinfoOutcome {
 	return kinfoOutcome{status: "observed", snapshot: snap}
 }
 
-func parseProcargs2Argv(buf []byte) ([][]byte, string) {
-	if len(buf) < 4 {
-		return nil, "malformed-kern-procargs2"
+func probeMacOSArgumentsDigest(pid uint32, isZombie bool, isLP64 bool) map[string]any {
+	if (runtime.GOARCH != "arm64" && runtime.GOARCH != "amd64") || !isLP64 {
+		return factNonObserved("unsupported", "unqualified-kern-procargs2-layout")
 	}
-	argcBits := binary.LittleEndian.Uint32(buf[0:4])
-	if argcBits > 262_144 {
-		return nil, "arguments-exceed-cap"
-	}
-	argc := int(argcBits)
-
-	pos := 4
-	for pos < len(buf) && buf[pos] != 0 {
-		pos++
-	}
-	if pos == 4 || pos >= len(buf) {
-		return nil, "malformed-kern-procargs2-execpath"
-	}
-	for pos < len(buf) && buf[pos] == 0 {
-		pos++
-	}
-	if argc == 0 {
-		return [][]byte{}, ""
-	}
-	argv := make([][]byte, 0, min(argc, 256))
-	for i := 0; i < argc; i++ {
-		if pos >= len(buf) {
-			return nil, "truncated-kern-procargs2-argv"
-		}
-		start := pos
-		for pos < len(buf) && buf[pos] != 0 {
-			pos++
-		}
-		if pos >= len(buf) {
-			return nil, "unterminated-kern-procargs2-arg"
-		}
-		argv = append(argv, buf[start:pos])
-		pos++
-	}
-	return argv, ""
-}
-
-func probeMacOSArgumentsDigest(pid uint32, isZombie bool) map[string]any {
 	buf, err := unix.SysctlRaw("kern.procargs2", int(pid))
 	if err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
@@ -258,7 +228,7 @@ func probeMacOSArgumentsDigest(pid uint32, isZombie bool) map[string]any {
 	if len(buf) > MaxArgumentsRawBytes {
 		return factNonObserved("error", "arguments-exceed-cap")
 	}
-	argv, reason := parseProcargs2Argv(buf)
+	argv, reason := parseProcargs2Argv64(buf, MaxArgumentsRawBytes)
 	if reason != "" {
 		return factNonObserved("error", reason)
 	}
@@ -296,11 +266,14 @@ func probeMacOSExecutableDigest(pid uint32, isZombie bool) map[string]any {
 	if execBytes[0] != '/' {
 		return factNonObserved("error", "relative-exec-path-unsupported")
 	}
-	execPath := string(execBytes)
+	resolvedPath, err := filepath.EvalSymlinks(string(execBytes))
+	if err != nil {
+		return errnoToDigestFact(err, "executable-open-failed")
+	}
 
 	var fd int
 	for {
-		fd, err = unix.Open(execPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		fd, err = unix.Open(resolvedPath, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 		if err == nil {
 			break
 		}
@@ -436,7 +409,7 @@ func observeProcessPlatform(pid uint32, hostScopeMap map[string]any, opts Observ
 			}
 			argsFact := factNonObserved("not-probed", defaultNotProbedReason)
 			if opts.IncludeArgumentsDigest {
-				argsFact = probeMacOSArgumentsDigest(pid, isZombie)
+				argsFact = probeMacOSArgumentsDigest(pid, isZombie, snap0.isLP64)
 			}
 
 			boot1, err := readBootSessionUUID()
@@ -500,13 +473,15 @@ func openContinuityHandlePlatform(pid uint32, hostScopeMap map[string]any, opts 
 	if err != nil {
 		return nil, nil, newErrorRefusal("kqueue-create-failed", fmt.Sprintf("kqueue() failed: %v", err))
 	}
-	unix.CloseOnExec(kq)
 	keepFD := false
 	defer func() {
 		if !keepFD {
 			_ = unix.Close(kq)
 		}
 	}()
+	if _, err := unix.FcntlInt(uintptr(kq), unix.F_SETFD, unix.FD_CLOEXEC); err != nil {
+		return nil, nil, newErrorRefusal("kqueue-cloexec-failed", fmt.Sprintf("fcntl(FD_CLOEXEC) failed: %v", err))
+	}
 
 	changes := [1]unix.Kevent_t{{
 		Ident:  uint64(pid),
@@ -548,7 +523,7 @@ func openContinuityHandlePlatform(pid uint32, hostScopeMap map[string]any, opts 
 	}
 	argsFact := factNonObserved("not-probed", defaultNotProbedReason)
 	if opts.IncludeArgumentsDigest {
-		argsFact = probeMacOSArgumentsDigest(pid, false)
+		argsFact = probeMacOSArgumentsDigest(pid, false, snap0.isLP64)
 	}
 
 	boot1, err := readBootSessionUUID()

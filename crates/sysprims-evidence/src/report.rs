@@ -238,10 +238,10 @@ fn validate_time_attribution_obj(v: &Value) -> bool {
     if !check_allowed_keys(obj, &["instant", "source"], &["evidence"]) {
         return false;
     }
-    if !obj
+    if obj
         .get("instant")
         .and_then(Value::as_str)
-        .is_some_and(|s| parse_strict_utc_unix(s).is_some())
+        .is_none_or(|s| parse_strict_utc_unix(s).is_none())
     {
         return false;
     }
@@ -309,10 +309,10 @@ pub fn validate_report_shape(report: &Value) -> Result<(), EvidenceError> {
     {
         return Err(err_shape());
     }
-    if !obj
+    if obj
         .get("created_at")
         .and_then(Value::as_str)
-        .is_some_and(|s| parse_strict_utc_unix(s).is_some())
+        .is_none_or(|s| parse_strict_utc_unix(s).is_none())
     {
         return Err(err_shape());
     }
@@ -488,10 +488,10 @@ pub fn validate_report_shape(report: &Value) -> Result<(), EvidenceError> {
                 .get("collector")
                 .and_then(Value::as_str)
                 .is_some_and(is_nonempty_512)
-            || !eo
+            || eo
                 .get("collected_at")
                 .and_then(Value::as_str)
-                .is_some_and(|s| parse_strict_utc_unix(s).is_some())
+                .is_none_or(|s| parse_strict_utc_unix(s).is_none())
             || !eo
                 .get("digest")
                 .and_then(Value::as_str)
@@ -580,14 +580,14 @@ pub fn validate_report_shape(report: &Value) -> Result<(), EvidenceError> {
                 .and_then(Value::as_str)
                 .is_some_and(is_nonempty_512)
             || !ao.get("rule").is_some_and(is_profile_ref_obj)
-            || !ao
+            || ao
                 .get("assessed_at")
                 .and_then(Value::as_str)
-                .is_some_and(|s| parse_strict_utc_unix(s).is_some())
-            || !ao
+                .is_none_or(|s| parse_strict_utc_unix(s).is_none())
+            || ao
                 .get("valid_until")
                 .and_then(Value::as_str)
-                .is_some_and(|s| parse_strict_utc_unix(s).is_some())
+                .is_none_or(|s| parse_strict_utc_unix(s).is_none())
             || !ao
                 .get("evidence_refs")
                 .is_some_and(|x| validate_unique_local_id_array(x, 0, 256))
@@ -725,10 +725,10 @@ pub fn validate_report_shape(report: &Value) -> Result<(), EvidenceError> {
                 .get("reason")
                 .and_then(Value::as_str)
                 .is_some_and(is_nonempty_512)
-            || !co
+            || co
                 .get("observed_at")
                 .and_then(Value::as_str)
-                .is_some_and(|s| parse_strict_utc_unix(s).is_some())
+                .is_none_or(|s| parse_strict_utc_unix(s).is_none())
         {
             return Err(err_shape());
         }

@@ -298,3 +298,44 @@ func TestFullConformanceAndParitySuitePasses(t *testing.T) {
 		t.Fatalf("expected >= 280 NDJSON parity lines, got %d", len(lines))
 	}
 }
+
+func TestStrictUTCTimestampEnforcesPositiveFourDigitYearBounds(t *testing.T) {
+	if _, ok := evidence.ParseStrictUTCUnix("0000-01-01T00:00:00Z"); ok {
+		t.Fatal("year 0000 must be rejected")
+	}
+	if _, ok := evidence.ParseStrictUTCUnix("0000-10-29T12:00:00Z"); ok {
+		t.Fatal("year 0000 must be rejected")
+	}
+	if _, ok := evidence.ParseStrictUTCUnix("0001-01-01T00:00:00Z"); !ok {
+		t.Fatal("0001-01-01T00:00:00Z must be accepted")
+	}
+	if _, ok := evidence.ParseStrictUTCUnix("9999-12-31T23:59:59Z"); !ok {
+		t.Fatal("9999-12-31T23:59:59Z must be accepted")
+	}
+
+	root := corpusRoot(t)
+	rawObs, err := os.ReadFile(filepath.Join(root, "profiles", "native-process-observation", "evidence.linux.example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var linuxObs map[string]any
+	if err := json.Unmarshal(rawObs, &linuxObs); err != nil {
+		t.Fatal(err)
+	}
+	linuxObs["observed_at"] = "0000-10-29T12:00:00Z"
+	if code, _ := evidence.RefusalCode(evidence.ValidateObservationShape(linuxObs)); code != "invalid-observation-shape" {
+		t.Fatalf("expected invalid-observation-shape on year 0000 observed_at, got %q", code)
+	}
+	accepted := evidence.ProfileRef{
+		ID:       evidence.NativeProcessObservationProfileID,
+		Revision: evidence.NativeProcessObservationProfileRevision,
+	}
+	nowValid := "2026-10-29T12:00:00Z"
+	if code, _ := evidence.RefusalCode(evidence.AdmitLiveObservation(linuxObs, &nowValid, accepted, nil, nil)); code != "invalid-observed-at" {
+		t.Fatalf("expected invalid-observed-at, got %q", code)
+	}
+	nowZero := "0000-10-29T12:00:00Z"
+	if code, _ := evidence.RefusalCode(evidence.AdmitLiveObservation(linuxObs, &nowZero, accepted, nil, nil)); code != "trusted-clock-unavailable" {
+		t.Fatalf("expected trusted-clock-unavailable, got %q", code)
+	}
+}

@@ -75,10 +75,18 @@ impl OwnedFd {
     }
 }
 
-#[derive(Debug)]
 pub(super) struct PlatformHandle {
     pidfd: c_int,
     exited: AtomicBool,
+}
+
+impl std::fmt::Debug for PlatformHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlatformHandle")
+            .field("backend", &"linux-pidfd")
+            .field("exited", &self.exited.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for PlatformHandle {
@@ -92,6 +100,19 @@ impl Drop for PlatformHandle {
 }
 
 impl PlatformHandle {
+    #[cfg(test)]
+    pub(super) fn new_sentinel_for_debug_test(fd: c_int) -> Self {
+        Self {
+            pidfd: fd,
+            exited: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn disarm_for_debug_test(&mut self) {
+        self.pidfd = -1;
+    }
+
     pub(super) fn poll_exited(&self) -> Result<bool, CollectorRefusal> {
         self.wait_exit(Duration::ZERO)
     }
@@ -132,9 +153,15 @@ impl PlatformHandle {
                         "poll reported POLLNVAL on pidfd",
                     ));
                 }
-                if (pfd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR)) != 0 {
+                if (pfd.revents & (libc::POLLIN | libc::POLLHUP)) != 0 {
                     self.exited.store(true, Ordering::Release);
                     return Ok(true);
+                }
+                if (pfd.revents & libc::POLLERR) != 0 {
+                    return Err(CollectorRefusal::error(
+                        "pidfd-poll-error",
+                        "poll reported POLLERR on pidfd without exit readiness",
+                    ));
                 }
                 return Ok(false);
             }
@@ -998,8 +1025,7 @@ fn probe_linux_arguments_digest(pid_dir_fd: c_int) -> Result<Value, CollectorRef
     match read_fd_bytes_capped(fd.0, MAX_ARGUMENTS_RAW_BYTES) {
         Ok(raw) if raw.is_empty() => Ok(fact_non_observed("not-present", "empty-cmdline")),
         Ok(raw) => {
-            let trimmed = raw.strip_suffix(b"\0").unwrap_or(&raw);
-            let argv: Vec<&[u8]> = trimmed.split(|&b| b == 0).collect();
+            let argv = super::parse_linux_cmdline_argv(&raw);
             Ok(digest_observed(
                 ARGV_DIGEST_DERIVATION_ID,
                 derive_arguments_digest(&argv),
@@ -1485,7 +1511,13 @@ pub(super) fn open_continuity_handle_impl(
         });
     };
     let pidfd_guard = OwnedFd(raw_pidfd);
-    let _ = unsafe { libc::fcntl(pidfd_guard.0, libc::F_SETFD, libc::FD_CLOEXEC) };
+    let cloexec_rc = unsafe { libc::fcntl(pidfd_guard.0, libc::F_SETFD, libc::FD_CLOEXEC) };
+    if cloexec_rc < 0 {
+        return Err(CollectorRefusal::error(
+            "pidfd-cloexec-failed",
+            format!("fcntl(FD_CLOEXEC) failed errno={}", last_errno()),
+        ));
+    }
 
     let ns_ctx_fact = if options.include_namespace_context_digest {
         probe_linux_namespace_context_digest(pid_dir0.0)?

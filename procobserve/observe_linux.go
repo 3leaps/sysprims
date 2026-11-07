@@ -5,7 +5,6 @@
 package procobserve
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -88,9 +87,12 @@ func (p *platformHandle) waitExit(timeout time.Duration) (bool, error) {
 			if (rev & unix.POLLNVAL) != 0 {
 				return false, newErrorRefusal("pidfd-invalid", "poll reported POLLNVAL on pidfd")
 			}
-			if (rev & (unix.POLLIN | unix.POLLHUP | unix.POLLERR)) != 0 {
+			if (rev & (unix.POLLIN | unix.POLLHUP)) != 0 {
 				p.exited = true
 				return true, nil
+			}
+			if (rev & unix.POLLERR) != 0 {
+				return false, newErrorRefusal("pidfd-poll-error", "poll reported POLLERR on pidfd without exit readiness")
 			}
 			return false, nil
 		}
@@ -901,11 +903,7 @@ func probeLinuxArgumentsDigest(pidDirFD int) (map[string]any, error) {
 	if len(raw) == 0 {
 		return factNonObserved("not-present", "empty-cmdline"), nil
 	}
-	trimmed := raw
-	if raw[len(raw)-1] == 0 {
-		trimmed = raw[:len(raw)-1]
-	}
-	argv := bytes.Split(trimmed, []byte{0})
+	argv := parseLinuxCmdlineArgv(raw)
 	return digestObserved(ArgvDigestDerivationID, evidence.DeriveArgumentsDigest(argv)), nil
 }
 
@@ -1299,13 +1297,15 @@ func openContinuityHandlePlatform(pid uint32, hostScopeMap map[string]any, opts 
 		}
 		return nil, nil, newErrorRefusal("pidfd-open-failed", fmt.Sprintf("pidfd_open failed: %v", err))
 	}
-	unix.CloseOnExec(pidfd)
 	keepPIDFD := false
 	defer func() {
 		if !keepPIDFD {
 			_ = unix.Close(pidfd)
 		}
 	}()
+	if _, err := unix.FcntlInt(uintptr(pidfd), unix.F_SETFD, unix.FD_CLOEXEC); err != nil {
+		return nil, nil, newErrorRefusal("pidfd-cloexec-failed", fmt.Sprintf("fcntl(FD_CLOEXEC) failed: %v", err))
+	}
 
 	nsCtxFact := factNonObserved("not-probed", defaultNotProbedReason)
 	if opts.IncludeNamespaceContextDigest {

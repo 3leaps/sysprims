@@ -219,45 +219,87 @@ func DefaultReportMetadata() ReportMetadata {
 	}
 }
 
-// ProcessContinuityHandle wraps a private read-only OS synchronization handle
-// (kqueue EVFILT_PROC NOTE_EXIT on macOS; pidfd on Linux) bracketed at open.
-//
-// It intentionally exposes no raw descriptor, refuses JSON marshaling, and
-// provides no signal delivery API.
-type ProcessContinuityHandle struct {
+type continuityState struct {
+	mu        sync.Mutex
+	closed    bool
 	pid       uint32
 	baseline  map[string]any
 	hostScope HostScope
 	options   ObservationOptions
-	mu        sync.Mutex
-	closed    bool
 	inner     *platformHandle
 }
 
-// MarshalJSON always fails to prevent accidental serialization of live handles.
-func (*ProcessContinuityHandle) MarshalJSON() ([]byte, error) {
-	return nil, newErrorRefusal("continuity-handle-not-serializable", "ProcessContinuityHandle must never be serialized")
+// ProcessContinuityHandle wraps a private read-only OS synchronization handle
+// (kqueue EVFILT_PROC NOTE_EXIT on macOS; pidfd on Linux) bracketed at open.
+//
+// It intentionally exposes no raw descriptor, refuses JSON and text
+// marshaling/unmarshaling on both value and pointer forms, is safe to pass by
+// value without copying internal synchronization locks, and provides no signal
+// delivery API.
+type ProcessContinuityHandle struct {
+	state *continuityState
 }
 
-// PID returns the numeric PID bound when the handle was opened.
+func errHandleNotSerializable() error {
+	return newErrorRefusal("continuity-handle-not-serializable", "ProcessContinuityHandle must never be serialized")
+}
+
+func errHandleInvalid() error {
+	return newErrorRefusal("continuity-handle-invalid", "ProcessContinuityHandle was not opened")
+}
+
+// MarshalJSON always fails on both value and pointer receivers to prevent
+// accidental serialization of live handles.
+func (ProcessContinuityHandle) MarshalJSON() ([]byte, error) {
+	return nil, errHandleNotSerializable()
+}
+
+// UnmarshalJSON always fails without mutating the receiver.
+func (*ProcessContinuityHandle) UnmarshalJSON([]byte) error {
+	return errHandleNotSerializable()
+}
+
+// MarshalText always fails on both value and pointer receivers to prevent
+// accidental text serialization of live handles.
+func (ProcessContinuityHandle) MarshalText() ([]byte, error) {
+	return nil, errHandleNotSerializable()
+}
+
+// UnmarshalText always fails without mutating the receiver.
+func (*ProcessContinuityHandle) UnmarshalText([]byte) error {
+	return errHandleNotSerializable()
+}
+
+// PID returns the numeric PID bound when the handle was opened, or 0 for an
+// unopened zero/nil handle.
 func (h *ProcessContinuityHandle) PID() uint32 {
-	return h.pid
+	if h == nil || h.state == nil {
+		return 0
+	}
+	return h.state.pid
 }
 
-// BaselineObservation returns a deep copy of the bracketed observation captured at open.
+// BaselineObservation returns a deep copy of the bracketed observation captured
+// at open, or nil for an unopened zero/nil handle.
 func (h *ProcessContinuityHandle) BaselineObservation() map[string]any {
-	return cloneMap(h.baseline)
-}
-
-// Close releases the private OS continuity descriptor (idempotent).
-func (h *ProcessContinuityHandle) Close() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.closed {
+	if h == nil || h.state == nil {
 		return nil
 	}
-	h.closed = true
-	return h.inner.closeHandle()
+	return cloneMap(h.state.baseline)
+}
+
+// Close releases the private OS continuity descriptor (idempotent once opened).
+func (h *ProcessContinuityHandle) Close() error {
+	if h == nil || h.state == nil {
+		return errHandleInvalid()
+	}
+	h.state.mu.Lock()
+	defer h.state.mu.Unlock()
+	if h.state.closed {
+		return nil
+	}
+	h.state.closed = true
+	return h.state.inner.closeHandle()
 }
 
 // PollExited performs a non-blocking exit check on the private continuity handle.
@@ -267,25 +309,42 @@ func (h *ProcessContinuityHandle) PollExited() (bool, error) {
 
 // WaitExit blocks up to timeout waiting for process exit (returning true on exit, false on timeout).
 func (h *ProcessContinuityHandle) WaitExit(timeout time.Duration) (bool, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.closed {
+	if h == nil || h.state == nil {
+		return false, errHandleInvalid()
+	}
+	h.state.mu.Lock()
+	defer h.state.mu.Unlock()
+	if h.state.closed {
 		return false, newErrorRefusal("continuity-handle-closed", "ProcessContinuityHandle is closed")
 	}
-	return h.inner.waitExit(timeout)
+	return h.state.inner.waitExit(timeout)
 }
 
 // Reobserve collects a fresh read-only observation for h.PID() using the stored
 // HostScope and ObservationOptions.
 func (h *ProcessContinuityHandle) Reobserve(observedAt string) (map[string]any, error) {
-	opts := h.options
+	if h == nil || h.state == nil {
+		return nil, errHandleInvalid()
+	}
+	h.state.mu.Lock()
+	closed := h.state.closed
+	pid := h.state.pid
+	hs := h.state.hostScope
+	opts := h.state.options
+	h.state.mu.Unlock()
+	if closed {
+		return nil, newErrorRefusal("continuity-handle-closed", "ProcessContinuityHandle is closed")
+	}
 	opts.ObservedAt = observedAt
-	return ObserveProcess(h.pid, h.hostScope, opts)
+	return ObserveProcess(pid, hs, opts)
 }
 
 // Reverify collects a fresh observation at nowUTC, enforces AdmitLiveObservation,
 // and compares against BaselineObservation() under policy.
 func (h *ProcessContinuityHandle) Reverify(policy evidence.ComparisonPolicy, nowUTC string) (map[string]any, evidence.ComparisonOutcome, error) {
+	if h == nil || h.state == nil {
+		return nil, evidence.ComparisonOutcome{}, errHandleInvalid()
+	}
 	candidate, err := h.Reobserve(nowUTC)
 	if err != nil {
 		return nil, evidence.ComparisonOutcome{}, err
@@ -299,7 +358,7 @@ func (h *ProcessContinuityHandle) Reverify(policy evidence.ComparisonPolicy, now
 		}
 		return nil, evidence.ComparisonOutcome{}, newErrorRefusal(code, "live observation freshness gate refused")
 	}
-	outcome := evidence.CompareNativeObservations(h.baseline, candidate, policy, accepted)
+	outcome := evidence.CompareNativeObservations(h.state.baseline, candidate, policy, accepted)
 	return candidate, outcome, nil
 }
 
@@ -371,11 +430,13 @@ func OpenContinuityHandle(pid uint32, hostScope HostScope, opts ObservationOptio
 		return nil, newErrorRefusal(code, "internal baseline output failed schema validation")
 	}
 	return &ProcessContinuityHandle{
-		pid:       pid,
-		baseline:  baseline,
-		hostScope: hostScope,
-		options:   normOpts,
-		inner:     ph,
+		state: &continuityState{
+			pid:       pid,
+			baseline:  baseline,
+			hostScope: hostScope,
+			options:   normOpts,
+			inner:     ph,
+		},
 	}, nil
 }
 

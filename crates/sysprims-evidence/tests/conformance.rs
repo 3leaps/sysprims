@@ -9,10 +9,11 @@ use std::process::Command;
 use canonprims_core::DigestAlg;
 use serde_json::{json, Value};
 use sysprims_evidence::{
-    admit_report_reader, derive_arguments_digest, derive_executable_digest,
+    admit_live_observation, admit_report_reader, derive_arguments_digest, derive_executable_digest,
     derive_linux_namespace_context_digest, derive_linux_security_context_digest, json_equal,
-    linux_id_is_unambiguously_mapped, parse_strict_utc_unix, project_host_scope_urn, CORPUS_DIGEST,
-    MAX_REPORT_BYTES, NATIVE_PROCESS_OBSERVATION_PROFILE_REVISION,
+    linux_id_is_unambiguously_mapped, parse_strict_utc_unix, project_host_scope_urn,
+    validate_observation_shape, ProfileRef, CORPUS_DIGEST, MAX_REPORT_BYTES,
+    NATIVE_PROCESS_OBSERVATION_PROFILE_ID, NATIVE_PROCESS_OBSERVATION_PROFILE_REVISION,
     NATIVE_PROCESS_OBSERVATION_README_REVISION, NATIVE_PROCESS_OBSERVATION_SCHEMA_REVISION,
 };
 
@@ -239,5 +240,54 @@ fn full_conformance_and_parity_suite_passes() {
     assert!(
         line_count >= 280,
         "expected >= 280 NDJSON parity lines, got {line_count}"
+    );
+}
+
+#[test]
+fn strict_utc_timestamp_enforces_positive_four_digit_year_bounds() {
+    assert_eq!(parse_strict_utc_unix("0000-01-01T00:00:00Z"), None);
+    assert_eq!(parse_strict_utc_unix("0000-10-29T12:00:00Z"), None);
+    assert!(parse_strict_utc_unix("0001-01-01T00:00:00Z").is_some());
+    assert!(parse_strict_utc_unix("9999-12-31T23:59:59Z").is_some());
+
+    let mut linux_obs: Value = serde_json::from_slice(
+        &fs::read(
+            corpus_root().join("profiles/native-process-observation/evidence.linux.example.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    linux_obs["observed_at"] = json!("0000-10-29T12:00:00Z");
+    assert_eq!(
+        validate_observation_shape(&linux_obs).unwrap_err().code(),
+        "invalid-observation-shape"
+    );
+    let accepted = ProfileRef::new(
+        NATIVE_PROCESS_OBSERVATION_PROFILE_ID,
+        NATIVE_PROCESS_OBSERVATION_PROFILE_REVISION,
+    );
+    assert_eq!(
+        admit_live_observation(
+            &linux_obs,
+            Some("2026-10-29T12:00:00Z"),
+            &accepted,
+            None,
+            None
+        )
+        .unwrap_err()
+        .code(),
+        "invalid-observed-at"
+    );
+    assert_eq!(
+        admit_live_observation(
+            &linux_obs,
+            Some("0000-10-29T12:00:00Z"),
+            &accepted,
+            None,
+            None
+        )
+        .unwrap_err()
+        .code(),
+        "trusted-clock-unavailable"
     );
 }

@@ -75,8 +75,52 @@ func TestRefusesOutOfRangePIDsAndMalformedInputsBeforeSyscalls(t *testing.T) {
 	assertRefusalCode(t, err, "invalid-host-scope")
 }
 
-func TestContinuityHandleRefusesJSONSerialization(t *testing.T) {
-	var h procobserve.ProcessContinuityHandle
-	_, err := json.Marshal(&h)
+func TestContinuityHandleRefusesJSONAndTextSerializationAndInvalidZeroState(t *testing.T) {
+	var zero procobserve.ProcessContinuityHandle
+
+	// Value, pointer, and embedded struct field JSON marshaling must all fail closed.
+	_, err := json.Marshal(zero)
 	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+
+	_, err = json.Marshal(&zero)
+	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+
+	type wrapper struct {
+		H procobserve.ProcessContinuityHandle `json:"h"`
+	}
+	_, err = json.Marshal(wrapper{H: zero})
+	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+
+	// JSON unmarshaling into zero handle must fail closed.
+	err = json.Unmarshal([]byte(`{}`), &zero)
+	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+
+	// Text marshaling and unmarshaling must fail closed on both value and pointer forms.
+	_, err = zero.MarshalText()
+	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+	_, err = (&zero).MarshalText()
+	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+	err = (&zero).UnmarshalText([]byte("handle"))
+	assertRefusalCode(t, err, "continuity-handle-not-serializable")
+
+	// Zero and nil handles fail closed without panicking and are safe to copy by value.
+	copiedByValue := zero
+	var nilPtr *procobserve.ProcessContinuityHandle
+	for _, candidate := range []*procobserve.ProcessContinuityHandle{&zero, &copiedByValue, nilPtr} {
+		if got := candidate.PID(); got != 0 {
+			t.Fatalf("expected unopened PID()=0, got %d", got)
+		}
+		if obs := candidate.BaselineObservation(); obs != nil {
+			t.Fatalf("expected unopened BaselineObservation()=nil, got %v", obs)
+		}
+		assertRefusalCode(t, candidate.Close(), "continuity-handle-invalid")
+		_, pErr := candidate.PollExited()
+		assertRefusalCode(t, pErr, "continuity-handle-invalid")
+		_, wErr := candidate.WaitExit(0)
+		assertRefusalCode(t, wErr, "continuity-handle-invalid")
+		_, rErr := candidate.Reobserve("2026-11-06T12:00:00Z")
+		assertRefusalCode(t, rErr, "continuity-handle-invalid")
+		_, _, vErr := candidate.Reverify(evidence.ComparisonPolicy{}, "2026-11-06T12:00:00Z")
+		assertRefusalCode(t, vErr, "continuity-handle-invalid")
+	}
 }

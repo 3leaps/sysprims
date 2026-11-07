@@ -50,7 +50,16 @@ rc.validate(with_rec, order + ['sysprims-recurrence'], manifests(order + ['syspr
 
 plan = pathlib.Path(sys.argv[1]).parent / 'config/release/publishable-crates.txt'
 names = rc.read_plan(plan)
-assert names[:5] == order and names[-1] == 'sysprims-recurrence', names
+expected_plan = [
+    'sysprims-core',
+    'sysprims-evidence',
+    'sysprims-signal',
+    'sysprims-session',
+    'sysprims-proc',
+    'sysprims-timeout',
+    'sysprims-recurrence',
+]
+assert names == expected_plan, names
 for bad in ('sysprims-core\n\nsysprims-proc\n', 'sysprims-core\nsysprims-core\n', ' sysprims-core\n', 'other-crate\n'):
     tmp = pathlib.Path(sys.argv[1]).parent / '.release-crates-test-plan'
     try:

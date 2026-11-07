@@ -89,10 +89,10 @@ impl EvidenceError {
     }
 }
 
-/// Parse a strict `YYYY-MM-DDTHH:MM:SSZ` UTC instant into Unix whole seconds.
+/// Parse a strict `YYYY-MM-DDTHH:MM:SSZ` UTC instant (`0001..=9999`) into Unix whole seconds.
 ///
-/// Sub-second fractions, non-`Z` offsets, lowercase `t`/`z`, leap-second `60`,
-/// and invalid calendar dates are rejected.
+/// Year `0000`, sub-second fractions, non-`Z` offsets, lowercase `t`/`z`,
+/// leap-second `60`, and invalid calendar dates are rejected.
 pub fn parse_strict_utc_unix(text: &str) -> Option<i64> {
     let b = text.as_bytes();
     if b.len() != 20 {
@@ -102,6 +102,9 @@ pub fn parse_strict_utc_unix(text: &str) -> Option<i64> {
         if !b[idx].is_ascii_digit() {
             return None;
         }
+    }
+    if &b[0..4] == b"0000" {
+        return None;
     }
     if b[4] != b'-'
         || b[7] != b'-'
