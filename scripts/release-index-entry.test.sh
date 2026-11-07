@@ -56,6 +56,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return
                 time.sleep(0.05)
             return
+        if self.path.endswith("/slowchunk"):
+            self.wfile.write(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n"
+            )
+            self.wfile.flush()
+            for ch in b"100000":
+                try:
+                    self.wfile.write(bytes([ch]))
+                    self.wfile.flush()
+                except OSError:
+                    return
+                time.sleep(0.1)
+            time.sleep(2.0)
+            return
         if self.path.endswith("/redirfile"):
             self.send_response(302)
             self.send_header("Location", "file:///etc/hosts")
@@ -170,20 +184,25 @@ printf '%s\n%s\n' "$live" "$live" >"$scratch/ab/cd/abcdef"
 expect_exit2 --allow-http --max-bytes 64 "$base" abcdef 1.0.0
 expect_exit2 --allow-http --max-line-bytes 32 "$base" abcdef 1.0.0
 
-# Trickle body and trickle headers must both abort near --timeout 0.2 (well under 0.8s).
-for slow_crate in slow slowhdr; do
-	python3 -I - "$root/scripts/release-index-entry.py" "$base" "$slow_crate" <<'PY'
+# Trickle body, trickle headers, and stalled chunk-size framing must all abort
+# near --timeout without blocking in BufferedReader.close().
+for spec in "slow:0.2:0.8" "slowhdr:0.2:0.8" "slowchunk:0.6:0.95"; do
+	slow_crate="${spec%%:*}"
+	rem="${spec#*:}"
+	tmo="${rem%%:*}"
+	cap="${rem#*:}"
+	python3 -I - "$root/scripts/release-index-entry.py" "$base" "$slow_crate" "$tmo" "$cap" <<'PY'
 import subprocess, sys, time
-script, base, crate = sys.argv[1:4]
+script, base, crate, tmo, cap = sys.argv[1:6]
 t0 = time.monotonic()
 proc = subprocess.run(
-    [sys.executable, "-I", script, "--allow-http", "--timeout", "0.2", base, crate, "1.0.0"],
+    [sys.executable, "-I", script, "--allow-http", "--timeout", tmo, base, crate, "1.0.0"],
     capture_output=True,
     text=True,
 )
 elapsed = time.monotonic() - t0
 assert proc.returncode == 2, (crate, proc.returncode, proc.stderr)
-assert elapsed < 0.8, f"{crate} took {elapsed:.3f}s despite --timeout 0.2"
+assert elapsed < float(cap), f"{crate} took {elapsed:.3f}s despite --timeout {tmo} (cap {cap}s)"
 PY
 done
 

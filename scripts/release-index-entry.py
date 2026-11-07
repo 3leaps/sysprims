@@ -15,6 +15,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import socket
 import sys
 import threading
 import time
@@ -92,11 +93,16 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, resolved)
 
 
-def _set_socket_timeout(response: object, remaining: float) -> None:
+def _extract_raw_socket(response: object) -> socket.socket | None:
     fp = getattr(response, "fp", None)
     raw = getattr(fp, "raw", None)
     sock = getattr(raw, "_sock", None)
-    if sock is not None and hasattr(sock, "settimeout"):
+    return sock if isinstance(sock, socket.socket) else None
+
+
+def _set_socket_timeout(response: object, remaining: float) -> None:
+    sock = _extract_raw_socket(response)
+    if sock is not None:
         sock.settimeout(remaining)
 
 
@@ -275,11 +281,14 @@ def _fetch_index_lines(
     thread.start()
     thread.join(timeout=max(0.0, deadline - time.monotonic()))
     if thread.is_alive():
-        resp = state.get("response")
-        if resp is not None:
+        # Never call resp.close() from the main thread: BufferedReader.close()
+        # blocks behind any in-flight readline()/read1() on the worker thread
+        # (such as a stalled chunk-size header). Shut down the OS socket
+        # directly without acquiring BufferedReader's lock.
+        sock = _extract_raw_socket(state.get("response"))
+        if sock is not None:
             try:
-                _set_socket_timeout(resp, 0.0)
-                resp.close()  # type: ignore[attr-defined]
+                sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
         raise TimeoutError("sparse-index request exceeded overall deadline")
