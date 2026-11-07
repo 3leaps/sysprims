@@ -4,14 +4,17 @@
 # hash-pinned maturin, install the wheel into a throwaway virtual environment,
 # and verify:
 #
-# 0. the wheel is cp310-abi3 and carries LICENSE-MIT, LICENSE-APACHE, NOTICE,
+# 0. the Python manifest version matches the repository VERSION (or retained
+#    version when surfaces.python.disposition == "skip" in the release plan),
+#    and the wheel is cp310-abi3 carrying LICENSE-MIT, LICENSE-APACHE, NOTICE,
 #    and py.typed with zero build-host paths;
 # 1. bindings/python/tests pass from outside the source tree under `python -I`
 #    with zero skipped tests;
 # 2. recurrence/v0 corpus output (34 accept + 38 reject vectors) matches Rust's
 #    `crates/sysprims-recurrence` byte-for-byte;
-# 3. `maturin sdist` produces `sysprims-<version>.tar.gz` with zero build-host
-#    paths and builds offline in isolation without the monorepo checkout.
+# 3. `maturin sdist` produces `sysprims-<py_version>.tar.gz` deterministically
+#    under SOURCE_DATE_EPOCH with zero build-host paths, safe regular/dir-only
+#    members, and builds offline in isolation without the monorepo checkout.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -20,7 +23,16 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/sysprims-python.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 cd "${root}"
 
-version="$(tr -d ' \t\r\n' <VERSION)"
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+	SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+fi
+case "${SOURCE_DATE_EPOCH}" in
+'' | *[!0-9]*)
+	echo "python-check: invalid SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" >&2
+	exit 1
+	;;
+esac
+export SOURCE_DATE_EPOCH
 
 for license in LICENSE-MIT LICENSE-APACHE NOTICE; do
 	cmp -s "${license}" "bindings/python/${license}" || {
@@ -39,6 +51,70 @@ venv_python="${work}/venv/bin/python"
 [ -x "${venv_python}" ] || venv_python="${work}/venv/Scripts/python.exe"
 "${venv_python}" -I -m pip install --quiet --disable-pip-version-check --require-hashes \
 	--only-binary :all: -r config/python-build-requirements.txt
+
+resolve_python_version() {
+	local tree_root="$1"
+	"${venv_python}" -I - "${tree_root}" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
+
+root = pathlib.Path(sys.argv[1])
+repo_version = (root / "VERSION").read_text(encoding="utf-8").strip()
+pyproject = tomllib.loads((root / "bindings/python/pyproject.toml").read_text(encoding="utf-8"))
+cargo_toml = tomllib.loads((root / "bindings/python/Cargo.toml").read_text(encoding="utf-8"))
+py_ver = pyproject.get("project", {}).get("version")
+cargo_ver = cargo_toml.get("package", {}).get("version")
+if not isinstance(py_ver, str) or not py_ver or py_ver != cargo_ver:
+    raise SystemExit(
+        f"python-check: bindings/python version mismatch (pyproject={py_ver!r}, Cargo.toml={cargo_ver!r})"
+    )
+
+expected = repo_version
+plan_path = root / "docs" / "releases" / f"v{repo_version}.json"
+if plan_path.is_file():
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    py_surface = (plan.get("surfaces") or {}).get("python") or {}
+    if py_surface.get("disposition") == "skip":
+        retained = py_surface.get("retained_version")
+        if not isinstance(retained, str) or not retained:
+            raise SystemExit("python-check: python skip plan missing retained_version")
+        expected = retained
+
+if py_ver != expected:
+    raise SystemExit(
+        f"python-check: bindings/python version {py_ver!r} != expected {expected!r} (VERSION={repo_version!r})"
+    )
+print(py_ver)
+PY
+}
+
+version="$(resolve_python_version "${root}")"
+
+# Self-test the retained-version resolver for disposition == "skip" and mismatch rejection.
+mkdir -p "${work}/skip-fixture/bindings/python" "${work}/skip-fixture/docs/releases"
+printf '9.9.9\n' >"${work}/skip-fixture/VERSION"
+cp bindings/python/pyproject.toml "${work}/skip-fixture/bindings/python/pyproject.toml"
+cp bindings/python/Cargo.toml "${work}/skip-fixture/bindings/python/Cargo.toml"
+cat >"${work}/skip-fixture/docs/releases/v9.9.9.json" <<EOF
+{"surfaces":{"python":{"disposition":"skip","retained_version":"${version}"}}}
+EOF
+[ "$(resolve_python_version "${work}/skip-fixture")" = "${version}" ] || {
+	echo "python-check: retained-version skip fixture did not resolve ${version}" >&2
+	exit 1
+}
+cat >"${work}/skip-fixture/docs/releases/v9.9.9.json" <<'EOF'
+{"surfaces":{"python":{"disposition":"publish"}}}
+EOF
+if resolve_python_version "${work}/skip-fixture" >/dev/null 2>&1; then
+	echo "python-check: publish fixture unexpectedly accepted mismatched Python version" >&2
+	exit 1
+fi
 
 here="$(pwd -P)"
 cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
@@ -70,15 +146,26 @@ MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" \
 	"${venv_python}" -I -m maturin build --release --locked --quiet \
 	--manifest-path bindings/python/Cargo.toml --interpreter "${venv_python}" --out "${work}/wheels"
 
+MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" \
+	MSYS2_ENV_CONV_EXCL=RUSTFLAGS \
+	RUSTFLAGS="${rustflags}" \
+	"${venv_python}" -I -m maturin build --release --locked --quiet \
+	--manifest-path bindings/python/Cargo.toml --interpreter "${venv_python}" --out "${work}/wheels-repeat"
+
 wheels=("${work}"/wheels/sysprims-*.whl)
+wheels_repeat=("${work}"/wheels-repeat/sysprims-*.whl)
 [ "${#wheels[@]}" -eq 1 ] && [ -f "${wheels[0]}" ] || {
 	echo "python-check: expected one wheel" >&2
 	exit 1
 }
+[ "${#wheels_repeat[@]}" -eq 1 ] && cmp -s "${wheels[0]}" "${wheels_repeat[0]}" || {
+	echo "python-check: repeat maturin wheel build under SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} was not deterministic" >&2
+	exit 1
+}
 case "${wheels[0]##*/}" in
-*-cp310-abi3-*) ;;
+"sysprims-${version}-cp310-abi3-"*) ;;
 *)
-	echo "python-check: wheel is not abi3 for 3.10: ${wheels[0]##*/}" >&2
+	echo "python-check: wheel is not sysprims-${version}-cp310-abi3-*: ${wheels[0]##*/}" >&2
 	exit 1
 	;;
 esac
@@ -130,12 +217,19 @@ if [ ! -s "${work}/py.results" ] || ! cmp -s "${work}/rust.results" "${work}/py.
 fi
 echo "python-check: recurrence corpus agrees with Rust ($(wc -l <"${work}/py.results" | tr -d ' ') vectors)" >&2
 
-# Build and verify source distribution (sdist) isolation + offline buildability.
+# Build and verify source distribution (sdist) determinism, isolation + offline buildability.
 "${venv_python}" -I -m maturin sdist \
 	--manifest-path bindings/python/Cargo.toml --out "${work}/sdist" >/dev/null
+"${venv_python}" -I -m maturin sdist \
+	--manifest-path bindings/python/Cargo.toml --out "${work}/sdist-repeat" >/dev/null
 sdist="${work}/sdist/sysprims-${version}.tar.gz"
+sdist_repeat="${work}/sdist-repeat/sysprims-${version}.tar.gz"
 [ -s "${sdist}" ] || {
 	echo "python-check: expected sdist ${sdist}" >&2
+	exit 1
+}
+cmp -s "${sdist}" "${sdist_repeat}" || {
+	echo "python-check: repeat maturin sdist build under SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} was not deterministic" >&2
 	exit 1
 }
 "${venv_python}" -I scripts/host-path-check.py "${sdist}" \
@@ -144,23 +238,78 @@ sdist="${work}/sdist/sysprims-${version}.tar.gz"
 	exit 1
 }
 mkdir -p "${work}/sdist-src"
-"${venv_python}" -I - "${sdist}" "${work}/sdist-src" <<'PY'
-import pathlib, sys, tarfile
+"${venv_python}" -I - "${sdist}" "${work}/sdist-src" "${version}" <<'PY'
+import os
+import pathlib
+import re
+import sys
+import tarfile
 
 archive = pathlib.Path(sys.argv[1])
 dest = pathlib.Path(sys.argv[2]).resolve()
+want_version = sys.argv[3]
+expected_root = f"sysprims-{want_version}"
+seen_folded: set[str] = set()
+
 with tarfile.open(archive, "r:gz") as tf:
-    names = tf.getnames()
-    if not any(n.endswith("/PKG-INFO") for n in names):
-        raise SystemExit("python-check: sdist is missing PKG-INFO")
-    for member in tf.getmembers():
-        target = (dest / member.name).resolve()
+    members = tf.getmembers()
+    if not any(m.name == f"{expected_root}/PKG-INFO" and m.isfile() for m in members):
+        raise SystemExit(f"python-check: sdist is missing {expected_root}/PKG-INFO")
+    for member in members:
+        raw = member.name
+        is_dir = member.isdir()
+        if (
+            member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+            or member.issym()
+            or member.islnk()
+            or member.isfifo()
+            or member.ischr()
+            or member.isblk()
+            or member.isdev()
+        ):
+            raise SystemExit(f"python-check: non-regular/link sdist entry {raw!r}")
+        if (
+            not raw
+            or "\\" in raw
+            or raw.startswith("/")
+            or (not is_dir and raw.endswith("/"))
+            or any(ord(ch) < 32 for ch in raw)
+            or re.match(r"^[A-Za-z]:", raw)
+        ):
+            raise SystemExit(f"python-check: unsafe sdist path {raw!r}")
+        trimmed = raw.rstrip("/") if is_dir else raw
+        parts = trimmed.split("/")
+        if (
+            not trimmed
+            or any(p in ("", ".", "..") or re.match(r"^[A-Za-z]:", p) for p in parts)
+            or parts[0] != expected_root
+            or (not is_dir and len(parts) < 2)
+        ):
+            raise SystemExit(f"python-check: unexpected sdist member path {raw!r}")
+        folded = "/".join(p.casefold() for p in parts)
+        if folded in seen_folded:
+            raise SystemExit(f"python-check: duplicate/colliding sdist entry {raw!r}")
+        seen_folded.add(folded)
+        target = (dest / pathlib.PurePosixPath(*parts)).resolve()
         if dest not in target.parents and target != dest:
-            raise SystemExit(f"python-check: unsafe sdist path {member.name!r}")
-    tf.extractall(dest, filter="data")
+            raise SystemExit(f"python-check: sdist path escapes destination: {raw!r}")
+        if is_dir:
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            reader = tf.extractfile(member)
+            if reader is None:
+                raise SystemExit(f"python-check: unreadable sdist member {raw!r}")
+            with open(target, "xb") as out_f:
+                out_f.write(reader.read())
+            if member.mode & 0o111:
+                os.chmod(target, 0o755)
 PY
 sdist_dir="${work}/sdist-src/sysprims-${version}"
-[ -f "${sdist_dir}/pyproject.toml" ] || sdist_dir="$(find "${work}/sdist-src" -mindepth 1 -maxdepth 1 -type d | head -1)"
+[ -f "${sdist_dir}/pyproject.toml" ] || {
+	echo "python-check: missing extracted ${sdist_dir}/pyproject.toml" >&2
+	exit 1
+}
 (
 	cd "${sdist_dir}" &&
 		MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" \

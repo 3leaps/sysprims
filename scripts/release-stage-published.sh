@@ -149,6 +149,7 @@ EOF
 python3 -I - "$work/assets" "$version" "$work/surfaces.json" <<'PY'
 import json
 import pathlib
+import re
 import sys
 import tarfile
 import zipfile
@@ -169,18 +170,60 @@ def parse_rfc822_headers(text: str) -> dict[str, str]:
     return headers
 
 
+def validate_member_path(
+    raw: str,
+    allowed_roots: set[str],
+    seen_folded: set[str],
+    archive_label: str,
+    *,
+    is_dir: bool = False,
+) -> None:
+    if (
+        not raw
+        or "\\" in raw
+        or raw.startswith("/")
+        or (not is_dir and raw.endswith("/"))
+        or any(ord(ch) < 32 for ch in raw)
+        or re.match(r"^[A-Za-z]:", raw)
+    ):
+        sys.exit(f"error: unsafe archive entry path in {archive_label}: {raw!r}")
+    trimmed = raw.rstrip("/") if is_dir else raw
+    parts = trimmed.split("/")
+    if (
+        not trimmed
+        or any(p in ("", ".", "..") or re.match(r"^[A-Za-z]:", p) for p in parts)
+        or parts[0] not in allowed_roots
+        or (not is_dir and len(parts) < 2)
+    ):
+        sys.exit(f"error: unexpected archive entry path in {archive_label}: {raw!r}")
+    folded = "/".join(p.casefold() for p in parts)
+    if folded in seen_folded:
+        sys.exit(f"error: duplicate or case-colliding archive entry in {archive_label}: {raw!r}")
+    seen_folded.add(folded)
+
+
 if meta["pyPublish"]:
     wheels = [f for f in meta["pypiFiles"] if f.endswith(".whl")]
     if len(wheels) != 5:
         sys.exit(f"error: expected 5 wheels for {version}, found {len(wheels)}")
+    wheel_roots = {
+        "sysprims",
+        "sysprims.libs",
+        f"sysprims-{version}.dist-info",
+        f"sysprims-{version}.data",
+    }
     meta_member = f"sysprims-{version}.dist-info/METADATA"
     for wheel_name in wheels:
         wheel_path = assets / wheel_name
+        seen_wheel_folded: set[str] = set()
         with zipfile.ZipFile(wheel_path) as zf:
             for info in zf.infolist():
+                if info.is_dir():
+                    sys.exit(f"error: directory entry in wheel {wheel_name}: {info.filename!r}")
                 unix_mode = info.external_attr >> 16
-                if unix_mode and (unix_mode & 0o170000) == 0o120000:
-                    sys.exit(f"error: symlink entry in wheel {wheel_name}: {info.filename}")
+                if unix_mode and (unix_mode & 0o170000) not in (0, 0o100000):
+                    sys.exit(f"error: non-regular or symlink entry in wheel {wheel_name}: {info.filename!r}")
+                validate_member_path(info.filename, wheel_roots, seen_wheel_folded, wheel_name)
             if meta_member not in zf.namelist():
                 sys.exit(f"error: {wheel_name} missing {meta_member}")
             headers = parse_rfc822_headers(zf.read(meta_member).decode("utf-8"))
@@ -188,11 +231,28 @@ if meta["pyPublish"]:
             sys.exit(f"error: {wheel_name} metadata mismatch: {headers}")
 
     sdist_name = f"sysprims-{version}.tar.gz"
+    sdist_roots = {f"sysprims-{version}"}
     pkg_info_member = f"sysprims-{version}/PKG-INFO"
+    seen_sdist_folded: set[str] = set()
     with tarfile.open(assets / sdist_name, "r:gz") as tf:
         for member in tf.getmembers():
-            if not (member.isfile() or member.isdir()):
-                sys.exit(f"error: non-regular entry in {sdist_name}: {member.name}")
+            if (
+                member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+                or member.issym()
+                or member.islnk()
+                or member.isfifo()
+                or member.ischr()
+                or member.isblk()
+                or member.isdev()
+            ):
+                sys.exit(f"error: non-regular entry in {sdist_name}: {member.name!r}")
+            validate_member_path(
+                member.name,
+                sdist_roots,
+                seen_sdist_folded,
+                sdist_name,
+                is_dir=member.isdir(),
+            )
         extracted = tf.extractfile(pkg_info_member)
         if extracted is None:
             sys.exit(f"error: {sdist_name} missing {pkg_info_member}")
@@ -203,12 +263,29 @@ if meta["pyPublish"]:
 if meta["tsPublish"]:
     if len(meta["npmPackages"]) != 8:
         sys.exit(f"error: expected 8 npm tarballs for {version}, found {len(meta['npmPackages'])}")
+    npm_roots = {"package"}
     for entry in meta["npmPackages"]:
         tgz_path = assets / entry["file"]
+        seen_tgz_folded: set[str] = set()
         with tarfile.open(tgz_path, "r:gz") as tf:
             for member in tf.getmembers():
-                if not (member.isfile() or member.isdir()):
-                    sys.exit(f"error: non-regular entry in {tgz_path.name}: {member.name}")
+                if (
+                    member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+                    or member.issym()
+                    or member.islnk()
+                    or member.isfifo()
+                    or member.ischr()
+                    or member.isblk()
+                    or member.isdev()
+                ):
+                    sys.exit(f"error: non-regular entry in {tgz_path.name}: {member.name!r}")
+                validate_member_path(
+                    member.name,
+                    npm_roots,
+                    seen_tgz_folded,
+                    tgz_path.name,
+                    is_dir=member.isdir(),
+                )
             extracted = tf.extractfile("package/package.json")
             if extracted is None:
                 sys.exit(f"error: {tgz_path.name} missing package/package.json")

@@ -269,6 +269,10 @@ resign_remote2
 [[ "$(find "$repo2/dist/published-npm" -maxdepth 1 -type f | wc -l | tr -d ' ')" == "8" ]]
 
 # Tampered wheel metadata (even if re-checksummed and re-signed!) is refused.
+cp "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl" "$fixture_dir/good-win.whl"
+cp "$remote2/sysprims-$v2.tar.gz" "$fixture_dir/good-sdist.tar.gz"
+cp "$remote2/3leaps-sysprims-$v2.tgz" "$fixture_dir/good-npm.tgz"
+
 python3 -I - "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl" "$v2" <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as zf:
@@ -277,5 +281,50 @@ PY
 resign_remote2
 rm -rf "$repo2/dist/published-pypi" "$repo2/dist/published-pypi.anchor"
 expect_fail_with 'metadata mismatch' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --pypi-only"
+
+# Traversal / unexpected-root / duplicate entries in .whl, .tar.gz, and .tgz are refused.
+for bad_wheel_member in '../../outside.txt' '/abs/outside.txt' 'C:\outside.txt' 'other_pkg/init.py' 'sysprims/__INIT__.py'; do
+	python3 -I - "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl" "$v2" "$bad_wheel_member" <<'PY'
+import sys, zipfile
+path, v, extra = sys.argv[1], sys.argv[2], sys.argv[3]
+with zipfile.ZipFile(path, "w") as zf:
+    zf.writestr(f"sysprims-{v}.dist-info/METADATA", f"Metadata-Version: 2.3\nName: sysprims\nVersion: {v}\n\n")
+    zf.writestr("sysprims/__init__.py", "# ok\n")
+    zf.writestr(extra, "bad\n")
+PY
+	resign_remote2
+	rm -rf "$repo2/dist/published-pypi" "$repo2/dist/published-pypi.anchor"
+	expect_fail_with 'archive entry' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --pypi-only"
+done
+cp "$fixture_dir/good-win.whl" "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl"
+
+python3 -I - "$remote2/sysprims-$v2.tar.gz" "$v2" <<'PY'
+import io, sys, tarfile
+path, v = sys.argv[1], sys.argv[2]
+with tarfile.open(path, "w:gz") as tf:
+    for name, body in [(f"sysprims-{v}/PKG-INFO", f"Metadata-Version: 2.3\nName: sysprims\nVersion: {v}\n\n".encode()), ("../../outside.txt", b"bad")]:
+        ti = tarfile.TarInfo(name)
+        ti.size = len(body)
+        tf.addfile(ti, io.BytesIO(body))
+PY
+resign_remote2
+rm -rf "$repo2/dist/published-pypi" "$repo2/dist/published-pypi.anchor"
+expect_fail_with 'archive entry' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --pypi-only"
+cp "$fixture_dir/good-sdist.tar.gz" "$remote2/sysprims-$v2.tar.gz"
+
+python3 -I - "$remote2/3leaps-sysprims-$v2.tgz" "$v2" <<'PY'
+import io, json, sys, tarfile
+path, v = sys.argv[1], sys.argv[2]
+pkg_bytes = json.dumps({"name": "@3leaps/sysprims", "version": v, "repository": {"type": "git", "url": "git+https://github.com/3leaps/sysprims.git"}}).encode()
+with tarfile.open(path, "w:gz") as tf:
+    for name, body in [("package/package.json", pkg_bytes), ("../../outside.txt", b"bad")]:
+        ti = tarfile.TarInfo(name)
+        ti.size = len(body)
+        tf.addfile(ti, io.BytesIO(body))
+PY
+resign_remote2
+rm -rf "$repo2/dist/published-npm" "$repo2/dist/published-npm.anchor"
+expect_fail_with 'archive entry' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --npm-only"
+cp "$fixture_dir/good-npm.tgz" "$remote2/3leaps-sysprims-$v2.tgz"
 
 echo '[ok] release-stage-published controls passed'

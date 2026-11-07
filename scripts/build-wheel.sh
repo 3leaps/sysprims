@@ -4,7 +4,7 @@
 # carries no build-host paths, and run the binding test suite and recurrence
 # corpus against native wheels.
 #
-#   build-wheel.sh <target|sdist> <out-dir>
+#   build-wheel.sh <target|wheel|host|sdist> <out-dir>
 #
 # Supported targets:
 #   - x86_64-unknown-linux-gnu   (inside digest-pinned manylinux2014 container)
@@ -12,13 +12,25 @@
 #   - aarch64-apple-darwin
 #   - x86_64-apple-darwin        (native or cross-compiled from aarch64-apple-darwin)
 #   - x86_64-pc-windows-msvc
-#   - sdist                      (sysprims-<version>.tar.gz)
+#   - wheel | host               (local host wheel for make build-python)
+#   - sdist                      (sysprims-<py_version>.tar.gz)
 set -euo pipefail
 
 target="${1:?target required}"
 out="${2:?output directory required}"
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "${root}"
+
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+	SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+fi
+case "${SOURCE_DATE_EPOCH}" in
+'' | *[!0-9]*)
+	echo "build-wheel: invalid SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" >&2
+	exit 1
+	;;
+esac
+export SOURCE_DATE_EPOCH
 
 toolchain="$(awk '
 	/^\[rust\]/ { in_rust = 1; next }
@@ -33,7 +45,31 @@ toolchain="$(awk '
 	echo "build-wheel: missing rust.msrv in config/ci/pins.toml" >&2
 	exit 1
 }
-version="$(tr -d ' \t\r\n' <VERSION)"
+
+py_manifest_version="$(awk '
+	/^\[project\]/ { in_proj = 1; next }
+	/^\[/ { in_proj = 0 }
+	in_proj && $1 == "version" {
+		gsub(/["\r\n]/, "", $3)
+		print $3
+		exit
+	}
+' bindings/python/pyproject.toml)"
+cargo_manifest_version="$(awk '
+	/^\[package\]/ { in_pkg = 1; next }
+	/^\[/ { in_pkg = 0 }
+	in_pkg && $1 == "version" {
+		gsub(/["\r\n]/, "", $3)
+		print $3
+		exit
+	}
+' bindings/python/Cargo.toml)"
+[ -n "${py_manifest_version}" ] && [ "${py_manifest_version}" = "${cargo_manifest_version}" ] || {
+	echo "build-wheel: bindings/python manifest version mismatch (${py_manifest_version} vs ${cargo_manifest_version})" >&2
+	exit 1
+}
+version="${py_manifest_version}"
+
 python="${PYTHON:-python3}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sysprims-wheel.XXXXXX")"
 cleanup_wheel() {
@@ -54,36 +90,51 @@ platform=native
 compat=()
 target_args=()
 can_exec_wheel=1
+local_host_mode=0
+
+if [ "${target}" = "wheel" ] || [ "${target}" = "host" ]; then
+	local_host_mode=1
+	if [ -z "${RUSTUP_TOOLCHAIN:-}" ] && command -v rustup >/dev/null 2>&1; then
+		if ! rustc --version 2>/dev/null | grep -q "^rustc ${toolchain} "; then
+			export RUSTUP_TOOLCHAIN="${toolchain}"
+		fi
+	fi
+	target="$(rustc -vV | awk '/^host:/{print $2}')"
+fi
 
 case "${target}" in
 x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu)
-	platform=linux
-	[ -f /etc/os-release ] && grep -q 'CentOS Linux' /etc/os-release && [ "$(ldd --version | head -1 | awk '{print $NF}')" = 2.17 ] || {
-		echo "build-wheel: Linux wheels build only inside the manylinux2014 image" >&2
-		exit 1
-	}
-	[ "$(uname -m)" = "${target%%-*}" ] || {
-		echo "build-wheel: host is not ${target}" >&2
-		exit 1
-	}
-	name="rustup-init-1.29.1-${target}"
-	want_sha="$(awk -v n="${name}" '$2 == n { print $1 }' config/ci-tools.sha256)"
-	[ -n "${want_sha}" ] || {
-		echo "build-wheel: no pin for ${name}" >&2
-		exit 1
-	}
-	curl --proto '=https' --tlsv1.2 --fail --silent --show-error --retry 3 --output "${work}/rustup-init" \
-		"https://static.rust-lang.org/rustup/archive/1.29.1/${target}/rustup-init"
-	got_sha="$(sha256sum "${work}/rustup-init" | cut -c1-64)"
-	[ "${got_sha}" = "${want_sha}" ] || {
-		echo "build-wheel: rustup-init checksum ${got_sha} != ${want_sha}" >&2
-		exit 1
-	}
-	chmod +x "${work}/rustup-init"
-	"${work}/rustup-init" -y -q --no-modify-path --profile minimal --default-toolchain "${toolchain}" >/dev/null
-	export PATH="${HOME}/.cargo/bin:${PATH}"
-	python=/opt/python/cp310-cp310/bin/python
-	compat=(--compatibility manylinux2014)
+	if [ "${local_host_mode}" -eq 1 ] && ! { [ -f /etc/os-release ] && grep -q 'CentOS Linux' /etc/os-release && [ "$(ldd --version | head -1 | awk '{print $NF}')" = 2.17 ]; }; then
+		platform=local-linux
+	else
+		platform=linux
+		[ -f /etc/os-release ] && grep -q 'CentOS Linux' /etc/os-release && [ "$(ldd --version | head -1 | awk '{print $NF}')" = 2.17 ] || {
+			echo "build-wheel: Linux release wheels build only inside the manylinux2014 image" >&2
+			exit 1
+		}
+		[ "$(uname -m)" = "${target%%-*}" ] || {
+			echo "build-wheel: host is not ${target}" >&2
+			exit 1
+		}
+		name="rustup-init-1.29.1-${target}"
+		want_sha="$(awk -v n="${name}" '$2 == n { print $1 }' config/ci-tools.sha256)"
+		[ -n "${want_sha}" ] || {
+			echo "build-wheel: no pin for ${name}" >&2
+			exit 1
+		}
+		curl --proto '=https' --tlsv1.2 --fail --silent --show-error --retry 3 --output "${work}/rustup-init" \
+			"https://static.rust-lang.org/rustup/archive/1.29.1/${target}/rustup-init"
+		got_sha="$(sha256sum "${work}/rustup-init" | cut -c1-64)"
+		[ "${got_sha}" = "${want_sha}" ] || {
+			echo "build-wheel: rustup-init checksum ${got_sha} != ${want_sha}" >&2
+			exit 1
+		}
+		chmod +x "${work}/rustup-init"
+		"${work}/rustup-init" -y -q --no-modify-path --profile minimal --default-toolchain "${toolchain}" >/dev/null
+		export PATH="${HOME}/.cargo/bin:${PATH}"
+		python=/opt/python/cp310-cp310/bin/python
+		compat=(--compatibility manylinux2014)
+	fi
 	;;
 aarch64-apple-darwin | x86_64-pc-windows-msvc)
 	platform=native
@@ -97,6 +148,11 @@ x86_64-apple-darwin)
 	fi
 	;;
 sdist)
+	if [ -z "${RUSTUP_TOOLCHAIN:-}" ] && command -v rustup >/dev/null 2>&1; then
+		if ! rustc --version 2>/dev/null | grep -q "^rustc ${toolchain} "; then
+			export RUSTUP_TOOLCHAIN="${toolchain}"
+		fi
+	fi
 	platform=sdist
 	;;
 *)
@@ -109,7 +165,7 @@ rustc --version | grep -q "^rustc ${toolchain} " || {
 	echo "build-wheel: rustc is not ${toolchain} (got $(rustc --version))" >&2
 	exit 1
 }
-if [ "${platform}" = "native" ] || [ "${platform}" = "linux" ]; then
+if [ "${platform}" = "native" ] || [ "${platform}" = "linux" ] || [ "${platform}" = "local-linux" ]; then
 	[ "$(rustc -vV | awk '/^host:/{print $2}')" = "${target}" ] || {
 		echo "build-wheel: rustc host is not ${target}" >&2
 		exit 1
@@ -121,6 +177,31 @@ build_python="${work}/build/bin/python"
 [ -x "${build_python}" ] || build_python="${work}/build/Scripts/python.exe"
 "${build_python}" -I -m pip install --quiet --disable-pip-version-check --require-hashes \
 	--only-binary :all: -r config/python-build-requirements.txt
+
+# Verify bindings/python version agrees with VERSION or release-plan skip retained_version.
+"${build_python}" -I - "${root}" "${version}" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+py_ver = sys.argv[2]
+repo_version = (root / "VERSION").read_text(encoding="utf-8").strip()
+expected = repo_version
+plan_path = root / "docs" / "releases" / f"v{repo_version}.json"
+if plan_path.is_file():
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    py_surface = (plan.get("surfaces") or {}).get("python") or {}
+    if py_surface.get("disposition") == "skip":
+        retained = py_surface.get("retained_version")
+        if not isinstance(retained, str) or not retained:
+            raise SystemExit("build-wheel: python skip plan missing retained_version")
+        expected = retained
+if py_ver != expected:
+    raise SystemExit(
+        f"build-wheel: bindings/python version {py_ver!r} != expected {expected!r} (VERSION={repo_version!r})"
+    )
+PY
 
 here="$(pwd -P)"
 cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
@@ -161,30 +242,85 @@ if [ "${target}" = "sdist" ]; then
 	}
 	mkdir -p "${work}/sdist-src"
 	"${build_python}" -I - "${work}/sdist/${artifact}" "${work}/sdist-src" "${version}" <<'PY'
-import email, pathlib, sys, tarfile
+import email
+import os
+import pathlib
+import re
+import sys
+import tarfile
 
 archive = pathlib.Path(sys.argv[1])
 dest = pathlib.Path(sys.argv[2]).resolve()
 want_version = sys.argv[3]
+expected_root = f"sysprims-{want_version}"
+seen_folded: set[str] = set()
+
 with tarfile.open(archive, "r:gz") as tf:
-    pkg_infos = [m for m in tf.getmembers() if m.name.endswith("/PKG-INFO")]
+    members = tf.getmembers()
+    pkg_infos = [m for m in members if m.name == f"{expected_root}/PKG-INFO" and m.isfile()]
     if len(pkg_infos) != 1:
-        raise SystemExit(f"build-wheel: expected 1 PKG-INFO in sdist, got {len(pkg_infos)}")
-    raw = tf.extractfile(pkg_infos[0]).read().decode("utf-8")
-    msg = email.message_from_string(raw)
+        raise SystemExit(f"build-wheel: expected 1 {expected_root}/PKG-INFO in sdist, got {len(pkg_infos)}")
+    pkg_reader = tf.extractfile(pkg_infos[0])
+    if pkg_reader is None:
+        raise SystemExit("build-wheel: unreadable PKG-INFO in sdist")
+    msg = email.message_from_string(pkg_reader.read().decode("utf-8"))
     if msg.get("Name") != "sysprims" or msg.get("Version") != want_version:
         raise SystemExit(f"build-wheel: sdist PKG-INFO mismatch: {msg.get('Name')} {msg.get('Version')}")
-    for member in tf.getmembers():
-        target = (dest / member.name).resolve()
+    for member in members:
+        raw = member.name
+        is_dir = member.isdir()
+        if (
+            member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+            or member.issym()
+            or member.islnk()
+            or member.isfifo()
+            or member.ischr()
+            or member.isblk()
+            or member.isdev()
+        ):
+            raise SystemExit(f"build-wheel: non-regular/link sdist entry {raw!r}")
+        if (
+            not raw
+            or "\\" in raw
+            or raw.startswith("/")
+            or (not is_dir and raw.endswith("/"))
+            or any(ord(ch) < 32 for ch in raw)
+            or re.match(r"^[A-Za-z]:", raw)
+        ):
+            raise SystemExit(f"build-wheel: unsafe sdist path {raw!r}")
+        trimmed = raw.rstrip("/") if is_dir else raw
+        parts = trimmed.split("/")
+        if (
+            not trimmed
+            or any(p in ("", ".", "..") or re.match(r"^[A-Za-z]:", p) for p in parts)
+            or parts[0] != expected_root
+            or (not is_dir and len(parts) < 2)
+        ):
+            raise SystemExit(f"build-wheel: unexpected sdist member path {raw!r}")
+        folded = "/".join(p.casefold() for p in parts)
+        if folded in seen_folded:
+            raise SystemExit(f"build-wheel: duplicate/colliding sdist entry {raw!r}")
+        seen_folded.add(folded)
+        target = (dest / pathlib.PurePosixPath(*parts)).resolve()
         if dest not in target.parents and target != dest:
-            raise SystemExit(f"build-wheel: unsafe sdist path {member.name!r}")
-    if hasattr(tarfile, "data_filter"):
-        tf.extractall(dest, filter="data")
-    else:
-        tf.extractall(dest)
+            raise SystemExit(f"build-wheel: sdist path escapes destination: {raw!r}")
+        if is_dir:
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            reader = tf.extractfile(member)
+            if reader is None:
+                raise SystemExit(f"build-wheel: unreadable sdist member {raw!r}")
+            with open(target, "xb") as out_f:
+                out_f.write(reader.read())
+            if member.mode & 0o111:
+                os.chmod(target, 0o755)
 PY
 	sdist_dir="${work}/sdist-src/sysprims-${version}"
-	[ -f "${sdist_dir}/pyproject.toml" ] || sdist_dir="$(find "${work}/sdist-src" -mindepth 1 -maxdepth 1 -type d | head -1)"
+	[ -f "${sdist_dir}/pyproject.toml" ] || {
+		echo "build-wheel: missing extracted ${sdist_dir}/pyproject.toml" >&2
+		exit 1
+	}
 	(
 		cd "${sdist_dir}" &&
 			MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" \
@@ -216,17 +352,27 @@ wheels=("${work}"/wheels/sysprims-*.whl)
 	exit 1
 }
 wheel="${wheels[0]##*/}"
-case "${target}" in
-x86_64-unknown-linux-gnu) want="sysprims-${version}-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" ;;
-aarch64-unknown-linux-gnu) want="sysprims-${version}-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl" ;;
-aarch64-apple-darwin) want="sysprims-${version}-cp310-abi3-macosx_11_0_arm64.whl" ;;
-x86_64-apple-darwin) want="sysprims-${version}-cp310-abi3-macosx_11_0_x86_64.whl" ;;
-x86_64-pc-windows-msvc) want="sysprims-${version}-cp310-abi3-win_amd64.whl" ;;
-esac
-[ "${wheel}" = "${want}" ] || {
-	echo "build-wheel: built ${wheel}, expected ${want}" >&2
-	exit 1
-}
+if [ "${platform}" = "local-linux" ]; then
+	case "${wheel}" in
+	"sysprims-${version}-cp310-abi3-"*linux*.whl) ;;
+	*)
+		echo "build-wheel: unexpected local Linux wheel name ${wheel}" >&2
+		exit 1
+		;;
+	esac
+else
+	case "${target}" in
+	x86_64-unknown-linux-gnu) want="sysprims-${version}-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" ;;
+	aarch64-unknown-linux-gnu) want="sysprims-${version}-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl" ;;
+	aarch64-apple-darwin) want="sysprims-${version}-cp310-abi3-macosx_11_0_arm64.whl" ;;
+	x86_64-apple-darwin) want="sysprims-${version}-cp310-abi3-macosx_11_0_x86_64.whl" ;;
+	x86_64-pc-windows-msvc) want="sysprims-${version}-cp310-abi3-win_amd64.whl" ;;
+	esac
+	[ "${wheel}" = "${want}" ] || {
+		echo "build-wheel: built ${wheel}, expected ${want}" >&2
+		exit 1
+	}
+fi
 
 "${build_python}" -I scripts/host-path-check.py "${work}/wheels/${wheel}" \
 	"${here}" "${cargo_home}" "${rustup_home}" "${home}" || {

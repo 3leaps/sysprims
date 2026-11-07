@@ -658,11 +658,15 @@ function verifyRegistries(root, directory, version, commit) {
   const tsPublish = plan.surfaces.typescript?.disposition === "publish";
   const scope = pyPublish && tsPublish ? "all" : pyPublish ? "pypi" : tsPublish ? "npm" : null;
   if (scope) {
-    const args = ["-I", "-B", "scripts/release-verify-registries.py", "--stage-dir", directory, "--version", version, "--commit", commit, scope];
+    const args = ["-I", "-B", "scripts/release-verify-registries.py", "--stage-dir", directory, "--version", version, "--commit", commit];
+    if ("python" in plan.surfaces && tsPublish) {
+      args.push("--require-staged-npm");
+    }
     if (pyPublish && process.env.SYSPRIMS_BOOTSTRAP_PYPI_NO_PROVENANCE === "1") {
       if (isCiEnv()) fail("SYSPRIMS_BOOTSTRAP_PYPI_NO_PROVENANCE is not accepted under GitHub Actions or CI");
       args.push("--pypi-bootstrap-no-provenance");
     }
+    args.push(scope);
     run(root, "python3", args);
   }
 }

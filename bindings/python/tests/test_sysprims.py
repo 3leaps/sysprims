@@ -154,12 +154,20 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
         )
         self.assertEqual(timed_out["status"], "timed_out")
 
-        setsid_res = sysprims.run_setsid(
-            [sys.executable, "-c", "raise SystemExit(0)"],
-            wait=True,
-        )
-        self.assertEqual(setsid_res["status"], "completed")
-        self.assertEqual(setsid_res["exit_code"], 0)
+        if sys.platform == "win32":
+            with self.assertRaises(sysprims.SysprimsError) as ctx:
+                sysprims.run_setsid(
+                    [sys.executable, "-c", "raise SystemExit(0)"],
+                    wait=True,
+                )
+            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+        else:
+            setsid_res = sysprims.run_setsid(
+                [sys.executable, "-c", "raise SystemExit(0)"],
+                wait=True,
+            )
+            self.assertEqual(setsid_res["status"], "completed")
+            self.assertEqual(setsid_res["exit_code"], 0)
 
         if sys.platform == "win32":
             with self.assertRaises(sysprims.SysprimsError) as ctx:
@@ -179,37 +187,46 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             sysprims.ContainedProcess(1)  # type: ignore[misc]
 
-        with sysprims.spawn_contained([sys.executable, "-c", "raise SystemExit(0)"]) as handle:
-            self.assertEqual(repr(handle), "<ContainedProcess open>")
-            with self.assertRaises(TypeError):
-                copy.copy(handle)
-            with self.assertRaises(TypeError):
-                copy.deepcopy(handle)
-            with self.assertRaises(TypeError):
-                pickle.dumps(handle)
-            ident = handle.identity()
-            self.assertIn("identity", ident)
-            self.assertGreater(ident["identity"]["pid"], 0)
-            waited = handle.wait(timeout_ms=10_000)
-            self.assertEqual(waited["leader_status"], "completed")
-
-        self.assertTrue(handle.closed)
-        self.assertEqual(repr(handle), "<ContainedProcess closed>")
-        handle.close()  # idempotent
         with self.assertRaises(sysprims.SysprimsError) as ctx:
-            handle.poll()
+            sysprims.spawn_contained([])
         self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
 
-        sleep_handle = sysprims.spawn_contained(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            grace_timeout_ms=200,
-            kill_timeout_ms=200,
-        )
-        try:
-            term_snap = sleep_handle.terminate()
-            self.assertEqual(term_snap["leader_status"], "terminated")
-        finally:
-            sleep_handle.close()
+        if sys.platform == "win32":
+            with self.assertRaises(sysprims.SysprimsError) as ctx:
+                sysprims.spawn_contained([sys.executable, "-c", "raise SystemExit(0)"])
+            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+        else:
+            with sysprims.spawn_contained([sys.executable, "-c", "raise SystemExit(0)"]) as handle:
+                self.assertEqual(repr(handle), "<ContainedProcess open>")
+                with self.assertRaises(TypeError):
+                    copy.copy(handle)
+                with self.assertRaises(TypeError):
+                    copy.deepcopy(handle)
+                with self.assertRaises(TypeError):
+                    pickle.dumps(handle)
+                ident = handle.identity()
+                self.assertIn("identity", ident)
+                self.assertGreater(ident["identity"]["pid"], 0)
+                waited = handle.wait(timeout_ms=10_000)
+                self.assertEqual(waited["leader_status"], "completed")
+
+            self.assertTrue(handle.closed)
+            self.assertEqual(repr(handle), "<ContainedProcess closed>")
+            handle.close()  # idempotent
+            with self.assertRaises(sysprims.SysprimsError) as ctx:
+                handle.poll()
+            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+
+            sleep_handle = sysprims.spawn_contained(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                grace_timeout_ms=200,
+                kill_timeout_ms=200,
+            )
+            try:
+                term_snap = sleep_handle.terminate()
+                self.assertEqual(term_snap["leader_status"], "terminated")
+            finally:
+                sleep_handle.close()
 
 
 class SysprimsRecurrenceCorpusTests(unittest.TestCase):

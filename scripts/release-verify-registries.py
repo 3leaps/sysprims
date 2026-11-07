@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -1391,8 +1392,39 @@ def verify_npm(
                 expected_commit=commit,
             )
 
-        if require_staged_npm or (
-            stage_dir is not None and matched_workflow == REGISTRY_PUBLISH_WORKFLOW
+        stage_has_npm_tarballs = bool(
+            sha256s is not None
+            and any(
+                f"{prefix}-{version}.tgz" in sha256s
+                for prefix in NPM_TARBALL_PREFIX_BY_PKG.values()
+            )
+        )
+        plan_requires_staged_npm = False
+        if commit is not None:
+            git_dir = Path.cwd()
+            if not (git_dir / ".git").exists():
+                git_dir = Path(__file__).resolve().parent.parent
+            plan_proc = subprocess.run(
+                ["git", "-C", str(git_dir), "show", f"{commit}:docs/releases/v{version}.json"],
+                capture_output=True,
+                text=True,
+            )
+            if plan_proc.returncode == 0:
+                try:
+                    plan_doc = json.loads(plan_proc.stdout)
+                except json.JSONDecodeError as exc:
+                    fail(f"invalid release plan JSON at {commit}: {exc}")
+                surfaces = plan_doc.get("surfaces") or {}
+                plan_requires_staged_npm = bool(
+                    "python" in surfaces
+                    and (surfaces.get("typescript") or {}).get("disposition") == "publish"
+                )
+
+        if (
+            require_staged_npm
+            or plan_requires_staged_npm
+            or stage_has_npm_tarballs
+            or (stage_dir is not None and matched_workflow == REGISTRY_PUBLISH_WORKFLOW)
         ):
             if stage_dir is None or sha256s is None or sha512s is None:
                 fail(

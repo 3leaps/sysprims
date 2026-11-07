@@ -719,7 +719,31 @@ refused_all() {
 }
 
 run_verify_all pypi
+run_verify_all all
 run_verify_all --require-staged-npm all
+
+# Even with valid legacy typescript-npm-publish.yml provenance and WITHOUT --require-staged-npm,
+# any mismatch against signed SHA256SUMS / staged .tgz tarballs is refused when tarballs are in the manifest.
+cp "$stage_dir/SHA256SUMS" "$scratch/SHA256SUMS.pristine"
+cp "$stage_dir/SHA512SUMS" "$scratch/SHA512SUMS.pristine"
+cp "$stage_dir/3leaps-sysprims-$version.tgz" "$scratch/3leaps-sysprims.pristine.tgz"
+sed "s/^\([0-9a-f]\{64\}\)\(  3leaps-sysprims-$version\.tgz\)$/0000000000000000000000000000000000000000000000000000000000000000\2/" \
+	"$scratch/SHA256SUMS.pristine" >"$stage_dir/SHA256SUMS"
+refused_all "staged npm tarball sha256 mismatch" npm
+
+# Internally consistent signed staged tarball that differs from the legacy-attested npm registry tarball is also refused!
+printf 'different-signed-release-bytes\n' >"$stage_dir/3leaps-sysprims-$version.tgz"
+alt256="$(shasum -a 256 "$stage_dir/3leaps-sysprims-$version.tgz" | awk '{print $1}')"
+alt512="$(shasum -a 512 "$stage_dir/3leaps-sysprims-$version.tgz" | awk '{print $1}')"
+sed "s/^\([0-9a-f]\{64\}\)\(  3leaps-sysprims-$version\.tgz\)$/${alt256}\2/" \
+	"$scratch/SHA256SUMS.pristine" >"$stage_dir/SHA256SUMS"
+sed "s/^\([0-9a-f]\{128\}\)\(  3leaps-sysprims-$version\.tgz\)$/${alt512}\2/" \
+	"$scratch/SHA512SUMS.pristine" >"$stage_dir/SHA512SUMS"
+refused_all "npm registry tarball sha256 differs from signed" npm
+
+cp "$scratch/3leaps-sysprims.pristine.tgz" "$stage_dir/3leaps-sysprims-$version.tgz"
+cp "$scratch/SHA256SUMS.pristine" "$stage_dir/SHA256SUMS"
+cp "$scratch/SHA512SUMS.pristine" "$stage_dir/SHA512SUMS"
 
 # --pypi-bootstrap-no-provenance skips PyPI PEP 740 while STILL enforcing npm Sigstore provenance!
 rm -f "$pypi_prov_file"
