@@ -23,10 +23,49 @@ runs:
         INPUT_COMPONENTS: ${{ inputs.components }}
       run: |
         set -euo pipefail
-        if [[ ! "$INPUT_TOOLCHAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "error: setup-rust requires an exact X.Y.Z toolchain version, got: ${INPUT_TOOLCHAIN}" >&2
+        semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+        if [[ "$INPUT_TOOLCHAIN" == *$'\n'* || "$INPUT_TOOLCHAIN" == *$'\r'* ]] \
+          || [[ ! "$INPUT_TOOLCHAIN" =~ $semver_re ]]; then
+          echo "error: invalid X.Y.Z toolchain: ${INPUT_TOOLCHAIN}" >&2
           exit 1
         fi
+        if [[ ! "$INPUT_COMPONENTS" =~ ^[A-Za-z0-9_.,[:space:]-]*$ ]]; then
+          echo "error: setup-rust components contain invalid characters: ${INPUT_COMPONENTS}" >&2
+          exit 1
+        fi
+        if [[ ! "$INPUT_TARGETS" =~ ^[A-Za-z0-9_.,[:space:]-]*$ ]]; then
+          echo "error: setup-rust targets contain invalid characters: ${INPUT_TARGETS}" >&2
+          exit 1
+        fi
+
+        filtered_comps=()
+        norm_comps="${INPUT_COMPONENTS//[,$'\r\n\t']/ }"
+        if [[ -n "${norm_comps// /}" ]]; then
+          read -r -a raw_comps <<< "$norm_comps"
+          for c in "${raw_comps[@]}"; do
+            [[ -z "$c" ]] && continue
+            if [[ ! "$c" =~ ^[a-z0-9]+(-[a-z0-9_]+)*$ ]]; then
+              echo "error: invalid rustup component token: ${c}" >&2
+              exit 1
+            fi
+            filtered_comps+=("$c")
+          done
+        fi
+
+        filtered_tgts=()
+        norm_tgts="${INPUT_TARGETS//[,$'\r\n\t']/ }"
+        if [[ -n "${norm_tgts// /}" ]]; then
+          read -r -a raw_tgts <<< "$norm_tgts"
+          for t in "${raw_tgts[@]}"; do
+            [[ -z "$t" ]] && continue
+            if [[ ! "$t" =~ ^[a-z0-9_]+(-[a-z0-9_.-]+)+$ ]]; then
+              echo "error: invalid Rust target triple token: ${t}" >&2
+              exit 1
+            fi
+            filtered_tgts+=("$t")
+          done
+        fi
+
         cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
         export PATH="${cargo_bin}:$PATH"
         echo "${cargo_bin}" >> "$GITHUB_PATH"
@@ -35,26 +74,12 @@ runs:
         rustup default "$INPUT_TOOLCHAIN"
         echo "RUSTUP_TOOLCHAIN=${INPUT_TOOLCHAIN}" >> "$GITHUB_ENV"
 
-        if [[ -n "${INPUT_COMPONENTS// /}" ]]; then
-          IFS=', ' read -r -a comps <<< "$INPUT_COMPONENTS"
-          filtered_comps=()
-          for c in "${comps[@]}"; do
-            [[ -n "$c" ]] && filtered_comps+=("$c")
-          done
-          if [[ "${#filtered_comps[@]}" -gt 0 ]]; then
-            rustup component add --toolchain "$INPUT_TOOLCHAIN" "${filtered_comps[@]}"
-          fi
+        if [[ "${#filtered_comps[@]}" -gt 0 ]]; then
+          rustup component add --toolchain "$INPUT_TOOLCHAIN" "${filtered_comps[@]}"
         fi
 
-        if [[ -n "${INPUT_TARGETS// /}" ]]; then
-          IFS=', ' read -r -a tgts <<< "$INPUT_TARGETS"
-          filtered_tgts=()
-          for t in "${tgts[@]}"; do
-            [[ -n "$t" ]] && filtered_tgts+=("$t")
-          done
-          if [[ "${#filtered_tgts[@]}" -gt 0 ]]; then
-            rustup target add --toolchain "$INPUT_TOOLCHAIN" "${filtered_tgts[@]}"
-          fi
+        if [[ "${#filtered_tgts[@]}" -gt 0 ]]; then
+          rustup target add --toolchain "$INPUT_TOOLCHAIN" "${filtered_tgts[@]}"
         fi
 
         actual_rustc="$(rustc --version)"

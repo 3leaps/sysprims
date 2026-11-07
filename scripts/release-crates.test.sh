@@ -213,6 +213,38 @@ out="$(publish_run)"
 set_index_sum "$(printf 'b%.0s' $(seq 64))"
 expect_fail_with 'on crates.io with different contents' publish_run
 [[ ! -e "$fixture_dir/uploads" ]]
+# A truncated sparse-index HTTP 200 response stops publication with an index
+# query error rather than treating the crate as absent and uploading.
+python3 -u - >"$fixture_dir/trunc-server.log" 2>&1 <<'PY' &
+import http.server
+
+class TruncHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "4096")
+        self.end_headers()
+        self.wfile.write(b'{"name":"sysprims-core"')
+        self.wfile.flush()
+        self.close_connection = True
+    def log_message(self, fmt, *args):
+        pass
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), TruncHandler)
+print(f"Serving HTTP on 127.0.0.1 port {srv.server_address[1]} ...", flush=True)
+srv.serve_forever()
+PY
+trunc_pid=$!
+for _ in $(seq 1 50); do
+	grep -q 'Serving HTTP' "$fixture_dir/trunc-server.log" && break
+	sleep 0.1
+done
+trunc_port="$(sed -n 's/.*port \([0-9]*\).*/\1/p' "$fixture_dir/trunc-server.log" | head -1)"
+[[ -n "$trunc_port" ]]
+expect_fail_with 'cannot query sparse index' bash -c \
+	"cd '$pub' && env PATH='$bin:$PATH' FAKE_CRATE='$fixture_dir/fake-crate.py' UPLOAD_LOG='$fixture_dir/uploads' SYSPRIMS_RELEASE_TAG='v$version' ./scripts/release-crates-dry-run.sh --publish --registry-index 'sparse+http://127.0.0.1:$trunc_port/'"
+kill "$trunc_pid" 2>/dev/null || true
+[[ ! -e "$fixture_dir/uploads" ]]
 set_index_sum "$tag_sum"
 
 # A packaged crate that records another commit or another path is refused

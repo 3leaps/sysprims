@@ -18,7 +18,6 @@ die() {
 publish=0
 index_url="https://github.com/rust-lang/crates.io-index"
 crates_io_index="$index_url"
-api_base="https://crates.io"
 download="https://static.crates.io/crates"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -28,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 		shift
 		;;
 	--registry-api)
-		api_base="${2:?}"
+		: "${2:?}"
 		shift
 		;;
 	--registry-dl)
@@ -125,10 +124,12 @@ gitdir="$(sed -n '1s/^gitdir: //p' .git)"
 python3 "$tree/scripts/release-crates.py" check
 
 registry_args=()
+index_args=()
 curl_proto=(--proto '=https' --tlsv1.2)
 user_agent='sysprims-release-verify/1.0 (+https://github.com/3leaps/sysprims)'
 if [[ "$index_url" != "$crates_io_index" ]]; then
 	registry_args=(--registry testreg)
+	index_args=(--allow-http)
 	registry_config() { printf '[registries.testreg]\nindex = "%s"\n' "$index_url"; }
 	sparse_index="$index_url"
 	curl_proto=(--proto '=http,https')
@@ -141,7 +142,7 @@ fi
 # Prints "absent", or the published checksum; refuses if yanked or unreadable.
 registry_checksum() {
 	local crate="$1" out rc=0
-	out="$("$python_bin" -I "$root/scripts/release-index-entry.py" "$sparse_index" "$crate" "$version")" || rc=$?
+	out="$("$python_bin" -I "$root/scripts/release-index-entry.py" ${index_args[@]+"${index_args[@]}"} "$sparse_index" "$crate" "$version")" || rc=$?
 	case "$rc" in
 	0)
 		[[ "$out" =~ ^[0-9a-f]{64}$ ]] || die "malformed sparse-index checksum for $crate@$version"

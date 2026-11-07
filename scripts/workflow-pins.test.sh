@@ -165,7 +165,47 @@ ci_pin_controls = [
         base
         + marked_job
         + '      - {uses: ./.github/actions/setup-rust, with: {toolchain: 1.98.1}}\n',
-        '# pin:rust=<key> marker line(s)',
+        'lacks # pin:rust=<key> marker',
+    ),
+    (
+        'flow-style runner list missing marker',
+        base
+        + '\n  pinctl:\n    runs-on: [ubuntu-24.04]\n    steps:\n      - run: echo ok\n',
+        'lacks # pin:runner=<key> marker',
+    ),
+    (
+        'custom matrix axis unmarked hosted runner',
+        base
+        + marked_job
+        + '      - run: echo ok\n    strategy:\n      matrix:\n        custom_runner:\n          - ubuntu-24.04\n',
+        'lacks # pin:runner=<key> marker',
+    ),
+    (
+        'flow-style setup-rust with decoy env marker',
+        base
+        + marked_job
+        + '      - name: decoy\n        env:\n          DECOY: 1.98.1  # pin:rust=stable\n        run: echo ok\n'
+        + '      - {uses: ./.github/actions/setup-rust, with: {toolchain: 1.98.1}}\n',
+        'lacks # pin:rust=<key> marker',
+    ),
+    (
+        'orphan runner pin marker on non-runner line',
+        base
+        + marked_job
+        + '      - name: decoy\n        env:\n          DECOY: ubuntu-24.04  # pin:runner=linux-x64\n        run: echo ok\n',
+        'not attached to a runner consumer',
+    ),
+    (
+        'env RUSTUP_TOOLCHAIN floating channel',
+        base
+        + marked_job
+        + '      - env:\n          RUSTUP_TOOLCHAIN: nightly\n        run: cargo check\n',
+        'env.RUSTUP_TOOLCHAIN must come from config/ci/pins.toml',
+    ),
+    (
+        'quoted cargo floating channel',
+        base + marked_job + '      - run: cargo +"nightly" check\n',
+        'floating Rust channel in run step',
     ),
     (
         'node20 checkout pin',
@@ -264,10 +304,10 @@ pin_with
 refused 'must trigger on workflow_dispatch only' check
 git -C "$repo" checkout -q -- .
 mkdir "$scratch/shadow"
-cp "$root/scripts/release-workflow-pin.py" "$scratch/shadow/"
+cp "$root/scripts/release-workflow-pin.py" "$root/scripts/ci-pins.py" "$root/scripts/workflow_yaml.py" "$scratch/shadow/"
 printf 'raise SystemExit("shadow yaml imported")\n' >"$scratch/shadow/yaml.py"
 (cd "$repo" && python3 -B -E "$scratch/shadow/release-workflow-pin.py" check) >"$scratch/out" 2>&1 || true
-if grep -q 'shadow' "$scratch/out"; then
+if grep -q 'shadow yaml imported' "$scratch/out"; then
 	echo 'error: a yaml.py beside the pin checker was imported' >&2
 	exit 1
 fi
@@ -275,6 +315,115 @@ grep -q 'every workflow matches' "$scratch/out" || {
 	cat "$scratch/out" >&2
 	exit 1
 }
+# Even when PyYAML is unavailable, ci-pins.py fails before restoring its script
+# directory to sys.path, so a local scripts/yaml.py never executes.
+python3 -B -P -E - "$scratch/shadow/ci-pins.py" "$repo" >"$scratch/out" 2>&1 <<'PY' || true
+import importlib.abc, runpy, sys
+
+class BlockInstalledYaml(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == "yaml" or fullname.startswith("yaml."):
+            raise ModuleNotFoundError("No module named 'yaml'")
+        return None
+
+sys.meta_path.insert(0, BlockInstalledYaml())
+sys.argv = [sys.argv[1], "--root", sys.argv[2], "check"]
+runpy.run_path(sys.argv[0], run_name="__main__")
+PY
+if grep -q 'shadow yaml imported' "$scratch/out"; then
+	echo 'error: ci-pins.py imported local yaml.py when PyYAML was missing' >&2
+	exit 1
+fi
+grep -q 'need PyYAML' "$scratch/out" || {
+	cat "$scratch/out" >&2
+	exit 1
+}
+
+# Symlink refusal in ci-pins.py sync happens before any workflow or digest file
+# is modified on disk.
+sync_repo="$scratch/sync-repo"
+mkdir -p "$sync_repo/.github/workflows" "$sync_repo/.github/actions/setup-rust" "$sync_repo/config/ci" "$sync_repo/config/release"
+cp "$root/.github/workflows/ci.yml" "$sync_repo/.github/workflows/ci.yml"
+cp "$root/.github/actions/setup-rust/action.yml" "$sync_repo/.github/actions/setup-rust/action.yml"
+cp "$root/config/ci/pins.toml" "$sync_repo/config/ci/pins.toml"
+cp "$root/config/release/release-workflow.sha256" "$sync_repo/config/release/release-workflow.sha256"
+sed_in_place 's/ubuntu-24\.04  # pin:runner=linux-x64/ubuntu-22.04  # pin:runner=linux-x64/' "$sync_repo/.github/workflows/ci.yml"
+cp "$sync_repo/.github/workflows/ci.yml" "$scratch/drifted-ci.before"
+ln -s /etc/hosts "$sync_repo/.github/actions/evil.yml"
+if python3 -B -P -E "$root/scripts/ci-pins.py" --root "$sync_repo" sync >"$scratch/out" 2>&1; then
+	echo 'error: ci-pins.py sync accepted symlink under .github/actions' >&2
+	exit 1
+fi
+cmp -s "$scratch/drifted-ci.before" "$sync_repo/.github/workflows/ci.yml" || {
+	echo 'error: ci-pins.py sync mutated workflow before refusing symlink' >&2
+	exit 1
+}
+rm "$sync_repo/.github/actions/evil.yml"
+rm "$sync_repo/config/release/release-workflow.sha256"
+ln -s "$scratch/outside-sha" "$sync_repo/config/release/release-workflow.sha256"
+if python3 -B -P -E "$root/scripts/ci-pins.py" --root "$sync_repo" sync >"$scratch/out" 2>&1; then
+	echo 'error: ci-pins.py sync accepted symlink at release-workflow.sha256' >&2
+	exit 1
+fi
+[[ ! -e "$scratch/outside-sha" ]] || {
+	echo 'error: ci-pins.py sync wrote through release-workflow.sha256 symlink' >&2
+	exit 1
+}
+cmp -s "$scratch/drifted-ci.before" "$sync_repo/.github/workflows/ci.yml" || {
+	echo 'error: ci-pins.py sync mutated workflow before refusing digest symlink' >&2
+	exit 1
+}
+
+# setup-rust composite action input validation refuses leading-zero versions,
+# option tokens (--help), and validates every newline-separated token.
+action_script="$(
+	python3 -B -P -E - "$root/scripts" "$root/.github/actions/setup-rust/action.yml" <<'PY'
+import pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import workflow_yaml as wy
+doc = wy.load_text(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"), "action.yml")
+print(doc["runs"]["steps"][0]["run"])
+PY
+)"
+stub_bin="$scratch/stub-bin"
+mkdir -p "$stub_bin"
+cat >"$stub_bin/rustup" <<'SH'
+#!/usr/bin/env bash
+echo "rustup $*" >>"$RUSTUP_LOG"
+SH
+cat >"$stub_bin/rustc" <<'SH'
+#!/usr/bin/env bash
+echo "rustc ${INPUT_TOOLCHAIN} (0000000 2026-01-01)"
+SH
+cat >"$stub_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+echo "cargo ${INPUT_TOOLCHAIN}"
+SH
+chmod +x "$stub_bin/rustup" "$stub_bin/rustc" "$stub_bin/cargo"
+run_setup_rust() {
+	env PATH="$stub_bin:$PATH" CARGO_HOME="$scratch/empty-cargo" GITHUB_PATH="$scratch/gh_path" GITHUB_ENV="$scratch/gh_env" RUSTUP_LOG="$scratch/rustup.log" \
+		INPUT_TOOLCHAIN="$1" INPUT_COMPONENTS="$2" INPUT_TARGETS="$3" bash -c "$action_script" >/dev/null 2>&1
+}
+if run_setup_rust "01.88.0" "" ""; then
+	echo 'error: setup-rust accepted leading-zero toolchain version' >&2
+	exit 1
+fi
+if run_setup_rust "1.88.0" "--help" ""; then
+	echo 'error: setup-rust accepted --help in components' >&2
+	exit 1
+fi
+if run_setup_rust "1.88.0" "" "--help"; then
+	echo 'error: setup-rust accepted --help in targets' >&2
+	exit 1
+fi
+if run_setup_rust "1.88.0" $'clippy\n--help' ""; then
+	echo 'error: setup-rust truncated newline-separated invalid component' >&2
+	exit 1
+fi
+: >"$scratch/rustup.log"
+run_setup_rust "1.88.0" $'clippy\nrustfmt' $'x86_64-unknown-linux-gnu\naarch64-apple-darwin'
+grep -q 'component add --toolchain 1.88.0 clippy rustfmt' "$scratch/rustup.log"
+grep -q 'target add --toolchain 1.88.0 x86_64-unknown-linux-gnu aarch64-apple-darwin' "$scratch/rustup.log"
 printf '# uncommitted\n' >>"$repo/.github/workflows/release.yml"
 pin verify-commit HEAD
 git -C "$repo" add .github/workflows/release.yml

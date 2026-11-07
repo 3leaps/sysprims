@@ -2,180 +2,334 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 const nativeOrder = [
-  "@3leaps/sysprims-darwin-arm64",
-  "@3leaps/sysprims-linux-arm64-gnu",
-  "@3leaps/sysprims-linux-arm64-musl",
-  "@3leaps/sysprims-linux-x64-gnu",
-  "@3leaps/sysprims-linux-x64-musl",
-  "@3leaps/sysprims-win32-arm64-msvc",
-  "@3leaps/sysprims-win32-x64-msvc",
+	"@3leaps/sysprims-darwin-arm64",
+	"@3leaps/sysprims-linux-arm64-gnu",
+	"@3leaps/sysprims-linux-arm64-musl",
+	"@3leaps/sysprims-linux-x64-gnu",
+	"@3leaps/sysprims-linux-x64-musl",
+	"@3leaps/sysprims-win32-arm64-msvc",
+	"@3leaps/sysprims-win32-x64-msvc",
 ];
 
-function fail(message) { throw new Error(message); }
+function fail(message) {
+	throw new Error(message);
+}
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: "utf8", env: process.env, ...options });
-  if (result.error) fail(`cannot run ${command}: ${result.error.message}`);
-  return result;
+	const result = spawnSync(command, args, {
+		encoding: "utf8",
+		env: process.env,
+		...options,
+	});
+	if (result.error) fail(`cannot run ${command}: ${result.error.message}`);
+	return result;
 }
 
 function mustRun(command, args, options = {}) {
-  const result = run(command, args, options);
-  if (result.status !== 0) fail(`${command} ${args.join(" ")} failed:\n${result.stderr}${result.stdout}`);
-  return result.stdout;
+	const result = run(command, args, options);
+	if (result.status !== 0)
+		fail(
+			`${command} ${args.join(" ")} failed:\n${result.stderr}${result.stdout}`,
+		);
+	return result.stdout;
 }
 
-function digest(path, algorithm) { return createHash(algorithm).update(readFileSync(path)).digest(algorithm === "sha512" ? "base64" : "hex"); }
-function json(path) { return JSON.parse(readFileSync(path, "utf8")); }
+function digest(path, algorithm) {
+	return createHash(algorithm)
+		.update(readFileSync(path))
+		.digest(algorithm === "sha512" ? "base64" : "hex");
+}
+function json(path) {
+	return JSON.parse(readFileSync(path, "utf8"));
+}
 
 function pack(directory, outputDirectory) {
-  const result = JSON.parse(mustRun("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", outputDirectory], { cwd: directory }));
-  if (!Array.isArray(result) || result.length !== 1) fail(`npm pack returned an unexpected result for ${directory}`);
-  const item = result[0];
-  const path = join(outputDirectory, item.filename);
-  if (!existsSync(path)) fail(`npm pack did not create ${path}`);
-  return {
-    name: item.name,
-    version: item.version,
-    filename: item.filename,
-    sha256: digest(path, "sha256"),
-    sri: `sha512-${digest(path, "sha512")}`,
-    content: (item.files ?? []).map(({ path: name, size, mode }) => ({ path: name, size, mode })).sort((a, b) => a.path.localeCompare(b.path)),
-  };
+	const result = JSON.parse(
+		mustRun(
+			"npm",
+			[
+				"pack",
+				"--json",
+				"--ignore-scripts",
+				"--pack-destination",
+				outputDirectory,
+			],
+			{ cwd: directory },
+		),
+	);
+	if (!Array.isArray(result) || result.length !== 1)
+		fail(`npm pack returned an unexpected result for ${directory}`);
+	const item = result[0];
+	const path = join(outputDirectory, item.filename);
+	if (!existsSync(path)) fail(`npm pack did not create ${path}`);
+	return {
+		name: item.name,
+		version: item.version,
+		filename: item.filename,
+		sha256: digest(path, "sha256"),
+		sri: `sha512-${digest(path, "sha512")}`,
+		content: (item.files ?? [])
+			.map(({ path: name, size, mode }) => ({ path: name, size, mode }))
+			.sort((a, b) => a.path.localeCompare(b.path)),
+	};
 }
 
 export function verifyStage(stageDirectory, expectedTag, expectedCommit) {
-  const manifest = json(join(stageDirectory, "manifest.json"));
-  if (manifest.schema !== "sysprims-npm-stage/v1") fail("unknown npm stage schema");
-  if (manifest.tag !== expectedTag || manifest.commit !== expectedCommit) fail("npm stage tag/commit binding mismatch");
-  const expectedNames = [...nativeOrder, "@3leaps/sysprims"];
-  if (JSON.stringify(manifest.packages.map((entry) => entry.name)) !== JSON.stringify(expectedNames)) fail("npm stage package order/set mismatch");
-  for (const entry of manifest.packages) {
-    const path = join(stageDirectory, "packages", entry.filename);
-    if (!existsSync(path)) fail(`staged tarball is missing: ${entry.filename}`);
-    if (entry.sha256 !== digest(path, "sha256") || entry.sri !== `sha512-${digest(path, "sha512")}`) fail(`staged tarball digest mismatch: ${entry.name}`);
-    if (entry.version !== expectedTag.replace(/^v/, "")) fail(`staged package version mismatch: ${entry.name}`);
-  }
-  return manifest;
+	const manifest = json(join(stageDirectory, "manifest.json"));
+	if (manifest.schema !== "sysprims-npm-stage/v1")
+		fail("unknown npm stage schema");
+	if (manifest.tag !== expectedTag || manifest.commit !== expectedCommit)
+		fail("npm stage tag/commit binding mismatch");
+	const expectedNames = [...nativeOrder, "@3leaps/sysprims"];
+	if (
+		JSON.stringify(manifest.packages.map((entry) => entry.name)) !==
+		JSON.stringify(expectedNames)
+	)
+		fail("npm stage package order/set mismatch");
+	for (const entry of manifest.packages) {
+		const path = join(stageDirectory, "packages", entry.filename);
+		if (!existsSync(path)) fail(`staged tarball is missing: ${entry.filename}`);
+		if (
+			entry.sha256 !== digest(path, "sha256") ||
+			entry.sri !== `sha512-${digest(path, "sha512")}`
+		)
+			fail(`staged tarball digest mismatch: ${entry.name}`);
+		if (entry.version !== expectedTag.replace(/^v/, ""))
+			fail(`staged package version mismatch: ${entry.name}`);
+	}
+	return manifest;
 }
 
 export function parseRegistryMetadata(value, label = "npm package") {
-  const tarball = value?.dist?.tarball ?? value?.["dist.tarball"];
-  const integrity = value?.dist?.integrity ?? value?.["dist.integrity"];
-  if (!tarball || !integrity) fail(`npm registry metadata is incomplete for ${label}`);
-  return { tarball, integrity };
+	const tarball = value?.dist?.tarball ?? value?.["dist.tarball"];
+	const integrity = value?.dist?.integrity ?? value?.["dist.integrity"];
+	if (!tarball || !integrity)
+		fail(`npm registry metadata is incomplete for ${label}`);
+	return { tarball, integrity };
 }
 
 function registryState(entry, registryDirectory) {
-  if (registryDirectory) {
-    const path = join(registryDirectory, entry.filename);
-    if (!existsSync(path)) return { state: "absent" };
-    return { state: "present", sha256: digest(path, "sha256"), sri: `sha512-${digest(path, "sha512")}` };
-  }
-  const viewed = run("npm", ["view", `${entry.name}@${entry.version}`, "dist.tarball", "dist.integrity", "--json"]);
-  if (viewed.status !== 0) {
-    if (/E404|not found/i.test(`${viewed.stderr}${viewed.stdout}`)) return { state: "absent" };
-    fail(`npm registry query failed for ${entry.name}@${entry.version}: ${viewed.stderr}${viewed.stdout}`);
-  }
-  const metadata = JSON.parse(viewed.stdout);
-  const parsed = parseRegistryMetadata(metadata, `${entry.name}@${entry.version}`);
-  return { state: "present", sri: parsed.integrity, tarball: parsed.tarball };
+	if (registryDirectory) {
+		const path = join(registryDirectory, entry.filename);
+		if (!existsSync(path)) return { state: "absent" };
+		return {
+			state: "present",
+			sha256: digest(path, "sha256"),
+			sri: `sha512-${digest(path, "sha512")}`,
+		};
+	}
+	const viewed = run("npm", [
+		"view",
+		`${entry.name}@${entry.version}`,
+		"dist.tarball",
+		"dist.integrity",
+		"--json",
+	]);
+	if (viewed.status !== 0) {
+		if (/E404|not found/i.test(`${viewed.stderr}${viewed.stdout}`))
+			return { state: "absent" };
+		fail(
+			`npm registry query failed for ${entry.name}@${entry.version}: ${viewed.stderr}${viewed.stdout}`,
+		);
+	}
+	const metadata = JSON.parse(viewed.stdout);
+	const parsed = parseRegistryMetadata(
+		metadata,
+		`${entry.name}@${entry.version}`,
+	);
+	return { state: "present", sri: parsed.integrity, tarball: parsed.tarball };
 }
 
-const VERIFY_USER_AGENT = "sysprims-release-verify/1.0 (+https://github.com/3leaps/sysprims)";
+const VERIFY_USER_AGENT =
+	"sysprims-release-verify/1.0 (+https://github.com/3leaps/sysprims)";
 
 function defaultSleep(ms) {
-  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+	if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function assertPresentIdentical(entry, state, stageDirectory) {
-  if (state.sri !== entry.sri) fail(`hostile same-version registry content for ${entry.name}@${entry.version}`);
-  if (state.sha256 && state.sha256 !== entry.sha256) fail(`hostile same-version registry bytes for ${entry.name}@${entry.version}`);
-  if (state.tarball) {
-    const temporary = join(stageDirectory, `.registry-${entry.filename}`);
-    try {
-      mustRun("curl", ["-fsSL", "--retry", "3", "-A", VERIFY_USER_AGENT, "-o", temporary, state.tarball]);
-      if (digest(temporary, "sha256") !== entry.sha256) fail(`hostile same-version registry bytes for ${entry.name}@${entry.version}`);
-    } finally { rmSync(temporary, { force: true }); }
-  }
+	if (state.sri !== entry.sri)
+		fail(
+			`hostile same-version registry content for ${entry.name}@${entry.version}`,
+		);
+	if (state.sha256 && state.sha256 !== entry.sha256)
+		fail(
+			`hostile same-version registry bytes for ${entry.name}@${entry.version}`,
+		);
+	if (state.tarball) {
+		const temporary = join(stageDirectory, `.registry-${entry.filename}`);
+		try {
+			mustRun("curl", [
+				"--proto",
+				"=https",
+				"--tlsv1.2",
+				"--max-time",
+				"60",
+				"-fsSL",
+				"--retry",
+				"3",
+				"-A",
+				VERIFY_USER_AGENT,
+				"-o",
+				temporary,
+				state.tarball,
+			]);
+			if (digest(temporary, "sha256") !== entry.sha256)
+				fail(
+					`hostile same-version registry bytes for ${entry.name}@${entry.version}`,
+				);
+		} finally {
+			rmSync(temporary, { force: true });
+		}
+	}
 }
 
-export function publishResumably(stageDirectory, manifest, {
-  registryDirectory,
-  publish = true,
-  publishPackage,
-  queryState = registryState,
-  sleepFn = defaultSleep,
-  pollAttempts = Number.parseInt(process.env.SYSPRIMS_NPM_POLL_ATTEMPTS ?? "12", 10),
-  pollSleepMs = Number.parseInt(process.env.SYSPRIMS_NPM_POLL_SLEEP_MS ?? "5000", 10),
-} = {}) {
-  if (!Number.isInteger(pollAttempts) || pollAttempts < 1) fail("SYSPRIMS_NPM_POLL_ATTEMPTS must be a positive integer");
-  if (!Number.isInteger(pollSleepMs) || pollSleepMs < 0) fail("SYSPRIMS_NPM_POLL_SLEEP_MS must be a non-negative integer");
-  const completed = [];
-  for (const entry of manifest.packages) {
-    if (entry.name === "@3leaps/sysprims" && completed.length !== nativeOrder.length) fail("root package cannot publish before all native packages are verified");
-    let state = queryState(entry, registryDirectory);
-    if (state.state === "absent") {
-      if (!publish) { completed.push({ name: entry.name, state: "absent" }); continue; }
-      if (publishPackage) publishPackage(entry, join(stageDirectory, "packages", entry.filename));
-      else mustRun("npm", ["publish", join(stageDirectory, "packages", entry.filename), "--access", "public", "--provenance"]);
-      for (let attempt = 1; attempt <= pollAttempts; attempt += 1) {
-        state = queryState(entry, registryDirectory);
-        if (state.state === "present") break;
-        if (attempt < pollAttempts) sleepFn(pollSleepMs);
-      }
-      if (state.state !== "present") fail(`npm package remained absent after publish (${pollAttempts} poll attempts): ${entry.name}@${entry.version}`);
-    }
-    assertPresentIdentical(entry, state, stageDirectory);
-    completed.push({ name: entry.name, state: "identical" });
-  }
-  return completed;
+export function publishResumably(
+	stageDirectory,
+	manifest,
+	{
+		registryDirectory,
+		publish = true,
+		publishPackage,
+		queryState = registryState,
+		sleepFn = defaultSleep,
+		nowFn = Date.now,
+		pollAttempts = Number.parseInt(
+			process.env.SYSPRIMS_NPM_POLL_ATTEMPTS ?? "12",
+			10,
+		),
+		pollSleepMs = Number.parseInt(
+			process.env.SYSPRIMS_NPM_POLL_SLEEP_MS ?? "5000",
+			10,
+		),
+		pollDeadlineMs = Number.parseInt(
+			process.env.SYSPRIMS_NPM_POLL_DEADLINE_MS ?? "180000",
+			10,
+		),
+	} = {},
+) {
+	if (!Number.isInteger(pollAttempts) || pollAttempts < 1)
+		fail("SYSPRIMS_NPM_POLL_ATTEMPTS must be a positive integer");
+	if (!Number.isInteger(pollSleepMs) || pollSleepMs < 0)
+		fail("SYSPRIMS_NPM_POLL_SLEEP_MS must be a non-negative integer");
+	if (!Number.isInteger(pollDeadlineMs) || pollDeadlineMs < 1)
+		fail("SYSPRIMS_NPM_POLL_DEADLINE_MS must be a positive integer");
+	const completed = [];
+	for (const entry of manifest.packages) {
+		if (
+			entry.name === "@3leaps/sysprims" &&
+			completed.length !== nativeOrder.length
+		)
+			fail(
+				"root package cannot publish before all native packages are verified",
+			);
+		let state = queryState(entry, registryDirectory);
+		if (state.state === "absent") {
+			if (!publish) {
+				completed.push({ name: entry.name, state: "absent" });
+				continue;
+			}
+			if (publishPackage)
+				publishPackage(entry, join(stageDirectory, "packages", entry.filename));
+			else
+				mustRun("npm", [
+					"publish",
+					join(stageDirectory, "packages", entry.filename),
+					"--access",
+					"public",
+					"--provenance",
+				]);
+			const deadline = nowFn() + pollDeadlineMs;
+			for (let attempt = 1; attempt <= pollAttempts; attempt += 1) {
+				state = queryState(entry, registryDirectory);
+				if (state.state === "present") break;
+				if (nowFn() >= deadline)
+					fail(
+						`npm package remained absent past ${pollDeadlineMs}ms deadline: ${entry.name}@${entry.version}`,
+					);
+				if (attempt < pollAttempts)
+					sleepFn(Math.min(pollSleepMs, Math.max(0, deadline - nowFn())));
+			}
+			if (state.state !== "present")
+				fail(
+					`npm package remained absent after publish (${pollAttempts} poll attempts): ${entry.name}@${entry.version}`,
+				);
+		}
+		assertPresentIdentical(entry, state, stageDirectory);
+		completed.push({ name: entry.name, state: "identical" });
+	}
+	return completed;
 }
 
 function argument(argv, name, fallback) {
-  const index = argv.indexOf(name);
-  return index === -1 ? fallback : argv[index + 1];
+	const index = argv.indexOf(name);
+	return index === -1 ? fallback : argv[index + 1];
 }
 
 function main() {
-  const argv = process.argv.slice(2);
-  const command = argv[0];
-  const stageDirectory = resolve(argument(argv, "--stage", "dist/npm-stage"));
-  const tag = argument(argv, "--tag", process.env.GITHUB_REF_NAME);
-  const commit = argument(argv, "--commit", process.env.GITHUB_SHA);
-  if (!tag || !commit) fail("--tag and --commit are required");
-  if (command === "stage") {
-    const nativeDirectory = resolve(argument(argv, "--native-dir", "npm-packages"));
-    const rootDirectory = resolve(argument(argv, "--root-package", "bindings/typescript/sysprims"));
-    rmSync(stageDirectory, { recursive: true, force: true });
-    const packagesDirectory = join(stageDirectory, "packages");
-    mkdirSync(packagesDirectory, { recursive: true });
-    const byName = new Map();
-    for (const child of readdirSync(nativeDirectory)) {
-      const directory = join(nativeDirectory, child);
-      if (!existsSync(join(directory, "package.json"))) continue;
-      const entry = pack(directory, packagesDirectory);
-      byName.set(entry.name, entry);
-    }
-    const root = pack(rootDirectory, packagesDirectory);
-    byName.set(root.name, root);
-    const names = [...nativeOrder, "@3leaps/sysprims"];
-    for (const name of names) if (!byName.has(name)) fail(`stage is missing package ${name}`);
-    writeFileSync(join(stageDirectory, "manifest.json"), `${JSON.stringify({ schema: "sysprims-npm-stage/v1", tag, commit, packages: names.map((name) => byName.get(name)) }, null, 2)}\n`);
-    verifyStage(stageDirectory, tag, commit);
-  } else if (command === "verify") {
-    verifyStage(stageDirectory, tag, commit);
-  } else if (command === "compare" || command === "publish") {
-    const manifest = verifyStage(stageDirectory, tag, commit);
-    publishResumably(stageDirectory, manifest, { publish: command === "publish" });
-  } else fail("usage: npm-release.mjs <stage|verify|compare|publish> --stage DIR --tag vX.Y.Z --commit SHA");
-  console.log(`[ok] npm ${command} completed for ${tag} at ${commit}`);
+	const argv = process.argv.slice(2);
+	const command = argv[0];
+	const stageDirectory = resolve(argument(argv, "--stage", "dist/npm-stage"));
+	const tag = argument(argv, "--tag", process.env.GITHUB_REF_NAME);
+	const commit = argument(argv, "--commit", process.env.GITHUB_SHA);
+	if (!tag || !commit) fail("--tag and --commit are required");
+	if (command === "stage") {
+		const nativeDirectory = resolve(
+			argument(argv, "--native-dir", "npm-packages"),
+		);
+		const rootDirectory = resolve(
+			argument(argv, "--root-package", "bindings/typescript/sysprims"),
+		);
+		rmSync(stageDirectory, { recursive: true, force: true });
+		const packagesDirectory = join(stageDirectory, "packages");
+		mkdirSync(packagesDirectory, { recursive: true });
+		const byName = new Map();
+		for (const child of readdirSync(nativeDirectory)) {
+			const directory = join(nativeDirectory, child);
+			if (!existsSync(join(directory, "package.json"))) continue;
+			const entry = pack(directory, packagesDirectory);
+			byName.set(entry.name, entry);
+		}
+		const root = pack(rootDirectory, packagesDirectory);
+		byName.set(root.name, root);
+		const names = [...nativeOrder, "@3leaps/sysprims"];
+		for (const name of names)
+			if (!byName.has(name)) fail(`stage is missing package ${name}`);
+		writeFileSync(
+			join(stageDirectory, "manifest.json"),
+			`${JSON.stringify({ schema: "sysprims-npm-stage/v1", tag, commit, packages: names.map((name) => byName.get(name)) }, null, 2)}\n`,
+		);
+		verifyStage(stageDirectory, tag, commit);
+	} else if (command === "verify") {
+		verifyStage(stageDirectory, tag, commit);
+	} else if (command === "compare" || command === "publish") {
+		const manifest = verifyStage(stageDirectory, tag, commit);
+		publishResumably(stageDirectory, manifest, {
+			publish: command === "publish",
+		});
+	} else
+		fail(
+			"usage: npm-release.mjs <stage|verify|compare|publish> --stage DIR --tag vX.Y.Z --commit SHA",
+		);
+	console.log(`[ok] npm ${command} completed for ${tag} at ${commit}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  try { main(); } catch (error) { console.error(`[ERROR] ${error.message}`); process.exitCode = 1; }
+	try {
+		main();
+	} catch (error) {
+		console.error(`[ERROR] ${error.message}`);
+		process.exitCode = 1;
+	}
 }
