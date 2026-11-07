@@ -297,12 +297,13 @@ def make_slsa_statement(
     ver: str,
     commit_sha: str = commit,
     include_workflow: bool = True,
+    workflow_path: str = ".github/workflows/typescript-npm-publish.yml",
 ) -> bytes:
     ext_params: dict = {}
     if include_workflow:
         ext_params["workflow"] = {
             "repository": "https://github.com/3leaps/sysprims",
-            "path": ".github/workflows/typescript-npm-publish.yml",
+            "path": workflow_path,
             "ref": f"refs/tags/v{ver}",
         }
     stmt = {
@@ -448,6 +449,21 @@ write_att("att.no-wf.json", cert_b64, make_tlog_entry(cert_der, no_wf_sig_der, n
 pypi_cert_b64, pypi_cert_der = make_test_cert_b64(
     version,
     workflow_path=".github/workflows/registry-publish.yml",
+)
+reg_npm_stmt = make_slsa_statement(
+    f"pkg:npm/%403leaps/sysprims@{version}",
+    "sha512",
+    root_tgz_sha512,
+    version,
+    workflow_path=".github/workflows/registry-publish.yml",
+)
+reg_npm_sig_b64, reg_npm_sig_der = sign_dsse_pae(reg_npm_stmt)
+write_att(
+    "att.registry-publish.json",
+    pypi_cert_b64,
+    make_tlog_entry(pypi_cert_der, reg_npm_sig_der, reg_npm_stmt),
+    reg_npm_stmt,
+    reg_npm_sig_b64,
 )
 pypi_ver_dir = http / "pypi" / "sysprims" / version
 pypi_ver_dir.mkdir(parents=True, exist_ok=True)
@@ -744,6 +760,20 @@ refused_all "npm registry tarball sha256 differs from signed" npm
 cp "$scratch/3leaps-sysprims.pristine.tgz" "$stage_dir/3leaps-sysprims-$version.tgz"
 cp "$scratch/SHA256SUMS.pristine" "$stage_dir/SHA256SUMS"
 cp "$scratch/SHA512SUMS.pristine" "$stage_dir/SHA512SUMS"
+
+# Standalone invocation without --stage-dir or --commit MUST refuse registry-publish.yml npm provenance!
+cp "$scratch/att.registry-publish.json" "$npm_att_file"
+if SYSPRIMS_NPM_REGISTRY_URL="$npm_base" \
+	SYSPRIMS_SIGSTORE_TEST_ROOT="$test_root_file" \
+	SYSPRIMS_REGISTRY_POLL_ATTEMPTS=2 \
+	SYSPRIMS_REGISTRY_POLL_SLEEP=0.05 \
+	python3 -I -B "$root/scripts/release-verify-registries.py" --version "$version" npm >"$scratch/out" 2>&1; then
+	echo "error: accepted registry-publish.yml npm provenance without --stage-dir or --commit" >&2
+	exit 1
+fi
+grep -q "staged npm tarball verification requires --stage-dir with SHA256SUMS and SHA512SUMS" "$scratch/out"
+run_verify_all npm
+cp "$scratch/npm-att.pristine.json" "$npm_att_file"
 
 # --pypi-bootstrap-no-provenance skips PyPI PEP 740 while STILL enforcing npm Sigstore provenance!
 rm -f "$pypi_prov_file"
