@@ -304,16 +304,22 @@ anchor_list="base"
 if [[ "$mode" == pypi ]]; then
 	mkdir -m 700 "$work/subset"
 	anchor_list="pypiFiles"
-	while IFS= read -r file; do
-		cp -p "$work/assets/$file" "$work/subset/$file"
-	done < <(python3 -I -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["pypiFiles"]))' "$work/surfaces.json")
+	subset_files="$(python3 -I -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["pypiFiles"]))' "$work/surfaces.json")"
+	if [[ -n "$subset_files" ]]; then
+		while IFS= read -r file; do
+			cp -p "$work/assets/$file" "$work/subset/$file"
+		done <<<"$subset_files"
+	fi
 	stage_src="$work/subset"
 elif [[ "$mode" == npm ]]; then
 	mkdir -m 700 "$work/subset"
 	anchor_list="npmFiles"
-	while IFS= read -r file; do
-		cp -p "$work/assets/$file" "$work/subset/$file"
-	done < <(python3 -I -c 'import json,sys; print("\n".join(sorted(e["file"] for e in json.load(open(sys.argv[1]))["npmPackages"])))' "$work/surfaces.json")
+	subset_files="$(python3 -I -c 'import json,sys; print("\n".join(sorted(e["file"] for e in json.load(open(sys.argv[1]))["npmPackages"])))' "$work/surfaces.json")"
+	if [[ -n "$subset_files" ]]; then
+		while IFS= read -r file; do
+			cp -p "$work/assets/$file" "$work/subset/$file"
+		done <<<"$subset_files"
+	fi
 	stage_src="$work/subset"
 fi
 

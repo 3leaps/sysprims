@@ -45,16 +45,19 @@ EXPECTED=(
 	sysprims.h
 )
 if git -C "$ROOT" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null 2>&1; then
-	EXPECTED=()
-	while IFS= read -r item; do
-		[ -n "$item" ] && EXPECTED+=("$item")
-	done < <(
+	inv_out="$(
 		cd "$ROOT" && node --input-type=module - "$ROOT" "$TAG" <<'EOF'
 import { inventoryForTag } from "./scripts/release-integrity.mjs";
 const [, , root, tag] = process.argv;
 for (const name of inventoryForTag(root, tag).base) console.log(name);
 EOF
-	)
+	)"
+	EXPECTED=()
+	if [ -n "$inv_out" ]; then
+		while IFS= read -r item; do
+			[ -n "$item" ] && EXPECTED+=("$item")
+		done <<<"$inv_out"
+	fi
 fi
 printf '%s\n' "${EXPECTED[@]}" | LC_ALL=C sort >.expected-release-files
 find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name '.actual-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%f\n' 2>/dev/null | LC_ALL=C sort >.actual-release-files || {
