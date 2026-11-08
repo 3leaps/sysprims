@@ -255,10 +255,9 @@ func TestContinuityHandleLiveZombieReapedAndPIDReuse(t *testing.T) {
 	}
 
 	_, outZombieStrict, err := handle.Reverify(strictPolicy, "2026-11-06T12:00:02Z")
-	if err != nil || outZombieStrict.Code() != "mismatch:process-not-live" {
-		t.Fatalf("zombie Reverify(require_live=true) = (%v, %v), want mismatch:process-not-live", outZombieStrict, err)
+	if err != nil {
+		t.Fatalf("zombie Reverify(require_live=true) error: %v", err)
 	}
-
 	relaxedPolicy := evidence.ComparisonPolicy{
 		BaselineHostScopeTrusted:   true,
 		CandidateHostScopeTrusted:  true,
@@ -267,8 +266,23 @@ func TestContinuityHandleLiveZombieReapedAndPIDReuse(t *testing.T) {
 		DetectObservedContextDrift: false,
 	}
 	_, outZombieRelaxed, err := handle.Reverify(relaxedPolicy, "2026-11-06T12:00:02Z")
-	if err != nil || outZombieRelaxed.Code() != "match" {
-		t.Fatalf("zombie Reverify(require_live=false) = (%v, %v), want match", outZombieRelaxed, err)
+	if err != nil {
+		t.Fatalf("zombie Reverify(require_live=false) error: %v", err)
+	}
+	if runtime.GOOS == "linux" {
+		if outZombieStrict.Code() != "insufficient:missing-target-pid-namespace" {
+			t.Fatalf("Linux zombie Reverify(require_live=true) = %v, want insufficient:missing-target-pid-namespace", outZombieStrict)
+		}
+		if outZombieRelaxed.Code() != "insufficient:missing-target-pid-namespace" {
+			t.Fatalf("Linux zombie Reverify(require_live=false) = %v, want insufficient:missing-target-pid-namespace", outZombieRelaxed)
+		}
+	} else {
+		if outZombieStrict.Code() != "mismatch:process-not-live" {
+			t.Fatalf("zombie Reverify(require_live=true) = %v, want mismatch:process-not-live", outZombieStrict)
+		}
+		if outZombieRelaxed.Code() != "match" {
+			t.Fatalf("zombie Reverify(require_live=false) = %v, want match", outZombieRelaxed)
+		}
 	}
 
 	// Reap child so PID disappears.

@@ -239,13 +239,15 @@ struct UserNsIdMapping {
     overflow_gid: u32,
 }
 
+type FactProbeOutcome<T> = Result<T, (String, &'static str)>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObserverAnchor {
     boot_id: String,
     pid_numbering_ns: String,
     time_ns: NsProbe,
     user_ns: NsProbe,
-    id_mapping: Option<Result<UserNsIdMapping, (String, &'static str)>>,
+    id_mapping: Option<FactProbeOutcome<UserNsIdMapping>>,
     hidepid_conceals: bool,
 }
 
@@ -747,11 +749,9 @@ fn collect_observer_anchor(
 fn load_userns_id_mapping(
     proc_fd: c_int,
     self_dir_fd: c_int,
-) -> Result<Result<UserNsIdMapping, (String, &'static str)>, CollectorRefusal> {
+) -> Result<FactProbeOutcome<UserNsIdMapping>, CollectorRefusal> {
     let read_map =
-        |fd: c_int,
-         rel: &str|
-         -> Result<Result<Vec<(u32, u32)>, (String, &'static str)>, CollectorRefusal> {
+        |fd: c_int, rel: &str| -> Result<FactProbeOutcome<Vec<(u32, u32)>>, CollectorRefusal> {
             match read_class_b_text(fd, rel, MAX_SMALL_PROC_FILE_BYTES) {
                 Ok(txt) => match parse_id_map_extents(&txt) {
                     Some(ext) => Ok(Ok(ext)),
@@ -767,23 +767,22 @@ fn load_userns_id_mapping(
                 Err(_) => Ok(Err(("error".into(), "userns-id-map-read-failed"))),
             }
         };
-    let read_overflow =
-        |rel: &str| -> Result<Result<u32, (String, &'static str)>, CollectorRefusal> {
-            match read_class_b_text(proc_fd, rel, 64) {
-                Ok(txt) => match txt.trim().parse::<u32>() {
-                    Ok(v) => Ok(Ok(v)),
-                    Err(_) => Ok(Err(("error".into(), "malformed-overflow-id"))),
-                },
-                Err((libc::ENOSYS, _)) => Err(map_class_b_observer_err(libc::ENOSYS, rel)),
-                Err((e, _)) if e == libc::EXDEV || e == libc::ELOOP => {
-                    Err(map_class_b_observer_err(e, rel))
-                }
-                Err((e, _)) if e == libc::EPERM || e == libc::EACCES => {
-                    Ok(Err(("inaccessible".into(), "overflow-id-denied")))
-                }
-                Err(_) => Ok(Err(("error".into(), "overflow-id-read-failed"))),
+    let read_overflow = |rel: &str| -> Result<FactProbeOutcome<u32>, CollectorRefusal> {
+        match read_class_b_text(proc_fd, rel, 64) {
+            Ok(txt) => match txt.trim().parse::<u32>() {
+                Ok(v) => Ok(Ok(v)),
+                Err(_) => Ok(Err(("error".into(), "malformed-overflow-id"))),
+            },
+            Err((libc::ENOSYS, _)) => Err(map_class_b_observer_err(libc::ENOSYS, rel)),
+            Err((e, _)) if e == libc::EXDEV || e == libc::ELOOP => {
+                Err(map_class_b_observer_err(e, rel))
             }
-        };
+            Err((e, _)) if e == libc::EPERM || e == libc::EACCES => {
+                Ok(Err(("inaccessible".into(), "overflow-id-denied")))
+            }
+            Err(_) => Ok(Err(("error".into(), "overflow-id-read-failed"))),
+        }
+    };
 
     let uid_extents = match read_map(self_dir_fd, "uid_map")? {
         Ok(v) => v,

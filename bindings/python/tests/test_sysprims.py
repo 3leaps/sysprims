@@ -347,6 +347,7 @@ class SysprimsRecurrenceCorpusTests(unittest.TestCase):
             Path(out_path).write_text(
                 "".join(f"{_jcs(row)}\n" for row in ndjson_lines),
                 encoding="utf-8",
+                newline="\n",
             )
 
         readme = (base / "README.md").read_text(encoding="utf-8")

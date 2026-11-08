@@ -493,7 +493,11 @@ jobs:
           cargo deny check advisories
           cargo deny --manifest-path bindings/python/Cargo.toml check advisories
       - name: Dependency assessment
-        run: goneat assess --categories dependencies --check --fail-on high
+        env:
+          GOFLAGS: -buildvcs=false
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          goneat assess --categories dependencies --check --fail-on high
   security-audit:
     name: Security Audit
     runs-on: ubuntu-24.04  # pin:runner=linux-x64

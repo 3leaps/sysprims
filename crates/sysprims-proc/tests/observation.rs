@@ -322,11 +322,6 @@ mod unix_qualification {
         let (_cand_zombie, outcome_zombie_live_req) = handle
             .reverify(&strict_policy, "2026-11-06T12:00:02Z")
             .expect("reverify zombie child");
-        assert_eq!(
-            outcome_zombie_live_req,
-            ComparisonOutcome::Mismatch("process-not-live".to_string())
-        );
-
         let relaxed_zombie_policy = ComparisonPolicy {
             baseline_host_scope_trusted: true,
             candidate_host_scope_trusted: true,
@@ -338,7 +333,24 @@ mod unix_qualification {
         let (_cand_zombie2, outcome_zombie_relaxed) = handle
             .reverify(&relaxed_zombie_policy, "2026-11-06T12:00:02Z")
             .expect("reverify zombie child with require_live=false");
-        assert_eq!(outcome_zombie_relaxed, ComparisonOutcome::Match);
+        if cfg!(target_os = "linux") {
+            // Linux do_exit() tears down task namespaces before entering EXIT_ZOMBIE,
+            // so /proc/<pid>/ns/pid is not-present on zombies and Step 5d refuses closed.
+            assert_eq!(
+                outcome_zombie_live_req,
+                ComparisonOutcome::Insufficient("missing-target-pid-namespace".to_string())
+            );
+            assert_eq!(
+                outcome_zombie_relaxed,
+                ComparisonOutcome::Insufficient("missing-target-pid-namespace".to_string())
+            );
+        } else {
+            assert_eq!(
+                outcome_zombie_live_req,
+                ComparisonOutcome::Mismatch("process-not-live".to_string())
+            );
+            assert_eq!(outcome_zombie_relaxed, ComparisonOutcome::Match);
+        }
 
         // Now reap the child so its PID disappears from the process table.
         owned.reap();
