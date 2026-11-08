@@ -94,7 +94,7 @@ mod unix_qualification {
         open_continuity_handle, CapabilityProbe, ObservationOptions, ReportMetadata,
     };
 
-    use super::{sample_host_scope, ZERO_DIGEST};
+    use super::{sample_host_scope, HostScope, ZERO_DIGEST};
 
     struct OwnedChild {
         child: Child,
@@ -168,6 +168,51 @@ mod unix_qualification {
         }
     }
 
+    /// Unprivileged OCI container runtimes (such as `docker run` without `--privileged`)
+    /// mount `/proc/sys` as a read-only descendant bind mount over `/proc`. Under
+    /// `native-process-observation:v0` Class B `openat2(RESOLVE_NO_XDEV)` confinement,
+    /// any descendant mount under `/proc` must refuse closed with `procfs-confinement-violation`.
+    fn linux_proc_sys_has_descendant_mount() -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(mi) = std::fs::read_to_string("/proc/self/mountinfo") {
+                for line in mi.lines() {
+                    let mut fields = line.split_whitespace();
+                    if let Some(mount_point) = fields.nth(4) {
+                        if mount_point == "/proc/sys" || mount_point.starts_with("/proc/sys/") {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
+
+    fn verify_proc_sys_overmount_refuses_closed(
+        pid: u32,
+        hs: &HostScope,
+        opts: &ObservationOptions,
+    ) -> bool {
+        if !linux_proc_sys_has_descendant_mount() {
+            return false;
+        }
+        let obs_err = observe_process(pid, hs, opts)
+            .expect_err("over-mounted /proc/sys must refuse under RESOLVE_NO_XDEV");
+        assert_eq!(obs_err.status, "error");
+        assert_eq!(obs_err.code, "procfs-confinement-violation");
+
+        let handle_err = open_continuity_handle(pid, hs, opts)
+            .expect_err("over-mounted /proc/sys must refuse continuity handle");
+        assert_eq!(handle_err.status, "error");
+        assert_eq!(handle_err.code, "procfs-confinement-violation");
+        true
+    }
+
     #[test]
     fn default_and_opt_in_disclosure_match_spawned_child_image_and_argv() {
         let (owned, sleep_path) = OwnedChild::spawn_sleep();
@@ -179,6 +224,9 @@ mod unix_qualification {
             observed_at: Some("2026-11-06T12:00:00Z".to_string()),
             ..ObservationOptions::default()
         };
+        if verify_proc_sys_overmount_refuses_closed(pid, &hs, &default_opts) {
+            return;
+        }
         let obs_default =
             observe_process(pid, &hs, &default_opts).expect("observe default owned child");
         assert_eq!(
@@ -269,6 +317,9 @@ mod unix_qualification {
             ..ObservationOptions::default()
         }
         .with_all_context_facts();
+        if verify_proc_sys_overmount_refuses_closed(pid, &hs, &opts) {
+            return;
+        }
 
         let handle = open_continuity_handle(pid, &hs, &opts).expect("open continuity handle");
         assert_eq!(handle.pid(), pid);
@@ -404,6 +455,9 @@ mod unix_qualification {
             ..ObservationOptions::default()
         }
         .with_all_context_facts();
+        if verify_proc_sys_overmount_refuses_closed(pid, &hs, &opts) {
+            return;
+        }
 
         let obs = observe_process(pid, &hs, &opts).expect("observe child");
         let meta = ReportMetadata {
@@ -520,6 +574,11 @@ mod unix_qualification {
             observed_at: Some("2026-11-06T12:00:00Z".to_string()),
             ..ObservationOptions::default()
         };
+        if verify_proc_sys_overmount_refuses_closed(worker_tid, &hs, &opts) {
+            let _ = done_tx.send(());
+            worker.join().expect("join worker thread");
+            return;
+        }
         let obs = observe_process(worker_tid, &hs, &opts)
             .expect("observing non-leader TID must return structured not-present observation");
         assert_eq!(

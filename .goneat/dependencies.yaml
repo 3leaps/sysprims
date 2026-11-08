@@ -37,6 +37,8 @@ cooling:
   exceptions:
     - pattern: "github.com/3leaps/*"
       reason: "Internal packages"
+    - pattern: "canonprims-*"
+      reason: "Internal packages"
     - pattern: "github.com/fulmenhq/*"
       reason: "Fulmen ecosystem packages"
 # Policy engine configuration
