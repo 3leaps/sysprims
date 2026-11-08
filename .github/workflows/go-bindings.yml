@@ -13,6 +13,8 @@ on:
         type: string
 env:
   CARGO_TERM_COLOR: always
+  GOWORK: 'off'
+  GOFLAGS: '-buildvcs=false'
   # Pinned llvm-mingw release tag for Windows arm64 GNU toolchain. Bump here
   # and in release.yml / ci.yml together when advancing. See
   # docs/standards/platform-support.md for toolchain policy.
@@ -522,6 +524,8 @@ jobs:
             -v "$PWD:/workspace" \
             -w /workspace/bindings/go/sysprims \
             -e CGO_ENABLED=1 \
+            -e GOWORK=off \
+            -e GOFLAGS=-buildvcs=false \
             -e SYSPRIMS_EXPECT_VERSION \
             golang:1.22-alpine \
             sh -eu -c '
@@ -534,6 +538,8 @@ jobs:
             -v "$PWD:/workspace" \
             -w /workspace/bindings/go/sysprims \
             -e CGO_ENABLED=1 \
+            -e GOWORK=off \
+            -e GOFLAGS=-buildvcs=false \
             -e SYSPRIMS_EXPECT_VERSION \
             -e SYSPRIMS_PROBE_PLATFORM=linux-arm64-musl \
             golang:1.22-alpine \
