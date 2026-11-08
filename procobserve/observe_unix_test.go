@@ -43,6 +43,16 @@ func spawnOwnedSleep(t *testing.T) *ownedSleepChild {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep child: %v", err)
 	}
+	if runtime.GOOS == "linux" && cmd.Process != nil {
+		cmdlinePath := "/proc/" + strconv.Itoa(cmd.Process.Pid) + "/cmdline"
+		for i := 0; i < 50; i++ {
+			// #nosec G304 -- reading kernel /proc/<pid>/cmdline for owned child exec readiness
+			if raw, err := os.ReadFile(cmdlinePath); err == nil && len(raw) > 0 {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
 	c := &ownedSleepChild{
 		cmd:      cmd,
 		execPath: sleepPath,

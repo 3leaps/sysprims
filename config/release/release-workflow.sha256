@@ -1,6 +1,6 @@
 4c0fbd0db0abfc23519e750c99e25c1c4c607630e63a61d2d061498250778735  .github/actions/setup-rust/action.yml
 ae9c0d0c7f2dd48860e348478f780fce994839885a04ae80cd8cec27528fa6db  .github/workflows/ci.yml
-dba82ce87c708d96b00ce13c40cb6523cac61952b8225c96a389aa92ab09f69c  .github/workflows/go-bindings.yml
+96a2805094a61c6596f4331d774c4453d507d1143fe66df29415bc5bd64fa01c  .github/workflows/go-bindings.yml
 806b58e956ab33825f0b68418cf2ec3b38aebeaac8e461ce221cc5ffdb8524e5  .github/workflows/release.yml
 98f12a69b828b0325565060cb25e6f7f9fadf05aaf1f69dca5614c22864b92df  .github/workflows/typescript-bindings.yml
 702492339805e8b316b1101975add4330c6d02ecb70a9fb755f0d6cd5ab427ac  .github/workflows/typescript-napi-prebuilds.yml

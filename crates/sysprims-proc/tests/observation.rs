@@ -115,6 +115,22 @@ mod unix_qualification {
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("spawn owned sleep child");
+            #[cfg(target_os = "linux")]
+            {
+                // glibc posix_spawn wakes the parent when FD_CLOEXEC closes in
+                // begin_new_exec(), microseconds before create_elf_tables() sets
+                // mm->arg_start/arg_end for /proc/<pid>/cmdline.
+                let cmdline_path = format!("/proc/{}/cmdline", child.id());
+                for _ in 0..50 {
+                    if std::fs::read(&cmdline_path)
+                        .map(|b| !b.is_empty())
+                        .unwrap_or(false)
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
             (
                 Self {
                     child,
