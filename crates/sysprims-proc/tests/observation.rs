@@ -169,17 +169,27 @@ mod unix_qualification {
     }
 
     /// Unprivileged OCI container runtimes (such as `docker run` without `--privileged`)
-    /// mount `/proc/sys` as a read-only descendant bind mount over `/proc`. Under
-    /// `native-process-observation:v0` Class B `openat2(RESOLVE_NO_XDEV)` confinement,
-    /// any descendant mount under `/proc` must refuse closed with `procfs-confinement-violation`.
-    fn linux_proc_sys_has_descendant_mount() -> bool {
+    /// mount `/proc/sys` as a read-only descendant bind mount over `/proc` (unlike bare-metal
+    /// systemd VMs where only `/proc/sys/fs/binfmt_misc` is mounted outside `/proc/sys/kernel`).
+    /// Under `native-process-observation:v0` Class B `openat2(RESOLVE_NO_XDEV)` confinement,
+    /// any mountpoint along the collector's `/proc/sys/kernel` anchor paths must refuse closed
+    /// with `procfs-confinement-violation`.
+    fn linux_proc_sys_kernel_is_overmounted() -> bool {
         #[cfg(target_os = "linux")]
         {
             if let Ok(mi) = std::fs::read_to_string("/proc/self/mountinfo") {
                 for line in mi.lines() {
                     let mut fields = line.split_whitespace();
                     if let Some(mount_point) = fields.nth(4) {
-                        if mount_point == "/proc/sys" || mount_point.starts_with("/proc/sys/") {
+                        if matches!(
+                            mount_point,
+                            "/proc/sys"
+                                | "/proc/sys/kernel"
+                                | "/proc/sys/kernel/random"
+                                | "/proc/sys/kernel/random/boot_id"
+                                | "/proc/sys/kernel/overflowuid"
+                                | "/proc/sys/kernel/overflowgid"
+                        ) {
                             return true;
                         }
                     }
@@ -198,7 +208,7 @@ mod unix_qualification {
         hs: &HostScope,
         opts: &ObservationOptions,
     ) -> bool {
-        if !linux_proc_sys_has_descendant_mount() {
+        if !linux_proc_sys_kernel_is_overmounted() {
             return false;
         }
         let obs_err = observe_process(pid, hs, opts)
