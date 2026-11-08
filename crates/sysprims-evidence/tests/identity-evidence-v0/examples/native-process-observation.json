@@ -1,0 +1,81 @@
+{
+  "contract": "identity-evidence/v0",
+  "report_id": "native-process-observation",
+  "created_at": "2026-10-29T12:00:00Z",
+  "producer": {
+    "name": "synthetic-process-collector",
+    "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "subjects": [
+    {
+      "id": "host-a",
+      "kind": "os-installation"
+    },
+    {
+      "id": "process-a",
+      "kind": "process"
+    }
+  ],
+  "identifiers": [
+    {
+      "id": "identifier-host-a",
+      "subject_ref": "host-a",
+      "namespace": "example.test/installations",
+      "value": "host-a",
+      "derivation": {
+        "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+        "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+      },
+      "stability": "installation",
+      "clone_behavior": "copyable"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "e-process-observation",
+      "subject_ref": "process-a",
+      "method": "os-observation",
+      "source": "synthetic-macos-sysctl-fixture",
+      "collector": "synthetic-process-collector",
+      "collected_at": "2026-10-29T12:00:00Z",
+      "digest": "sha256:a47eb757c96dc148988088a3c6c478e70bb865f7c83cbfdc7ae70571894b4eb6",
+      "format_profile": {
+        "id": "urn:3leaps:identity-evidence:native-process-observation:v0",
+        "revision": "sha256:0c116af8e558012f654be4c8ca772583b2d3b58c43cc157ce606e4f74f6b4a60"
+      }
+    }
+  ],
+  "assessments": [],
+  "capabilities": [
+    {
+      "id": "cap-exit-handle",
+      "subject_ref": "process-a",
+      "provider": "macos-kqueue-proc",
+      "capability": "process-exit-observation",
+      "status": "available",
+      "reason": "Private kqueue EVFILT_PROC NOTE_EXIT handle bracketed by sysctl start-identity reads.",
+      "observed_at": "2026-10-29T12:00:00Z"
+    },
+    {
+      "id": "cap-pid-namespace",
+      "subject_ref": "process-a",
+      "provider": "macos-sysctl-proc",
+      "capability": "pid-namespace-observation",
+      "status": "unsupported",
+      "reason": "Darwin kernel has a single boot-scoped process table without PID namespaces.",
+      "observed_at": "2026-10-29T12:00:00Z"
+    },
+    {
+      "id": "cap-arguments-digest",
+      "subject_ref": "process-a",
+      "provider": "macos-sysctl-proc",
+      "capability": "arguments-digest",
+      "status": "not-probed",
+      "reason": "Omitted under default opt-in disclosure policy.",
+      "observed_at": "2026-10-29T12:00:00Z"
+    }
+  ],
+  "keys": [],
+  "claims": [],
+  "input_reports": []
+}

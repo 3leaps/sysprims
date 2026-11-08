@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+from collections.abc import Mapping, Sequence
+from enum import IntEnum
+from typing import Any, Final, Union
+
+__version__: Final[str]
+
+RECURRENCE_CONTRACT: Final[str]
+RECURRENCE_CORPUS_DIGEST: Final[str]
+RECURRENCE_REFUSAL_REASONS: Final[tuple[str, ...]]
+
+SIGHUP: Final[int]
+SIGINT: Final[int]
+SIGKILL: Final[int]
+SIGTERM: Final[int]
+SIGUSR1: Final[int]
+SIGUSR2: Final[int]
+
+BytesInput = Union[bytes, bytearray, memoryview, str]
+
+class SysprimsErrorCode(IntEnum):
+    OK = 0
+    INVALID_ARGUMENT = 1
+    SPAWN_FAILED = 2
+    TIMEOUT = 3
+    PERMISSION_DENIED = 4
+    NOT_FOUND = 5
+    NOT_SUPPORTED = 6
+    GROUP_CREATION_FAILED = 7
+    SYSTEM = 8
+    INTERNAL = 99
+
+class SysprimsError(RuntimeError):
+    code: SysprimsErrorCode
+    message: str
+    def __init__(self, code: SysprimsErrorCode | int, message: str) -> None: ...
+
+class RecurrenceRefusal(ValueError):
+    reason: str
+    detail: str
+    def __init__(self, reason: str, detail: str) -> None: ...
+
+class RecurrenceQueryError(RuntimeError):
+    kind: str
+    message: str
+    def __init__(self, kind: str, message: str) -> None: ...
+
+def abi_version() -> int: ...
+def platform() -> str: ...
+def proc_get(
+    pid: int,
+    *,
+    include_env: bool = False,
+    include_threads: bool = False,
+) -> dict[str, Any]: ...
+def process_list(
+    filter: Mapping[str, Any] | None = None,
+    *,
+    include_env: bool = False,
+    include_threads: bool = False,
+) -> dict[str, Any]: ...
+def listening_ports(filter: Mapping[str, Any] | None = None) -> dict[str, Any]: ...
+def list_fds(pid: int, filter: Mapping[str, Any] | None = None) -> dict[str, Any]: ...
+def wait_pid(pid: int, timeout_ms: int) -> dict[str, Any]: ...
+def descendants(
+    root_pid: int,
+    *,
+    max_levels: int | None = None,
+    filter: Mapping[str, Any] | None = None,
+    cpu_mode: str | None = None,
+    sample_duration_ms: int | None = None,
+    include_env: bool = False,
+    include_threads: bool = False,
+) -> dict[str, Any]: ...
+def kill_descendants(
+    root_pid: int,
+    *,
+    signal: int = ...,
+    max_levels: int | None = None,
+    filter: Mapping[str, Any] | None = None,
+    cpu_mode: str | None = None,
+    sample_duration_ms: int | None = None,
+    cascade: bool = False,
+) -> dict[str, Any]: ...
+def guard_step(config: Mapping[str, Any]) -> dict[str, Any]: ...
+def ancestors(
+    pid: int,
+    *,
+    max_depth: int = 64,
+    include_env: bool = False,
+    include_threads: bool = False,
+) -> dict[str, Any]: ...
+def self_getpgid() -> int: ...
+def self_getsid() -> int: ...
+def signal_send(pid: int, signal: int) -> None: ...
+def signal_send_group(pgid: int, signal: int) -> None: ...
+def terminate(pid: int) -> None: ...
+def force_kill(pid: int) -> None: ...
+def kill_many(pids: Sequence[int], signal: int) -> dict[str, Any]: ...
+def terminate_many(pids: Sequence[int]) -> dict[str, Any]: ...
+def force_kill_many(pids: Sequence[int]) -> dict[str, Any]: ...
+def terminate_tree(
+    pid: int,
+    config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]: ...
+def run_with_timeout(
+    command: str,
+    args: Sequence[str] = (),
+    *,
+    timeout_ms: int,
+    kill_after_ms: int | None = None,
+    signal: int | None = None,
+    grouping: str = "group_by_default",
+    preserve_status: bool = False,
+) -> dict[str, Any]: ...
+def run_setsid(
+    argv: Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    wait: bool = False,
+) -> dict[str, Any]: ...
+def run_nohup(
+    argv: Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    wait: bool = False,
+    output_file: str | None = None,
+) -> dict[str, Any]: ...
+def spawn_in_group(
+    argv: Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]: ...
+
+class ContainedProcess:
+    @property
+    def closed(self) -> bool: ...
+    def identity(self) -> dict[str, Any]: ...
+    def poll(self) -> dict[str, Any]: ...
+    def wait(self, timeout_ms: int | None = None) -> dict[str, Any]: ...
+    def terminate(self) -> dict[str, Any]: ...
+    def close(self) -> None: ...
+    def __enter__(self) -> ContainedProcess: ...
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None: ...
+
+def spawn_contained(
+    argv: Sequence[str],
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    execution_timeout_ms: int | None = None,
+    grace_timeout_ms: int | None = None,
+    kill_timeout_ms: int | None = None,
+    signal: int | None = None,
+    kill_signal: int | None = None,
+) -> ContainedProcess: ...
+
+class RecurrenceRule:
+    @classmethod
+    def from_json(cls, data: BytesInput) -> RecurrenceRule: ...
+    @classmethod
+    def from_document_json(cls, data: BytesInput) -> RecurrenceRule: ...
+    @classmethod
+    def from_text(cls, lines: Sequence[str]) -> RecurrenceRule: ...
+    @property
+    def dtstart(self) -> str: ...
+    @property
+    def tzid(self) -> str: ...
+    @property
+    def freq(self) -> str: ...
+    def to_canonical_json(self) -> bytes: ...
+    def digest(self) -> str: ...
+    def to_text(self) -> list[str]: ...
+    def expand(self, from_utc: str, to_utc: str, limit: int) -> list[str]: ...
+    def next_after(self, after_utc: str) -> str | None: ...
+
+def tzdb_version() -> str: ...

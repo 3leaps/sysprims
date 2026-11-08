@@ -2,6 +2,7 @@
 # Generate exact SHA256/SHA512 manifests for one immutable release payload.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 DIR=${1:-dist/release}
 TAG=${2:-${SYSPRIMS_RELEASE_TAG:-}}
 [ -d "$DIR" ] || {
@@ -43,6 +44,21 @@ EXPECTED=(
 	"sysprims-ffi-${VERSION}-libs.tar.gz"
 	sysprims.h
 )
+if git -C "$ROOT" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null 2>&1; then
+	inv_out="$(
+		cd "$ROOT" && node --input-type=module - "$ROOT" "$TAG" <<'EOF'
+import { inventoryForTag } from "./scripts/release-integrity.mjs";
+const [, , root, tag] = process.argv;
+for (const name of inventoryForTag(root, tag).base) console.log(name);
+EOF
+	)"
+	EXPECTED=()
+	if [ -n "$inv_out" ]; then
+		while IFS= read -r item; do
+			[ -n "$item" ] && EXPECTED+=("$item")
+		done <<<"$inv_out"
+	fi
+fi
 printf '%s\n' "${EXPECTED[@]}" | LC_ALL=C sort >.expected-release-files
 find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name '.actual-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%f\n' 2>/dev/null | LC_ALL=C sort >.actual-release-files || {
 	find . -maxdepth 1 -type f ! -name '.expected-release-files' ! -name '.actual-release-files' ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -exec basename {} \; | LC_ALL=C sort >.actual-release-files

@@ -12,10 +12,11 @@
 
 
 .PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check
+.PHONY: evidence-test evidence-crosscheck python-check test-python build-python
 .PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
-.PHONY: content-check surface-scan workflow-pin doctor doctor-release
+.PHONY: content-check surface-scan workflow-pin ci-pins-sync ci-pins-check doctor doctor-release
 .PHONY: check-windows check-windows-msvc check-windows-gnu
 .PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
 .PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
@@ -26,14 +27,14 @@
 .PHONY: release-plan-check release-guard-provenance release-guard-tag-version release-guard-tag-version-post
 .PHONY: release-guard-downloaded release-guard-checksummed release-guard-signed
 .PHONY: release-guard-uploaded release-guard-remote release-publish
-.PHONY: release-stage-published release-verify-registries release-pack-npm-redirector release-source-check
+.PHONY: release-stage-published release-stage-published-pypi release-stage-published-npm release-verify-registries release-pack-npm-redirector release-source-check
 .PHONY: release-require-checksummed
 .PHONY: version-patch version-minor version-major version-set version-sync
 .PHONY: version-check version-tooling-test
 
 # Every target that reads the release tag runs its prerequisites serially, so
 # release-require-tag (always first) finishes before any other prerequisite.
-.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-stage-published release-tag release-create-draft release-verify release-verify-registries release-verify-remote-tag release-verify-signatures release-verify-tag
+.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-stage-published release-stage-published-pypi release-stage-published-npm release-tag release-create-draft release-verify release-verify-registries release-verify-remote-tag release-verify-signatures release-verify-tag
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -77,10 +78,11 @@ help: ## Show available targets
 	@echo "  build           Build all crates (debug) | build-release (release) | build-ffi (FFI + header)"
 	@echo "  install         Install sysprims binary to ~/.local/bin"
 	@echo "  clean           Remove build artifacts"
-	@echo "Go & TypeScript bindings:"
+	@echo "Go, Python & TypeScript bindings:"
 	@echo "  build-local-go      Build FFI for local Go development (build-local-ffi-shared: shared)"
 	@echo "  go-test             Run Go binding tests | header-go: generate C header"
 	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
+	@echo "  python-check        Build and verify the Python abi3 wheel and sdist"
 	@echo "  typescript-api-generate / typescript-api-check  Generate or check TS public API docs"
 	@echo "Quality gates:"
 	@echo "  check           Run all quality checks (fmt, lint, test, deny)"
@@ -92,6 +94,7 @@ help: ## Show available targets
 	@echo "  content-check   Refuse local paths, keys, tokens and commit markers in tracked files"
 	@echo "  surface-scan    Public-surface scan when LIMENSAFE_CATALOG_PATH is set"
 	@echo "  workflow-pin    Verify every workflow matches its reviewed digest and is read-only"
+	@echo "  ci-pins-sync / ci-pins-check  Synchronize or verify CI runner labels and Rust pins"
 	@echo "  doctor          Report host tool versions against recommended minimums (doctor-release)"
 	@echo "  miri / msrv     Run Miri UB detection (nightly) or verify MSRV (Rust 1.88.0)"
 	@echo "Release (manual signing workflow):"
@@ -276,7 +279,7 @@ goneat-version: ## Print PATH goneat vs Makefile pin
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
 
-check: fmt-check lint test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
+check: fmt-check lint test evidence-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
 
 # The public-surface scan uses limensafe with a maintainer catalog named by
@@ -288,14 +291,21 @@ surface-scan: ## Public-surface scan (tree, commit messages, PR text, branch) wh
 # in CI as part of check.
 content-check: ## Refuse local paths, private keys, tokens and commit markers in tracked files
 	@$(PYTHON) -I -B scripts/content-check.py
-	@for dir in bindings/go/sysprims go/recurrence bindings/typescript/sysprims; do \
+	@for dir in bindings/go/sysprims go/recurrence bindings/typescript/sysprims bindings/python; do \
 		for file in LICENSE-MIT LICENSE-APACHE NOTICE; do \
 			cmp -s "$$file" "$$dir/$$file" || { echo "error: $$dir/$$file differs from root $$file" >&2; exit 1; }; \
 		done; \
 	done
 
-workflow-pin: ## Every workflow matches its reviewed digest and is read-only
+workflow-pin: ## Every workflow matches its reviewed digest, CI pins, and read-only policy
 	@$(PYTHON) -B -E scripts/release-workflow-pin.py check
+	@$(PYTHON) -B -P -E scripts/ci-pins.py check
+
+ci-pins-sync: ## Propagate config/ci/pins.toml to workflow pin markers and refresh workflow digests
+	@$(PYTHON) -B -P -E scripts/ci-pins.py sync
+
+ci-pins-check: ## Verify CI runner labels and Rust toolchain pins match config/ci/pins.toml
+	@$(PYTHON) -B -P -E scripts/ci-pins.py check
 
 doctor: ## Report host tool versions against the recommended minimums (DOCTOR_SCOPE=release|dev)
 	@./scripts/doctor.sh $(or $(DOCTOR_SCOPE),release)
@@ -342,6 +352,24 @@ recurrence-crosscheck: ## Compare Rust and Go recurrence outputs (corpus NDJSON 
 recurrence-tzdata-check: ## Rebuild the pinned tz bundle and require byte equality (network)
 	@scripts/recurrence-tzdata-bundle.sh --check
 
+evidence-test: ## Test sysprims-evidence, native process collectors, pure-Go packages, and parity
+	$(CARGO) test -p sysprims-evidence
+	$(CARGO) test -p sysprims-proc --test observation
+	GOWORK=off CGO_ENABLED=0 go vet ./evidence/... ./procobserve/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./evidence/... ./procobserve/...
+	@$(MAKE) --no-print-directory evidence-crosscheck
+
+evidence-crosscheck: ## Compare Rust and Go evidence NDJSON outputs and verify out-of-tree Go build
+	@bash scripts/evidence-crosscheck.sh
+
+python-check: ## Build, install, and test the Python abi3 wheel and offline sdist
+	@PYTHON=$(PYTHON) ./scripts/python-check.sh
+
+test-python: python-check ## Alias for python-check
+
+build-python: ## Build the local Python abi3 wheel and sdist into dist/local/python
+	@PYTHON=$(PYTHON) ./scripts/build-wheel.sh wheel dist/local/python/wheels
+	@PYTHON=$(PYTHON) ./scripts/build-wheel.sh sdist dist/local/python/sdist
+
 test-diabolical: ## Run hostile process-control tests in a disposable container
 	@echo "Running isolated process-control tests with $(CONTAINER_RUNTIME)..."
 	@if ! command -v "$(CONTAINER_RUNTIME)" >/dev/null 2>&1; then \
@@ -359,6 +387,7 @@ test-diabolical: ## Run hostile process-control tests in a disposable container
 fmt: ## Format code (cargo fmt + goneat assess format --fix)
 	@echo "Formatting Rust..."
 	$(CARGO) fmt --all
+	$(CARGO) fmt --manifest-path bindings/python/Cargo.toml --all
 	@if command -v goneat >/dev/null 2>&1; then \
 		echo "Formatting markdown, YAML, JSON (goneat assess format --fix)..."; \
 		goneat assess --categories format --fix --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null; \
@@ -370,6 +399,7 @@ fmt: ## Format code (cargo fmt + goneat assess format --fix)
 fmt-check: goneat-version ## Check formatting without modifying
 	@echo "Checking Rust formatting..."
 	$(CARGO) fmt --all -- --check
+	$(CARGO) fmt --manifest-path bindings/python/Cargo.toml --all -- --check
 	@echo "Checking markdown, YAML, JSON formatting (goneat assess format)..."
 	goneat assess --categories format --check --fail-on $(GONEAT_FORMAT_FAIL_ON) --ci-summary --log-level warn --output /dev/null
 	@echo "[ok] Formatting check passed"
@@ -377,6 +407,7 @@ fmt-check: goneat-version ## Check formatting without modifying
 lint: goneat-version ## Run linting (cargo clippy + goneat lint)
 	@echo "Linting Rust..."
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
+	$(CARGO) clippy --manifest-path bindings/python/Cargo.toml -- -D warnings
 	@bash scripts/check-npm-trusted-publish-runtime.sh
 	@echo "Linting YAML, shell, workflows..."
 	goneat assess --categories lint --check --fail-on medium --ci-summary --log-level warn --output /dev/null
@@ -396,7 +427,8 @@ typescript-api-check: ## Check TypeScript capability, export, and documentation 
 deny: ## Run cargo-deny license and advisory checks
 	@echo "Running cargo-deny..."
 	@if command -v cargo-deny >/dev/null 2>&1; then \
-		cargo-deny check; \
+		cargo-deny check && \
+		cargo-deny --manifest-path bindings/python/Cargo.toml check; \
 	else \
 		echo "[!!] cargo-deny not found (run 'make bootstrap')"; \
 		exit 1; \
@@ -406,7 +438,8 @@ deny: ## Run cargo-deny license and advisory checks
 audit: ## Run cargo-audit security scan
 	@echo "Running cargo-audit..."
 	@if command -v cargo-audit >/dev/null 2>&1; then \
-		cargo-audit audit; \
+		cargo-audit audit && \
+		cargo-audit audit --file bindings/python/Cargo.lock; \
 	else \
 		echo "[!!] cargo-audit not found (run 'make bootstrap')"; \
 		exit 1; \
@@ -755,7 +788,7 @@ release-tooling-test: ## Synthetic release-tooling controls (no operator keys)
 
 release-clean: ## Remove dist/release and dist/published contents
 	@echo "Cleaning release directory..."
-	rm -rf $(DIST_RELEASE) $(DIST_RELEASE).anchor $(DIST_PUBLISHED) $(DIST_PUBLISHED).anchor
+	rm -rf $(DIST_RELEASE) $(DIST_RELEASE).anchor $(DIST_PUBLISHED) $(DIST_PUBLISHED).anchor dist/published-pypi dist/published-pypi.anchor dist/published-npm dist/published-npm.anchor
 	@echo "[ok] Release directory cleaned"
 
 dist-local-clean: ## Remove dist/local contents
@@ -843,7 +876,15 @@ release-stage-published: release-require-tag release-guard-tag-version-post ## D
 	rm -rf $(DIST_PUBLISHED) $(DIST_PUBLISHED).anchor
 	./scripts/release-stage-published.sh $(DIST_PUBLISHED)
 
-release-verify-registries: release-require-tag release-guard-tag-version-post ## Verify crates.io, Go module proxy, and npm (with SLSA provenance) serve the exact release
+release-stage-published-pypi: release-require-tag release-guard-tag-version-post ## Download, verify, and stage only PyPI wheels/sdist into dist/published-pypi
+	rm -rf dist/published-pypi dist/published-pypi.anchor
+	./scripts/release-stage-published.sh --pypi-only
+
+release-stage-published-npm: release-require-tag release-guard-tag-version-post ## Download, verify, and stage only npm tarballs into dist/published-npm
+	rm -rf dist/published-npm dist/published-npm.anchor
+	./scripts/release-stage-published.sh --npm-only
+
+release-verify-registries: release-require-tag release-guard-tag-version-post ## Verify crates.io, Go module proxy, PyPI, and npm (with SLSA provenance) serve the exact release
 	@node scripts/release-integrity.mjs verify-registries --dir $(DIST_PUBLISHED)
 
 release-pack-npm-redirector: ## Build the bare-name npm redirector tarball (sysprims-<version>.tgz)

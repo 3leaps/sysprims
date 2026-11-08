@@ -28,12 +28,13 @@ coupling the pure-Go code to the cgo binding or moving the existing binding.
 
 1. The pure-Go recurrence implementation is its own module,
    `github.com/3leaps/sysprims/go/recurrence`, with its own `go.mod`, in the
-   `go/recurrence/` directory. It does not import the cgo binding, sets no
-   `replace` directives, and is not part of a `go.work` workspace. The CI job
-   `recurrence` (`.github/workflows/ci.yml`, on Linux, macOS and Windows) runs
-   its tests with `GOWORK=off` and `CGO_ENABLED=0` in the repository and again
-   from a copy outside it, where `RECURRENCE_CORPUS_DIR` points at the vendored
-   corpus and any skipped test fails the job.
+   `go/recurrence/` directory. It does not import the cgo binding and sets no
+   `replace` directives. Root `go.work` lists `./go/recurrence` for repository
+   static analysis, while `Makefile` targets and the CI job `recurrence`
+   (`.github/workflows/ci.yml`, on Linux, macOS and Windows) run its tests with
+   `GOWORK=off` and `CGO_ENABLED=0` in the repository and again from a copy
+   outside it, where `RECURRENCE_CORPUS_DIR` points at the vendored corpus and
+   any skipped test fails the job.
 2. The module is tagged `go/recurrence/vX.Y.Z`, the directory-prefixed form
    Go uses to resolve versions of a module in a subdirectory.
 3. A release tags one commit with every name in its tag set, all at the same

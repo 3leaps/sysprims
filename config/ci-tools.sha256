@@ -1,0 +1,6 @@
+# SHA-256 of CI tool archives verified against upstream published checksums.
+# Used by scripts/build-wheel.sh inside digest-pinned manylinux2014 containers.
+#
+# rustup-init 1.29.1   https://static.rust-lang.org/rustup/archive/1.29.1/ (published .sha256 per target)
+dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71  rustup-init-1.29.1-x86_64-unknown-linux-gnu
+15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433  rustup-init-1.29.1-aarch64-unknown-linux-gnu

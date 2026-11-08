@@ -1,0 +1,14 @@
+# The Python binding's build backend, pinned by version and wheel hash.
+# Installed by scripts/python-check.sh and scripts/build-wheel.sh with
+# --require-hashes --only-binary :all:.
+# maturin 1.15.0 (2026-08-24): https://pypi.org/project/maturin/1.15.0/
+maturin==1.15.0 \
+    --hash=sha256:cd35772633f489841132bc8e71d6fc7f842df30b9c05cd5cdf1ee1ddcb744cc7 \
+    --hash=sha256:653020a63525bb224e5ab0adf02e17a2e08bc86dbea7fc1399c9a56d7529b99e \
+    --hash=sha256:0ebf9767892725083138e671c34482c660317a2f3d6a29fc0e0f34e9d8c99136 \
+    --hash=sha256:552c2be4afd43fe8d5c9f3ec8d4c4756d973b8dcbe94c14084390301f50243e1 \
+    --hash=sha256:c7dc0c66c78d3debdd9c5aa807e861fbcbf07f3505d34b125df74c03986b0f48
+# maturin's dependency on Python < 3.11 (3.11+ has tomllib).
+# tomli 2.5.0 (2026-10-07): https://pypi.org/project/tomli/2.5.0/
+tomli==2.5.0 ; python_version < "3.11" \
+    --hash=sha256:32a7b79ac57a2e83670ce329ccf675798bc5a2094783a63676866b70503f2e2b

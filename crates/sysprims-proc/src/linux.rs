@@ -471,9 +471,8 @@ fn parse_local_socket(local: &str) -> SysprimsResult<(Option<IpAddr>, u16)> {
         .next()
         .ok_or_else(|| SysprimsError::internal("missing local port"))?;
 
-    let port_raw = u16::from_str_radix(port_hex, 16)
+    let port = u16::from_str_radix(port_hex, 16)
         .map_err(|_| SysprimsError::internal("invalid port hex"))?;
-    let port = u16::from_be(port_raw);
 
     let addr = match addr_hex.len() {
         8 => Some(IpAddr::V4(parse_ipv4(addr_hex)?)),
@@ -885,5 +884,22 @@ mod tests {
         assert!(size > 0, "Page size should be positive");
         // Common value is 4096
         assert!(size >= 1024);
+    }
+
+    #[test]
+    fn test_parse_local_socket_host_order_port_hex() {
+        let (addr4, port4) = parse_local_socket("0100007F:0016").expect("parse ipv4:22");
+        assert_eq!(addr4, Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert_eq!(port4, 22);
+
+        let (addr_ephem, port_ephem) =
+            parse_local_socket("0100007F:EDE1").expect("parse ipv4:60897");
+        assert_eq!(addr_ephem, Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert_eq!(port_ephem, 60897);
+
+        let (addr6, port6) =
+            parse_local_socket("00000000000000000000000001000000:1F90").expect("parse ipv6:8080");
+        assert_eq!(addr6, Some(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert_eq!(port6, 8080);
     }
 }

@@ -1,0 +1,23 @@
+{
+  "id": "urn:3leaps:identity-evidence:report-admission:v0",
+  "status": "experimental",
+  "report_bytes": 262144,
+  "canonical_report_bytes": 262144,
+  "json_nesting_depth": 16,
+  "dependency_depth": 4,
+  "evidence_bytes_each": 262144,
+  "aggregate_evidence_bytes": 2097152,
+  "retrieval_count": 32,
+  "verification_deadline_ms": 2000,
+  "implicit_network": false,
+  "canonicalization": {
+    "scheme": "jcs/rfc8785",
+    "input_domain": "canonical-json/v0",
+    "specification": {
+      "id": "https://github.com/3leaps/canonprims/blob/v0.1.1/docs/spec/jcs-rfc8785.md",
+      "revision": "sha256:ed24a97ed616ecbc7beaf47bd28a3855f73420e496459c0e8e807535b36798f1"
+    },
+    "corpus_digest": "sha256:de3ac543580ddb90f7e3a6e72239097274d3635ea783f302a9260b5a7d0c8d90"
+  },
+  "scope": "Report admission and budget definitions; no evidence-provider qualification."
+}

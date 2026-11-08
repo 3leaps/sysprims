@@ -1,0 +1,802 @@
+[
+  {
+    "id": "unchanged-bundle-relabel-possession-key",
+    "report_changes": [
+      {
+        "path": [
+          "keys",
+          "-"
+        ],
+        "value": {
+          "id": "key-b",
+          "subject_ref": "subject-a",
+          "representation_profile": {
+            "id": "urn:example:identity:synthetic-public-key:v0",
+            "revision": "sha256:abebefd9bc1b980c93c12cd032ab3f9a1cbff3ff98e9a0155fdc0fd9c922876f"
+          },
+          "public_key_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          0,
+          "key_ref"
+        ],
+        "value": "key-b"
+      },
+      {
+        "path": [
+          "evidence",
+          1,
+          "key_ref"
+        ],
+        "value": "key-b"
+      },
+      {
+        "path": [
+          "assessments",
+          0,
+          "key_ref"
+        ],
+        "value": "key-b"
+      }
+    ],
+    "context_changes": [],
+    "expected": "report-possession-descriptor-mismatch"
+  },
+  {
+    "id": "unchanged-bundle-relabel-process-unused-correct-claim",
+    "report_changes": [
+      {
+        "path": [
+          "subjects",
+          "-"
+        ],
+        "value": {
+          "id": "process-b",
+          "kind": "process"
+        }
+      },
+      {
+        "path": [
+          "claims",
+          "-"
+        ],
+        "value": {
+          "id": "claim-other-process",
+          "subject_ref": "process-b",
+          "property_profile": {
+            "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+            "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+          },
+          "property": "launch-bound-session",
+          "value": "subject-a"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          3,
+          "subject_ref"
+        ],
+        "value": "process-b"
+      },
+      {
+        "path": [
+          "evidence",
+          3,
+          "claim_refs"
+        ],
+        "value": [
+          "claim-other-process"
+        ]
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "subject_ref"
+        ],
+        "value": "process-b"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "claim_refs"
+        ],
+        "value": [
+          "claim-other-process"
+        ]
+      }
+    ],
+    "context_changes": [],
+    "expected": "report-process-descriptor-mismatch"
+  },
+  {
+    "id": "unchanged-bundle-relabel-enrollment",
+    "report_changes": [
+      {
+        "path": [
+          "identifiers",
+          "-"
+        ],
+        "value": {
+          "id": "identifier-b",
+          "subject_ref": "subject-a",
+          "namespace": "example.test/identity",
+          "value": "different-enrollment",
+          "derivation": {
+            "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+            "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+          },
+          "stability": "enrollment",
+          "clone_behavior": "copyable"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          0,
+          "identifier_ref"
+        ],
+        "value": "identifier-b"
+      },
+      {
+        "path": [
+          "evidence",
+          1,
+          "identifier_ref"
+        ],
+        "value": "identifier-b"
+      },
+      {
+        "path": [
+          "assessments",
+          0,
+          "identifier_ref"
+        ],
+        "value": "identifier-b"
+      }
+    ],
+    "context_changes": [],
+    "expected": "report-possession-descriptor-mismatch"
+  },
+  {
+    "id": "launch-method-upgrade",
+    "report_changes": [
+      {
+        "path": [
+          "evidence",
+          3,
+          "method"
+        ],
+        "value": "authority-statement"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "value"
+        ],
+        "value": "authority-verified"
+      }
+    ],
+    "context_changes": [],
+    "expected": "report-evidence-method-mismatch"
+  },
+  {
+    "id": "selected-evidence-digest-changed",
+    "report_changes": [
+      {
+        "path": [
+          "evidence",
+          3,
+          "digest"
+        ],
+        "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "context_changes": [],
+    "expected": "report-evidence-binding-mismatch"
+  },
+  {
+    "id": "selected-evidence-format-changed",
+    "report_changes": [
+      {
+        "path": [
+          "evidence",
+          1,
+          "format_profile"
+        ],
+        "value": {
+          "id": "urn:example:identity:synthetic-enrollment-format:v0",
+          "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+        }
+      }
+    ],
+    "context_changes": [],
+    "expected": "report-evidence-binding-mismatch"
+  },
+  {
+    "id": "assessment-cites-wrong-claim-unused-correct-claim",
+    "report_changes": [
+      {
+        "path": [
+          "subjects",
+          "-"
+        ],
+        "value": {
+          "id": "other-session",
+          "kind": "session"
+        }
+      },
+      {
+        "path": [
+          "claims",
+          "-"
+        ],
+        "value": {
+          "id": "claim-wrong-session",
+          "subject_ref": "process-a",
+          "property_profile": {
+            "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+            "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+          },
+          "property": "launch-bound-session",
+          "value": "other-session"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          "-"
+        ],
+        "value": {
+          "id": "e-other-observation",
+          "subject_ref": "process-a",
+          "method": "os-observation",
+          "source": "synthetic-fixture",
+          "collector": "synthetic-collector",
+          "collected_at": "2026-10-29T12:00:00Z",
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "format_profile": {
+            "id": "urn:example:identity:synthetic-enrollment-format:v0",
+            "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+          },
+          "claim_refs": [
+            "claim-wrong-session"
+          ]
+        }
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "evidence_refs"
+        ],
+        "value": [
+          "e-launch",
+          "e-other-observation"
+        ]
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "claim_refs"
+        ],
+        "value": [
+          "claim-wrong-session"
+        ]
+      }
+    ],
+    "context_changes": [],
+    "expected": "assessment-process-claim-mismatch"
+  },
+  {
+    "id": "assessment-omits-bundle-evidence",
+    "report_changes": [
+      {
+        "path": [
+          "subjects",
+          "-"
+        ],
+        "value": {
+          "id": "other-session",
+          "kind": "session"
+        }
+      },
+      {
+        "path": [
+          "claims",
+          "-"
+        ],
+        "value": {
+          "id": "claim-wrong-session",
+          "subject_ref": "process-a",
+          "property_profile": {
+            "id": "urn:3leaps:identity-evidence:local-process-session:v0",
+            "revision": "sha256:5cf6300b565a7fca392003edd376f33c1c2b90b72e7436aa89a5c0533e96dc3d"
+          },
+          "property": "launch-bound-session",
+          "value": "other-session"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          "-"
+        ],
+        "value": {
+          "id": "e-other-observation",
+          "subject_ref": "process-a",
+          "method": "os-observation",
+          "source": "synthetic-fixture",
+          "collector": "synthetic-collector",
+          "collected_at": "2026-10-29T12:00:00Z",
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "format_profile": {
+            "id": "urn:example:identity:synthetic-enrollment-format:v0",
+            "revision": "sha256:90f7b84ac1d7ae9f8329ac06aa3f771ba6f6e104f301c1276b539d2332cc19cc"
+          },
+          "claim_refs": [
+            "claim-wrong-session"
+          ]
+        }
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "evidence_refs"
+        ],
+        "value": [
+          "e-other-observation"
+        ]
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "claim_refs"
+        ],
+        "value": [
+          "claim-wrong-session"
+        ]
+      }
+    ],
+    "context_changes": [],
+    "expected": "assessment-bundle-evidence-required"
+  },
+  {
+    "id": "assessment-enrollment-substitution",
+    "report_changes": [
+      {
+        "path": [
+          "identifiers",
+          "-"
+        ],
+        "value": {
+          "id": "identifier-b",
+          "subject_ref": "subject-a",
+          "namespace": "example.test/identity",
+          "value": "different-enrollment",
+          "derivation": {
+            "id": "urn:example:identity:synthetic-identifier-derivation:v0",
+            "revision": "sha256:cf58fe77e63c6c91f67ef93302d6872790df131215e94a205c62b55ca84a56fe"
+          },
+          "stability": "enrollment",
+          "clone_behavior": "copyable"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          0,
+          "identifier_ref"
+        ],
+        "value": "identifier-b"
+      },
+      {
+        "path": [
+          "assessments",
+          0,
+          "identifier_ref"
+        ],
+        "value": "identifier-b"
+      }
+    ],
+    "context_changes": [],
+    "expected": "assessment-possession-binding-mismatch"
+  },
+  {
+    "id": "renamed-evidence-and-claim-records",
+    "report_changes": [
+      {
+        "path": [
+          "evidence",
+          1,
+          "id"
+        ],
+        "value": "proof-renamed"
+      },
+      {
+        "path": [
+          "evidence",
+          3,
+          "id"
+        ],
+        "value": "launch-renamed"
+      },
+      {
+        "path": [
+          "claims",
+          0,
+          "id"
+        ],
+        "value": "claim-renamed"
+      },
+      {
+        "path": [
+          "evidence",
+          3,
+          "claim_refs"
+        ],
+        "value": [
+          "claim-renamed"
+        ]
+      },
+      {
+        "path": [
+          "assessments",
+          0,
+          "evidence_refs"
+        ],
+        "value": [
+          "e-enroll",
+          "proof-renamed"
+        ]
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "evidence_refs"
+        ],
+        "value": [
+          "launch-renamed"
+        ]
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "claim_refs"
+        ],
+        "value": [
+          "claim-renamed"
+        ]
+      }
+    ],
+    "context_changes": [],
+    "expected": "accept"
+  },
+  {
+    "id": "assessment-before-expiry",
+    "report_changes": [
+      {
+        "path": [
+          "assessments",
+          0,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          1,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      }
+    ],
+    "context_changes": [
+      {
+        "path": [
+          "now"
+        ],
+        "value": "2026-10-29T12:00:00Z"
+      },
+      {
+        "path": [
+          "observed_at"
+        ],
+        "value": "2026-10-29T12:00:00Z"
+      }
+    ],
+    "expected": "accept"
+  },
+  {
+    "id": "assessment-exact-expiry",
+    "report_changes": [
+      {
+        "path": [
+          "assessments",
+          0,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          1,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      }
+    ],
+    "context_changes": [
+      {
+        "path": [
+          "now"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "observed_at"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      }
+    ],
+    "expected": "assessment-expired"
+  },
+  {
+    "id": "assessment-after-expiry-fresh-observation",
+    "report_changes": [
+      {
+        "path": [
+          "assessments",
+          0,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          1,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      }
+    ],
+    "context_changes": [
+      {
+        "path": [
+          "now"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      },
+      {
+        "path": [
+          "observed_at"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      }
+    ],
+    "expected": "assessment-expired"
+  },
+  {
+    "id": "assessment-outlives-challenge",
+    "report_changes": [
+      {
+        "path": [
+          "assessments",
+          2,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:56Z"
+      }
+    ],
+    "context_changes": [],
+    "expected": "assessment-outlives-binding"
+  },
+  {
+    "id": "historical-state-is-not-current",
+    "report_changes": [
+      {
+        "path": [
+          "assessments",
+          2,
+          "state"
+        ],
+        "value": "stale"
+      }
+    ],
+    "context_changes": [],
+    "expected": "assessment-not-current"
+  },
+  {
+    "id": "fresh-reevaluation-new-report",
+    "report_changes": [
+      {
+        "path": [
+          "report_id"
+        ],
+        "value": "reevaluated-process-session"
+      },
+      {
+        "path": [
+          "created_at"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      },
+      {
+        "path": [
+          "assessments",
+          0,
+          "assessed_at"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      },
+      {
+        "path": [
+          "assessments",
+          1,
+          "assessed_at"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "assessed_at"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      },
+      {
+        "path": [
+          "input_reports",
+          "-"
+        ],
+        "value": {
+          "id": "prior-report",
+          "report_id": "prior-expired-process-session",
+          "digest": "sha256:f6cf5ad2cdccaf2d186c98dc493e72142ba0340711cdd00260e8a63eb3900459"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          0,
+          "origin"
+        ],
+        "value": {
+          "input_ref": "prior-report",
+          "record_ref": "e-enroll"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          1,
+          "origin"
+        ],
+        "value": {
+          "input_ref": "prior-report",
+          "record_ref": "e-pop"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          2,
+          "origin"
+        ],
+        "value": {
+          "input_ref": "prior-report",
+          "record_ref": "e-custody"
+        }
+      },
+      {
+        "path": [
+          "evidence",
+          3,
+          "origin"
+        ],
+        "value": {
+          "input_ref": "prior-report",
+          "record_ref": "e-launch"
+        }
+      },
+      {
+        "path": [
+          "capabilities",
+          0,
+          "origin"
+        ],
+        "value": {
+          "input_ref": "prior-report",
+          "record_ref": "capability-0"
+        }
+      }
+    ],
+    "context_changes": [
+      {
+        "path": [
+          "now"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      },
+      {
+        "path": [
+          "observed_at"
+        ],
+        "value": "2026-10-29T12:00:02Z"
+      }
+    ],
+    "expected": "accept",
+    "input_report_changes": [
+      {
+        "path": [
+          "report_id"
+        ],
+        "value": "prior-expired-process-session"
+      },
+      {
+        "path": [
+          "assessments",
+          0,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          1,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      },
+      {
+        "path": [
+          "assessments",
+          2,
+          "valid_until"
+        ],
+        "value": "2026-10-29T12:00:01Z"
+      }
+    ]
+  }
+]

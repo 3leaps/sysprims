@@ -37,6 +37,8 @@ cooling:
   exceptions:
     - pattern: "github.com/3leaps/*"
       reason: "Internal packages"
+    - pattern: "canonprims-*"
+      reason: "Internal packages"
     - pattern: "github.com/fulmenhq/*"
       reason: "Fulmen ecosystem packages"
 # Policy engine configuration
@@ -46,7 +48,9 @@ policy_engine:
 languages:
   - language: go
     paths:
-      - bindings/go/go.mod
+      - go.mod
+      - bindings/go/sysprims/go.mod
+      - go/recurrence/go.mod
   - language: rust
     paths:
       - Cargo.toml

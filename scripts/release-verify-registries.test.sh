@@ -4,7 +4,7 @@
 # scripts/pack-npm-redirector.sh against a loopback HTTP server across all 8
 # @3leaps/sysprims* npm packages.
 set -euo pipefail
-unset GITHUB_ACTIONS CI SYSPRIMS_NPM_REGISTRY_URL SYSPRIMS_SIGSTORE_TEST_ROOT
+unset GITHUB_ACTIONS CI SYSPRIMS_NPM_REGISTRY_URL SYSPRIMS_PYPI_API_URL SYSPRIMS_SIGSTORE_TEST_ROOT
 
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 scratch="$(mktemp -d)"
@@ -25,9 +25,12 @@ port="$(sed -n 's/.*port \([0-9]*\).*/\1/p' "$scratch/server.log" | head -1)"
 version="0.3.0"
 commit="0123456789abcdef0123456789abcdef01234567"
 npm_base="http://127.0.0.1:$port/npm"
+pypi_base="http://127.0.0.1:$port/pypi"
+stage_dir="$scratch/stage"
+mkdir -p "$stage_dir"
 test_root_file="$scratch/test-trust-root.json"
 
-python3 -I -B - "$scratch/http" "$version" "$commit" "$npm_base" "$root/scripts/release-verify-registries.py" "$test_root_file" <<'PY'
+python3 -I -B - "$scratch/http" "$version" "$commit" "$npm_base" "$pypi_base" "$stage_dir" "$root/scripts/release-verify-registries.py" "$test_root_file" <<'PY'
 import base64
 import hashlib
 import importlib.util
@@ -39,8 +42,10 @@ http = pathlib.Path(sys.argv[1])
 version = sys.argv[2]
 commit = sys.argv[3]
 npm_base = sys.argv[4]
-mod_path = sys.argv[5]
-test_root_path = pathlib.Path(sys.argv[6])
+pypi_base = sys.argv[5]
+stage_dir = pathlib.Path(sys.argv[6])
+mod_path = sys.argv[7]
+test_root_path = pathlib.Path(sys.argv[8])
 
 spec = importlib.util.spec_from_file_location("rvr", mod_path)
 rvr = importlib.util.module_from_spec(spec)
@@ -292,12 +297,13 @@ def make_slsa_statement(
     ver: str,
     commit_sha: str = commit,
     include_workflow: bool = True,
+    workflow_path: str = ".github/workflows/typescript-npm-publish.yml",
 ) -> bytes:
     ext_params: dict = {}
     if include_workflow:
         ext_params["workflow"] = {
             "repository": "https://github.com/3leaps/sysprims",
-            "path": ".github/workflows/typescript-npm-publish.yml",
+            "path": workflow_path,
             "ref": f"refs/tags/v{ver}",
         }
     stmt = {
@@ -438,6 +444,123 @@ write_att("att.wrong-commit-slsa.json", cert_b64, make_tlog_entry(cert_der, bad_
 no_wf_stmt = make_slsa_statement(f"pkg:npm/%403leaps/sysprims@{version}", "sha512", root_tgz_sha512, version, include_workflow=False)
 no_wf_sig_b64, no_wf_sig_der = sign_dsse_pae(no_wf_stmt)
 write_att("att.no-wf.json", cert_b64, make_tlog_entry(cert_der, no_wf_sig_der, no_wf_stmt), no_wf_stmt, no_wf_sig_b64)
+
+# Synthetic PyPI JSON + PEP 740 integrity fixtures for all 5 wheels + sdist
+pypi_cert_b64, pypi_cert_der = make_test_cert_b64(
+    version,
+    workflow_path=".github/workflows/registry-publish.yml",
+)
+reg_npm_stmt = make_slsa_statement(
+    f"pkg:npm/%403leaps/sysprims@{version}",
+    "sha512",
+    root_tgz_sha512,
+    version,
+    workflow_path=".github/workflows/registry-publish.yml",
+)
+reg_npm_sig_b64, reg_npm_sig_der = sign_dsse_pae(reg_npm_stmt)
+write_att(
+    "att.registry-publish.json",
+    pypi_cert_b64,
+    make_tlog_entry(pypi_cert_der, reg_npm_sig_der, reg_npm_stmt),
+    reg_npm_stmt,
+    reg_npm_sig_b64,
+)
+pypi_ver_dir = http / "pypi" / "sysprims" / version
+pypi_ver_dir.mkdir(parents=True, exist_ok=True)
+pypi_files_dir = http / "pypi-files"
+pypi_files_dir.mkdir(parents=True, exist_ok=True)
+pypi_int_base = http / "integrity" / "sysprims" / version
+pypi_int_base.mkdir(parents=True, exist_ok=True)
+
+origin = pypi_base.split("/pypi", 1)[0]
+py_expected = sorted(
+    [*(f"sysprims-{version}-{t}.whl" for t in rvr.PYTHON_WHEEL_TAGS), f"sysprims-{version}.tar.gz"]
+)
+sha256_lines = []
+sha512_lines = []
+pypi_urls = []
+for fname in py_expected:
+    content = f"pypi-artifact-{fname}\n".encode("utf-8")
+    (stage_dir / fname).write_bytes(content)
+    (pypi_files_dir / fname).write_bytes(content)
+    d256 = hashlib.sha256(content).hexdigest()
+    d512 = hashlib.sha512(content).hexdigest()
+    sha256_lines.append(f"{d256}  {fname}")
+    sha512_lines.append(f"{d512}  {fname}")
+    pypi_urls.append(
+        {
+            "filename": fname,
+            "yanked": False,
+            "digests": {"sha256": d256},
+            "url": f"{origin}/pypi-files/{fname}",
+        }
+    )
+    py_stmt = json.dumps(
+        {
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [{"name": fname, "digest": {"sha256": d256}}],
+            "predicateType": "https://docs.pypi.org/attestations/publish/v1",
+            "predicate": {},
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    py_sig_b64, py_sig_der = sign_dsse_pae(py_stmt)
+    prov_dir = pypi_int_base / fname
+    prov_dir.mkdir(parents=True, exist_ok=True)
+    (prov_dir / "provenance").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "attestation_bundles": [
+                    {
+                        "publisher": {
+                            "kind": "GitHub",
+                            "repository": "3leaps/sysprims",
+                            "workflow": "registry-publish.yml",
+                            "environment": "publish-pypi",
+                        },
+                        "attestations": [
+                            {
+                                "version": 1,
+                                "verification_material": {
+                                    "certificate": pypi_cert_b64,
+                                    "transparency_entries": [
+                                        make_tlog_entry(pypi_cert_der, py_sig_der, py_stmt)
+                                    ],
+                                },
+                                "envelope": {
+                                    "statement": base64.b64encode(py_stmt).decode("ascii"),
+                                    "signature": py_sig_b64,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+for pkg, prefix in rvr.NPM_TARBALL_PREFIX_BY_PKG.items():
+    short = pkg.split("/", 1)[1]
+    tgz_name = f"{prefix}-{version}.tgz"
+    tgz_data = (http / "npm" / "tarballs" / f"{short}-{version}.tgz").read_bytes()
+    (stage_dir / tgz_name).write_bytes(tgz_data)
+    sha256_lines.append(f"{hashlib.sha256(tgz_data).hexdigest()}  {tgz_name}")
+    sha512_lines.append(f"{hashlib.sha512(tgz_data).hexdigest()}  {tgz_name}")
+
+(stage_dir / "SHA256SUMS").write_text("\n".join(sorted(sha256_lines)) + "\n", encoding="utf-8")
+(stage_dir / "SHA512SUMS").write_text("\n".join(sorted(sha512_lines)) + "\n", encoding="utf-8")
+
+pypi_doc = {
+    "info": {"name": "sysprims", "version": version},
+    "ownership": {"organization": "3leaps"},
+    "urls": pypi_urls,
+}
+(pypi_ver_dir / "json").write_text(json.dumps(pypi_doc), encoding="utf-8")
+(http / "pypi" / "sysprims" / "json").write_text(
+    json.dumps({"ownership": {"organization": "3leaps"}}), encoding="utf-8"
+)
 PY
 
 npm_meta_file="$scratch/http/npm/@3leaps/sysprims/$version"
@@ -578,6 +701,119 @@ if command -v npm >/dev/null 2>&1; then
 	"$root/scripts/pack-npm-redirector.sh" "$scratch/redirector" "$version" >/dev/null
 	[[ -s "$scratch/redirector/sysprims-$version.tgz" ]]
 fi
+
+# PyPI + unified `all` scope + `--pypi-bootstrap-no-provenance` + `--require-staged-npm` controls
+pypi_meta_file="$scratch/http/pypi/sysprims/$version/json"
+pypi_proj_file="$scratch/http/pypi/sysprims/json"
+pypi_prov_file="$scratch/http/integrity/sysprims/$version/sysprims-$version.tar.gz/provenance"
+cp "$pypi_meta_file" "$scratch/pypi.pristine.json"
+cp "$pypi_prov_file" "$scratch/pypi-prov.pristine.json"
+
+run_verify_all() {
+	SYSPRIMS_NPM_REGISTRY_URL="$npm_base" \
+		SYSPRIMS_PYPI_API_URL="$pypi_base" \
+		SYSPRIMS_SIGSTORE_TEST_ROOT="$test_root_file" \
+		SYSPRIMS_REGISTRY_POLL_ATTEMPTS=2 \
+		SYSPRIMS_REGISTRY_POLL_SLEEP=0.05 \
+		python3 -I -B "$root/scripts/release-verify-registries.py" \
+		--stage-dir "$stage_dir" --version "$version" --commit "$commit" "$@" >"$scratch/out" 2>&1
+}
+
+refused_all() {
+	local pattern="$1"
+	shift
+	if run_verify_all "$@"; then
+		echo "error: accepted, expected failure matching '$pattern'" >&2
+		cat "$scratch/out" >&2
+		exit 1
+	fi
+	grep -Eq -- "$pattern" "$scratch/out" || {
+		echo "error: failed for unexpected reason (want '$pattern')" >&2
+		cat "$scratch/out" >&2
+		exit 1
+	}
+}
+
+run_verify_all pypi
+run_verify_all all
+run_verify_all --require-staged-npm all
+
+# Even with valid legacy typescript-npm-publish.yml provenance and WITHOUT --require-staged-npm,
+# any mismatch against signed SHA256SUMS / staged .tgz tarballs is refused when tarballs are in the manifest.
+cp "$stage_dir/SHA256SUMS" "$scratch/SHA256SUMS.pristine"
+cp "$stage_dir/SHA512SUMS" "$scratch/SHA512SUMS.pristine"
+cp "$stage_dir/3leaps-sysprims-$version.tgz" "$scratch/3leaps-sysprims.pristine.tgz"
+sed "s/^\([0-9a-f]\{64\}\)\(  3leaps-sysprims-$version\.tgz\)$/0000000000000000000000000000000000000000000000000000000000000000\2/" \
+	"$scratch/SHA256SUMS.pristine" >"$stage_dir/SHA256SUMS"
+refused_all "staged npm tarball sha256 mismatch" npm
+
+# Internally consistent signed staged tarball that differs from the legacy-attested npm registry tarball is also refused!
+printf 'different-signed-release-bytes\n' >"$stage_dir/3leaps-sysprims-$version.tgz"
+alt256="$(shasum -a 256 "$stage_dir/3leaps-sysprims-$version.tgz" | awk '{print $1}')"
+alt512="$(shasum -a 512 "$stage_dir/3leaps-sysprims-$version.tgz" | awk '{print $1}')"
+sed "s/^\([0-9a-f]\{64\}\)\(  3leaps-sysprims-$version\.tgz\)$/${alt256}\2/" \
+	"$scratch/SHA256SUMS.pristine" >"$stage_dir/SHA256SUMS"
+sed "s/^\([0-9a-f]\{128\}\)\(  3leaps-sysprims-$version\.tgz\)$/${alt512}\2/" \
+	"$scratch/SHA512SUMS.pristine" >"$stage_dir/SHA512SUMS"
+refused_all "npm registry tarball sha256 differs from signed" npm
+
+cp "$scratch/3leaps-sysprims.pristine.tgz" "$stage_dir/3leaps-sysprims-$version.tgz"
+cp "$scratch/SHA256SUMS.pristine" "$stage_dir/SHA256SUMS"
+cp "$scratch/SHA512SUMS.pristine" "$stage_dir/SHA512SUMS"
+
+# Standalone invocation without --stage-dir or --commit MUST refuse registry-publish.yml npm provenance!
+cp "$scratch/att.registry-publish.json" "$npm_att_file"
+if SYSPRIMS_NPM_REGISTRY_URL="$npm_base" \
+	SYSPRIMS_SIGSTORE_TEST_ROOT="$test_root_file" \
+	SYSPRIMS_REGISTRY_POLL_ATTEMPTS=2 \
+	SYSPRIMS_REGISTRY_POLL_SLEEP=0.05 \
+	python3 -I -B "$root/scripts/release-verify-registries.py" --version "$version" npm >"$scratch/out" 2>&1; then
+	echo "error: accepted registry-publish.yml npm provenance without --stage-dir or --commit" >&2
+	exit 1
+fi
+grep -q "staged npm tarball verification requires --stage-dir with SHA256SUMS and SHA512SUMS" "$scratch/out"
+run_verify_all npm
+cp "$scratch/npm-att.pristine.json" "$npm_att_file"
+
+# --pypi-bootstrap-no-provenance skips PyPI PEP 740 while STILL enforcing npm Sigstore provenance!
+rm -f "$pypi_prov_file"
+refused_all "PyPI PEP 740 provenance .* unavailable" pypi
+run_verify_all --pypi-bootstrap-no-provenance all
+jq 'del(.dist.attestations)' "$scratch/npm.pristine.json" >"$npm_meta_file"
+refused_all "npm Sigstore provenance missing dist.attestations" --pypi-bootstrap-no-provenance all
+cp "$scratch/npm.pristine.json" "$npm_meta_file"
+cp "$scratch/pypi-prov.pristine.json" "$pypi_prov_file"
+
+# Yanked file, org ownership mismatch, SHA-256 mismatch, wrong publisher, and tampered PEP 740 signature are refused.
+jq '.urls[0].yanked = true' "$scratch/pypi.pristine.json" >"$pypi_meta_file"
+refused_all "is yanked" pypi
+jq '.ownership.organization = "other-org"' "$scratch/pypi.pristine.json" >"$pypi_meta_file"
+printf '{"ownership":{"organization":"other-org"}}\n' >"$pypi_proj_file"
+refused_all "ownership organization must be '3leaps'" pypi
+printf '{"ownership":{"organization":"3leaps"}}\n' >"$pypi_proj_file"
+jq '.urls[0].digests.sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' "$scratch/pypi.pristine.json" >"$pypi_meta_file"
+refused_all "PyPI sha256 mismatch" pypi
+cp "$scratch/pypi.pristine.json" "$pypi_meta_file"
+
+jq '.attestation_bundles[0].publisher.workflow = "wrong.yml"' "$scratch/pypi-prov.pristine.json" >"$pypi_prov_file"
+refused_all "publisher mismatch" pypi
+jq '.attestation_bundles[0].attestations[0].envelope.signature = "MEUCIQD/////////////////////////////////////////AAIgf/////////////////////////////////////////8="' \
+	"$scratch/pypi-prov.pristine.json" >"$pypi_prov_file"
+refused_all "(ECDSA|signature verification failed)" pypi
+cp "$scratch/pypi-prov.pristine.json" "$pypi_prov_file"
+
+if GITHUB_ACTIONS=true SYSPRIMS_PYPI_API_URL="$pypi_base" \
+	python3 -I -B "$root/scripts/release-verify-registries.py" --stage-dir "$stage_dir" --version "$version" pypi >"$scratch/out" 2>&1; then
+	echo "error: accepted SYSPRIMS_PYPI_API_URL under GITHUB_ACTIONS" >&2
+	exit 1
+fi
+grep -q "SYSPRIMS_PYPI_API_URL is not accepted under GitHub Actions" "$scratch/out"
+if GITHUB_ACTIONS=true python3 -I -B "$root/scripts/release-verify-registries.py" \
+	--pypi-bootstrap-no-provenance --stage-dir "$stage_dir" --version "$version" pypi >"$scratch/out" 2>&1; then
+	echo "error: accepted --pypi-bootstrap-no-provenance under GITHUB_ACTIONS" >&2
+	exit 1
+fi
+grep -q -- "--bootstrap-no-provenance is not accepted under GitHub Actions or CI" "$scratch/out"
 
 # Recorded real @3leaps/sysprims@0.2.4 Sigstore SLSA bundle against DEFAULT_TRUST_ROOT
 # (verifies production Fulcio P-384 leaf cert + OIDC extensions, DSSE P-256 PAE,

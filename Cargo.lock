@@ -124,6 +124,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "canonprims-core"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3c1d08a41819b76c755be62c778cc9a6da161ae36b9b9a75a9001b8a1e6a47c"
+dependencies = [
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "canonprims-json"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45b26e3eabd4aa540a4ea41dab8b09f70667ba7b88970dd86b14ac852b7f25dc"
+dependencies = [
+ "canonprims-core",
+ "ryu-js",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -793,6 +813,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -936,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -954,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rsfulmen",
  "thiserror 2.0.21",
@@ -962,8 +988,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysprims-evidence"
+version = "0.4.0"
+dependencies = [
+ "canonprims-core",
+ "canonprims-json",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "time",
+]
+
+[[package]]
 name = "sysprims-ffi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -976,19 +1014,23 @@ dependencies = [
 
 [[package]]
 name = "sysprims-proc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "sysprims-core",
+ "sysprims-evidence",
  "sysprims-signal",
+ "thiserror 2.0.21",
+ "time",
  "windows-sys",
 ]
 
 [[package]]
 name = "sysprims-recurrence"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "jiff",
  "serde",
@@ -998,7 +1040,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-session"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "sysprims-core",
@@ -1006,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-signal"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "rsfulmen",
@@ -1016,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-timeout"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libc",
  "rsfulmen",
@@ -1031,7 +1073,7 @@ dependencies = [
 
 [[package]]
 name = "sysprims-ts-napi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "napi",
  "napi-build",

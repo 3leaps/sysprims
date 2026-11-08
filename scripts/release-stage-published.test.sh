@@ -120,4 +120,211 @@ expect_fail_with 'already exists' bash -c "cd '$repo' && SYSPRIMS_RELEASE_TAG='v
 grep -qx "tag=v$version" "$repo/dist/published.anchor"
 grep -qx "object=$tag_object" "$repo/dist/published.anchor"
 grep -qx "commit=$commit" "$repo/dist/published.anchor"
+
+# Modern 6-surface release plan: verifies 5 wheels + sdist + 8 npm tarballs,
+# supports --pypi-only and --npm-only, and rejects tampered embedded metadata.
+v2=1.3.0
+repo2="$fixture_dir/repo2"
+messages2="$fixture_dir/messages/v$v2"
+fixture_repo "$repo2" "$v2" publish 1
+cp "$fixture_root/Makefile" "$repo2/Makefile"
+cp "$fixture_root/scripts/"{release-stage-published.sh,release-integrity.mjs,version-pack.mjs,verify-signatures.sh,sign-release-assets.sh,generate-checksums.sh} "$repo2/scripts/"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$repo2/scripts/release-guard-tag-version.sh"
+chmod +x "$repo2/scripts/release-guard-tag-version.sh"
+printf '{"schema":"sysprims-release-plan/v1","version":"%s","provenance_policy":"commit_footer","surfaces":{"rust":{"disposition":"publish"},"cli":{"disposition":"publish"},"ffi":{"disposition":"publish"},"go":{"disposition":"publish","lock_phase":"resolved"},"typescript":{"disposition":"publish"},"python":{"disposition":"publish"}}}\n' "$v2" \
+	>"$repo2/docs/releases/v$v2.json"
+printf 'notes\n' >"$repo2/docs/releases/v$v2.md"
+gpg --homedir "$fixture_dir/gpg" --batch --armor --export-options export-minimal --export "$subkey!" \
+	>"$repo2/docs/security/release-signing-keys.asc"
+cp "$repo/docs/security/sysprims-minisign.pub" "$repo2/docs/security/sysprims-minisign.pub"
+printf '%s\n' "$subkey" >"$repo2/config/release/signing-subkey.txt"
+fixture_commit "$repo2" pins
+SYSPRIMS_DECERNOR_BIN="$decernor" "$repo2/scripts/release-insert-anchors.sh" >/dev/null
+fixture_commit "$repo2" anchors
+
+tags2=("v$v2" "bindings/go/sysprims/v$v2" "go/recurrence/v$v2")
+fixture_messages "$messages2" "$v2" "${tags2[@]}"
+for tag in "${tags2[@]}"; do
+	GNUPGHOME="$fixture_dir/gpg" GIT_COMMITTER_NAME='3 Leaps Infosec Team' GIT_COMMITTER_EMAIL=infosec@3leaps.net \
+		git -C "$repo2" tag -s -a --cleanup=verbatim -u "$subkey!" -F "$messages2/${tag//\//__}.txt" "$tag" HEAD
+done
+commit2="$(git -C "$repo2" rev-parse "v$v2^{commit}")"
+
+remote2="$fixture_dir/remote2"
+mkdir -p "$remote2"
+python3 -I - "$remote2" "$v2" <<'PY'
+import io
+import json
+import pathlib
+import tarfile
+import zipfile
+import sys
+
+out = pathlib.Path(sys.argv[1])
+version = sys.argv[2]
+
+core = [
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    f"sbom-{version}.cdx.json",
+    f"sysprims-{version}-darwin-amd64.tar.gz",
+    f"sysprims-{version}-darwin-arm64.tar.gz",
+    f"sysprims-{version}-linux-amd64-musl.tar.gz",
+    f"sysprims-{version}-linux-amd64.tar.gz",
+    f"sysprims-{version}-linux-arm64-musl.tar.gz",
+    f"sysprims-{version}-linux-arm64.tar.gz",
+    f"sysprims-{version}-windows-amd64.zip",
+    f"sysprims-{version}-windows-arm64.zip",
+    f"sysprims-ffi-{version}-libs.tar.gz",
+    "sysprims.h",
+]
+for name in core:
+    (out / name).write_text(f"{name}\n", encoding="utf-8")
+
+wheel_tags = [
+    "cp310-abi3-macosx_11_0_arm64",
+    "cp310-abi3-macosx_11_0_x86_64",
+    "cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64",
+    "cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64",
+    "cp310-abi3-win_amd64",
+]
+for wtag in wheel_tags:
+    wpath = out / f"sysprims-{version}-{wtag}.whl"
+    with zipfile.ZipFile(wpath, "w") as zf:
+        zf.writestr(
+            f"sysprims-{version}.dist-info/METADATA",
+            f"Metadata-Version: 2.3\nName: sysprims\nVersion: {version}\n\n",
+        )
+
+sdist_path = out / f"sysprims-{version}.tar.gz"
+with tarfile.open(sdist_path, "w:gz") as tf:
+    payload = f"Metadata-Version: 2.3\nName: sysprims\nVersion: {version}\n\n".encode("utf-8")
+    ti = tarfile.TarInfo(f"sysprims-{version}/PKG-INFO")
+    ti.size = len(payload)
+    tf.addfile(ti, io.BytesIO(payload))
+
+npm_pkgs = [
+    ("3leaps-sysprims", "@3leaps/sysprims"),
+    ("3leaps-sysprims-darwin-arm64", "@3leaps/sysprims-darwin-arm64"),
+    ("3leaps-sysprims-linux-arm64-gnu", "@3leaps/sysprims-linux-arm64-gnu"),
+    ("3leaps-sysprims-linux-arm64-musl", "@3leaps/sysprims-linux-arm64-musl"),
+    ("3leaps-sysprims-linux-x64-gnu", "@3leaps/sysprims-linux-x64-gnu"),
+    ("3leaps-sysprims-linux-x64-musl", "@3leaps/sysprims-linux-x64-musl"),
+    ("3leaps-sysprims-win32-arm64-msvc", "@3leaps/sysprims-win32-arm64-msvc"),
+    ("3leaps-sysprims-win32-x64-msvc", "@3leaps/sysprims-win32-x64-msvc"),
+]
+for prefix, pkg_name in npm_pkgs:
+    tgz_path = out / f"{prefix}-{version}.tgz"
+    with tarfile.open(tgz_path, "w:gz") as tf:
+        payload = json.dumps({
+            "name": pkg_name,
+            "version": version,
+            "repository": {"type": "git", "url": "git+https://github.com/3leaps/sysprims.git"},
+        }).encode("utf-8")
+        ti = tarfile.TarInfo("package/package.json")
+        ti.size = len(payload)
+        tf.addfile(ti, io.BytesIO(payload))
+PY
+cp "$repo2/docs/releases/v$v2.md" "$remote2/release-notes-v$v2.md"
+(cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" ./scripts/release-stage-public.sh --anchors "$remote2" >/dev/null)
+resign_remote2() {
+	rm -f "$remote2"/SHA256SUMS* "$remote2"/SHA512SUMS* "$remote2"/sysprims-minisign.pub "$remote2"/sysprims-release-signing-key.asc
+	(cd "$repo2" && ./scripts/generate-checksums.sh "$remote2" "v$v2" >/dev/null)
+	(cd "$repo2" && SYSPRIMS_MINISIGN_KEY="$fixture_dir/minisign.key" SYSPRIMS_PGP_KEY_ID="$subkey!" \
+		SYSPRIMS_GPG_HOMEDIR="$fixture_dir/gpg" ./scripts/sign-release-assets.sh "v$v2" "$remote2" >/dev/null)
+	(cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" SYSPRIMS_DECERNOR_BIN="$decernor" ./scripts/release-stage-public.sh "$remote2" >/dev/null)
+	node --input-type=module - "$remote2" "$fixture_dir/release2.json" "$v2" "$commit2" <<'EOF'
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const [, , dir, out, version, commit] = process.argv;
+const assets = readdirSync(dir).sort().map((name) => ({
+  name,
+  digest: `sha256:${createHash("sha256").update(readFileSync(join(dir, name))).digest("hex")}`,
+}));
+writeFileSync(out, JSON.stringify({
+  tag_name: `v${version}`,
+  target_commitish: commit,
+  draft: false,
+  immutable: true,
+  assets,
+}));
+EOF
+}
+resign_remote2
+
+(cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" SYSPRIMS_DECERNOR_BIN="$decernor" \
+	SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE="$fixture_dir/release2.json" SYSPRIMS_REMOTE_ASSET_DIR="$remote2" \
+	./scripts/release-stage-published.sh >/dev/null)
+[[ "$(find "$repo2/dist/published" -maxdepth 1 -type f | wc -l | tr -d ' ')" == "38" ]]
+
+(cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" SYSPRIMS_DECERNOR_BIN="$decernor" \
+	SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE="$fixture_dir/release2.json" SYSPRIMS_REMOTE_ASSET_DIR="$remote2" \
+	./scripts/release-stage-published.sh --pypi-only >/dev/null)
+[[ "$(find "$repo2/dist/published-pypi" -maxdepth 1 -type f | wc -l | tr -d ' ')" == "6" ]]
+
+(cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" SYSPRIMS_DECERNOR_BIN="$decernor" \
+	SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE="$fixture_dir/release2.json" SYSPRIMS_REMOTE_ASSET_DIR="$remote2" \
+	./scripts/release-stage-published.sh --npm-only >/dev/null)
+[[ "$(find "$repo2/dist/published-npm" -maxdepth 1 -type f | wc -l | tr -d ' ')" == "8" ]]
+
+# Tampered wheel metadata (even if re-checksummed and re-signed!) is refused.
+cp "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl" "$fixture_dir/good-win.whl"
+cp "$remote2/sysprims-$v2.tar.gz" "$fixture_dir/good-sdist.tar.gz"
+cp "$remote2/3leaps-sysprims-$v2.tgz" "$fixture_dir/good-npm.tgz"
+
+python3 -I - "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl" "$v2" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    zf.writestr(f"sysprims-{sys.argv[2]}.dist-info/METADATA", "Metadata-Version: 2.3\nName: wrong-pkg\nVersion: 9.9.9\n\n")
+PY
+resign_remote2
+rm -rf "$repo2/dist/published-pypi" "$repo2/dist/published-pypi.anchor"
+expect_fail_with 'metadata mismatch' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --pypi-only"
+
+# Traversal / unexpected-root / duplicate entries in .whl, .tar.gz, and .tgz are refused.
+for bad_wheel_member in '../../outside.txt' '/abs/outside.txt' 'C:\outside.txt' 'other_pkg/init.py' 'sysprims/__INIT__.py'; do
+	python3 -I - "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl" "$v2" "$bad_wheel_member" <<'PY'
+import sys, zipfile
+path, v, extra = sys.argv[1], sys.argv[2], sys.argv[3]
+with zipfile.ZipFile(path, "w") as zf:
+    zf.writestr(f"sysprims-{v}.dist-info/METADATA", f"Metadata-Version: 2.3\nName: sysprims\nVersion: {v}\n\n")
+    zf.writestr("sysprims/__init__.py", "# ok\n")
+    zf.writestr(extra, "bad\n")
+PY
+	resign_remote2
+	rm -rf "$repo2/dist/published-pypi" "$repo2/dist/published-pypi.anchor"
+	expect_fail_with 'archive entry' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --pypi-only"
+done
+cp "$fixture_dir/good-win.whl" "$remote2/sysprims-$v2-cp310-abi3-win_amd64.whl"
+
+python3 -I - "$remote2/sysprims-$v2.tar.gz" "$v2" <<'PY'
+import io, sys, tarfile
+path, v = sys.argv[1], sys.argv[2]
+with tarfile.open(path, "w:gz") as tf:
+    for name, body in [(f"sysprims-{v}/PKG-INFO", f"Metadata-Version: 2.3\nName: sysprims\nVersion: {v}\n\n".encode()), ("../../outside.txt", b"bad")]:
+        ti = tarfile.TarInfo(name)
+        ti.size = len(body)
+        tf.addfile(ti, io.BytesIO(body))
+PY
+resign_remote2
+rm -rf "$repo2/dist/published-pypi" "$repo2/dist/published-pypi.anchor"
+expect_fail_with 'archive entry' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --pypi-only"
+cp "$fixture_dir/good-sdist.tar.gz" "$remote2/sysprims-$v2.tar.gz"
+
+python3 -I - "$remote2/3leaps-sysprims-$v2.tgz" "$v2" <<'PY'
+import io, json, sys, tarfile
+path, v = sys.argv[1], sys.argv[2]
+pkg_bytes = json.dumps({"name": "@3leaps/sysprims", "version": v, "repository": {"type": "git", "url": "git+https://github.com/3leaps/sysprims.git"}}).encode()
+with tarfile.open(path, "w:gz") as tf:
+    for name, body in [("package/package.json", pkg_bytes), ("../../outside.txt", b"bad")]:
+        ti = tarfile.TarInfo(name)
+        ti.size = len(body)
+        tf.addfile(ti, io.BytesIO(body))
+PY
+resign_remote2
+rm -rf "$repo2/dist/published-npm" "$repo2/dist/published-npm.anchor"
+expect_fail_with 'archive entry' bash -c "cd '$repo2' && SYSPRIMS_RELEASE_TAG='v$v2' SYSPRIMS_DECERNOR_BIN='$decernor' SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE='$fixture_dir/release2.json' SYSPRIMS_REMOTE_ASSET_DIR='$remote2' ./scripts/release-stage-published.sh --npm-only"
+cp "$fixture_dir/good-npm.tgz" "$remote2/3leaps-sysprims-$v2.tgz"
+
 echo '[ok] release-stage-published controls passed'

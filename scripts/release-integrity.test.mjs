@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { existsSync as existsSyncLocal } from "node:fs";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { ANCHORS, assertInventory, checkRemote, expectedInventory, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyPublishedStage, verifyTaggedAssets } from "./release-integrity.mjs";
+import { ANCHORS, NPM_TARBALL_PACKAGES, PYTHON_WHEEL_TAGS, assertInventory, checkRemote, expectedInventory, inventoryForCommit, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyPublishedStage, verifyTaggedAssets } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -245,6 +245,8 @@ test("release leaves are guard-wired and only release-publish can undraft", () =
   assert.match(makefile, /^release-publish: release-require-tag release-guard-tag-version-post release-guard-provenance /m);
   assert.match(makefile, /^release-guard-remote: release-require-tag release-guard-tag-version-post /m);
   assert.match(makefile, /^release-stage-published: release-require-tag release-guard-tag-version-post /m);
+  assert.match(makefile, /^release-stage-published-pypi: release-require-tag release-guard-tag-version-post /m);
+  assert.match(makefile, /^release-stage-published-npm: release-require-tag release-guard-tag-version-post /m);
   assert.match(makefile, /^release-verify-registries: release-require-tag release-guard-tag-version-post /m);
   // Draft creation never publishes and never replaces assets.
   const draft = readFileSync("scripts/release-create-draft.sh", "utf8");
@@ -268,14 +270,16 @@ test("npm dry-run cannot enter the protected OIDC job", () => {
   assert.doesNotMatch(stageBlock, /environment:|id-token:/);
 });
 
-test("registry promotion requires every listed crate and both Go modules from the release commit", () => {
+test("registry promotion requires every listed crate and all Go modules from the release commit", () => {
   // The repository's own publication list and modules, at HEAD.
   const version = readFileSync("VERSION", "utf8").trim();
   const live = remoteRequirements(process.cwd(), "HEAD", version);
   const listed = readFileSync("config/release/publishable-crates.txt", "utf8").split("\n").filter(Boolean);
   assert.deepEqual(live.crates, listed);
+  assert.ok(live.crates.includes("sysprims-evidence"));
   assert.ok(live.crates.includes("sysprims-recurrence"));
   assert.deepEqual(live.modules.map((module) => module.path), [
+    "github.com/3leaps/sysprims",
     "github.com/3leaps/sysprims/bindings/go/sysprims",
     "github.com/3leaps/sysprims/go/recurrence",
   ]);
@@ -321,17 +325,38 @@ test("registry requirements follow the release commit's plan and tree", () => {
   assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.length, 1, "the working tree is not consulted");
   commitAll("module");
   assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.at(-1).path, "github.com/3leaps/sysprims/go/recurrence");
+  mkdirSync(join(root, "evidence"), { recursive: true });
+  writeFileSync(join(root, "evidence/doc.go"), "package evidence\n");
+  assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules.length, 2, "uncommitted evidence/doc.go is ignored");
+  commitAll("evidence");
+  assert.equal(remoteRequirements(root, "HEAD", "1.2.3").modules[0].path, "github.com/3leaps/sysprims");
 });
 
 // The release decisions after tagging are taken at the tag's commit: the plan
 // is that commit's blob, npm gitHead and provenance are checked against that
 // commit, and an index flag that hides a working-tree edit is refused.
+function pypiFixtureResponse(version = "1.2.3", overrides = {}) {
+  const filenames = [
+    ...PYTHON_WHEEL_TAGS.map((tag) => `sysprims-${version}-${tag}.whl`),
+    `sysprims-${version}.tar.gz`,
+  ];
+  return {
+    info: { name: "sysprims", version },
+    urls: filenames.map((filename) => ({
+      filename,
+      yanked: false,
+      digests: { sha256: "a".repeat(64) },
+    })),
+    ...overrides,
+  };
+}
+
 function taggedPlanFixture() {
   const root = mkdtempSync(join(tmpdir(), "sysprims-tagged-plan-"));
   roots.push(root);
-  const plan = (typescript) => JSON.stringify({
+  const plan = (typescript, python = { disposition: "publish" }) => JSON.stringify({
     schema: "sysprims-release-plan/v1", version: "1.2.3", provenance_policy: "commit_footer",
-    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, ffi: { disposition: "publish" }, go: { disposition: "publish", lock_phase: "resolved" }, typescript },
+    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, ffi: { disposition: "publish" }, go: { disposition: "publish", lock_phase: "resolved" }, typescript, python },
   });
   mkdirSync(join(root, "docs/releases"), { recursive: true });
   mkdirSync(join(root, "config/release"), { recursive: true });
@@ -346,19 +371,23 @@ function taggedPlanFixture() {
   must(root, "git", ["commit", "-qm", "release without attribution"]);
   must(root, "git", ["tag", "-a", "-m", "Release 1.2.3", "v1.2.3"]);
   const tagCommit = must(root, "git", ["rev-parse", "v1.2.3^{commit}"]);
-  const skipPlan = plan({ disposition: "skip", retained_version: "1.2.2" });
-  // Records which npm versions were asked for; every lookup resolves.
+  const skipPlan = plan({ disposition: "skip", retained_version: "1.2.2" }, { disposition: "skip", retained_version: "1.2.2" });
+  // Records which npm and PyPI versions were asked for; every lookup resolves.
   const lookup = (gitHead = tagCommit) => {
     const asked = [];
+    const askedPy = [];
     return {
       asked,
+      askedPy,
       crate: (_, v) => v,
       goModule: (_, v) => `v${v}`,
       npm(url) { const v = url.split("/").pop(); asked.push(v); return { version: v, gitHead, dist: { integrity: "x", tarball: "y" } }; },
       npmResolves: () => false,
+      pypi(v) { askedPy.push(v); return pypiFixtureResponse(v); },
+      pypiResolves: () => false,
     };
   };
-  return { root, tagCommit, skipPlan, lookup };
+  return { root, tagCommit, skipPlan, lookup, plan };
 }
 
 test("registry checks use the tag commit's plan, not the checkout's", () => {
@@ -440,6 +469,8 @@ test("every published npm package must carry exactly the tag commit as gitHead",
         return response;
       },
       npmResolves: () => false,
+      pypi: (v) => pypiFixtureResponse(v),
+      pypiResolves: () => false,
     };
   };
   assert.doesNotThrow(() => remoteRegistries(root, tagCommit, "1.2.3", npmLookup(-1)));
@@ -464,8 +495,74 @@ test("every published npm package must carry exactly the tag commit as gitHead",
       };
     },
     npmResolves: () => false,
+    pypi: (v) => pypiFixtureResponse(v),
+    pypiResolves: () => false,
   };
   assert.doesNotThrow(() => remoteRegistries(root, tagCommit, "1.2.3", attestedLookup));
+});
+
+test("modern release plans expand inventory with 6 Python assets and 8 npm tarballs and check PyPI", () => {
+  assert.equal(expectedInventory("0.3.0").base.length, 16);
+  const full = expectedInventory("0.4.0", {
+    python: { disposition: "publish" },
+    typescript: { disposition: "publish" },
+  });
+  assert.equal(full.base.length, 30);
+  assert.equal(full.signed.length, 38);
+  for (const tag of PYTHON_WHEEL_TAGS) {
+    assert.ok(full.base.includes(`sysprims-0.4.0-${tag}.whl`));
+  }
+  assert.ok(full.base.includes("sysprims-0.4.0.tar.gz"));
+  for (const [prefix] of NPM_TARBALL_PACKAGES) {
+    assert.ok(full.base.includes(`${prefix}-0.4.0.tgz`));
+  }
+
+  const pySkip = expectedInventory("0.4.0", {
+    python: { disposition: "skip", retained_version: "0.3.9" },
+    typescript: { disposition: "publish" },
+  });
+  assert.equal(pySkip.base.length, 24);
+
+  const tsSkip = expectedInventory("0.4.0", {
+    python: { disposition: "publish" },
+    typescript: { disposition: "skip", retained_version: "0.3.9" },
+  });
+  assert.equal(tsSkip.base.length, 22);
+
+  const { root, tagCommit, lookup, plan } = taggedPlanFixture();
+  assert.equal(inventoryForCommit(root, tagCommit, "1.2.3").base.length, 30);
+
+  // Missing wheel on PyPI is refused.
+  assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", {
+    ...lookup(),
+    pypi(v) {
+      const doc = pypiFixtureResponse(v);
+      doc.urls.pop();
+      return doc;
+    },
+  }), /missing sysprims-1\.2\.3\.tar\.gz/);
+
+  // Yanked wheel on PyPI is refused.
+  assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", {
+    ...lookup(),
+    pypi(v) {
+      const doc = pypiFixtureResponse(v);
+      doc.urls[0].yanked = true;
+      return doc;
+    },
+  }), /is yanked/);
+
+  // Skipped Python surface checks retained_version and refuses resolution at current version.
+  writeFileSync(join(root, "docs/releases/v1.2.3.json"), plan({ disposition: "publish" }, { disposition: "skip", retained_version: "1.2.2" }));
+  must(root, "git", ["commit", "-qam", "skip python"]);
+  const skipCommit = must(root, "git", ["rev-parse", "HEAD"]);
+  const skipLookup = lookup(skipCommit);
+  remoteRegistries(root, skipCommit, "1.2.3", skipLookup);
+  assert.deepEqual(skipLookup.askedPy, ["1.2.2"]);
+  assert.throws(() => remoteRegistries(root, skipCommit, "1.2.3", {
+    ...lookup(skipCommit),
+    pypiResolves: () => true,
+  }), /skipped Python surface unexpectedly resolves on PyPI at 1\.2\.3/);
 });
 
 // The fingerprint anchors are release assets: in every phase's inventory,

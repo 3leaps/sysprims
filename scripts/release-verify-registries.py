@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT OR Apache-2.0
-"""Verify that npm serves the exact signed release packages and Sigstore provenance.
+"""Verify that PyPI and npm serve the exact signed release packages and provenance.
 
-Queries the npm registry JSON API (`https://registry.npmjs.org/<pkg>/<version>`)
-and the npm Sigstore attestation endpoint for all 8 `@3leaps/sysprims*` packages
-(`@3leaps/sysprims` plus the 7 N-API platform packages), verifying:
-  - exact version and gitHead (when --commit is given)
-  - dist.integrity (sha512) and dist.shasum (sha1), plus downloaded tarball bytes
-    when dist.tarball is present
-  - cryptographic Sigstore provenance bundle (Fulcio P-384 certificate chain,
-    OIDC workflow extensions for 3leaps/sysprims, Rekor P-256 SET / RFC 6962
-    Merkle inclusion proof and checkpoint, DSSE P-256 signature, and SLSA v1
-    in-toto statement binding the package sha512)
+Verifies:
+  - PyPI (`https://pypi.org/pypi/sysprims/<version>/json` + PEP 740 `/integrity/...`):
+    all 5 `cp310-abi3` wheels and `sysprims-<version>.tar.gz` match `SHA256SUMS`
+    in `--stage-dir`, are non-yanked under the `3leaps` PyPI organization, match
+    downloaded file bytes, and carry cryptographic PEP 740 Sigstore provenance from
+    `3leaps/sysprims` `.github/workflows/registry-publish.yml` (`publish-pypi`)
+  - npm (`https://registry.npmjs.org/<pkg>/<version>` + Sigstore attestations):
+    all 8 `@3leaps/sysprims*` packages match expected version, `gitHead` / SLSA
+    `gitCommit`, `dist.integrity` (sha512), `dist.shasum` (sha1), downloaded
+    tarball bytes, and cryptographic Sigstore SLSA v1 provenance (plus exact
+    `SHA256SUMS`/`SHA512SUMS` match against `--stage-dir` when published via
+    `registry-publish.yml` or `--require-staged-npm`)
 
 Usage:
-  release-verify-registries.py [--expect-provenance | --bootstrap-no-provenance] --version <version> [--commit <sha>]
-  release-verify-registries.py [--expect-provenance | --bootstrap-no-provenance] <version> [npm|all]
+  release-verify-registries.py [--expect-provenance | --bootstrap-no-provenance | --pypi-bootstrap-no-provenance]
+    [--stage-dir <dir>] [--require-staged-npm] --version <version> [--commit <sha>] [npm|pypi|all]
+  release-verify-registries.py [--expect-provenance | --bootstrap-no-provenance] <version> [npm|pypi|all]
 """
 
 import base64
@@ -24,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -43,14 +47,36 @@ NPM_PACKAGES = (
     "@3leaps/sysprims",
 )
 
+NPM_TARBALL_PREFIX_BY_PKG = {
+    "@3leaps/sysprims": "3leaps-sysprims",
+    "@3leaps/sysprims-darwin-arm64": "3leaps-sysprims-darwin-arm64",
+    "@3leaps/sysprims-linux-arm64-gnu": "3leaps-sysprims-linux-arm64-gnu",
+    "@3leaps/sysprims-linux-arm64-musl": "3leaps-sysprims-linux-arm64-musl",
+    "@3leaps/sysprims-linux-x64-gnu": "3leaps-sysprims-linux-x64-gnu",
+    "@3leaps/sysprims-linux-x64-musl": "3leaps-sysprims-linux-x64-musl",
+    "@3leaps/sysprims-win32-arm64-msvc": "3leaps-sysprims-win32-arm64-msvc",
+    "@3leaps/sysprims-win32-x64-msvc": "3leaps-sysprims-win32-x64-msvc",
+}
+
+PYTHON_WHEEL_TAGS = (
+    "cp310-abi3-macosx_11_0_arm64",
+    "cp310-abi3-macosx_11_0_x86_64",
+    "cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64",
+    "cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64",
+    "cp310-abi3-win_amd64",
+)
+
 EXPECTED_REPO = "3leaps/sysprims"
+EXPECTED_PYPI_ORG = "3leaps"
+REGISTRY_PUBLISH_WORKFLOW = ".github/workflows/registry-publish.yml"
 EXPECTED_WORKFLOW_PATHS = (
     ".github/workflows/typescript-npm-publish.yml",
-    ".github/workflows/registry-publish.yml",
+    REGISTRY_PUBLISH_WORKFLOW,
 )
 EXPECTED_OIDC_ISSUER = b"https://token.actions.githubusercontent.com"
 DSSE_PAYLOAD_TYPE = "application/vnd.in-toto+json"
 SLSA_PREDICATE_V1 = "https://slsa.dev/provenance/v1"
+PYPI_PUBLISH_PREDICATE_V1 = "https://docs.pypi.org/attestations/publish/v1"
 
 # X.509 and Fulcio OIDs (DER value bytes of OBJECT IDENTIFIER TLV, tag 0x06):
 # - 2.5.29.17 subjectAltName: 55 1d 11
@@ -358,7 +384,7 @@ def parse_and_verify_fulcio_leaf_cert(
     label: str,
     expected_commit: str | None = None,
     expected_ref_str: str | None = None,
-) -> tuple[tuple[int, int], int, int]:
+) -> tuple[tuple[int, int], int, int, str]:
     """Parse X.509v3 leaf certificate DER, verify Fulcio CA signature and OIDC extensions."""
     tag, cert_seq, end = read_der_tlv(cert_der, 0)
     if tag != 0x30 or end != len(cert_der):
@@ -559,7 +585,7 @@ def parse_and_verify_fulcio_leaf_cert(
                 f"{label}: certificate missing required Fulcio commit digest extension"
             )
 
-    return leaf_q, not_before, not_after
+    return leaf_q, not_before, not_after, matched_san.decode("ascii")
 
 
 def verify_rekor_merkle_inclusion(
@@ -792,6 +818,21 @@ def verify_rekor_tlog_entry(
         )
 
 
+def decode_cert_der(cert_b64: str, label: str) -> bytes:
+    try:
+        raw = base64.b64decode(cert_b64, validate=True)
+    except Exception as err:
+        fail(f"{label}: invalid base64 certificate: {err}")
+    if b"-----BEGIN CERTIFICATE-----" in raw:
+        lines = [
+            line.strip()
+            for line in raw.decode("ascii", errors="strict").splitlines()
+            if line.strip() and not line.strip().startswith("-----")
+        ]
+        return base64.b64decode("".join(lines), validate=True)
+    return raw
+
+
 def verify_sigstore_attestation(
     cert_b64: str,
     tlog_entries: list,
@@ -805,8 +846,10 @@ def verify_sigstore_attestation(
     label: str,
     expected_commit: str | None = None,
     expected_ref: str | None = None,
-) -> None:
-    """Verify Fulcio certificate, Rekor transparency log entry, DSSE signature, and SLSA statement."""
+    allowed_workflows: tuple[str, ...] = EXPECTED_WORKFLOW_PATHS,
+    allowed_predicate_types: tuple[str, ...] = (SLSA_PREDICATE_V1,),
+) -> str:
+    """Verify Fulcio certificate, Rekor transparency log entry, DSSE signature, and in-toto statement."""
     if not isinstance(cert_b64, str) or not cert_b64:
         fail(f"{label} missing verification certificate")
     if not isinstance(tlog_entries, list) or not tlog_entries:
@@ -817,12 +860,12 @@ def verify_sigstore_attestation(
         fail(f"{label} missing DSSE signature")
 
     ref_str = expected_ref or f"refs/tags/v{version}"
-    cert_der = base64.b64decode(cert_b64)
+    cert_der = decode_cert_der(cert_b64, label)
     expected_san_uris = tuple(
         f"https://github.com/{EXPECTED_REPO}/{wf}@{ref_str}".encode("ascii")
-        for wf in EXPECTED_WORKFLOW_PATHS
+        for wf in allowed_workflows
     )
-    leaf_q, not_before, not_after = parse_and_verify_fulcio_leaf_cert(
+    leaf_q, not_before, not_after, matched_san_uri = parse_and_verify_fulcio_leaf_cert(
         cert_der,
         expected_san_uris,
         version,
@@ -831,6 +874,9 @@ def verify_sigstore_attestation(
         expected_commit=expected_commit,
         expected_ref_str=ref_str,
     )
+    matched_workflow = matched_san_uri.removeprefix(
+        f"https://github.com/{EXPECTED_REPO}/"
+    ).removesuffix(f"@{ref_str}")
 
     stmt_bytes = base64.b64decode(statement_b64)
     dsse_sig = base64.b64decode(sig_b64)
@@ -860,7 +906,7 @@ def verify_sigstore_attestation(
     if stmt.get("_type") != "https://in-toto.io/Statement/v1":
         fail(f"{label} statement _type mismatch: {stmt.get('_type')!r}")
     pred_type = stmt.get("predicateType")
-    if pred_type != SLSA_PREDICATE_V1:
+    if pred_type not in allowed_predicate_types:
         fail(f"{label} statement predicateType mismatch: {pred_type!r}")
     subjects = stmt.get("subject") or []
     matched = [
@@ -876,41 +922,47 @@ def verify_sigstore_attestation(
         )
 
     predicate = stmt.get("predicate")
-    if not isinstance(predicate, dict):
-        fail(f"{label} SLSA statement predicate must be an object")
-    build_def = predicate.get("buildDefinition")
-    if not isinstance(build_def, dict):
-        fail(f"{label} SLSA statement buildDefinition must be an object")
-    wf = (build_def.get("externalParameters") or {}).get("workflow")
-    if (
-        not isinstance(wf, dict)
-        or wf.get("repository") != f"https://github.com/{EXPECTED_REPO}"
-        or wf.get("path") not in EXPECTED_WORKFLOW_PATHS
-        or wf.get("ref") != ref_str
-    ):
-        fail(f"{label} SLSA workflow parameters mismatch: {wf!r}")
+    if pred_type == SLSA_PREDICATE_V1:
+        if not isinstance(predicate, dict):
+            fail(f"{label} SLSA statement predicate must be an object")
+        build_def = predicate.get("buildDefinition")
+        if not isinstance(build_def, dict):
+            fail(f"{label} SLSA statement buildDefinition must be an object")
+        wf = (build_def.get("externalParameters") or {}).get("workflow")
+        if (
+            not isinstance(wf, dict)
+            or wf.get("repository") != f"https://github.com/{EXPECTED_REPO}"
+            or wf.get("path") not in allowed_workflows
+            or wf.get("ref") != ref_str
+        ):
+            fail(f"{label} SLSA workflow parameters mismatch: {wf!r}")
 
-    if expected_commit is not None:
-        resolved_deps = build_def.get("resolvedDependencies")
-        if not isinstance(resolved_deps, list) or not resolved_deps:
-            fail(f"{label} SLSA buildDefinition missing resolvedDependencies")
-        repo_prefix = f"git+https://github.com/{EXPECTED_REPO}@"
-        matched_commit = False
-        for dep in resolved_deps:
-            if not isinstance(dep, dict):
-                continue
-            uri = dep.get("uri")
-            if isinstance(uri, str) and uri.startswith(repo_prefix):
-                git_commit = (dep.get("digest") or {}).get("gitCommit")
-                if git_commit != expected_commit:
-                    fail(
-                        f"{label} SLSA resolvedDependencies gitCommit mismatch: {git_commit!r} != {expected_commit}"
-                    )
-                matched_commit = True
-        if not matched_commit:
-            fail(
-                f"{label} SLSA resolvedDependencies missing gitCommit for {EXPECTED_REPO}@{expected_commit}"
-            )
+        if expected_commit is not None:
+            resolved_deps = build_def.get("resolvedDependencies")
+            if not isinstance(resolved_deps, list) or not resolved_deps:
+                fail(f"{label} SLSA buildDefinition missing resolvedDependencies")
+            repo_prefix = f"git+https://github.com/{EXPECTED_REPO}@"
+            matched_commit = False
+            for dep in resolved_deps:
+                if not isinstance(dep, dict):
+                    continue
+                uri = dep.get("uri")
+                if isinstance(uri, str) and uri.startswith(repo_prefix):
+                    git_commit = (dep.get("digest") or {}).get("gitCommit")
+                    if git_commit != expected_commit:
+                        fail(
+                            f"{label} SLSA resolvedDependencies gitCommit mismatch: {git_commit!r} != {expected_commit}"
+                        )
+                    matched_commit = True
+            if not matched_commit:
+                fail(
+                    f"{label} SLSA resolvedDependencies missing gitCommit for {EXPECTED_REPO}@{expected_commit}"
+                )
+    elif pred_type == PYPI_PUBLISH_PREDICATE_V1:
+        if predicate is not None and not isinstance(predicate, dict):
+            fail(f"{label} PyPI publish predicate must be null or an object")
+
+    return matched_workflow
 
 
 def validate_base_url(url: str, default: str, env_var: str) -> str:
@@ -981,17 +1033,250 @@ def fetch_json(url: str, label: str) -> dict:
     return data
 
 
+def read_manifest(path: Path, hex_len: int) -> dict[str, str]:
+    if not path.exists() or path.is_symlink() or not path.is_file():
+        fail(f"manifest missing or not a regular file: {path}")
+    entries: dict[str, str] = {}
+    pattern = re.compile(rf"^([0-9a-f]{{{hex_len}}})  (.+)$")
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw:
+            continue
+        match = pattern.match(raw)
+        if not match:
+            fail(f"malformed manifest line in {path.name}: {raw!r}")
+        digest, name = match.groups()
+        name = name.removeprefix("./")
+        if name in entries:
+            fail(f"duplicate manifest entry in {path.name}: {name}")
+        entries[name] = digest
+    if not entries:
+        fail(f"manifest is empty: {path}")
+    return entries
+
+
+def verify_pypi_provenance(
+    integrity_base: str,
+    version: str,
+    commit: str | None,
+    filename: str,
+    expected_sha256: str,
+    trust_root: SigstoreTrustRoot,
+) -> None:
+    label = f"PyPI PEP 740 provenance for {filename}"
+    raw = fetch_bytes(
+        f"{integrity_base}/sysprims/{version}/{filename}/provenance",
+        label,
+        accept="application/vnd.pypi.integrity.v1+json, application/json",
+    )
+    try:
+        prov_doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as err:
+        fail(f"{label} returned invalid JSON: {err}")
+    if not isinstance(prov_doc, dict):
+        fail(f"{label} did not return a JSON object")
+
+    bundles = prov_doc.get("attestation_bundles")
+    if not isinstance(bundles, list) or not bundles:
+        fail(f"PyPI PEP 740 provenance missing attestation_bundles for {filename}")
+
+    verified = False
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            fail(f"PyPI PEP 740 attestation bundle is not an object for {filename}")
+        publisher = bundle.get("publisher") or {}
+        attestations = bundle.get("attestations")
+        if (
+            not isinstance(attestations, list)
+            or not attestations
+            or not all(isinstance(a, dict) for a in attestations)
+        ):
+            fail(
+                f"PyPI PEP 740 bundle has empty or invalid attestations for {filename}"
+            )
+        if not (
+            publisher.get("kind") == "GitHub"
+            and publisher.get("repository") == EXPECTED_REPO
+            and publisher.get("workflow") == "registry-publish.yml"
+            and publisher.get("environment") == "publish-pypi"
+        ):
+            continue
+        for att in attestations:
+            if att.get("version") != 1:
+                fail(
+                    f"{label}: unsupported PEP 740 attestation version {att.get('version')!r}"
+                )
+            vm = att.get("verification_material")
+            env = att.get("envelope")
+            if not isinstance(vm, dict) or not isinstance(env, dict):
+                fail(f"{label}: missing verification_material or envelope")
+            verify_sigstore_attestation(
+                vm.get("certificate"),
+                vm.get("transparency_entries"),
+                env.get("statement"),
+                env.get("signature"),
+                filename,
+                "sha256",
+                expected_sha256,
+                version,
+                trust_root,
+                label,
+                expected_commit=commit,
+                allowed_workflows=(REGISTRY_PUBLISH_WORKFLOW,),
+                allowed_predicate_types=(
+                    SLSA_PREDICATE_V1,
+                    PYPI_PUBLISH_PREDICATE_V1,
+                ),
+            )
+            verified = True
+    if not verified:
+        fail(
+            f"PyPI PEP 740 provenance publisher mismatch for {filename} "
+            f"(expected GitHub {EXPECTED_REPO} registry-publish.yml publish-pypi)"
+        )
+
+
+def verify_pypi(
+    version: str,
+    commit: str | None,
+    stage_dir: Path | None,
+    require_provenance: bool,
+    trust_root: SigstoreTrustRoot,
+) -> None:
+    if stage_dir is None:
+        fail(
+            "PyPI verification requires --stage-dir pointing to the verified release directory"
+        )
+    default_base = "https://pypi.org/pypi"
+    base = validate_base_url(
+        os.environ.get("SYSPRIMS_PYPI_API_URL", default_base),
+        default_base,
+        "SYSPRIMS_PYPI_API_URL",
+    )
+    integrity_base = (base[:-5] if base.endswith("/pypi") else base) + "/integrity"
+    is_loopback = base.startswith("http://127.0.0.1:")
+    loopback_origin = base.split("/pypi", 1)[0] if is_loopback else ""
+
+    sha256s = read_manifest(stage_dir / "SHA256SUMS", 64)
+    expected_files = sorted(
+        [
+            *(f"sysprims-{version}-{tag}.whl" for tag in PYTHON_WHEEL_TAGS),
+            f"sysprims-{version}.tar.gz",
+        ]
+    )
+    for name in expected_files:
+        if name not in sha256s:
+            fail(f"SHA256SUMS missing {name}")
+        staged = stage_dir / name
+        if not staged.exists() or staged.is_symlink() or not staged.is_file():
+            fail(f"staged Python artifact missing: {name}")
+        if hashlib.sha256(staged.read_bytes()).hexdigest() != sha256s[name]:
+            fail(f"staged Python artifact sha256 mismatch for {name}")
+
+    ver_doc = fetch_json(f"{base}/sysprims/{version}/json", f"PyPI sysprims=={version}")
+    info = ver_doc.get("info") or {}
+    if info.get("name") != "sysprims" or info.get("version") != version:
+        fail(
+            f"PyPI metadata mismatch for sysprims=={version}: name={info.get('name')!r} version={info.get('version')!r}"
+        )
+
+    ownership = ver_doc.get("ownership") or {}
+    org = ownership.get("organization")
+    if org != EXPECTED_PYPI_ORG:
+        proj_doc = fetch_json(f"{base}/sysprims/json", "PyPI sysprims project")
+        org = (proj_doc.get("ownership") or {}).get("organization")
+    if org != EXPECTED_PYPI_ORG:
+        fail(
+            f"PyPI project ownership organization must be {EXPECTED_PYPI_ORG!r}, got {org!r}"
+        )
+
+    urls = ver_doc.get("urls")
+    if not isinstance(urls, list):
+        fail(f"PyPI sysprims=={version} response missing urls list")
+    published: dict[str, tuple[str, str]] = {}
+    for entry in urls:
+        if not isinstance(entry, dict):
+            fail("PyPI urls entry is not an object")
+        filename = entry.get("filename")
+        if not isinstance(filename, str) or filename in published:
+            fail(f"invalid or duplicate PyPI filename: {filename!r}")
+        if entry.get("yanked"):
+            fail(f"PyPI release file {filename} is yanked")
+        digest = (entry.get("digests") or {}).get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            fail(f"PyPI release file {filename} missing valid sha256 digest")
+        file_url = entry.get("url")
+        if not isinstance(file_url, str) or not file_url:
+            fail(f"PyPI release file {filename} missing download url")
+        if is_loopback:
+            if not file_url.startswith(f"{loopback_origin}/"):
+                fail(f"PyPI loopback file URL invalid for {filename}: {file_url!r}")
+        elif not file_url.startswith("https://files.pythonhosted.org/"):
+            fail(
+                f"PyPI file URL must use https://files.pythonhosted.org/ for {filename}: {file_url!r}"
+            )
+        published[filename] = (digest, file_url)
+
+    if sorted(published) != expected_files:
+        fail(
+            f"PyPI artifact inventory mismatch for sysprims=={version}: expected {expected_files}, got {sorted(published)}"
+        )
+
+    for name in expected_files:
+        pub_sha256, file_url = published[name]
+        if pub_sha256 != sha256s[name]:
+            fail(f"PyPI sha256 mismatch for {name}: {pub_sha256} != {sha256s[name]}")
+        raw_bytes = fetch_bytes(
+            file_url,
+            f"PyPI download {name}",
+            accept="application/octet-stream",
+        )
+        dl_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        if dl_sha256 != sha256s[name]:
+            fail(
+                f"PyPI downloaded bytes sha256 mismatch for {name}: {dl_sha256} != {sha256s[name]}"
+            )
+        if require_provenance:
+            verify_pypi_provenance(
+                integrity_base,
+                version,
+                commit,
+                name,
+                sha256s[name],
+                trust_root,
+            )
+
+    prov_note = (
+        " + PEP 740 provenance" if require_provenance else " (bootstrap: no provenance)"
+    )
+    print(
+        f"[ok] PyPI: sysprims=={version} (5 wheels + sdist) match signed SHA256SUMS (org: {EXPECTED_PYPI_ORG}){prov_note}"
+    )
+
+
 def verify_npm(
     version: str,
     commit: str | None,
     require_provenance: bool,
     trust_root: SigstoreTrustRoot,
+    stage_dir: Path | None = None,
+    require_staged_npm: bool = False,
 ) -> None:
     default_base = "https://registry.npmjs.org"
     base = validate_base_url(
         os.environ.get("SYSPRIMS_NPM_REGISTRY_URL", default_base),
         default_base,
         "SYSPRIMS_NPM_REGISTRY_URL",
+    )
+
+    sha256s = (
+        read_manifest(stage_dir / "SHA256SUMS", 64)
+        if stage_dir is not None and (stage_dir / "SHA256SUMS").is_file()
+        else None
+    )
+    sha512s = (
+        read_manifest(stage_dir / "SHA512SUMS", 128)
+        if stage_dir is not None and (stage_dir / "SHA512SUMS").is_file()
+        else None
     )
 
     for pkg in NPM_PACKAGES:
@@ -1052,6 +1337,7 @@ def verify_npm(
         if actual_sha1_hex != shasum:
             fail(f"npm tarball shasum mismatch for {pkg}@{version}")
 
+        matched_workflow: str | None = None
         attestations = dist.get("attestations")
         if require_provenance:
             if not isinstance(attestations, dict) or not attestations.get("url"):
@@ -1095,7 +1381,7 @@ def verify_npm(
             sigs = dsse.get("signatures") or []
             sig_b64 = sigs[0].get("sig") if sigs and isinstance(sigs[0], dict) else None
             purl = f"pkg:npm/{pkg.replace('@', '%40')}@{version}"
-            verify_sigstore_attestation(
+            matched_workflow = verify_sigstore_attestation(
                 cert_b64,
                 tlog_entries,
                 dsse.get("payload"),
@@ -1109,6 +1395,74 @@ def verify_npm(
                 expected_commit=commit,
             )
 
+        stage_has_npm_tarballs = bool(
+            sha256s is not None
+            and any(
+                f"{prefix}-{version}.tgz" in sha256s
+                for prefix in NPM_TARBALL_PREFIX_BY_PKG.values()
+            )
+        )
+        plan_requires_staged_npm = False
+        git_dir = Path.cwd()
+        if not (git_dir / ".git").exists():
+            git_dir = Path(__file__).resolve().parent.parent
+        plan_ref = commit if commit is not None else f"refs/tags/v{version}^{{commit}}"
+        plan_proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(git_dir),
+                "show",
+                f"{plan_ref}:docs/releases/v{version}.json",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if plan_proc.returncode == 0:
+            try:
+                plan_doc = json.loads(plan_proc.stdout)
+            except json.JSONDecodeError as exc:
+                fail(f"invalid release plan JSON at {plan_ref}: {exc}")
+            surfaces = plan_doc.get("surfaces") or {}
+            plan_requires_staged_npm = bool(
+                "python" in surfaces
+                and (surfaces.get("typescript") or {}).get("disposition") == "publish"
+            )
+
+        if (
+            require_staged_npm
+            or plan_requires_staged_npm
+            or stage_has_npm_tarballs
+            or matched_workflow == REGISTRY_PUBLISH_WORKFLOW
+        ):
+            if stage_dir is None or sha256s is None or sha512s is None:
+                fail(
+                    "staged npm tarball verification requires --stage-dir with SHA256SUMS and SHA512SUMS"
+                )
+            tgz_name = f"{NPM_TARBALL_PREFIX_BY_PKG[pkg]}-{version}.tgz"
+            if tgz_name not in sha256s or tgz_name not in sha512s:
+                fail(f"checksum manifests missing {tgz_name}")
+            staged_tgz = stage_dir / tgz_name
+            if (
+                not staged_tgz.exists()
+                or staged_tgz.is_symlink()
+                or not staged_tgz.is_file()
+            ):
+                fail(f"staged npm tarball missing: {tgz_name}")
+            staged_bytes = staged_tgz.read_bytes()
+            if hashlib.sha256(staged_bytes).hexdigest() != sha256s[tgz_name]:
+                fail(f"staged npm tarball sha256 mismatch for {tgz_name}")
+            if hashlib.sha512(staged_bytes).hexdigest() != sha512s[tgz_name]:
+                fail(f"staged npm tarball sha512 mismatch for {tgz_name}")
+            if hashlib.sha256(tgz_bytes).hexdigest() != sha256s[tgz_name]:
+                fail(
+                    f"npm registry tarball sha256 differs from signed {tgz_name} for {pkg}@{version}"
+                )
+            if actual_sha512_hex != sha512s[tgz_name]:
+                fail(
+                    f"npm registry tarball sha512 differs from signed {tgz_name} for {pkg}@{version}"
+                )
+
     prov_note = (
         " + Sigstore provenance"
         if require_provenance
@@ -1121,9 +1475,13 @@ def verify_npm(
 
 def main() -> None:
     args = sys.argv[1:]
-    require_provenance = True
+    require_npm_provenance = True
+    require_pypi_provenance = True
     seen_expect = False
     seen_bootstrap = False
+    seen_pypi_bootstrap = False
+    require_staged_npm = False
+    stage_dir: Path | None = None
     version: str | None = None
     commit: str | None = None
     positional: list[str] = []
@@ -1133,12 +1491,24 @@ def main() -> None:
         arg = args[i]
         if arg == "--expect-provenance":
             seen_expect = True
-            require_provenance = True
+            require_npm_provenance = True
+            require_pypi_provenance = True
             i += 1
         elif arg == "--bootstrap-no-provenance":
             seen_bootstrap = True
-            require_provenance = False
+            require_npm_provenance = False
+            require_pypi_provenance = False
             i += 1
+        elif arg == "--pypi-bootstrap-no-provenance":
+            seen_pypi_bootstrap = True
+            require_pypi_provenance = False
+            i += 1
+        elif arg == "--require-staged-npm":
+            require_staged_npm = True
+            i += 1
+        elif arg == "--stage-dir" and i + 1 < len(args):
+            stage_dir = Path(args[i + 1])
+            i += 2
         elif arg == "--version" and i + 1 < len(args):
             version = args[i + 1]
             i += 2
@@ -1151,9 +1521,9 @@ def main() -> None:
             positional.append(arg)
             i += 1
 
-    if seen_expect and seen_bootstrap:
+    if seen_expect and (seen_bootstrap or seen_pypi_bootstrap):
         fail("cannot combine --expect-provenance and --bootstrap-no-provenance")
-    if seen_bootstrap and is_ci_env():
+    if (seen_bootstrap or seen_pypi_bootstrap) and is_ci_env():
         fail("--bootstrap-no-provenance is not accepted under GitHub Actions or CI")
 
     scope = "npm"
@@ -1164,7 +1534,8 @@ def main() -> None:
                 scope = positional[1]
         else:
             fail(
-                "usage: release-verify-registries.py [--expect-provenance | --bootstrap-no-provenance] --version <version> [--commit <sha>]"
+                "usage: release-verify-registries.py [--expect-provenance | --bootstrap-no-provenance | --pypi-bootstrap-no-provenance] "
+                "[--stage-dir <dir>] --version <version> [--commit <sha>] [npm|pypi|all]"
             )
     elif positional:
         if len(positional) == 1:
@@ -1176,11 +1547,21 @@ def main() -> None:
         fail(f"version ({version}) must be X.Y.Z")
     if commit is not None and not re.fullmatch(r"[0-9a-f]{40}", commit):
         fail(f"commit ({commit}) must be a 40-hex SHA")
-    if scope not in ("npm", "all"):
-        fail(f"unknown registry scope: {scope} (expected npm or all)")
+    if scope not in ("npm", "pypi", "all"):
+        fail(f"unknown registry scope: {scope} (expected npm, pypi, or all)")
 
     trust_root = active_trust_root()
-    verify_npm(version, commit, require_provenance, trust_root)
+    if scope in ("pypi", "all"):
+        verify_pypi(version, commit, stage_dir, require_pypi_provenance, trust_root)
+    if scope in ("npm", "all"):
+        verify_npm(
+            version,
+            commit,
+            require_npm_provenance,
+            trust_root,
+            stage_dir=stage_dir,
+            require_staged_npm=require_staged_npm,
+        )
 
 
 if __name__ == "__main__":

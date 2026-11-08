@@ -16,7 +16,7 @@ minisign -G -W -p "$fixture_dir/pinned.pub" -s "$fixture_dir/pinned.key" >/dev/n
 minisign -G -W -p "$fixture_dir/other.pub" -s "$fixture_dir/other.key" >/dev/null
 
 fixture_repo "$repo" "$version" publish 0
-cp "$fixture_root/scripts/"{verify-signatures.sh,release-fetch-anchors.sh,generate-checksums.sh} "$repo/scripts/"
+cp "$fixture_root/scripts/"{verify-signatures.sh,release-fetch-anchors.sh,generate-checksums.sh,release-integrity.mjs,version-pack.mjs} "$repo/scripts/"
 gpg --homedir "$fixture_dir/gpg" --batch --armor --export-options export-minimal --export "$subkey!" \
 	>"$repo/docs/security/release-signing-keys.asc"
 cp "$fixture_dir/pinned.pub" "$repo/docs/security/sysprims-minisign.pub"

@@ -22,7 +22,7 @@ permissions:
 jobs:
   stage:
     name: Validate and stage npm packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
       commit: ${{ steps.identity.outputs.commit }}
@@ -125,7 +125,7 @@ jobs:
     name: Publish attested npm packages
     if: ${{ !inputs.dry_run }}
     needs: stage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     environment: publish-npm
     permissions:
       contents: read

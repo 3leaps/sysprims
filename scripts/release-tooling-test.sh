@@ -7,7 +7,7 @@ root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
 for suite in release-tag-controls release-anchors release-validate-pin verify-pinned-tag release-tag \
 	release-stage-public release-stage-published release-fetch-anchors release-materialize-tag-messages \
-	verify-signatures release-crates check-registry-config release-source-check release-cargo-provider \
+	verify-signatures release-crates release-index-entry check-registry-config release-source-check release-cargo-provider \
 	release-fetch-ci-artifacts release-verify-registries \
 	workflow-permissions workflow-pins content-check doctor surface-scan; do
 	echo "== $suite"

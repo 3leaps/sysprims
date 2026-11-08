@@ -19,7 +19,7 @@ permissions:
 jobs:
   format:
     name: Format Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
@@ -29,14 +29,21 @@ jobs:
         run: make fmt-check
   lint:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.98.1  # pin:rust=stable
+          components: clippy
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: |
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --manifest-path bindings/python/Cargo.toml -- -D warnings
   planning-hygiene:
     name: Planning Reference Guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: No private planning-plane references in tracked files
@@ -50,12 +57,14 @@ jobs:
           sudo apt-get install -y -q python3-yaml
           python3 -P -E -c 'import yaml'
       - name: Workflow digest pins and read-only permissions
-        run: python3 -B -E scripts/release-workflow-pin.py check
+        run: |
+          python3 -B -E scripts/release-workflow-pin.py check
+          python3 -B -P -E scripts/ci-pins.py check
       - name: npm trusted publishing runtime guard
         run: bash scripts/check-npm-trusted-publish-runtime.sh
   release-tooling:
     name: Release Tooling Controls
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Verify tooling prerequisites
@@ -85,7 +94,7 @@ jobs:
         run: make release-tooling-test
   typescript-api-drift:
     name: TypeScript API Drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
@@ -93,7 +102,9 @@ jobs:
           node-version: '22.23.4'
           cache: npm
           cache-dependency-path: bindings/typescript/sysprims/package-lock.json
-      - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
       - name: Install pinned cbindgen
         run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
       - name: Install TypeScript tooling
@@ -108,11 +119,12 @@ jobs:
         run: npm run api:check
   windows-cross-check:
     name: Windows Cross-Target Check (no SDK)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: x86_64-pc-windows-msvc,x86_64-pc-windows-gnu,aarch64-pc-windows-msvc
       # cargo check does type checking only (no linking), so this works without the Windows SDK.
       # This is a fast guardrail for Windows-only compile errors.
@@ -129,20 +141,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04  # pin:runner=linux-x64
             target: x86_64-unknown-linux-gnu
-          - os: macos-latest
+          - os: macos-15  # pin:runner=macos-arm64
             target: aarch64-apple-darwin
-          - os: windows-latest
+          - os: windows-2025  # pin:runner=windows-x64
             target: x86_64-pc-windows-msvc
           - os: windows-latest-arm64-s
             target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install Rust toolchain
-        run: |
-          rustup show
-          rustup target add ${{ matrix.target }}
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.98.1  # pin:rust=stable
+          targets: ${{ matrix.target }}
       - name: Run tests
         run: cargo test --workspace --all-features
       - name: Run FFI smoke tests
@@ -156,14 +169,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04  # pin:runner=linux-x64
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
+          - os: windows-2025  # pin:runner=windows-x64
             target: x86_64-pc-windows-gnu
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: ${{ matrix.target }}
       - name: Install MinGW (Windows)
         if: runner.os == 'Windows'
@@ -183,13 +197,16 @@ jobs:
   # Musl build test (Linux only)
   test-musl:
     name: Test (Linux musl)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - name: Add musl target
-        run: rustup target add x86_64-unknown-linux-musl
+      - name: Install Rust and musl target
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.98.1  # pin:rust=stable
+          targets: x86_64-unknown-linux-musl
       - name: Build with musl
         run: cargo build --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
       - name: Test with musl
@@ -206,13 +223,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04  # pin:runner=linux-x64
             lib_dir: linux-amd64
             lib_name: libsysprims_ffi.a
-          - os: macos-latest
+          - os: macos-15  # pin:runner=macos-arm64
             lib_dir: darwin-arm64
             lib_name: libsysprims_ffi.a
-          - os: windows-latest
+          - os: windows-2025  # pin:runner=windows-x64
             lib_dir: windows-amd64
             lib_name: libsysprims_ffi.a
             rust_target: x86_64-pc-windows-gnu
@@ -227,8 +244,9 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.26.10'
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable
+      - uses: ./.github/actions/setup-rust
         with:
+          toolchain: 1.98.1  # pin:rust=stable
           targets: ${{ matrix.rust_target }}
       - name: Install MinGW (Windows x64, msys2)
         if: matrix.win_toolchain == 'msys2'
@@ -325,7 +343,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os:
+          - ubuntu-24.04  # pin:runner=linux-x64
+          - macos-15  # pin:runner=macos-arm64
+          - windows-2025  # pin:runner=windows-x64
     defaults:
       run:
         shell: bash
@@ -335,7 +356,9 @@ jobs:
         with:
           go-version: '1.26.10'
           cache: false
-      - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884  # 1.88.0
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
       - name: Rust crate
         run: cargo test -p sysprims-recurrence
       - name: Go module (standalone, pure Go)
@@ -351,8 +374,7 @@ jobs:
           fi
           go vet ./...
           go test -count=1 ./...
-      # The pure-Go module sits outside go.work by design, so repo-root Go
-      # tooling does not reach it; scan it here directly.
+      # Run gosec and govulncheck directly against go/recurrence with GOWORK=off.
       - name: Go module security (gosec, govulncheck)
         if: runner.os == 'Linux'
         working-directory: go/recurrence
@@ -380,9 +402,81 @@ jobs:
           fi
       - name: Rust/Go agreement
         run: scripts/recurrence-crosscheck.sh
+  evidence:
+    # Rust crate and pure-Go root module for identity-evidence/v0 and
+    # native-process-observation:v0: each passes the pinned corpus and their
+    # NDJSON outputs agree byte for byte on every OS cell.
+    name: Evidence Rust/Go agreement (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04  # pin:runner=linux-x64
+          - macos-15  # pin:runner=macos-arm64
+          - windows-2025  # pin:runner=windows-x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+      - name: Rust crate
+        run: |
+          cargo test -p sysprims-evidence
+          cargo test -p sysprims-proc --test observation
+      - name: Go module (standalone, pure Go)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          test -z "$(gofmt -l ./evidence ./procobserve)"
+          if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
+            echo "go.mod must not contain replace directives" >&2
+            exit 1
+          fi
+          go vet ./evidence/... ./procobserve/...
+          go test -count=1 ./evidence/... ./procobserve/...
+      - name: Go module security (gosec, govulncheck)
+        if: runner.os == 'Linux'
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          "$(go env GOPATH)/bin/gosec" ./evidence/... ./procobserve/...
+          "$(go env GOPATH)/bin/govulncheck" ./evidence/... ./procobserve/...
+      - name: Go module alone (outside the repository, no SKIP allowed)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          corpus="$PWD/crates/sysprims-evidence/tests/identity-evidence-v0"
+          parity="$PWD/crates/sysprims-evidence/tests/parity-cases.json"
+          standalone="$(mktemp -d)/sysprims-evidence-go"
+          mkdir -p "$standalone"
+          cp go.mod go.sum LICENSE-MIT LICENSE-APACHE NOTICE "$standalone/"
+          cp -R evidence "$standalone/evidence"
+          cp -R procobserve "$standalone/procobserve"
+          cd "$standalone"
+          EVIDENCE_CORPUS_DIR="$corpus" EVIDENCE_PARITY_CASES="$parity" \
+            go test -count=1 -v ./evidence/... ./procobserve/... | tee "$RUNNER_TEMP/go-evidence-standalone.log"
+          if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-evidence-standalone.log"; then
+            echo "standalone evidence Go tests must not skip" >&2
+            exit 1
+          fi
+      - name: Rust/Go agreement
+        run: bash scripts/evidence-crosscheck.sh
   license-check:
     name: License & Dependency Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     container:
       image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
       options: --user root
@@ -391,26 +485,97 @@ jobs:
       - name: Report Goneat version
         run: goneat version
       - name: License check
-        run: cargo deny check licenses
+        run: |
+          cargo deny check licenses
+          cargo deny --manifest-path bindings/python/Cargo.toml check licenses
       - name: Advisory check
-        run: cargo deny check advisories
+        run: |
+          cargo deny check advisories
+          cargo deny --manifest-path bindings/python/Cargo.toml check advisories
       - name: Dependency assessment
-        run: goneat assess --categories dependencies --check --fail-on high
+        env:
+          GOFLAGS: -buildvcs=false
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          goneat assess --categories dependencies --check --fail-on high
   security-audit:
     name: Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.98.1  # pin:rust=stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Security audit
-        run: cargo audit
+        run: |
+          cargo audit
+          cargo audit --file bindings/python/Cargo.lock
+  python-bindings:
+    name: Test Python Bindings (${{ matrix.target }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04  # pin:runner=linux-x64
+            target: x86_64-unknown-linux-gnu
+            python: '3.10'
+          - os: ubuntu-24.04  # pin:runner=linux-x64
+            target: x86_64-unknown-linux-gnu
+            python: '3.14'
+          - os: macos-15  # pin:runner=macos-arm64
+            target: aarch64-apple-darwin
+            python: '3.14'
+          - os: windows-2025  # pin:runner=windows-x64
+            target: x86_64-pc-windows-msvc
+            python: '3.14'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+          targets: ${{ matrix.target }}
+      - name: Build and verify Python wheel and sdist
+        run: make python-check PYTHON=python
+  python-bindings-arm64:
+    name: Test Python Bindings (aarch64-unknown-linux-gnu, 3.14)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest-arm64-s
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: '3.14'
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: 1.88.0  # pin:rust=msrv
+          targets: aarch64-unknown-linux-gnu
+      - name: Build and verify Python wheel and sdist
+        run: make python-check PYTHON=python
   # Container-based privileged tests
   # These tests require isolation because they verify dangerous signal behaviors
   # See: ADR-0011
   container-tests:
     name: Container Tests (Privileged)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs: [format, lint, test]  # Only run after basic checks pass
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7

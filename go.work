@@ -1,6 +1,7 @@
-go 1.21
+go 1.26.0
 
 use (
 	.
 	./bindings/go/sysprims
+	./go/recurrence
 )

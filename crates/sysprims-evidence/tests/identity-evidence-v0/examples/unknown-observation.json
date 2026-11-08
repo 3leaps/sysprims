@@ -1,0 +1,64 @@
+{
+  "contract": "identity-evidence/v0",
+  "report_id": "unknown-observation",
+  "created_at": "2026-10-29T12:00:00Z",
+  "producer": {
+    "name": "synthetic-collector",
+    "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "evaluator": {
+    "software": {
+      "name": "synthetic-evaluator",
+      "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "principal": {
+      "namespace": "example.test/evaluators",
+      "value": "synthetic-evaluator-a"
+    },
+    "verification_profile": {
+      "id": "urn:example:identity:synthetic-report-verification:v0",
+      "revision": "sha256:7ae90d28740da18bc58879e9653767ef4b2879457a4ced81b1c006e9b531297f"
+    }
+  },
+  "subjects": [
+    {
+      "id": "subject-a",
+      "kind": "virtual-machine"
+    }
+  ],
+  "identifiers": [],
+  "evidence": [],
+  "assessments": [
+    {
+      "subject_ref": "subject-a",
+      "scope": "identity-continuity",
+      "dimension": "identity-binding",
+      "value": "unknown",
+      "state": "unknown",
+      "rule": {
+        "id": "urn:example:identity:synthetic-evaluation-rule:v0",
+        "revision": "sha256:9d5ae8d5d865a39caff6affd5f01b9d8e22d5d8282d808db26a0f3d997035725"
+      },
+      "assessed_at": "2026-10-29T12:00:00Z",
+      "valid_until": "2026-10-29T12:05:00Z",
+      "evidence_refs": [],
+      "residuals": [
+        "Synthetic fixture; no native or cryptographic qualification."
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "subject_ref": "subject-a",
+      "provider": "synthetic-tpm",
+      "capability": "key-attestation",
+      "status": "inaccessible",
+      "reason": "Fixture visibility result for this guest only.",
+      "observed_at": "2026-10-29T12:00:00Z",
+      "id": "capability-0"
+    }
+  ],
+  "keys": [],
+  "claims": [],
+  "input_reports": []
+}

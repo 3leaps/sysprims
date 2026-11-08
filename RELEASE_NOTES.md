@@ -6,6 +6,77 @@
 
 ---
 
+## v0.4.0 - 2026-11-08
+
+**Status:** Native Process Observation, Python Bindings, and Release Ceremony Hardening
+
+v0.4.0 adds `contract: identity-evidence/v0` process-session and native process
+observation derivation in Rust (`sysprims-evidence`) and pure Go (`evidence`),
+paired with live OS process observation and kernel continuity handles in Rust
+(`sysprims-proc::observation`) and pure Go (`procobserve`). Rust and Go agree
+byte-for-byte across the `identity-evidence/v0` conformance fixtures and
+`native-process-observation:v0` derivation vectors. This release also ships
+`cp310-abi3` Python bindings (`sysprims` on PyPI) with wheel and
+source-distribution release packaging and PEP 740 attestation verification,
+centralizes CI runner-label and Rust toolchain pins under `config/ci/pins.toml`,
+switches Cargo publication checks to the `crates.io` sparse index, and stages
+verified npm `.tgz` release tarballs.
+
+### Highlights
+
+- **Identity evidence derivation (`sysprims-evidence` and pure-Go `evidence`)**:
+  wire admission, report construction, `local-process-session:v0`, and
+  `native-process-observation:v0` evidence derivation with RFC 8785 canonical
+  JSON (JCS), SHA-256 digests, and cross-language conformance parity.
+- **Native process observation (`sysprims-proc::observation` and pure-Go `procobserve`)**:
+  process snapshots, executable hashing, 64-bit Darwin `KERN_PROCARGS2` and
+  Linux `/proc/<pid>` `openat2` (`RESOLVE_NO_XDEV | RESOLVE_NO_MAGICLINKS`)
+  collectors, and `ProcessContinuityHandle` (`pidfd` on Linux, `kqueue`
+  `EVFILT_PROC` on macOS) for race-checked exit waiting and re-verification.
+- **Python bindings (`bindings/python`, PyPI `sysprims`)**: PyO3/maturin
+  `cp310-abi3` extension covering process inspection, signals, session and
+  group spawn, contained spawn (`spawn_contained`), timeout execution, and
+  `recurrence/v0` evaluation, with typed `.pyi` stubs (`py.typed`), offline
+  source-distribution verification, multi-platform wheels, and PyPI PEP 740
+  attestation checks.
+- **Centralized CI pins and sparse-index Cargo verification**: GitHub Actions
+  runner labels and Rust toolchains (`msrv = "1.88.0"`, `stable = "1.98.1"`)
+  validate against `config/ci/pins.toml` alongside `.github/actions/setup-rust`;
+  Cargo release dry-run and registry integrity checks query `index.crates.io`
+  directly via `scripts/release-index-entry.py` instead of the cached
+  `crates.io` REST API.
+- **Staged npm tarballs and cross-OS CI validation**: TypeScript release
+  packaging stages verified `.tgz` archives with strict tar-header and manifest
+  checks, and CI adds Linux, macOS, and Windows validation for `evidence` and
+  `python-bindings` (including Windows `NOT_SUPPORTED` test parity).
+
+### Release Coordinates
+
+- Rust crates: `sysprims-core`, `sysprims-evidence`, `sysprims-signal`,
+  `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and
+  `sysprims-recurrence` at `0.4.0`.
+- Rust workspace and root Go module (`github.com/3leaps/sysprims/evidence@v0.4.0`,
+  `github.com/3leaps/sysprims/procobserve@v0.4.0`): repository tag `v0.4.0`.
+- Go bindings module: path-prefixed tag `bindings/go/sysprims/v0.4.0` on the
+  same commit (`github.com/3leaps/sysprims/bindings/go/sysprims@v0.4.0`).
+- Go recurrence module: path-prefixed tag `go/recurrence/v0.4.0` on the same
+  commit (`github.com/3leaps/sysprims/go/recurrence@v0.4.0`).
+- Python: `sysprims==0.4.0` on PyPI, published via GitHub Actions Trusted
+  Publishing with PEP 740 attestations from the verified core tag.
+- TypeScript: `@3leaps/sysprims@0.4.0`, published from the verified core tag.
+
+### Upgrade Notes
+
+- `sysprims-evidence` (`0.4.0`) and pure-Go
+  `github.com/3leaps/sysprims/evidence@v0.4.0` and
+  `github.com/3leaps/sysprims/procobserve@v0.4.0` require no `cgo`.
+- Python wheels (`cp310-abi3` for Linux `x86_64`/`aarch64` `manylinux_2_17`,
+  macOS `arm64`/`x86_64`, and Windows `amd64`) plus `sysprims-0.4.0.tar.gz`
+  are included in the signed GitHub Release inventory and published to PyPI
+  with PEP 740 provenance attestations.
+
+---
+
 ## v0.3.0 - 2026-11-02
 
 **Status:** Recurrence and Release Integrity Hardening
@@ -115,51 +186,5 @@ waiting, termination, and deterministic close operations.
   separate native policy.
 - Go `Wait` rejects negative durations. Positive sub-millisecond durations are
   bounded waits rather than infinite waits.
-
----
-
-## v0.2.3 - 2026-09-01
-
-**Status:** Cargo Publication Enablement
-
-v0.2.3 enables crates.io publication for the Rust library surface while keeping
-the command-line, C FFI, and TypeScript native implementation crates private to
-the repository release workflow.
-
-### Highlights
-
-- **Rust library publication**: `sysprims-core`, `sysprims-signal`,
-  `sysprims-session`, `sysprims-proc`, and `sysprims-timeout` opt in to Cargo
-  publication with standalone crate README files and repository metadata.
-- **Private implementation crates**: `sysprims-cli`, `sysprims-ffi`, and
-  `sysprims-ts-napi` remain unpublished as Rust crates.
-- **Versioned workspace dependencies**: internal Cargo path dependencies carry
-  the same release version so published crates resolve through crates.io.
-- **Release dry-run target**: `make release-check` validates the version pack
-  and constructs Cargo package tarballs without publishing.
-- **Release checklist update**: crates.io publication order and negative
-  controls are documented for the first upload.
-- **TypeScript CI install mode**: pull-request validation omits optional
-  same-version platform packages until the npm release workflow publishes them.
-
-### Release Coordinates
-
-- Rust crates: `sysprims-core`, `sysprims-signal`, `sysprims-session`,
-  `sysprims-proc`, and `sysprims-timeout` at `0.2.3`.
-- Rust workspace: repository tag `v0.2.3`.
-- Go module: path-prefixed tag `bindings/go/sysprims/v0.2.3` on the same
-  commit.
-- TypeScript: `@3leaps/sysprims@0.2.3`, published from the verified core tag.
-
-### Upgrade Notes
-
-- Rust consumers can switch the five public library crates from git-tag
-  dependencies to crates.io versions after publication.
-- The first crates.io upload must publish in dependency order:
-  `sysprims-core`, then `sysprims-signal` and `sysprims-session`, then
-  `sysprims-proc`, then `sysprims-timeout`.
-- TypeScript platform packages are still produced by the tag-based npm
-  workflows; they are not installed during pull-request validation before
-  publication.
 
 _Older releases are archived in `docs/releases/`._
