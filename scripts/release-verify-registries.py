@@ -1090,7 +1090,9 @@ def verify_pypi_provenance(
             or not attestations
             or not all(isinstance(a, dict) for a in attestations)
         ):
-            fail(f"PyPI PEP 740 bundle has empty or invalid attestations for {filename}")
+            fail(
+                f"PyPI PEP 740 bundle has empty or invalid attestations for {filename}"
+            )
         if not (
             publisher.get("kind") == "GitHub"
             and publisher.get("repository") == EXPECTED_REPO
@@ -1141,7 +1143,9 @@ def verify_pypi(
     trust_root: SigstoreTrustRoot,
 ) -> None:
     if stage_dir is None:
-        fail("PyPI verification requires --stage-dir pointing to the verified release directory")
+        fail(
+            "PyPI verification requires --stage-dir pointing to the verified release directory"
+        )
     default_base = "https://pypi.org/pypi"
     base = validate_base_url(
         os.environ.get("SYSPRIMS_PYPI_API_URL", default_base),
@@ -1154,7 +1158,10 @@ def verify_pypi(
 
     sha256s = read_manifest(stage_dir / "SHA256SUMS", 64)
     expected_files = sorted(
-        [*(f"sysprims-{version}-{tag}.whl" for tag in PYTHON_WHEEL_TAGS), f"sysprims-{version}.tar.gz"]
+        [
+            *(f"sysprims-{version}-{tag}.whl" for tag in PYTHON_WHEEL_TAGS),
+            f"sysprims-{version}.tar.gz",
+        ]
     )
     for name in expected_files:
         if name not in sha256s:
@@ -1165,9 +1172,7 @@ def verify_pypi(
         if hashlib.sha256(staged.read_bytes()).hexdigest() != sha256s[name]:
             fail(f"staged Python artifact sha256 mismatch for {name}")
 
-    ver_doc = fetch_json(
-        f"{base}/sysprims/{version}/json", f"PyPI sysprims=={version}"
-    )
+    ver_doc = fetch_json(f"{base}/sysprims/{version}/json", f"PyPI sysprims=={version}")
     info = ver_doc.get("info") or {}
     if info.get("name") != "sysprims" or info.get("version") != version:
         fail(
@@ -1206,7 +1211,9 @@ def verify_pypi(
             if not file_url.startswith(f"{loopback_origin}/"):
                 fail(f"PyPI loopback file URL invalid for {filename}: {file_url!r}")
         elif not file_url.startswith("https://files.pythonhosted.org/"):
-            fail(f"PyPI file URL must use https://files.pythonhosted.org/ for {filename}: {file_url!r}")
+            fail(
+                f"PyPI file URL must use https://files.pythonhosted.org/ for {filename}: {file_url!r}"
+            )
         published[filename] = (digest, file_url)
 
     if sorted(published) != expected_files:
@@ -1217,9 +1224,7 @@ def verify_pypi(
     for name in expected_files:
         pub_sha256, file_url = published[name]
         if pub_sha256 != sha256s[name]:
-            fail(
-                f"PyPI sha256 mismatch for {name}: {pub_sha256} != {sha256s[name]}"
-            )
+            fail(f"PyPI sha256 mismatch for {name}: {pub_sha256} != {sha256s[name]}")
         raw_bytes = fetch_bytes(
             file_url,
             f"PyPI download {name}",
@@ -1241,9 +1246,7 @@ def verify_pypi(
             )
 
     prov_note = (
-        " + PEP 740 provenance"
-        if require_provenance
-        else " (bootstrap: no provenance)"
+        " + PEP 740 provenance" if require_provenance else " (bootstrap: no provenance)"
     )
     print(
         f"[ok] PyPI: sysprims=={version} (5 wheels + sdist) match signed SHA256SUMS (org: {EXPECTED_PYPI_ORG}){prov_note}"
@@ -1405,7 +1408,13 @@ def verify_npm(
             git_dir = Path(__file__).resolve().parent.parent
         plan_ref = commit if commit is not None else f"refs/tags/v{version}^{{commit}}"
         plan_proc = subprocess.run(
-            ["git", "-C", str(git_dir), "show", f"{plan_ref}:docs/releases/v{version}.json"],
+            [
+                "git",
+                "-C",
+                str(git_dir),
+                "show",
+                f"{plan_ref}:docs/releases/v{version}.json",
+            ],
             capture_output=True,
             text=True,
         )
@@ -1434,7 +1443,11 @@ def verify_npm(
             if tgz_name not in sha256s or tgz_name not in sha512s:
                 fail(f"checksum manifests missing {tgz_name}")
             staged_tgz = stage_dir / tgz_name
-            if not staged_tgz.exists() or staged_tgz.is_symlink() or not staged_tgz.is_file():
+            if (
+                not staged_tgz.exists()
+                or staged_tgz.is_symlink()
+                or not staged_tgz.is_file()
+            ):
                 fail(f"staged npm tarball missing: {tgz_name}")
             staged_bytes = staged_tgz.read_bytes()
             if hashlib.sha256(staged_bytes).hexdigest() != sha256s[tgz_name]:

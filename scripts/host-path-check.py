@@ -42,7 +42,12 @@ def needles(paths):
             continue
         drive = re.fullmatch(r"([A-Za-z]):", parts[0])
         if drive:
-            head = rb"(?:/)?[" + drive.group(1).upper().encode() + drive.group(1).lower().encode() + rb"]:"
+            head = (
+                rb"(?:/)?["
+                + drive.group(1).upper().encode()
+                + drive.group(1).lower().encode()
+                + rb"]:"
+            )
             names = parts[1:]
         else:
             head = b""
@@ -61,9 +66,20 @@ def needles(paths):
 # A JSON string escape: one backslash, then a \uXXXX code or one of \\ \/ \" \b
 # \f \n \r \t. A \u surrogate pair decodes to its one supplementary character.
 JSON_ESCAPE = re.compile(rb"\\(u[0-9A-Fa-f]{4}|[\\/\"bfnrt])")
-JSON_SURROGATE_PAIR = re.compile(rb"\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re.I)
+JSON_SURROGATE_PAIR = re.compile(
+    rb"\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re.I
+)
 PERCENT = re.compile(rb"%([0-9A-Fa-f]{2})")
-SIMPLE = {b"\\": b"\\", b"/": b"/", b'"': b'"', b"b": b"\b", b"f": b"\f", b"n": b"\n", b"r": b"\r", b"t": b"\t"}
+SIMPLE = {
+    b"\\": b"\\",
+    b"/": b"/",
+    b'"': b'"',
+    b"b": b"\b",
+    b"f": b"\f",
+    b"n": b"\n",
+    b"r": b"\r",
+    b"t": b"\t",
+}
 
 
 def json_unescape(data):
@@ -71,7 +87,9 @@ def json_unescape(data):
 
     def pair(m):
         hi, lo = int(m.group(1), 16), int(m.group(2), 16)
-        return chr(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)).encode("utf-8", "surrogatepass")
+        return chr(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)).encode(
+            "utf-8", "surrogatepass"
+        )
 
     def one(m):
         e = m.group(1)
@@ -110,7 +128,12 @@ def members(artifact):
     elif tarfile.is_tarfile(artifact):
         with tarfile.open(artifact, "r:*") as t:
             for member in t.getmembers():
-                yield f"{member.name}#header", f"{member.name}\n{member.linkname}".encode("utf-8", "surrogateescape")
+                yield (
+                    f"{member.name}#header",
+                    f"{member.name}\n{member.linkname}".encode(
+                        "utf-8", "surrogateescape"
+                    ),
+                )
                 if member.isfile():
                     extracted = t.extractfile(member)
                     if extracted is not None:
@@ -129,7 +152,9 @@ def main(argv):
             for pattern in patterns:
                 m = pattern.search(view)
                 if m:
-                    found = view[m.start():m.end() + 40].decode("ascii", "backslashreplace")
+                    found = view[m.start() : m.end() + 40].decode(
+                        "ascii", "backslashreplace"
+                    )
                     sys.exit(f"{name} embeds a build-host path: {found}")
     return 0
 

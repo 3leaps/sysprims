@@ -51,20 +51,28 @@ class SysprimsMetadataAndValidationTests(unittest.TestCase):
         for bad_pid in (True, False, 0, -1, 0x8000_0000, 1 << 80, "123"):
             with self.assertRaises(sysprims.SysprimsError) as ctx:
                 sysprims.proc_get(bad_pid)  # type: ignore[arg-type]
-            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+            self.assertEqual(
+                ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT
+            )
 
         with self.assertRaises(sysprims.SysprimsError) as ctx:
             sysprims.terminate(True)  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+        self.assertEqual(
+            ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT
+        )
 
         with self.assertRaises(sysprims.SysprimsError) as ctx:
             sysprims.wait_pid(os.getpid(), True)  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+        self.assertEqual(
+            ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT
+        )
 
     def test_unknown_filter_fields_refused(self) -> None:
         with self.assertRaises(sysprims.SysprimsError) as ctx:
             sysprims.process_list({"unknown_field": 1})
-        self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+        self.assertEqual(
+            ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT
+        )
 
 
 class SysprimsProcessAndControlTests(unittest.TestCase):
@@ -100,7 +108,9 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
         if sys.platform == "win32":
             with self.assertRaises(sysprims.SysprimsError) as ctx:
                 sysprims.list_fds(os.getpid())
-            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+            self.assertEqual(
+                ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED
+            )
         else:
             fds = sysprims.list_fds(os.getpid())
             self.assertGreater(len(fds["fds"]), 0)
@@ -110,7 +120,9 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
             for fn in (sysprims.self_getpgid, sysprims.self_getsid):
                 with self.assertRaises(sysprims.SysprimsError) as ctx:
                     fn()
-                self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+                self.assertEqual(
+                    ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED
+                )
         else:
             self.assertGreater(sysprims.self_getpgid(), 0)
             self.assertGreater(sysprims.self_getsid(), 0)
@@ -160,7 +172,9 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
                     [sys.executable, "-c", "raise SystemExit(0)"],
                     wait=True,
                 )
-            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+            self.assertEqual(
+                ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED
+            )
         else:
             setsid_res = sysprims.run_setsid(
                 [sys.executable, "-c", "raise SystemExit(0)"],
@@ -171,8 +185,12 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
 
         if sys.platform == "win32":
             with self.assertRaises(sysprims.SysprimsError) as ctx:
-                sysprims.run_nohup([sys.executable, "-c", "raise SystemExit(0)"], wait=True)
-            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+                sysprims.run_nohup(
+                    [sys.executable, "-c", "raise SystemExit(0)"], wait=True
+                )
+            self.assertEqual(
+                ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED
+            )
         else:
             with tempfile.TemporaryDirectory() as tmp:
                 out_file = str(Path(tmp) / "nohup.out")
@@ -189,14 +207,20 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
 
         with self.assertRaises(sysprims.SysprimsError) as ctx:
             sysprims.spawn_contained([])
-        self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+        self.assertEqual(
+            ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT
+        )
 
         if sys.platform == "win32":
             with self.assertRaises(sysprims.SysprimsError) as ctx:
                 sysprims.spawn_contained([sys.executable, "-c", "raise SystemExit(0)"])
-            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED)
+            self.assertEqual(
+                ctx.exception.code, sysprims.SysprimsErrorCode.NOT_SUPPORTED
+            )
         else:
-            with sysprims.spawn_contained([sys.executable, "-c", "raise SystemExit(0)"]) as handle:
+            with sysprims.spawn_contained(
+                [sys.executable, "-c", "raise SystemExit(0)"]
+            ) as handle:
                 self.assertEqual(repr(handle), "<ContainedProcess open>")
                 with self.assertRaises(TypeError):
                     copy.copy(handle)
@@ -215,7 +239,9 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
             handle.close()  # idempotent
             with self.assertRaises(sysprims.SysprimsError) as ctx:
                 handle.poll()
-            self.assertEqual(ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT)
+            self.assertEqual(
+                ctx.exception.code, sysprims.SysprimsErrorCode.INVALID_ARGUMENT
+            )
 
             sleep_handle = sysprims.spawn_contained(
                 [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -240,7 +266,9 @@ class SysprimsRecurrenceCorpusTests(unittest.TestCase):
         manifest = json.loads(manifest_bytes.decode("utf-8"))
         self.assertEqual(manifest["tzdb_version"], sysprims.tzdb_version())
         for rel, want_sha in manifest["files"].items():
-            got_sha = "sha256:" + hashlib.sha256((corpus / rel).read_bytes()).hexdigest()
+            got_sha = (
+                "sha256:" + hashlib.sha256((corpus / rel).read_bytes()).hexdigest()
+            )
             self.assertEqual(got_sha, want_sha, rel)
 
         vectors = sorted((corpus / "vectors").glob("*.json"))
@@ -267,7 +295,9 @@ class SysprimsRecurrenceCorpusTests(unittest.TestCase):
             text = rule.to_text()
             self.assertEqual(text, vec["text"], name)
             self.assertEqual(sysprims.RecurrenceRule.from_text(text), rule, name)
-            self.assertEqual(sysprims.RecurrenceRule.from_json(rule.to_canonical_json()), rule, name)
+            self.assertEqual(
+                sysprims.RecurrenceRule.from_json(rule.to_canonical_json()), rule, name
+            )
 
             results: list[dict[str, object]] = []
             for q in vec["queries"]:
@@ -323,7 +353,9 @@ class SysprimsRecurrenceCorpusTests(unittest.TestCase):
         for ex_path in sorted((base / "examples").glob("*.json")):
             ex_bytes = ex_path.read_bytes()
             ex_rule = sysprims.RecurrenceRule.from_json(ex_bytes)
-            row = next(line for line in readme.splitlines() if f"`{ex_path.name}`" in line)
+            row = next(
+                line for line in readme.splitlines() if f"`{ex_path.name}`" in line
+            )
             self.assertIn(ex_rule.digest(), row)
             self.assertEqual(
                 ex_rule.to_canonical_json().decode("utf-8"),

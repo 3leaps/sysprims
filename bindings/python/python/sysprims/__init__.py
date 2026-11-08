@@ -184,7 +184,9 @@ def _require_argv(argv: Sequence[str]) -> list[str]:
         )
     items = list(argv)
     if not items:
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "argv must not be empty")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "argv must not be empty"
+        )
     for idx, entry in enumerate(items):
         if not isinstance(entry, str) or not entry:
             raise SysprimsError(
@@ -219,7 +221,9 @@ def _bytes_input(data: BytesInput, label: str = "input") -> bytes:
     try:
         view = memoryview(data)
     except TypeError:
-        raise TypeError(f"{label} must be bytes-like or str, not {type(data).__name__}") from None
+        raise TypeError(
+            f"{label} must be bytes-like or str, not {type(data).__name__}"
+        ) from None
     with view:
         return view.tobytes()
 
@@ -353,7 +357,9 @@ def _descendants_config_json(
     wire: dict[str, Any] = {}
     if filter is not None:
         if not isinstance(filter, Mapping):
-            raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "filter must be a mapping")
+            raise SysprimsError(
+                SysprimsErrorCode.INVALID_ARGUMENT, "filter must be a mapping"
+            )
         wire.update(filter)
     if cpu_mode is not None:
         if cpu_mode not in ("lifetime", "monitor"):
@@ -396,7 +402,9 @@ def descendants(
         )
     cfg_json = _descendants_config_json(filter, cpu_mode, sample_duration_ms, False)
     opts_json = _process_options_json(include_env, include_threads)
-    return _call_json(_native.proc_descendants, checked_root, levels, cfg_json, opts_json)
+    return _call_json(
+        _native.proc_descendants, checked_root, levels, cfg_json, opts_json
+    )
 
 
 def kill_descendants(
@@ -419,13 +427,18 @@ def kill_descendants(
             f"max_levels must be between 0 and {_U32_MAX}",
         )
     cfg_json = _descendants_config_json(filter, cpu_mode, sample_duration_ms, cascade)
-    return _call_json(_native.proc_kill_descendants, checked_root, levels, checked_sig, cfg_json)
+    return _call_json(
+        _native.proc_kill_descendants, checked_root, levels, checked_sig, cfg_json
+    )
 
 
 def guard_step(config: Mapping[str, Any]) -> dict[str, Any]:
     """Run one single-shot descendant guard evaluation/remediation step."""
     if not isinstance(config, Mapping) or not config:
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "guard config must be a non-empty mapping")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            "guard config must be a non-empty mapping",
+        )
     cfg_json = _serialize_json_mapping(config, "guard config")
     return _call_json(_native.proc_guard_step, cfg_json)
 
@@ -498,7 +511,9 @@ def _validate_pid_list(pids: Sequence[int]) -> list[int]:
         )
     items = [_require_pid(p, f"pids[{idx}]") for idx, p in enumerate(pids)]
     if not items:
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "pids must not be empty")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "pids must not be empty"
+        )
     return items
 
 
@@ -556,9 +571,16 @@ def terminate_tree(pid: int, config: Mapping[str, Any] | None = None) -> dict[st
     if config is None:
         return _call_json(_native.terminate_tree, checked_pid, "")
     if not isinstance(config, Mapping):
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "config must be a mapping")
-    wire = {"schema_id": config.get("schema_id", _TERMINATE_TREE_SCHEMA_ID), **dict(config)}
-    return _call_json(_native.terminate_tree, checked_pid, _serialize_json_mapping(wire, "config"))
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "config must be a mapping"
+        )
+    wire = {
+        "schema_id": config.get("schema_id", _TERMINATE_TREE_SCHEMA_ID),
+        **dict(config),
+    }
+    return _call_json(
+        _native.terminate_tree, checked_pid, _serialize_json_mapping(wire, "config")
+    )
 
 
 def run_with_timeout(
@@ -573,13 +595,19 @@ def run_with_timeout(
 ) -> dict[str, Any]:
     """Execute `command` with `args` under `timeout_ms`, escalating if needed."""
     if not isinstance(command, str) or not command:
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "command must be a non-empty string")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "command must be a non-empty string"
+        )
     if isinstance(args, (str, bytes, bytearray)) or not isinstance(args, Sequence):
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "args must be a sequence of strings")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "args must be a sequence of strings"
+        )
     arg_list: list[str] = []
     for idx, item in enumerate(args):
         if not isinstance(item, str):
-            raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, f"args[{idx}] must be a string")
+            raise SysprimsError(
+                SysprimsErrorCode.INVALID_ARGUMENT, f"args[{idx}] must be a string"
+            )
         arg_list.append(item)
     checked_timeout = _require_int(timeout_ms, "timeout_ms")
     if checked_timeout < 0 or checked_timeout > _MAX_DURATION_MS:
@@ -630,7 +658,9 @@ def run_setsid(
     checked_env = _require_env(env)
     _require_bool(wait, "wait")
     if cwd is not None and (not isinstance(cwd, str) or not cwd):
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string"
+        )
     wire: dict[str, Any] = {
         "schema_id": _RUN_SETSID_SCHEMA_ID,
         "argv": checked_argv,
@@ -656,8 +686,12 @@ def run_nohup(
     checked_env = _require_env(env)
     _require_bool(wait, "wait")
     if cwd is not None and (not isinstance(cwd, str) or not cwd):
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string")
-    if output_file is not None and (not isinstance(output_file, str) or not output_file):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string"
+        )
+    if output_file is not None and (
+        not isinstance(output_file, str) or not output_file
+    ):
         raise SysprimsError(
             SysprimsErrorCode.INVALID_ARGUMENT,
             "output_file must be a non-empty string",
@@ -686,7 +720,9 @@ def spawn_in_group(
     checked_argv = _require_argv(argv)
     checked_env = _require_env(env)
     if cwd is not None and (not isinstance(cwd, str) or not cwd):
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string"
+        )
     wire: dict[str, Any] = {
         "schema_id": _SPAWN_IN_GROUP_SCHEMA_ID,
         "argv": checked_argv,
@@ -804,7 +840,9 @@ def spawn_contained(
     checked_argv = _require_argv(argv)
     checked_env = _require_env(env)
     if cwd is not None and (not isinstance(cwd, str) or not cwd):
-        raise SysprimsError(SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string")
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string"
+        )
     wire: dict[str, Any] = {
         "schema_id": _CONTAINMENT_SPAWN_SCHEMA_ID,
         "argv": checked_argv,
@@ -891,19 +929,27 @@ class RecurrenceRule:
         """Decode and validate a rule from a capability-enveloped JSON document."""
         raw_bytes = _bytes_input(data, "data")
         try:
-            return cls(_native.RawRecurrenceRule.from_document_json(raw_bytes), _internal=True)
+            return cls(
+                _native.RawRecurrenceRule.from_document_json(raw_bytes), _internal=True
+            )
         except _native.RawRecurrenceRefusal as exc:
             raise RecurrenceRefusal(*exc.args) from None
 
     @classmethod
     def from_text(cls, lines: Sequence[str]) -> RecurrenceRule:
         """Decode and validate a rule from RFC 5545 content lines."""
-        if isinstance(lines, (str, bytes, bytearray)) or not isinstance(lines, Sequence):
-            raise TypeError("lines must be a sequence of strings, not a single str/bytes")
+        if isinstance(lines, (str, bytes, bytearray)) or not isinstance(
+            lines, Sequence
+        ):
+            raise TypeError(
+                "lines must be a sequence of strings, not a single str/bytes"
+            )
         line_list = list(lines)
         for idx, line in enumerate(line_list):
             if not isinstance(line, str):
-                raise TypeError(f"lines[{idx}] must be a str, not {type(line).__name__}")
+                raise TypeError(
+                    f"lines[{idx}] must be a str, not {type(line).__name__}"
+                )
         try:
             return cls(_native.RawRecurrenceRule.from_text(line_list), _internal=True)
         except _native.RawRecurrenceRefusal as exc:
