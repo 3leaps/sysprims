@@ -48,6 +48,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `python-bindings` (including Windows `NOT_SUPPORTED` Python test parity) and
   normalizes `windows-arm64` Go version-probe line endings.
 
+### Fixed
+
+- Linux `/proc/net/{tcp,tcp6,udp,udp6}` local port hex parsing in
+  `sysprims-proc` (`listening_ports` previously byte-swapped port numbers
+  already formatted in host byte order by the kernel).
+- Standalone Go sub-module and container smoke checks in `go-bindings.yml` now
+  set `GOWORK=off` and `GOFLAGS=-buildvcs=false` so Go 1.21/1.22 sub-module
+  invocations inside a repository checkout do not inherit the root `go.work`
+  (`go 1.26.0`) or fail VCS ownership checks across container UID boundaries.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
@@ -895,7 +905,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/3leaps/sysprims/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/3leaps/sysprims/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/3leaps/sysprims/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/3leaps/sysprims/compare/v0.2.2...v0.2.3
