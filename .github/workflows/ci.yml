@@ -431,18 +431,19 @@ jobs:
         run: |
           cargo test -p sysprims-evidence
           cargo test -p sysprims-proc --test observation
+          cargo test -p sysprims-signal
       - name: Go module (standalone, pure Go)
         env:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          test -z "$(gofmt -l ./evidence ./procobserve)"
+          test -z "$(gofmt -l ./evidence ./procobserve ./syserror ./signal)"
           if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
             echo "go.mod must not contain replace directives" >&2
             exit 1
           fi
-          go vet ./evidence/... ./procobserve/...
-          go test -count=1 ./evidence/... ./procobserve/...
+          go vet ./evidence/... ./procobserve/... ./syserror/... ./signal/...
+          go test -count=1 ./evidence/... ./procobserve/... ./syserror/... ./signal/...
       - name: Go module security (gosec, govulncheck)
         if: runner.os == 'Linux'
         env:
@@ -451,8 +452,8 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
           go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-          "$(go env GOPATH)/bin/gosec" ./evidence/... ./procobserve/...
-          "$(go env GOPATH)/bin/govulncheck" ./evidence/... ./procobserve/...
+          "$(go env GOPATH)/bin/gosec" ./evidence/... ./procobserve/... ./syserror/... ./signal/...
+          "$(go env GOPATH)/bin/govulncheck" ./evidence/... ./procobserve/... ./syserror/... ./signal/...
       - name: Go module alone (outside the repository, no SKIP allowed)
         env:
           GOWORK: 'off'
@@ -460,20 +461,28 @@ jobs:
         run: |
           corpus="$PWD/crates/sysprims-evidence/tests/identity-evidence-v0"
           parity="$PWD/crates/sysprims-evidence/tests/parity-cases.json"
+          sigvec="$PWD/testdata/conformance/signal/vectors.json"
           standalone="$(mktemp -d)/sysprims-evidence-go"
           mkdir -p "$standalone"
           cp go.mod go.sum LICENSE-MIT LICENSE-APACHE NOTICE "$standalone/"
           cp -R evidence "$standalone/evidence"
           cp -R procobserve "$standalone/procobserve"
+          cp -R syserror "$standalone/syserror"
+          cp -R signal "$standalone/signal"
           cd "$standalone"
-          EVIDENCE_CORPUS_DIR="$corpus" EVIDENCE_PARITY_CASES="$parity" \
-            go test -count=1 -v ./evidence/... ./procobserve/... | tee "$RUNNER_TEMP/go-evidence-standalone.log"
+          EVIDENCE_CORPUS_DIR="$corpus" \
+            EVIDENCE_PARITY_CASES="$parity" \
+            SIGNAL_CONFORMANCE_VECTORS="$sigvec" \
+            go test -count=1 -v ./evidence/... ./procobserve/... ./syserror/... ./signal/... \
+            | tee "$RUNNER_TEMP/go-evidence-standalone.log"
           if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-evidence-standalone.log"; then
-            echo "standalone evidence Go tests must not skip" >&2
+            echo "standalone evidence/signal Go tests must not skip" >&2
             exit 1
           fi
       - name: Rust/Go agreement
-        run: bash scripts/evidence-crosscheck.sh
+        run: |
+          bash scripts/evidence-crosscheck.sh
+          bash scripts/signal-crosscheck.sh
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-24.04  # pin:runner=linux-x64

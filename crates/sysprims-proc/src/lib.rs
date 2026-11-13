@@ -65,6 +65,11 @@ mod windows;
 /// Read-only `native-process-observation:v0` OS collectors and continuity handles.
 pub mod observation;
 
+/// Re-exported process-bound signal and exit-watch handle (`ProcessHandle`) from `sysprims-signal`.
+pub use sysprims_signal::{
+    open_process_handle, open_process_handle_verified, ProcessHandle, SignalBinding,
+};
+
 // Re-export the platform implementation
 #[cfg(target_os = "linux")]
 use linux as platform;

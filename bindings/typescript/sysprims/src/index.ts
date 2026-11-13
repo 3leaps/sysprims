@@ -1,6 +1,14 @@
 import { ContainedProcess, spawnContained } from "./containment";
 import { SysprimsError, SysprimsErrorCode } from "./errors";
-import { callJsonReturn, callU32Out, callVoid, loadSysprims } from "./ffi";
+import {
+  callBoolOut,
+  callI32Out,
+  callJsonReturn,
+  callStringOut,
+  callU32Out,
+  callVoid,
+  loadSysprims,
+} from "./ffi";
 import type {
   AncestorsOptions,
   AncestorsResult,
@@ -15,6 +23,7 @@ import type {
   GuardEvent,
   KillDescendantsOptions,
   KillDescendantsResult,
+  OpenProcessHandleOptions,
   PortBindingsSnapshot,
   PortFilter,
   ProcessFilter,
@@ -24,6 +33,7 @@ import type {
   RunNohupConfig,
   RunSetsidConfig,
   SessionSpawnResult,
+  SignalBinding,
   SpawnInGroupConfig,
   SpawnInGroupResult,
   TerminateTreeConfig,
@@ -31,9 +41,11 @@ import type {
   WaitPidResult,
 } from "./types";
 import {
+  MAX_SAFE_PID,
   U32_MAX,
   validateDuration,
   validateMaxLevels,
+  validatePgid,
   validatePid,
   validatePort,
   validateProcessFilter,
@@ -41,7 +53,15 @@ import {
   validateU32,
 } from "./validation";
 
-export { ContainedProcess, spawnContained, SysprimsError, SysprimsErrorCode };
+export {
+  ContainedProcess,
+  MAX_SAFE_PID,
+  spawnContained,
+  SysprimsError,
+  SysprimsErrorCode,
+  validatePgid,
+  validatePid,
+};
 export type { ContainedProcessWaitOptions } from "./containment";
 export type {
   AncestorsOptions,
@@ -66,6 +86,7 @@ export type {
   KillDescendantsFailure,
   KillDescendantsOptions,
   KillDescendantsResult,
+  OpenProcessHandleOptions,
   PortBinding,
   PortBindingsSnapshot,
   PortFilter,
@@ -82,6 +103,7 @@ export type {
   SessionSpawnResult,
   SessionSpawnStatus,
   SessionSpawnVerb,
+  SignalBinding,
   SpawnContainedOptions,
   SpawnInGroupConfig,
   SpawnInGroupResult,
@@ -636,6 +658,222 @@ export function forceKillMany(pids: number[]): BatchKillResult {
     }
   }
   return result;
+}
+
+export const SIGHUP = 1;
+export const SIGINT = 2;
+export const SIGQUIT = 3;
+export const SIGKILL = 9;
+export const SIGPIPE = 13;
+export const SIGALRM = 14;
+export const SIGTERM = 15;
+export const SIGUSR1: number = process.platform === "darwin" ? 30 : 10;
+export const SIGUSR2: number = process.platform === "darwin" ? 31 : 12;
+
+export function terminateGroup(pgid: number): void {
+  signalSendGroup(pgid, SIGTERM);
+}
+
+export function forceKillGroup(pgid: number): void {
+  signalSendGroup(pgid, SIGKILL);
+}
+
+export function resolveSignalName(signalName: string): number {
+  if (typeof signalName !== "string") {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signalName must be a string");
+  }
+  const lib = loadSysprims();
+  return callI32Out(() => lib.sysprimsResolveSignalName(signalName));
+}
+
+export function matchSignalNames(pattern: string): string[] {
+  if (typeof pattern !== "string") {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pattern must be a string");
+  }
+  const lib = loadSysprims();
+  return lib.sysprimsMatchSignalNames(pattern);
+}
+
+export function killByName(pid: number, signalName: string): void {
+  validatePid(pid);
+  if (typeof signalName !== "string") {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signalName must be a string");
+  }
+  const lib = loadSysprims();
+  callVoid(() => lib.sysprimsKillByName(pid, signalName));
+}
+
+export function killGroupByName(pgid: number, signalName: string): void {
+  validatePid(pgid, "pgid");
+  if (typeof signalName !== "string") {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signalName must be a string");
+  }
+  const lib = loadSysprims();
+  callVoid(() => lib.sysprimsKillGroupByName(pgid, signalName));
+}
+
+let processHandleBackstop: FinalizationRegistry<bigint> | null = null;
+
+function getProcessHandleBackstop(): FinalizationRegistry<bigint> {
+  if (processHandleBackstop === null) {
+    processHandleBackstop = new FinalizationRegistry<bigint>((token) => {
+      try {
+        const lib = loadSysprims();
+        lib.sysprimsProcessHandleClose(token);
+      } catch {
+        // Leak backstop only.
+      }
+    });
+  }
+  return processHandleBackstop;
+}
+
+const PROCESS_HANDLE_INTERNAL = Symbol("ProcessHandleInternal");
+
+interface ProcessHandleOpenWire {
+  token: string;
+  pid: number;
+  start_identity: string;
+  binding: SignalBinding;
+}
+
+/**
+ * Signal and exit-watch handle bound to a verified process incarnation.
+ *
+ * Raw OS descriptors/handles are retained in Rust and never exposed across FFI.
+ */
+export class ProcessHandle {
+  #token: bigint | null;
+  readonly #pid: number;
+  readonly #startIdentity: string;
+  readonly #binding: SignalBinding;
+
+  /** @internal */
+  constructor(
+    guard: symbol,
+    token: bigint,
+    pid: number,
+    startIdentity: string,
+    binding: SignalBinding,
+  ) {
+    if (guard !== PROCESS_HANDLE_INTERNAL) {
+      throw new SysprimsError(
+        SysprimsErrorCode.InvalidArgument,
+        "ProcessHandle cannot be constructed directly; use openProcessHandle",
+      );
+    }
+    this.#token = token;
+    this.#pid = pid;
+    this.#startIdentity = startIdentity;
+    this.#binding = binding;
+    getProcessHandleBackstop().register(this, token, this);
+  }
+
+  #requireToken(): bigint {
+    if (this.#token == null) {
+      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "process handle is closed");
+    }
+    return this.#token;
+  }
+
+  get pid(): number {
+    return this.#pid;
+  }
+
+  get startIdentity(): string {
+    return this.#startIdentity;
+  }
+
+  get binding(): SignalBinding {
+    return this.#binding;
+  }
+
+  get closed(): boolean {
+    return this.#token == null;
+  }
+
+  exited(): boolean {
+    const token = this.#requireToken();
+    const lib = loadSysprims();
+    return callBoolOut(() => lib.sysprimsProcessHandleExited(token));
+  }
+
+  signal(sig: number): SignalBinding {
+    const token = this.#requireToken();
+    validateSignal(sig);
+    const lib = loadSysprims();
+    return callStringOut(() => lib.sysprimsProcessHandleSignal(token, sig)) as SignalBinding;
+  }
+
+  signalByName(signalName: string): SignalBinding {
+    this.#requireToken();
+    const sig = resolveSignalName(signalName);
+    return this.signal(sig);
+  }
+
+  terminate(): SignalBinding {
+    return this.signal(SIGTERM);
+  }
+
+  forceKill(): SignalBinding {
+    return this.signal(SIGKILL);
+  }
+
+  close(): void {
+    const token = this.#token;
+    if (token == null) {
+      return;
+    }
+    this.#token = null;
+    getProcessHandleBackstop().unregister(this);
+    const lib = loadSysprims();
+    callVoid(() => lib.sysprimsProcessHandleClose(token));
+  }
+
+  [Symbol.dispose](): void {
+    this.close();
+  }
+
+  toJSON(): never {
+    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "ProcessHandle is not serializable");
+  }
+}
+
+export function openProcessHandle(pid: number, options?: OpenProcessHandleOptions): ProcessHandle {
+  validatePid(pid);
+  if (
+    options?.expectedStartIdentity !== undefined &&
+    typeof options.expectedStartIdentity !== "string"
+  ) {
+    throw new SysprimsError(
+      SysprimsErrorCode.InvalidArgument,
+      "expectedStartIdentity must be a string",
+    );
+  }
+  const lib = loadSysprims();
+  const wire = callJsonReturn(() =>
+    lib.sysprimsProcessHandleOpen(pid, options?.expectedStartIdentity ?? null),
+  ) as ProcessHandleOpenWire;
+  return new ProcessHandle(
+    PROCESS_HANDLE_INTERNAL,
+    BigInt(wire.token),
+    wire.pid,
+    wire.start_identity,
+    wire.binding,
+  );
+}
+
+export function openProcessHandleVerified(
+  pid: number,
+  expectedStartIdentity: string,
+): ProcessHandle {
+  if (typeof expectedStartIdentity !== "string") {
+    throw new SysprimsError(
+      SysprimsErrorCode.InvalidArgument,
+      "expectedStartIdentity must be a string",
+    );
+  }
+  return openProcessHandle(pid, { expectedStartIdentity });
 }
 
 // -----------------------------------------------------------------------------

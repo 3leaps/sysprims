@@ -24,6 +24,10 @@ export function validatePid(value: number, name = "pid"): number {
   return validateInteger(value, name, 1, MAX_SAFE_PID);
 }
 
+export function validatePgid(value: number, name = "pgid"): number {
+  return validateInteger(value, name, 1, MAX_SAFE_PID);
+}
+
 export function validateSignal(value: number, name = "signal"): number {
   return validateInteger(value, name, I32_MIN, I32_MAX);
 }

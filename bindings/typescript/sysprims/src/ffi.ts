@@ -30,6 +30,9 @@ function findPackageRoot(startDir: string): string {
 
 export type SysprimsCallJsonResult = { code: number; json?: string; message?: string };
 export type SysprimsCallU32Result = { code: number; value?: number; message?: string };
+export type SysprimsCallI32Result = { code: number; value?: number; message?: string };
+export type SysprimsCallBoolResult = { code: number; value?: boolean; message?: string };
+export type SysprimsCallStringResult = { code: number; value?: string; message?: string };
 export type SysprimsCallVoidResult = { code: number; message?: string };
 export type SysprimsCallTokenResult = { code: number; token?: bigint; message?: string };
 
@@ -78,6 +81,17 @@ export type SysprimsLib = {
   sysprimsSignalSendGroup: (pgid: number, signal: number) => SysprimsCallVoidResult;
   sysprimsTerminate: (pid: number) => SysprimsCallVoidResult;
   sysprimsForceKill: (pid: number) => SysprimsCallVoidResult;
+  sysprimsResolveSignalName: (signalName: string) => SysprimsCallI32Result;
+  sysprimsMatchSignalNames: (pattern: string) => string[];
+  sysprimsKillByName: (pid: number, signalName: string) => SysprimsCallVoidResult;
+  sysprimsKillGroupByName: (pgid: number, signalName: string) => SysprimsCallVoidResult;
+  sysprimsProcessHandleOpen: (
+    pid: number,
+    expectedStartIdentity?: string | null,
+  ) => SysprimsCallJsonResult;
+  sysprimsProcessHandleExited: (token: bigint) => SysprimsCallBoolResult;
+  sysprimsProcessHandleSignal: (token: bigint, signal: number) => SysprimsCallStringResult;
+  sysprimsProcessHandleClose: (token: bigint) => SysprimsCallVoidResult;
 
   // Terminate tree
   sysprimsTerminateTree: (pid: number, configJson: string) => SysprimsCallJsonResult;
@@ -118,6 +132,30 @@ export function callU32Out(fn: () => SysprimsCallU32Result): number {
     raiseSysprimsError(r.code, r.message);
   }
   return (r.value as number) >>> 0;
+}
+
+export function callI32Out(fn: () => SysprimsCallI32Result): number {
+  const r = fn();
+  if (r.code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(r.code, r.message);
+  }
+  return r.value as number;
+}
+
+export function callBoolOut(fn: () => SysprimsCallBoolResult): boolean {
+  const r = fn();
+  if (r.code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(r.code, r.message);
+  }
+  return Boolean(r.value);
+}
+
+export function callStringOut(fn: () => SysprimsCallStringResult): string {
+  const r = fn();
+  if (r.code !== SysprimsErrorCode.Ok) {
+    raiseSysprimsError(r.code, r.message);
+  }
+  return r.value as string;
 }
 
 export function callVoid(fn: () => SysprimsCallVoidResult): void {

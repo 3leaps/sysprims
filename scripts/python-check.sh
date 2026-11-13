@@ -193,10 +193,13 @@ PY
 
 tests="${root}/bindings/python/tests"
 corpus="${root}/crates/sysprims-recurrence/tests/recurrence-v0"
+sigvec="${root}/testdata/conformance/signal/vectors.json"
 (
 	cd "${work}" &&
 		SYSPRIMS_RECURRENCE_V0_DIR="${corpus}" \
 			RECURRENCE_NDJSON_OUT="${work}/py.results" \
+			SIGNAL_CONFORMANCE_VECTORS="${sigvec}" \
+			SIGNAL_NDJSON_OUT="${work}/py.signal.results" \
 			"${venv_python}" -I -m unittest discover -v -s "${tests}" -t "${tests}"
 ) 2>"${work}/unittest.log" || {
 	cat "${work}/unittest.log" >&2
@@ -216,6 +219,14 @@ if [ ! -s "${work}/py.results" ] || ! cmp -s "${work}/rust.results" "${work}/py.
 	exit 1
 fi
 echo "python-check: recurrence corpus agrees with Rust ($(wc -l <"${work}/py.results" | tr -d ' ') vectors)" >&2
+
+cargo run --quiet --locked -p sysprims-signal --example signal-diff >"${work}/rust.signal.results"
+if [ ! -s "${work}/py.signal.results" ] || ! cmp -s "${work}/rust.signal.results" "${work}/py.signal.results"; then
+	echo "python-check: signal conformance results differ (rust vs python):" >&2
+	diff -u "${work}/rust.signal.results" "${work}/py.signal.results" | head -30 >&2 || true
+	exit 1
+fi
+echo "python-check: signal conformance agrees with Rust ($(wc -l <"${work}/py.signal.results" | tr -d ' ') vectors)" >&2
 
 # Build and verify source distribution (sdist) determinism, isolation + offline buildability.
 "${venv_python}" -I -m maturin sdist \

@@ -4,24 +4,42 @@
 
 This document is generated from emitted package declarations and the reviewed native surface contract. See [Capability Intent Matrix](capability-intent-matrix.md) for policy and lifecycle rationale.
 
-Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI functions.
+Summary: 47 public values, 51 public types, 36 N-API callables, and 41 C-ABI functions.
 
 ## Public Values
 
 - `ContainedProcess`: `class` (Managed containment lifecycle)
+- `MAX_SAFE_PID`: `2147483647` (Signal one process)
+- `ProcessHandle`: `class` (Process-bound signal and exit handle)
+- `SIGALRM`: `14` (Signal one process)
+- `SIGHUP`: `1` (Signal one process)
+- `SIGINT`: `2` (Signal one process)
+- `SIGKILL`: `9` (Signal one process)
+- `SIGPIPE`: `13` (Signal one process)
+- `SIGQUIT`: `3` (Signal one process)
+- `SIGTERM`: `15` (Signal one process)
+- `SIGUSR1`: `number` (Signal one process)
+- `SIGUSR2`: `number` (Signal one process)
 - `SysprimsError`: `class` (Error values)
 - `SysprimsErrorCode`: `{ readonly Ok: 0; readonly InvalidArgument: 1; readonly SpawnFailed: 2; readonly Timeout: 3; readonly PermissionDenied: 4; readonly NotFound: 5; readonly NotSupported: 6; readonly GroupCreationFailed: 7; readonly System: 8; readonly Internal: 99; }` (Error values)
 - `ancestors`: `(pid: number, options?: AncestorsOptions \| undefined): AncestorsResult` (Ancestor traversal)
 - `descendants`: `(pid: number, options?: DescendantsOptions \| undefined): DescendantsResult` (Descendant traversal)
 - `forceKill`: `(pid: number): void` (Forced direct termination)
+- `forceKillGroup`: `(pgid: number): void` (Signal one process group)
 - `forceKillMany`: `(pids: number[]): BatchKillResult` (JavaScript batch signal conveniences)
 - `guardStep`: `(config: GuardConfig): GuardEvent` (Stateless guard evaluation)
+- `killByName`: `(pid: number, signalName: string): void` (Signal catalog and name-based dispatch)
 - `killDescendants`: `(pid: number, signal?: number \| undefined, options?: KillDescendantsOptions \| undefined): KillDescendantsResult` (Descendant remediation)
+- `killGroupByName`: `(pgid: number, signalName: string): void` (Signal catalog and name-based dispatch)
 - `killMany`: `(pids: number[], signal: number): BatchKillResult` (JavaScript batch signal conveniences)
 - `listFds`: `(pid: number, filter?: FdFilter \| undefined): FdSnapshot` (File descriptor listing)
 - `listeningPorts`: `(filter?: PortFilter \| undefined): PortBindingsSnapshot` (Listening ports)
+- `matchSignalNames`: `(pattern: string): string[]` (Signal catalog and name-based dispatch)
+- `openProcessHandle`: `(pid: number, options?: OpenProcessHandleOptions \| undefined): ProcessHandle` (Process-bound signal and exit handle)
+- `openProcessHandleVerified`: `(pid: number, expectedStartIdentity: string): ProcessHandle` (Process-bound signal and exit handle)
 - `procGet`: `(pid: number, options?: ProcessOptions \| undefined): ProcessInfo` (Process lookup)
 - `processList`: `(filter?: ProcessFilter \| undefined, options?: ProcessOptions \| undefined): ProcessSnapshot` (Process snapshot)
+- `resolveSignalName`: `(signalName: string): number` (Signal catalog and name-based dispatch)
 - `runNohup`: `(config: RunNohupConfig): SessionSpawnResult` (Nohup spawn)
 - `runSetsid`: `(config: RunSetsidConfig): SessionSpawnResult` (New session spawn)
 - `selfPGID`: `(): number` (Current process group)
@@ -31,8 +49,11 @@ Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI fun
 - `spawnContained`: `(argv: string[], options?: SpawnContainedOptions \| undefined): Promise<ContainedProcess>` (Managed contained spawn)
 - `spawnInGroup`: `(config: SpawnInGroupConfig): SpawnInGroupResult` (PID-returning grouped spawn)
 - `terminate`: `(pid: number): void` (Graceful direct termination)
+- `terminateGroup`: `(pgid: number): void` (Signal one process group)
 - `terminateMany`: `(pids: number[]): BatchKillResult` (JavaScript batch signal conveniences)
 - `terminateTree`: `(pid: number, config?: TerminateTreeConfig \| undefined): TerminateTreeResult` (PID-based tree termination)
+- `validatePgid`: `(value: number, name?: string \| undefined): number` (Signal one process group)
+- `validatePid`: `(value: number, name?: string \| undefined): number` (Signal one process)
 - `waitPID`: `(pid: number, timeoutMs: number): WaitPidResult` (PID wait)
 
 ## Public Types
@@ -61,10 +82,12 @@ Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI fun
 - `KillDescendantsFailure`: export interface KillDescendantsFailure { pid: number; error: string; } (Descendant remediation)
 - `KillDescendantsOptions`: export interface KillDescendantsOptions { maxLevels?: number; filter?: ProcessFilter; cpuMode?: CpuMode; sampleDurationMs?: number; cascade?: boolean; } (Descendant remediation)
 - `KillDescendantsResult`: export interface KillDescendantsResult { schema_id: string; signal_sent: number; root_pid: number; succeeded: number[]; failed: KillDescendantsFailure[]; skipped_safety: number; } (Descendant remediation)
+- `OpenProcessHandleOptions`: export interface OpenProcessHandleOptions { expectedStartIdentity?: string; } (Process-bound signal and exit handle)
 - `PortBinding`: export interface PortBinding { protocol: Protocol; local_addr?: string | null; local_port: number; state?: string | null; pid?: number | null; process?: ProcessInfo; } (Listening ports)
 - `PortBindingsSnapshot`: export interface PortBindingsSnapshot { schema_id: string; timestamp: string; platform: string; bindings: PortBinding[]; warnings: string[]; } (Listening ports)
 - `PortFilter`: export interface PortFilter { protocol?: Protocol; local_port?: number; } (Listening ports)
 - `ProcessFilter`: export interface ProcessFilter { name_contains?: string; name_equals?: string; user_equals?: string; pid_in?: number[]; ppid?: number; state_in?: ProcessState[]; cpu_above?: number; memory_above_kb?: number; running_for_at_least_secs?: number; } (Process snapshot)
+- `ProcessHandle`: export declare class ProcessHandle { #private; get pid(): number; get startIdentity(): string; get binding(): SignalBinding; get closed(): boolean; exited(): boolean; signal(sig: number): SignalBinding; signalByName(signalName: string): SignalBinding; terminate(): SignalBinding; forceKill(): SignalBinding; close(): void; [Symbol.dispose](): void; toJSON(): never; } (Process-bound signal and exit handle)
 - `ProcessInfo`: export interface ProcessInfo { pid: number; ppid: number; name: string; user?: string | null; cpu_percent: number; memory_kb: number; elapsed_seconds: number; start_time_unix_ms?: number | null; exe_path?: string | null; state: ProcessState; cmdline: string[]; env?: Record<string, string> | null; thread_count?: number | null; } (Process lookup)
 - `ProcessOptions`: export interface ProcessOptions { includeEnv?: boolean; includeThreads?: boolean; } (Process lookup)
 - `ProcessSnapshot`: export interface ProcessSnapshot { schema_id: string; timestamp: string; processes: ProcessInfo[]; } (Process snapshot)
@@ -77,6 +100,7 @@ Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI fun
 - `SessionSpawnResult`: export interface SessionSpawnResult { schema_id: string; timestamp: string; platform: string; verb: SessionSpawnVerb; status: SessionSpawnStatus; pid: number | null; sid: number | null; pgid: number | null; session_kind: SessionKind; identifier_provenance: SessionIdentifierProvenance; exit_code: number | null; signal: number | null; output_file: string | null; warnings: string[]; } (New session spawn)
 - `SessionSpawnStatus`: export type SessionSpawnStatus = "spawned" | "completed"; (New session spawn)
 - `SessionSpawnVerb`: export type SessionSpawnVerb = "setsid" | "nohup"; (New session spawn)
+- `SignalBinding`: export type SignalBinding = "bound" | "checked_numeric"; (Process-bound signal and exit handle)
 - `SpawnContainedOptions`: export interface SpawnContainedOptions { cwd?: string | null; env?: Record<string, string> | null; executionTimeoutMs?: number; graceTimeoutMs?: number; killTimeoutMs?: number; signal?: number; killSignal?: number; } (Managed contained spawn)
 - `SpawnInGroupConfig`: export interface SpawnInGroupConfig { schema_id?: string; argv: string[]; cwd?: string | null; env?: Record<string, string> | null; } (PID-returning grouped spawn)
 - `SpawnInGroupResult`: export interface SpawnInGroupResult { schema_id: string; timestamp: string; platform: string; pid: number; pgid?: number | null; tree_kill_reliability: "guaranteed" | "best_effort"; warnings: string[]; } (PID-returning grouped spawn)
@@ -96,6 +120,9 @@ Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI fun
 - `sysprimsContainmentTerminate`: exposed; public mapping: `ContainedProcess`
 - `sysprimsContainmentWait`: exposed; public mapping: `ContainedProcess`
 - `sysprimsForceKill`: exposed; public mapping: `forceKill`
+- `sysprimsKillByName`: exposed; public mapping: `killByName`
+- `sysprimsKillGroupByName`: exposed; public mapping: `killGroupByName`
+- `sysprimsMatchSignalNames`: exposed; public mapping: `matchSignalNames`
 - `sysprimsProcAncestors`: exposed; public mapping: `ancestors`
 - `sysprimsProcDescendants`: exposed; public mapping: `descendants`
 - `sysprimsProcGet`: internal-only; public mapping: none
@@ -107,12 +134,17 @@ Summary: 26 public values, 48 public types, 28 N-API callables, and 41 C-ABI fun
 - `sysprimsProcListFds`: exposed; public mapping: `listFds`
 - `sysprimsProcListeningPorts`: exposed; public mapping: `listeningPorts`
 - `sysprimsProcWaitPid`: exposed; public mapping: `waitPID`
+- `sysprimsProcessHandleClose`: exposed; public mapping: `ProcessHandle`
+- `sysprimsProcessHandleExited`: exposed; public mapping: `ProcessHandle`
+- `sysprimsProcessHandleOpen`: exposed; public mapping: `openProcessHandle`, `openProcessHandleVerified`
+- `sysprimsProcessHandleSignal`: exposed; public mapping: `ProcessHandle`
+- `sysprimsResolveSignalName`: exposed; public mapping: `ProcessHandle`, `resolveSignalName`
 - `sysprimsRunNohup`: exposed; public mapping: `runNohup`
 - `sysprimsRunSetsid`: exposed; public mapping: `runSetsid`
 - `sysprimsSelfGetpgid`: exposed; public mapping: `selfPGID`
 - `sysprimsSelfGetsid`: exposed; public mapping: `selfSID`
 - `sysprimsSignalSend`: exposed; public mapping: `signalSend`
-- `sysprimsSignalSendGroup`: exposed; public mapping: `signalSendGroup`
+- `sysprimsSignalSendGroup`: exposed; public mapping: `forceKillGroup`, `signalSendGroup`, `terminateGroup`
 - `sysprimsSpawnInGroup`: exposed; public mapping: `spawnInGroup`
 - `sysprimsTerminate`: exposed; public mapping: `terminate`
 - `sysprimsTerminateTree`: exposed; public mapping: `terminateTree`
