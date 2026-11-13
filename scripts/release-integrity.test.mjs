@@ -9,7 +9,9 @@ import { after, test } from "node:test";
 import { ANCHORS, NPM_TARBALL_PACKAGES, PYTHON_WHEEL_TAGS, assertInventory, checkRemote, expectedInventory, inventoryForCommit, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyPublishedStage, verifyTaggedAssets } from "./release-integrity.mjs";
 
 const roots = [];
-after(() => roots.forEach((root) => rmSync(root, { recursive: true, force: true })));
+after(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
+});
 function must(root, command, args) {
   const result = spawnSync(command, args, { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, `${command} ${args.join(" ")}\n${result.stderr}${result.stdout}`);
@@ -263,10 +265,11 @@ test("release leaves are guard-wired and only release-publish can undraft", () =
   }
 });
 
-test("npm dry-run cannot enter the protected OIDC job", () => {
-  const workflow = readFileSync(".github/workflows/typescript-npm-publish.yml", "utf8");
-  assert.match(workflow, /publish:\n[\s\S]*?if: \$\{\{ !inputs\.dry_run \}\}[\s\S]*?environment: publish-npm/);
-  const stageBlock = workflow.slice(workflow.indexOf("  stage:"), workflow.indexOf("  publish:"));
+test("dry-run cannot enter protected OIDC jobs in registry-publish.yml", () => {
+  const workflow = readFileSync(".github/workflows/registry-publish.yml", "utf8");
+  assert.match(workflow, /publish-pypi:\n[\s\S]*?if: \$\{\{ !inputs\.dry_run[\s\S]*?environment: publish-pypi/);
+  assert.match(workflow, /publish-npm:\n[\s\S]*?if: \$\{\{ !inputs\.dry_run[\s\S]*?environment: publish-npm/);
+  const stageBlock = workflow.slice(workflow.indexOf("  stage:"), workflow.indexOf("  publish-pypi:"));
   assert.doesNotMatch(stageBlock, /environment:|id-token:/);
 });
 

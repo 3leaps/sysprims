@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Every workflow is read-only at the top level, and no workflow creates, edits
-# or publishes a GitHub release. Write permissions exist only on two reviewed
+# or publishes a GitHub release. Write permissions exist only on reviewed
 # jobs, each with exactly the scopes it needs:
-#   typescript-npm-publish.yml publish: id-token (npm trusted publishing), only
+#   registry-publish.yml publish-pypi: id-token (PyPI trusted publishing), only
+#     behind the publish-pypi environment
+#   registry-publish.yml publish-npm: id-token (npm trusted publishing), only
 #     behind the publish-npm environment
 #   go-bindings.yml update-go-bindings: contents + pull-requests (opens the
 #     prebuilt-library pull request). Its steps may use only the actions listed
@@ -29,10 +31,14 @@ sys.path.insert(0, sys.argv[1])
 import workflow_yaml as wy  # noqa: E402
 
 ALLOWED_WRITE = {
-    ('typescript-npm-publish.yml', 'publish'): {'id-token'},
+    ('registry-publish.yml', 'publish-pypi'): {'id-token'},
+    ('registry-publish.yml', 'publish-npm'): {'id-token'},
     ('go-bindings.yml', 'update-go-bindings'): {'contents', 'pull-requests'},
 }
-REQUIRED_ENVIRONMENT = {('typescript-npm-publish.yml', 'publish'): 'publish-npm'}
+REQUIRED_ENVIRONMENT = {
+    ('registry-publish.yml', 'publish-pypi'): 'publish-pypi',
+    ('registry-publish.yml', 'publish-npm'): 'publish-npm',
+}
 # Actions a write job may run, by repository (the pin lint fixes the SHA), and
 # the one action that may receive the token.
 WRITER_ACTIONS = {
@@ -344,8 +350,9 @@ controls = [
     ('merge key', 'ci.yml', replace_once('ci.yml', top, 'permissions:\n  <<: {contents: write}\n'), PARSE),
     ('duplicate permissions key', 'ci.yml', replace_once('ci.yml', top, top + 'permissions:\n  contents: write\n'), 'duplicate key'),
     ('reusable workflow job', 'release.yml', replace_once('release.yml', '\njobs:\n', '\njobs:\n  reuse:\n    uses: org/repo/.github/workflows/x.yml@0123456789012345678901234567890123456789  # v1\n'), 'reusable workflow calls'),
-    ('npm publish loses environment', 'typescript-npm-publish.yml', replace_once('typescript-npm-publish.yml', '    environment: publish-npm\n', ''), 'outside environment'),
-    ('npm publish gains contents write', 'typescript-npm-publish.yml', replace_once('typescript-npm-publish.yml', '      contents: read\n      actions: read\n      id-token: write\n', '      contents: write\n      actions: read\n      id-token: write\n'), JOB),
+    ('pypi publish loses environment', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-pypi\n', ''), 'outside environment'),
+    ('npm publish loses environment', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-npm\n', ''), 'outside environment'),
+    ('npm publish gains contents write', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-npm\n    permissions:\n      contents: read\n      id-token: write\n', '    environment: publish-npm\n    permissions:\n      contents: write\n      id-token: write\n'), JOB),
     ('go PR job gains a scope', 'go-bindings.yml', replace_once('go-bindings.yml', '      pull-requests: write\n', '      pull-requests: write\n      actions: write\n'), JOB),
     ('go PR job run reads secrets', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: echo ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
     ('go PR job step env github.token', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: make x\n        env:\n          GH_TOKEN: ${{ github.token }}\n'), TOKEN),

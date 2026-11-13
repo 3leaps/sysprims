@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
@@ -85,6 +86,49 @@ function pack(directory, outputDirectory) {
 	};
 }
 
+const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+const PYTHON_WHEEL_TAGS = [
+	"cp310-abi3-macosx_11_0_arm64",
+	"cp310-abi3-macosx_11_0_x86_64",
+	"cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64",
+	"cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64",
+	"cp310-abi3-win_amd64",
+];
+
+function parsePublishedAnchor(anchorPath) {
+	if (!existsSync(anchorPath))
+		fail(`published anchor is missing: ${anchorPath}`);
+	const fields = new Map();
+	const files = [];
+	const seen = new Set();
+	for (const line of readFileSync(anchorPath, "utf8").split("\n")) {
+		if (!line) continue;
+		const fileMatch = /^file=([0-9a-f]{64}) ([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(
+			line,
+		);
+		if (fileMatch) {
+			const [, sha256, name] = fileMatch;
+			if (seen.has(name)) fail(`${anchorPath} lists ${name} twice`);
+			seen.add(name);
+			files.push({ name, sha256 });
+			continue;
+		}
+		const fieldMatch = /^(tag|object|commit)=(.+)$/.exec(line);
+		if (!fieldMatch || fields.has(fieldMatch[1]))
+			fail(`${anchorPath} is malformed`);
+		fields.set(fieldMatch[1], fieldMatch[2]);
+	}
+	if (!fields.get("tag") || !/^[0-9a-f]{40}$/.test(fields.get("object") ?? "") || !/^[0-9a-f]{40}$/.test(fields.get("commit") ?? ""))
+		fail(`${anchorPath} is missing required tag/object/commit fields`);
+	return {
+		tag: fields.get("tag"),
+		object: fields.get("object"),
+		commit: fields.get("commit"),
+		files,
+	};
+}
+
 export function verifyStage(stageDirectory, expectedTag, expectedCommit) {
 	const manifest = json(join(stageDirectory, "manifest.json"));
 	if (manifest.schema !== "sysprims-npm-stage/v1")
@@ -98,6 +142,8 @@ export function verifyStage(stageDirectory, expectedTag, expectedCommit) {
 	)
 		fail("npm stage package order/set mismatch");
 	for (const entry of manifest.packages) {
+		if (!SAFE_FILENAME.test(entry.filename ?? ""))
+			fail(`invalid staged tarball filename: ${entry.filename}`);
 		const path = join(stageDirectory, "packages", entry.filename);
 		if (!existsSync(path)) fail(`staged tarball is missing: ${entry.filename}`);
 		if (
@@ -109,6 +155,127 @@ export function verifyStage(stageDirectory, expectedTag, expectedCommit) {
 			fail(`staged package version mismatch: ${entry.name}`);
 	}
 	return manifest;
+}
+
+function inspectTarball(tarballPath) {
+	const script = [
+		"import json, sys, tarfile",
+		"path = sys.argv[1]",
+		"pkg = None",
+		"files = []",
+		"with tarfile.open(path, 'r:gz') as tf:",
+		"    for m in tf.getmembers():",
+		"        if not m.isfile():",
+		"            continue",
+		"        rel = m.name[8:] if m.name.startswith('package/') else m.name",
+		"        files.append({'path': rel, 'size': m.size, 'mode': m.mode})",
+		"        if m.name == 'package/package.json':",
+		"            f = tf.extractfile(m)",
+		"            pkg = json.load(f) if f is not None else None",
+		"if not isinstance(pkg, dict) or not pkg.get('name') or not pkg.get('version'):",
+		"    raise SystemExit('missing package/package.json metadata in ' + path)",
+		"files.sort(key=lambda item: item['path'])",
+		"print(json.dumps({'name': pkg['name'], 'version': pkg['version'], 'files': files}))",
+	].join("\n");
+	return JSON.parse(mustRun("python3", ["-I", "-c", script, tarballPath]));
+}
+
+export function stagePublished(
+	publishedDirectory,
+	anchorPath,
+	stageDirectory,
+	expectedTag,
+	expectedCommit,
+) {
+	const anchor = parsePublishedAnchor(anchorPath);
+	if (anchor.tag !== expectedTag || anchor.commit !== expectedCommit)
+		fail("published npm anchor tag/commit mismatch");
+	const expectedNames = [...nativeOrder, "@3leaps/sysprims"];
+	if (anchor.files.length !== expectedNames.length)
+		fail(`published npm anchor must list ${expectedNames.length} tarballs`);
+	const actualFiles = readdirSync(publishedDirectory)
+		.filter((name) => !name.startsWith("."))
+		.sort();
+	const anchoredFiles = anchor.files.map((item) => item.name).sort();
+	if (JSON.stringify(actualFiles) !== JSON.stringify(anchoredFiles))
+		fail("published npm directory inventory does not match anchor");
+	rmSync(stageDirectory, { recursive: true, force: true });
+	const packagesDirectory = join(stageDirectory, "packages");
+	mkdirSync(packagesDirectory, { recursive: true });
+	const byName = new Map();
+	for (const item of anchor.files) {
+		if (!SAFE_FILENAME.test(item?.name ?? "") || !item?.sha256)
+			fail("published npm anchor entry is incomplete");
+		const sourcePath = join(publishedDirectory, item.name);
+		if (!existsSync(sourcePath))
+			fail(`published npm tarball is missing: ${item.name}`);
+		const actualSha256 = digest(sourcePath, "sha256");
+		if (actualSha256 !== item.sha256)
+			fail(`published npm tarball digest mismatch: ${item.name}`);
+		const destinationPath = join(packagesDirectory, item.name);
+		copyFileSync(sourcePath, destinationPath);
+		const inspected = inspectTarball(destinationPath);
+		byName.set(inspected.name, {
+			name: inspected.name,
+			version: inspected.version,
+			filename: item.name,
+			sha256: actualSha256,
+			sri: `sha512-${digest(destinationPath, "sha512")}`,
+			content: inspected.files,
+		});
+	}
+	for (const name of expectedNames)
+		if (!byName.has(name)) fail(`published stage is missing package ${name}`);
+	writeFileSync(
+		join(stageDirectory, "manifest.json"),
+		`${JSON.stringify(
+			{
+				schema: "sysprims-npm-stage/v1",
+				tag: expectedTag,
+				commit: expectedCommit,
+				packages: expectedNames.map((name) => byName.get(name)),
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	return verifyStage(stageDirectory, expectedTag, expectedCommit);
+}
+
+export function verifyPublishedPypi(
+	publishedDirectory,
+	anchorPath,
+	expectedTag,
+	expectedCommit,
+) {
+	const anchor = parsePublishedAnchor(anchorPath);
+	if (anchor.tag !== expectedTag || anchor.commit !== expectedCommit)
+		fail("published pypi anchor tag/commit mismatch");
+	const expectedVersion = expectedTag.replace(/^v/, "");
+	const expectedSet = [
+		...PYTHON_WHEEL_TAGS.map((tag) => `sysprims-${expectedVersion}-${tag}.whl`),
+		`sysprims-${expectedVersion}.tar.gz`,
+	].sort();
+	const actualFiles = readdirSync(publishedDirectory)
+		.filter((name) => !name.startsWith("."))
+		.sort();
+	const anchoredFiles = anchor.files.map((item) => item.name).sort();
+	if (JSON.stringify(actualFiles) !== JSON.stringify(anchoredFiles))
+		fail("published pypi directory inventory does not match anchor");
+	if (JSON.stringify(anchoredFiles) !== JSON.stringify(expectedSet))
+		fail(
+			`published pypi stage does not match expected distribution set for ${expectedTag}`,
+		);
+	for (const item of anchor.files) {
+		if (!SAFE_FILENAME.test(item?.name ?? "") || !item?.sha256)
+			fail("published pypi anchor entry is incomplete");
+		const sourcePath = join(publishedDirectory, item.name);
+		if (!existsSync(sourcePath))
+			fail(`published pypi distribution is missing: ${item.name}`);
+		if (digest(sourcePath, "sha256") !== item.sha256)
+			fail(`published pypi distribution digest mismatch: ${item.name}`);
+	}
+	return anchor;
 }
 
 export function parseRegistryMetadata(value, label = "npm package") {
@@ -234,7 +401,7 @@ export function publishResumably(
 		sleepFn = defaultSleep,
 		nowFn = Date.now,
 		pollAttempts = Number.parseInt(
-			process.env.SYSPRIMS_NPM_POLL_ATTEMPTS ?? "12",
+			process.env.SYSPRIMS_NPM_POLL_ATTEMPTS ?? "36",
 			10,
 		),
 		pollSleepMs = Number.parseInt(
@@ -366,6 +533,22 @@ function main() {
 			`${JSON.stringify({ schema: "sysprims-npm-stage/v1", tag, commit, packages: names.map((name) => byName.get(name)) }, null, 2)}\n`,
 		);
 		verifyStage(stageDirectory, tag, commit);
+	} else if (command === "stage-published") {
+		const publishedDirectory = resolve(
+			argument(argv, "--published-dir", "dist/published-npm"),
+		);
+		const anchorPath = resolve(
+			argument(argv, "--anchor", "dist/published-npm.anchor"),
+		);
+		stagePublished(publishedDirectory, anchorPath, stageDirectory, tag, commit);
+	} else if (command === "verify-pypi") {
+		const publishedDirectory = resolve(
+			argument(argv, "--published-dir", "dist/published-pypi"),
+		);
+		const anchorPath = resolve(
+			argument(argv, "--anchor", "dist/published-pypi.anchor"),
+		);
+		verifyPublishedPypi(publishedDirectory, anchorPath, tag, commit);
 	} else if (command === "verify") {
 		verifyStage(stageDirectory, tag, commit);
 	} else if (command === "compare" || command === "publish") {
@@ -375,7 +558,7 @@ function main() {
 		});
 	} else
 		fail(
-			"usage: npm-release.mjs <stage|verify|compare|publish> --stage DIR --tag vX.Y.Z --commit SHA",
+			"usage: npm-release.mjs <stage|stage-published|verify|verify-pypi|compare|publish> --stage DIR --tag vX.Y.Z --commit SHA",
 		);
 	console.log(`[ok] npm ${command} completed for ${tag} at ${commit}`);
 }

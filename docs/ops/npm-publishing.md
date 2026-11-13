@@ -49,7 +49,7 @@ After the package exists:
 4. Configure:
    - **Organization or user**: `3leaps`
    - **Repository**: `sysprims`
-   - **Workflow filename**: `typescript-npm-publish.yml`
+   - **Workflow filename**: `registry-publish.yml`
    - **Environment name**: `publish-npm`
 5. Click **Set up connection**
 
@@ -67,18 +67,19 @@ This ensures only OIDC-authenticated workflows can publish.
 
 ## Workflow Configuration
 
-Only the protected `publish` job in `typescript-npm-publish.yml` receives:
+Only the protected `publish-npm` (and `publish-pypi`) jobs in `registry-publish.yml` receive:
 
 ```yaml
 permissions:
-  id-token: write # Required for OIDC
   contents: read
+  id-token: write # Required for OIDC
 ```
 
 The preceding `stage` job has no environment and no `id-token` permission. It
-validates the exact tag and surface plan, downloads same-commit prebuilds,
-packs all eight packages, and uploads a tag-and-commit-bound manifest containing
-the package names, versions, tarball filenames, SHA-256, SRI, and content lists.
+validates the exact tag and surface plan, downloads and verifies the signed
+tarballs from the immutable GitHub Release (`scripts/release-stage-published.sh --npm-only`),
+and uploads a tag-and-commit-bound manifest containing the package names,
+versions, tarball filenames, SHA-256, SRI, and content lists.
 
 Key points:
 
@@ -86,53 +87,46 @@ Key points:
 - Use `registry-url: 'https://registry.npmjs.org'` in setup-node
 - Use Node.js 24 for the publish workflow. The workflow hard-fails if Node.js is
   below 22.14.0 or npm is below 11.5.1.
-- Run on GitHub-hosted runners only (e.g., `ubuntu-latest`)
+- Run on GitHub-hosted runners only (`ubuntu-24.04`)
 
 ### Environment protection (`publish-npm`)
 
-The protected `publish` job deploys to the `publish-npm` environment. Its
-deployment ref policies allow only:
+The protected `publish-npm` job deploys to the `publish-npm` environment. Its
+deployment ref policy allows only:
 
 | Ref | Type | Pattern |
 | --- | ---- | ------- |
 | Release tag | tag | `v*` |
-| Recovery policy branch | branch | `bindings/typescript/sysprims/v*` |
 
-`main` is deliberately not allowlisted — do not add it. Normal publication
-dispatches from the release tag ref:
+`main` and branch refs are deliberately not allowlisted — do not add them.
+Publication must always be dispatched from the release tag ref:
 
 ```bash
 VERSION=$(cat VERSION)
-gh workflow run "TypeScript npm Publish" --ref "v${VERSION}" \
-  -f tag="v${VERSION}" -f prebuilds_run_id=<prebuilds-run-id>
+gh workflow run registry-publish.yml --ref "v${VERSION}" \
+  -f tag="v${VERSION}" -f registry=npm
 ```
-
-If the workflow revision on the release tag cannot be used, create a
-short-lived policy branch at the workflow-revision SHA whose name matches
-`bindings/typescript/sysprims/v*`, dispatch the workflow from that branch, then
-delete the branch.
 
 ## Publishing Process
 
 ### Automated (Preferred)
 
-After prebuilds complete successfully:
+After the signed immutable GitHub Release is published:
 
 ```bash
 VERSION=$(cat VERSION)
-gh workflow run "TypeScript npm Publish" --ref "v${VERSION}" \
-  -f tag="v${VERSION}" -f prebuilds_run_id=<prebuilds-run-id>
+gh workflow run registry-publish.yml --ref "v${VERSION}" \
+  -f tag="v${VERSION}" -f registry=all
 ```
 
 The workflow:
 
 1. Validates the exact remote annotated tags, surface plan, and provenance
-2. Downloads prebuild artifacts produced from the same commit
-3. Packs and attests all packages outside the protected environment
-4. Compares every exact package/version with the registry; dry-run stops here
-5. Enters `publish-npm` only for a real publication
-6. Skips an already-present package only when its registry tarball is identical
-7. Publishes/verifies all seven native packages before the root package
+2. Stages and verifies the signed `.tgz` tarballs directly from the immutable GitHub Release (zero rebuild)
+3. Compares every exact package/version with the registry; dry-run stops here
+4. Enters `publish-npm` only for a real publication
+5. Skips an already-present package only when its registry tarball is identical
+6. Publishes/verifies all seven native packages before the root package (with a 180s CDN readiness poll window)
 
 The sequence is resumable after any partial native publication. A same-version
 registry package with different bytes or integrity stops the run.
@@ -155,14 +149,12 @@ npm could not match workflow to trusted publisher configuration:
 
 - Check organization name matches GitHub URL exactly (case-sensitive)
 - Verify `package.json` has correct `repository.url`
-- Confirm workflow file exists at `.github/workflows/typescript-npm-publish.yml`
+- Confirm workflow file exists at `.github/workflows/registry-publish.yml`
 
 ### Publish job denied by environment protection
 
 The run's ref is not on the `publish-npm` allowlist (for example, a dispatch
-from `main`). Dispatch from the release tag ref, or from a short-lived
-`bindings/typescript/sysprims/v*` policy branch created at the
-workflow-revision SHA — then delete the branch.
+from `main`). Always dispatch from the `v*` release tag ref (`--ref "v${VERSION}"`).
 
 ### Provenance not generated
 
