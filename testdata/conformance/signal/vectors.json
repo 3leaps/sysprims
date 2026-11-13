@@ -1,0 +1,253 @@
+{
+  "schema": "sysprims-signal-conformance/v1",
+  "constants": {
+    "max_safe_pid": 2147483647,
+    "signals_common": {
+      "SIGHUP": 1,
+      "SIGINT": 2,
+      "SIGQUIT": 3,
+      "SIGKILL": 9,
+      "SIGPIPE": 13,
+      "SIGALRM": 14,
+      "SIGTERM": 15
+    },
+    "signals_platform": {
+      "darwin": {
+        "SIGUSR1": 30,
+        "SIGUSR2": 31
+      },
+      "other": {
+        "SIGUSR1": 10,
+        "SIGUSR2": 12
+      }
+    }
+  },
+  "pid_validation_cases": [
+    {
+      "id": "pid-zero-rejected",
+      "kind": "pid",
+      "value": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "pid-one-accepted-by-validator",
+      "kind": "pid",
+      "value": 1,
+      "expected": "ok"
+    },
+    {
+      "id": "pid-max-safe-accepted-by-validator",
+      "kind": "pid",
+      "value": 2147483647,
+      "expected": "ok"
+    },
+    {
+      "id": "pid-boundary-overflow-rejected",
+      "kind": "pid",
+      "value": 2147483648,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "pid-u32-max-broadcast-hazard-rejected",
+      "kind": "pid",
+      "value": 4294967295,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "pgid-zero-rejected",
+      "kind": "pgid",
+      "value": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "pgid-max-safe-accepted-by-validator",
+      "kind": "pgid",
+      "value": 2147483647,
+      "expected": "ok"
+    },
+    {
+      "id": "pgid-boundary-overflow-rejected",
+      "kind": "pgid",
+      "value": 2147483648,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "pgid-u32-max-rejected",
+      "kind": "pgid",
+      "value": 4294967295,
+      "expected": "invalid_argument"
+    }
+  ],
+  "batch_validation_cases": [
+    {
+      "id": "batch-empty-rejected",
+      "pids": [],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "batch-contains-zero-rejected",
+      "pids": [99999, 0],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "batch-contains-overflow-rejected",
+      "pids": [99999, 2147483648],
+      "expected": "invalid_argument"
+    }
+  ],
+  "resolve_signal_cases": [
+    {
+      "id": "resolve-sigterm-canonical",
+      "input": "SIGTERM",
+      "expected": "ok",
+      "signal": "SIGTERM"
+    },
+    {
+      "id": "resolve-term-unprefixed",
+      "input": "TERM",
+      "expected": "ok",
+      "signal": "SIGTERM"
+    },
+    {
+      "id": "resolve-term-short-id",
+      "input": "term",
+      "expected": "ok",
+      "signal": "SIGTERM"
+    },
+    {
+      "id": "resolve-sigterm-trimmed-lower",
+      "input": " sigterm ",
+      "expected": "ok",
+      "signal": "SIGTERM"
+    },
+    {
+      "id": "resolve-sigint-short-id",
+      "input": "int",
+      "expected": "ok",
+      "signal": "SIGINT"
+    },
+    {
+      "id": "resolve-sighup",
+      "input": "HUP",
+      "expected": "ok",
+      "signal": "SIGHUP"
+    },
+    {
+      "id": "resolve-sigquit",
+      "input": "quit",
+      "expected": "ok",
+      "signal": "SIGQUIT"
+    },
+    {
+      "id": "resolve-sigkill",
+      "input": "KILL",
+      "expected": "ok",
+      "signal": "SIGKILL"
+    },
+    {
+      "id": "resolve-sigpipe",
+      "input": "SIGPIPE",
+      "expected": "ok",
+      "signal": "SIGPIPE"
+    },
+    {
+      "id": "resolve-sigalrm",
+      "input": "alrm",
+      "expected": "ok",
+      "signal": "SIGALRM"
+    },
+    {
+      "id": "resolve-sigusr1",
+      "input": "usr1",
+      "expected": "ok",
+      "signal": "SIGUSR1"
+    },
+    {
+      "id": "resolve-sigusr2",
+      "input": "SIGUSR2",
+      "expected": "ok",
+      "signal": "SIGUSR2"
+    },
+    {
+      "id": "resolve-empty-rejected",
+      "input": "   ",
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "resolve-unknown-rejected",
+      "input": "SIGDOESNOTEXIST",
+      "expected": "invalid_argument"
+    }
+  ],
+  "match_signal_cases": [
+    {
+      "id": "match-star-all",
+      "pattern": "*",
+      "expected": [
+        "SIGTERM",
+        "SIGINT",
+        "SIGHUP",
+        "SIGQUIT",
+        "SIGPIPE",
+        "SIGALRM",
+        "SIGUSR1",
+        "SIGUSR2",
+        "SIGKILL"
+      ]
+    },
+    {
+      "id": "match-sigu-prefix",
+      "pattern": "SIGU*",
+      "expected": ["SIGUSR1", "SIGUSR2"]
+    },
+    {
+      "id": "match-question-usr",
+      "pattern": "usr?",
+      "expected": ["SIGUSR1", "SIGUSR2"]
+    },
+    {
+      "id": "match-term-substring",
+      "pattern": "*term*",
+      "expected": ["SIGTERM"]
+    },
+    {
+      "id": "match-empty-pattern",
+      "pattern": "   ",
+      "expected": []
+    },
+    {
+      "id": "match-none",
+      "pattern": "NOMATCH*",
+      "expected": []
+    }
+  ],
+  "process_handle_validation_cases": [
+    {
+      "id": "handle-open-pid-zero-rejected",
+      "pid": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "handle-open-pid-overflow-rejected",
+      "pid": 2147483648,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "handle-open-pid-u32-max-rejected",
+      "pid": 4294967295,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "handle-open-verified-empty-identity-rejected",
+      "pid": "self",
+      "expected_start_identity": "   ",
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "handle-open-verified-mismatched-identity-not-found",
+      "pid": "self",
+      "expected_start_identity": "0000000000.999999",
+      "expected": "not_found"
+    }
+  ]
+}

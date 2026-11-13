@@ -824,6 +824,238 @@ pub fn sysprims_force_kill(pid: f64) -> SysprimsCallVoidResult {
     }
 }
 
+#[napi(object)]
+pub struct SysprimsCallI32Result {
+    pub code: i32,
+    pub value: Option<i32>,
+    pub message: Option<String>,
+}
+
+#[napi(object)]
+pub struct SysprimsCallBoolResult {
+    pub code: i32,
+    pub value: Option<bool>,
+    pub message: Option<String>,
+}
+
+#[napi(object)]
+pub struct SysprimsCallStringResult {
+    pub code: i32,
+    pub value: Option<String>,
+    pub message: Option<String>,
+}
+
+#[napi]
+pub fn sysprims_resolve_signal_name(signal_name: String) -> SysprimsCallI32Result {
+    match sysprims_signal::resolve_signal_name(&signal_name) {
+        Ok(num) => SysprimsCallI32Result {
+            code: SysprimsErrorCode::Ok as i32,
+            value: Some(num),
+            message: None,
+        },
+        Err(e) => SysprimsCallI32Result {
+            code: SysprimsErrorCode::from(&e) as i32,
+            value: None,
+            message: Some(e.to_string()),
+        },
+    }
+}
+
+#[napi]
+pub fn sysprims_match_signal_names(pattern: String) -> Vec<String> {
+    sysprims_signal::match_signal_names(&pattern)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+#[napi]
+pub fn sysprims_kill_by_name(pid: f64, signal_name: String) -> SysprimsCallVoidResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
+    match sysprims_signal::kill_by_name(pid, &signal_name) {
+        Ok(()) => ok_void(),
+        Err(e) => err_void(e),
+    }
+}
+
+#[napi]
+pub fn sysprims_kill_group_by_name(pgid: f64, signal_name: String) -> SysprimsCallVoidResult {
+    let pgid = match validate_pid_number(pgid, "pgid") {
+        Ok(value) => value,
+        Err(e) => return err_void(e),
+    };
+    match sysprims_signal::kill_group_by_name(pgid, &signal_name) {
+        Ok(()) => ok_void(),
+        Err(e) => err_void(e),
+    }
+}
+
+static NEXT_PROCESS_HANDLE_TOKEN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+fn process_handle_registry() -> &'static std::sync::Mutex<
+    std::collections::HashMap<u64, std::sync::Arc<sysprims_signal::ProcessHandle>>,
+> {
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<u64, std::sync::Arc<sysprims_signal::ProcessHandle>>,
+        >,
+    > = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn lookup_process_handle(
+    token: napi::bindgen_prelude::BigInt,
+) -> Result<std::sync::Arc<sysprims_signal::ProcessHandle>, SysprimsError> {
+    let (signed, raw, lossless) = token.get_u64();
+    if signed || !lossless || raw == 0 {
+        return Err(SysprimsError::invalid_argument(
+            "process handle is invalid or closed",
+        ));
+    }
+    let guard = process_handle_registry()
+        .lock()
+        .map_err(|_| SysprimsError::internal("process handle registry poisoned"))?;
+    guard
+        .get(&raw)
+        .cloned()
+        .ok_or_else(|| SysprimsError::invalid_argument("process handle is closed"))
+}
+
+#[derive(serde::Serialize)]
+struct ProcessHandleOpenWire {
+    token: String,
+    pid: u32,
+    start_identity: String,
+    binding: &'static str,
+}
+
+#[napi]
+pub fn sysprims_process_handle_open(
+    pid: f64,
+    expected_start_identity: Option<String>,
+) -> SysprimsCallJsonResult {
+    let pid = match validate_pid_number(pid, "pid") {
+        Ok(value) => value,
+        Err(e) => return err_json(e),
+    };
+    let handle = match expected_start_identity {
+        Some(ref exp) => sysprims_signal::open_process_handle_verified(pid, exp),
+        None => sysprims_signal::open_process_handle(pid),
+    };
+    let handle = match handle {
+        Ok(h) => std::sync::Arc::new(h),
+        Err(e) => return err_json(e),
+    };
+    let token = NEXT_PROCESS_HANDLE_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let wire = ProcessHandleOpenWire {
+        token: token.to_string(),
+        pid: handle.pid(),
+        start_identity: handle.start_identity().to_string(),
+        binding: handle.binding().as_str(),
+    };
+    match process_handle_registry().lock() {
+        Ok(mut guard) => {
+            guard.insert(token, handle);
+        }
+        Err(_) => return err_json(SysprimsError::internal("process handle registry poisoned")),
+    }
+    match serde_json::to_string(&wire) {
+        Ok(json) => ok_json(json),
+        Err(e) => err_json(SysprimsError::internal(format!(
+            "failed to serialize process handle metadata: {e}"
+        ))),
+    }
+}
+
+#[napi]
+pub fn sysprims_process_handle_exited(
+    token: napi::bindgen_prelude::BigInt,
+) -> SysprimsCallBoolResult {
+    let handle = match lookup_process_handle(token) {
+        Ok(h) => h,
+        Err(e) => {
+            return SysprimsCallBoolResult {
+                code: SysprimsErrorCode::from(&e) as i32,
+                value: None,
+                message: Some(e.to_string()),
+            }
+        }
+    };
+    match handle.exited() {
+        Ok(ex) => SysprimsCallBoolResult {
+            code: SysprimsErrorCode::Ok as i32,
+            value: Some(ex),
+            message: None,
+        },
+        Err(e) => SysprimsCallBoolResult {
+            code: SysprimsErrorCode::from(&e) as i32,
+            value: None,
+            message: Some(e.to_string()),
+        },
+    }
+}
+
+#[napi]
+pub fn sysprims_process_handle_signal(
+    token: napi::bindgen_prelude::BigInt,
+    signal: f64,
+) -> SysprimsCallStringResult {
+    let sig = match validate_i32_number(signal, "signal") {
+        Ok(v) => v,
+        Err(e) => {
+            return SysprimsCallStringResult {
+                code: SysprimsErrorCode::from(&e) as i32,
+                value: None,
+                message: Some(e.to_string()),
+            }
+        }
+    };
+    let handle = match lookup_process_handle(token) {
+        Ok(h) => h,
+        Err(e) => {
+            return SysprimsCallStringResult {
+                code: SysprimsErrorCode::from(&e) as i32,
+                value: None,
+                message: Some(e.to_string()),
+            }
+        }
+    };
+    match handle.signal(sig) {
+        Ok(b) => SysprimsCallStringResult {
+            code: SysprimsErrorCode::Ok as i32,
+            value: Some(b.as_str().to_string()),
+            message: None,
+        },
+        Err(e) => SysprimsCallStringResult {
+            code: SysprimsErrorCode::from(&e) as i32,
+            value: None,
+            message: Some(e.to_string()),
+        },
+    }
+}
+
+#[napi]
+pub fn sysprims_process_handle_close(
+    token: napi::bindgen_prelude::BigInt,
+) -> SysprimsCallVoidResult {
+    let (signed, raw, lossless) = token.get_u64();
+    if signed || !lossless || raw == 0 {
+        return err_void(SysprimsError::invalid_argument("process handle is invalid"));
+    }
+    let removed = match process_handle_registry().lock() {
+        Ok(mut guard) => guard.remove(&raw),
+        Err(_) => return err_void(SysprimsError::internal("process handle registry poisoned")),
+    };
+    if let Some(handle) = removed {
+        handle.close();
+    }
+    ok_void()
+}
+
 // -----------------------------------------------------------------------------
 // Terminate Tree
 // -----------------------------------------------------------------------------

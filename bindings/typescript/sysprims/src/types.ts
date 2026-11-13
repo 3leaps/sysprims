@@ -228,6 +228,12 @@ export interface FdSnapshot {
 
 // Signal operations
 
+export type SignalBinding = "bound" | "checked_numeric";
+
+export interface OpenProcessHandleOptions {
+  expectedStartIdentity?: string;
+}
+
 export interface BatchKillFailure {
   pid: number;
   error: string;

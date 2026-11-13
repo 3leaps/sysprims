@@ -29,10 +29,10 @@ or incompatible narrowing or widening is not.
 | Surface | Count | Policy |
 | --- | ---: | --- |
 | C-ABI runtime functions | 41 | Every function is classified below. |
-| N-API runtime functions | 28 | Every function is classified below. |
-| Public TypeScript functions | 23 | All remain public and patch-compatible. |
-| Other public runtime values | 3 | `SysprimsError`, `SysprimsErrorCode`, and `ContainedProcess` remain public. |
-| Explicit package-root type exports | 43 | All remain public and patch-compatible. |
+| N-API runtime functions | 36 | Every function is classified below. |
+| Public TypeScript functions | 33 | All remain public and patch-compatible. |
+| Other public runtime values | 14 | `SysprimsError`, `SysprimsErrorCode`, `ContainedProcess`, `ProcessHandle`, `MAX_SAFE_PID`, `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGKILL`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGUSR1`, and `SIGUSR2` remain public. |
+| Explicit package-root type exports | 45 | All remain public and patch-compatible. |
 
 ## Public Capability Matrix
 
@@ -52,8 +52,10 @@ or incompatible narrowing or widening is not.
 | Current session | `sysprims_session::getsid` | `sysprims_self_getsid` | `sysprimsSelfGetsid` | `selfSID` | exposed | Unix only; Windows returns `NotSupported`. |
 | New session spawn | `sysprims_session::run_setsid` | `sysprims_run_setsid` | `sysprimsRunSetsid` | `runSetsid`; `RunSetsidConfig`, `SessionIdentifierProvenance`, `SessionKind`, `SessionSpawnResult`, `SessionSpawnStatus`, `SessionSpawnVerb` | exposed | Unix only. Waiting is blocking; detached children can outlive the JavaScript process. |
 | Nohup spawn | `sysprims_session::run_nohup` | `sysprims_run_nohup` | `sysprimsRunNohup` | `runNohup`; `RunNohupConfig`, `SessionIdentifierProvenance`, `SessionKind`, `SessionSpawnResult`, `SessionSpawnStatus`, `SessionSpawnVerb` | exposed | Unix only. The child inherits the caller group, which must not be treated as owned group-kill authority. |
-| Signal one process | `sysprims_signal::kill` | `sysprims_signal_send` | `sysprimsSignalSend` | `signalSend` | exposed | Rust rejects unsafe PID values before platform conversion. Windows supports a limited signal set. |
-| Signal one process group | `sysprims_signal::killpg` | `sysprims_signal_send_group` | `sysprimsSignalSendGroup` | `signalSendGroup` | exposed | Unix only. Public APIs never encode groups as negative PIDs. |
+| Signal one process | `sysprims_signal::kill`, `sysprims_signal::validate_pid` | `sysprims_signal_send` | `sysprimsSignalSend` | `signalSend`, `validatePid`; `MAX_SAFE_PID`, `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGKILL`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGUSR1`, `SIGUSR2` | exposed | Rust rejects unsafe PID values before platform conversion. Windows supports a limited signal set. |
+| Signal one process group | `sysprims_signal::killpg`, `sysprims_signal::validate_pgid` | `sysprims_signal_send_group` | `sysprimsSignalSendGroup` | `signalSendGroup`, `terminateGroup`, `forceKillGroup`, `validatePgid` | exposed | Unix only. Public APIs never encode groups as negative PIDs. |
+| Signal catalog and name-based dispatch | `sysprims_signal::{resolve_signal_name, match_signal_names, kill_by_name, kill_group_by_name}` | none | `sysprimsResolveSignalName`, `sysprimsMatchSignalNames`, `sysprimsKillByName`, `sysprimsKillGroupByName` | `resolveSignalName`, `matchSignalNames`, `killByName`, `killGroupByName` | exposed | Resolves and globs canonical signal names and short IDs across the 4-language signal conformance catalog. |
+| Process-bound signal and exit handle | `sysprims_signal::{open_process_handle, open_process_handle_verified, ProcessHandle}` | none | `sysprimsProcessHandleOpen`, `sysprimsProcessHandleExited`, `sysprimsProcessHandleSignal`, `sysprimsProcessHandleClose` | `openProcessHandle`, `openProcessHandleVerified`, `ProcessHandle`; `OpenProcessHandleOptions`, `SignalBinding` | exposed | Brackets handle registration with native process start-identity checks and binds signal delivery to an OS descriptor/handle (`pidfd` on Linux `>= 5.3`, `HANDLE` on Windows) or re-checks the `kqueue` exit watch and `kinfo_proc` start-identity before numeric `kill` on macOS. |
 | Graceful direct termination | `sysprims_signal::terminate` | `sysprims_terminate` | `sysprimsTerminate` | `terminate` | exposed | SIGTERM on Unix; immediate `TerminateProcess` semantics on Windows. |
 | Forced direct termination | `sysprims_signal::force_kill` | `sysprims_force_kill` | `sysprimsForceKill` | `forceKill` | exposed | SIGKILL on Unix and immediate termination on Windows. |
 | JavaScript batch signal conveniences | TypeScript composition over native signal operations | none | none | `killMany`, `terminateMany`, `forceKillMany`; `BatchKillFailure`, `BatchKillResult` | exposed | Operations validate and report per-PID failures. They do not add native batch authority. |
@@ -89,7 +91,15 @@ runtime names shown here.
 | `sysprimsSelfGetpgid` | `sysprims_self_getpgid` | `selfPGID` | exposed |  |
 | `sysprimsSelfGetsid` | `sysprims_self_getsid` | `selfSID` | exposed |  |
 | `sysprimsSignalSend` | `sysprims_signal_send` | `signalSend` | exposed |  |
-| `sysprimsSignalSendGroup` | `sysprims_signal_send_group` | `signalSendGroup` | exposed |  |
+| `sysprimsSignalSendGroup` | `sysprims_signal_send_group` | `signalSendGroup`, `terminateGroup`, `forceKillGroup` | exposed |  |
+| `sysprimsResolveSignalName` | `sysprims_resolve_signal_name` | `resolveSignalName`, `ProcessHandle` | exposed |  |
+| `sysprimsMatchSignalNames` | `sysprims_match_signal_names` | `matchSignalNames` | exposed |  |
+| `sysprimsKillByName` | `sysprims_kill_by_name` | `killByName` | exposed |  |
+| `sysprimsKillGroupByName` | `sysprims_kill_group_by_name` | `killGroupByName` | exposed |  |
+| `sysprimsProcessHandleOpen` | `sysprims_process_handle_open` | `openProcessHandle`, `openProcessHandleVerified` | exposed |  |
+| `sysprimsProcessHandleExited` | `sysprims_process_handle_exited` | `ProcessHandle` | exposed |  |
+| `sysprimsProcessHandleSignal` | `sysprims_process_handle_signal` | `ProcessHandle` | exposed |  |
+| `sysprimsProcessHandleClose` | `sysprims_process_handle_close` | `ProcessHandle` | exposed |  |
 | `sysprimsTerminate` | `sysprims_terminate` | `terminate` | exposed |  |
 | `sysprimsForceKill` | `sysprims_force_kill` | `forceKill` | exposed |  |
 | `sysprimsTerminateTree` | `sysprims_terminate_tree` | `terminateTree` | exposed |  |
@@ -175,10 +185,9 @@ ABI and retains its existing compatibility contract.
 | `sysprims_timeout::{run_with_timeout, run_with_timeout_default}` | C exposes only the options-capable operation | none | none | excluded | The default function is a Rust convenience alias. Both remain outside TypeScript until a safe asynchronous lifecycle contract is approved. |
 | `sysprims_proc::GuardRunner` managed loop | C polling handle family | none | none | excluded | Native blocking scheduling and signal integration do not define a safe JavaScript event-loop and disposal contract. Public `guardStep` remains available. |
 | `sysprims_signal::{kill_many, terminate_many, force_kill_many}` | none | none | `killMany`, `terminateMany`, `forceKillMany` | exposed through JavaScript composition | Existing public conveniences preserve per-PID error reporting without exposing a new native authority. |
-| `sysprims_signal::kill_by_name` | none | none | none | excluded | Number-based `signalSend` is the canonical binding operation; exposing catalog name resolution would add a second signal contract. |
-| `sysprims_signal::match_signal_names` | none | none | none | excluded | Signal catalog discovery is not part of the current binding contract and has no cross-layer schema. |
-| `sysprims_signal` re-exported `rsfulmen::foundry::signals::*` catalog helpers and metadata | none | none | none | excluded | Catalog lookup/resolution, listing, exit-code conversion, behavior, and platform-support helpers have no C/N-API projection or TypeScript schema. Numeric signal dispatch remains the binding contract. |
-| `sysprims_signal::{terminate_group, force_kill_group}` | none | none | none | excluded, convenience aliases | `signalSendGroup` already projects the underlying group operation without adding duplicate public values. |
+| `sysprims_signal::{resolve_signal_name, match_signal_names, kill_by_name, kill_group_by_name}` | none | `sysprimsResolveSignalName`, `sysprimsMatchSignalNames`, `sysprimsKillByName`, `sysprimsKillGroupByName` | `resolveSignalName`, `matchSignalNames`, `killByName`, `killGroupByName` | exposed | Shared 4-language signal catalog and name-based dispatch surface. |
+| `sysprims_signal::{open_process_handle, open_process_handle_verified, ProcessHandle}` | none | `sysprimsProcessHandleOpen`, `sysprimsProcessHandleExited`, `sysprimsProcessHandleSignal`, `sysprimsProcessHandleClose` | `openProcessHandle`, `openProcessHandleVerified`, `ProcessHandle` | exposed | Process-bound exit watch and signal handle (`ProcessHandle`) across macOS (`kqueue`), Linux (`pidfd`), and Windows (`HANDLE`). |
+| `sysprims_signal::{terminate_group, force_kill_group}` | none | `sysprimsSignalSendGroup` | `terminateGroup`, `forceKillGroup` | exposed | Group termination conveniences over `signalSendGroup`. |
 | `sysprims_proc::{snapshot, snapshot_with_options, snapshot_filtered}` | default C aliases or none | default N-API aliases or none | `processList` | exposed through the options-capable operation | These Rust convenience variants collapse into the single public filtered/options-capable operation. |
 | `sysprims_proc::{get_process, descendants, descendants_with_options, descendants_with_config}` | default C aliases or none | default N-API aliases or none | `procGet`, `descendants` | exposed through options-capable operations | These Rust convenience variants do not require duplicate JavaScript values. Phase B adds opt-in descendant detail fields to the existing `descendants` operation rather than another public function. |
 | `sysprims_proc::{cpu_total_time_ns, select_descendant_targets}` | none | none | none | excluded, implementation support | These operations support CPU enrichment and remediation selection internally; neither is a standalone cross-layer capability contract. |
@@ -189,25 +198,25 @@ ABI and retains its existing compatibility contract.
 
 ## Public Type Export Inventory
 
-The emitted package root must continue to export these 43 explicit type names:
+The emitted package root must continue to export these 45 explicit type names:
 
 `AncestorsOptions`, `AncestorsResult`, `BatchKillFailure`, `BatchKillResult`,
 `ContainedProcessWaitOptions`, `ContainmentCompletion`, `ContainmentIdentity`,
 `ContainmentSnapshot`, `CpuMode`, `DescendantsLevel`, `DescendantsOptions`,
 `DescendantsResult`, `FdFilter`, `FdSnapshot`, `GuardAction`, `GuardConfig`,
 `GuardEvent`, `GuardRule`, `KillDescendantsFailure`, `KillDescendantsOptions`,
-`KillDescendantsResult`, `PortBinding`, `PortBindingsSnapshot`, `PortFilter`,
-`ProcessFilter`, `ProcessInfo`, `ProcessOptions`, `ProcessSnapshot`,
-`ProcessState`, `Protocol`, `RunNohupConfig`, `RunSetsidConfig`,
-`SessionIdentifierProvenance`, `SessionKind`, `SessionSpawnResult`,
-`SessionSpawnStatus`, `SessionSpawnVerb`, `SpawnContainedOptions`,
-`SpawnInGroupConfig`, `SpawnInGroupResult`, `TerminateTreeConfig`,
-`TerminateTreeResult`, and `WaitPidResult`.
+`KillDescendantsResult`, `OpenProcessHandleOptions`, `PortBinding`,
+`PortBindingsSnapshot`, `PortFilter`, `ProcessFilter`, `ProcessInfo`,
+`ProcessOptions`, `ProcessSnapshot`, `ProcessState`, `Protocol`, `RunNohupConfig`,
+`RunSetsidConfig`, `SessionIdentifierProvenance`, `SessionKind`,
+`SessionSpawnResult`, `SessionSpawnStatus`, `SessionSpawnVerb`, `SignalBinding`,
+`SpawnContainedOptions`, `SpawnInGroupConfig`, `SpawnInGroupResult`,
+`TerminateTreeConfig`, `TerminateTreeResult`, and `WaitPidResult`.
 
-`ContainedProcess`, `SysprimsError`, and `SysprimsErrorCode` also remain
-available in both the value and type namespaces. `FdInfo` and `FdKind` remain
-package-root type exports because existing public `FdSnapshot` and `FdFilter`
-declarations already reference them.
+`ContainedProcess`, `ProcessHandle`, `SysprimsError`, and `SysprimsErrorCode`
+also remain available in both the value and type namespaces. `FdInfo` and
+`FdKind` remain package-root type exports because existing public `FdSnapshot`
+and `FdFilter` declarations already reference them.
 
 ## Projection and Drift Policy
 

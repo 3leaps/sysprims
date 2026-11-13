@@ -617,6 +617,96 @@ fn signal_kill_many(py: Python<'_>, pids: Vec<i128>, signal: i128) -> PyResult<S
     .map_err(py_sysprims_err)
 }
 
+#[pyfunction]
+fn resolve_signal_name(signal_name: &str) -> PyResult<i32> {
+    sysprims_signal::resolve_signal_name(signal_name).map_err(py_sysprims_err)
+}
+
+#[pyfunction]
+fn match_signal_names(pattern: &str) -> Vec<&'static str> {
+    sysprims_signal::match_signal_names(pattern)
+}
+
+#[pyfunction]
+fn kill_by_name(py: Python<'_>, pid: i128, signal_name: &str) -> PyResult<()> {
+    let pid = validate_pid(pid, "pid").map_err(py_sysprims_err)?;
+    py.detach(|| sysprims_signal::kill_by_name(pid, signal_name))
+        .map_err(py_sysprims_err)
+}
+
+#[pyfunction]
+fn kill_group_by_name(py: Python<'_>, pgid: i128, signal_name: &str) -> PyResult<()> {
+    let pgid = validate_pid(pgid, "pgid").map_err(py_sysprims_err)?;
+    py.detach(|| sysprims_signal::kill_group_by_name(pgid, signal_name))
+        .map_err(py_sysprims_err)
+}
+
+#[pyclass(frozen, module = "sysprims._sysprims", name = "RawProcessHandle")]
+struct RawProcessHandle {
+    inner: sysprims_signal::ProcessHandle,
+}
+
+#[pymethods]
+impl RawProcessHandle {
+    #[staticmethod]
+    #[pyo3(signature = (pid, expected_start_identity = None))]
+    fn open(py: Python<'_>, pid: i128, expected_start_identity: Option<&str>) -> PyResult<Self> {
+        let pid = validate_pid(pid, "pid").map_err(py_sysprims_err)?;
+        let expected = expected_start_identity.map(str::to_string);
+        py.detach(move || match expected {
+            Some(ref exp) => sysprims_signal::open_process_handle_verified(pid, exp),
+            None => sysprims_signal::open_process_handle(pid),
+        })
+        .map(|inner| Self { inner })
+        .map_err(py_sysprims_err)
+    }
+
+    fn pid(&self) -> u32 {
+        self.inner.pid()
+    }
+
+    fn start_identity(&self) -> &str {
+        self.inner.start_identity()
+    }
+
+    fn binding(&self) -> &'static str {
+        self.inner.binding().as_str()
+    }
+
+    fn closed(&self) -> bool {
+        self.inner.is_closed()
+    }
+
+    fn exited(&self, py: Python<'_>) -> PyResult<bool> {
+        py.detach(|| self.inner.exited()).map_err(py_sysprims_err)
+    }
+
+    fn signal(&self, py: Python<'_>, sig: i128) -> PyResult<&'static str> {
+        let sig = validate_i32(sig, "signal").map_err(py_sysprims_err)?;
+        py.detach(|| self.inner.signal(sig).map(|b| b.as_str()))
+            .map_err(py_sysprims_err)
+    }
+
+    fn signal_by_name(&self, py: Python<'_>, signal_name: &str) -> PyResult<&'static str> {
+        py.detach(|| self.inner.signal_by_name(signal_name).map(|b| b.as_str()))
+            .map_err(py_sysprims_err)
+    }
+
+    fn terminate(&self, py: Python<'_>) -> PyResult<&'static str> {
+        py.detach(|| self.inner.terminate().map(|b| b.as_str()))
+            .map_err(py_sysprims_err)
+    }
+
+    fn force_kill(&self, py: Python<'_>) -> PyResult<&'static str> {
+        py.detach(|| self.inner.force_kill().map(|b| b.as_str()))
+            .map_err(py_sysprims_err)
+    }
+
+    fn close(&self) {
+        self.inner.close();
+    }
+}
+
 // =============================================================================
 // Terminate Tree & Timeout Execution
 // =============================================================================
@@ -1317,6 +1407,7 @@ fn _sysprims(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type::<RawRecurrenceQueryError>(),
     )?;
     m.add_class::<RawRecurrenceRule>()?;
+    m.add_class::<RawProcessHandle>()?;
 
     m.add_function(wrap_pyfunction!(abi_version, m)?)?;
     m.add_function(wrap_pyfunction!(platform, m)?)?;
@@ -1336,6 +1427,10 @@ fn _sysprims(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(terminate, m)?)?;
     m.add_function(wrap_pyfunction!(force_kill, m)?)?;
     m.add_function(wrap_pyfunction!(signal_kill_many, m)?)?;
+    m.add_function(wrap_pyfunction!(resolve_signal_name, m)?)?;
+    m.add_function(wrap_pyfunction!(match_signal_names, m)?)?;
+    m.add_function(wrap_pyfunction!(kill_by_name, m)?)?;
+    m.add_function(wrap_pyfunction!(kill_group_by_name, m)?)?;
     m.add_function(wrap_pyfunction!(terminate_tree, m)?)?;
     m.add_function(wrap_pyfunction!(run_with_timeout, m)?)?;
     m.add_function(wrap_pyfunction!(run_setsid, m)?)?;
@@ -1354,7 +1449,10 @@ fn _sysprims(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("RECURRENCE_CORPUS_DIGEST", RECURRENCE_CORPUS_DIGEST_STR)?;
     m.add("SIGHUP", sysprims_signal::SIGHUP)?;
     m.add("SIGINT", sysprims_signal::SIGINT)?;
+    m.add("SIGQUIT", sysprims_signal::SIGQUIT)?;
     m.add("SIGKILL", sysprims_signal::SIGKILL)?;
+    m.add("SIGPIPE", sysprims_signal::SIGPIPE)?;
+    m.add("SIGALRM", sysprims_signal::SIGALRM)?;
     m.add("SIGTERM", sysprims_signal::SIGTERM)?;
     m.add("SIGUSR1", sysprims_signal::SIGUSR1)?;
     m.add("SIGUSR2", sysprims_signal::SIGUSR2)?;

@@ -1,20 +1,38 @@
 {
-  "matrixSha256": "266bc16c8ccdb7fa821b7ec3e122655d58346afa7484712fa1f00909a124152c",
+  "matrixSha256": "de5554c50693ec7fed1f90ae9774f60be0c7187e71f6411dfb19357b2f813eab",
   "publicValues": {
     "ContainedProcess": "Managed containment lifecycle",
+    "MAX_SAFE_PID": "Signal one process",
+    "ProcessHandle": "Process-bound signal and exit handle",
+    "SIGALRM": "Signal one process",
+    "SIGHUP": "Signal one process",
+    "SIGINT": "Signal one process",
+    "SIGKILL": "Signal one process",
+    "SIGPIPE": "Signal one process",
+    "SIGQUIT": "Signal one process",
+    "SIGTERM": "Signal one process",
+    "SIGUSR1": "Signal one process",
+    "SIGUSR2": "Signal one process",
     "SysprimsError": "Error values",
     "SysprimsErrorCode": "Error values",
     "ancestors": "Ancestor traversal",
     "descendants": "Descendant traversal",
     "forceKill": "Forced direct termination",
+    "forceKillGroup": "Signal one process group",
     "forceKillMany": "JavaScript batch signal conveniences",
     "guardStep": "Stateless guard evaluation",
+    "killByName": "Signal catalog and name-based dispatch",
     "killDescendants": "Descendant remediation",
+    "killGroupByName": "Signal catalog and name-based dispatch",
     "killMany": "JavaScript batch signal conveniences",
     "listFds": "File descriptor listing",
     "listeningPorts": "Listening ports",
+    "matchSignalNames": "Signal catalog and name-based dispatch",
+    "openProcessHandle": "Process-bound signal and exit handle",
+    "openProcessHandleVerified": "Process-bound signal and exit handle",
     "procGet": "Process lookup",
     "processList": "Process snapshot",
+    "resolveSignalName": "Signal catalog and name-based dispatch",
     "runNohup": "Nohup spawn",
     "runSetsid": "New session spawn",
     "selfPGID": "Current process group",
@@ -24,8 +42,11 @@
     "spawnContained": "Managed contained spawn",
     "spawnInGroup": "PID-returning grouped spawn",
     "terminate": "Graceful direct termination",
+    "terminateGroup": "Signal one process group",
     "terminateMany": "JavaScript batch signal conveniences",
     "terminateTree": "PID-based tree termination",
+    "validatePgid": "Signal one process group",
+    "validatePid": "Signal one process",
     "waitPID": "PID wait"
   },
   "publicTypes": {
@@ -53,10 +74,12 @@
     "KillDescendantsFailure": "Descendant remediation",
     "KillDescendantsOptions": "Descendant remediation",
     "KillDescendantsResult": "Descendant remediation",
+    "OpenProcessHandleOptions": "Process-bound signal and exit handle",
     "PortBinding": "Listening ports",
     "PortBindingsSnapshot": "Listening ports",
     "PortFilter": "Listening ports",
     "ProcessFilter": "Process snapshot",
+    "ProcessHandle": "Process-bound signal and exit handle",
     "ProcessInfo": "Process lookup",
     "ProcessOptions": "Process lookup",
     "ProcessSnapshot": "Process snapshot",
@@ -69,6 +92,7 @@
     "SessionSpawnResult": "New session spawn",
     "SessionSpawnStatus": "New session spawn",
     "SessionSpawnVerb": "New session spawn",
+    "SignalBinding": "Process-bound signal and exit handle",
     "SpawnContainedOptions": "Managed contained spawn",
     "SpawnInGroupConfig": "PID-returning grouped spawn",
     "SpawnInGroupResult": "PID-returning grouped spawn",
@@ -85,39 +109,75 @@
     },
     "sysprimsContainmentClose": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprimsContainmentIdentity": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprimsContainmentPoll": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprimsContainmentSpawn": {
       "disposition": "exposed",
-      "public": ["spawnContained"]
+      "public": [
+        "spawnContained"
+      ]
     },
     "sysprimsContainmentTerminate": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprimsContainmentWait": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprimsForceKill": {
       "disposition": "exposed",
-      "public": ["forceKill"]
+      "public": [
+        "forceKill"
+      ]
+    },
+    "sysprimsKillByName": {
+      "disposition": "exposed",
+      "public": [
+        "killByName"
+      ]
+    },
+    "sysprimsKillGroupByName": {
+      "disposition": "exposed",
+      "public": [
+        "killGroupByName"
+      ]
+    },
+    "sysprimsMatchSignalNames": {
+      "disposition": "exposed",
+      "public": [
+        "matchSignalNames"
+      ]
     },
     "sysprimsProcAncestors": {
       "disposition": "exposed",
-      "public": ["ancestors"]
+      "public": [
+        "ancestors"
+      ]
     },
     "sysprimsProcDescendants": {
       "disposition": "exposed",
-      "public": ["descendants"]
+      "public": [
+        "descendants"
+      ]
     },
     "sysprimsProcGet": {
       "disposition": "internal-only",
@@ -125,15 +185,21 @@
     },
     "sysprimsProcGetEx": {
       "disposition": "exposed",
-      "public": ["procGet"]
+      "public": [
+        "procGet"
+      ]
     },
     "sysprimsProcGuardStep": {
       "disposition": "exposed",
-      "public": ["guardStep"]
+      "public": [
+        "guardStep"
+      ]
     },
     "sysprimsProcKillDescendants": {
       "disposition": "exposed",
-      "public": ["killDescendants"]
+      "public": [
+        "killDescendants"
+      ]
     },
     "sysprimsProcList": {
       "disposition": "internal-only",
@@ -141,55 +207,115 @@
     },
     "sysprimsProcListEx": {
       "disposition": "exposed",
-      "public": ["processList"]
+      "public": [
+        "processList"
+      ]
     },
     "sysprimsProcListFds": {
       "disposition": "exposed",
-      "public": ["listFds"]
+      "public": [
+        "listFds"
+      ]
     },
     "sysprimsProcListeningPorts": {
       "disposition": "exposed",
-      "public": ["listeningPorts"]
+      "public": [
+        "listeningPorts"
+      ]
     },
     "sysprimsProcWaitPid": {
       "disposition": "exposed",
-      "public": ["waitPID"]
+      "public": [
+        "waitPID"
+      ]
+    },
+    "sysprimsProcessHandleClose": {
+      "disposition": "exposed",
+      "public": [
+        "ProcessHandle"
+      ]
+    },
+    "sysprimsProcessHandleExited": {
+      "disposition": "exposed",
+      "public": [
+        "ProcessHandle"
+      ]
+    },
+    "sysprimsProcessHandleOpen": {
+      "disposition": "exposed",
+      "public": [
+        "openProcessHandle",
+        "openProcessHandleVerified"
+      ]
+    },
+    "sysprimsProcessHandleSignal": {
+      "disposition": "exposed",
+      "public": [
+        "ProcessHandle"
+      ]
+    },
+    "sysprimsResolveSignalName": {
+      "disposition": "exposed",
+      "public": [
+        "ProcessHandle",
+        "resolveSignalName"
+      ]
     },
     "sysprimsRunNohup": {
       "disposition": "exposed",
-      "public": ["runNohup"]
+      "public": [
+        "runNohup"
+      ]
     },
     "sysprimsRunSetsid": {
       "disposition": "exposed",
-      "public": ["runSetsid"]
+      "public": [
+        "runSetsid"
+      ]
     },
     "sysprimsSelfGetpgid": {
       "disposition": "exposed",
-      "public": ["selfPGID"]
+      "public": [
+        "selfPGID"
+      ]
     },
     "sysprimsSelfGetsid": {
       "disposition": "exposed",
-      "public": ["selfSID"]
+      "public": [
+        "selfSID"
+      ]
     },
     "sysprimsSignalSend": {
       "disposition": "exposed",
-      "public": ["signalSend"]
+      "public": [
+        "signalSend"
+      ]
     },
     "sysprimsSignalSendGroup": {
       "disposition": "exposed",
-      "public": ["signalSendGroup"]
+      "public": [
+        "forceKillGroup",
+        "signalSendGroup",
+        "terminateGroup"
+      ]
     },
     "sysprimsSpawnInGroup": {
       "disposition": "exposed",
-      "public": ["spawnInGroup"]
+      "public": [
+        "spawnInGroup"
+      ]
     },
     "sysprimsTerminate": {
       "disposition": "exposed",
-      "public": ["terminate"]
+      "public": [
+        "terminate"
+      ]
     },
     "sysprimsTerminateTree": {
       "disposition": "exposed",
-      "public": ["terminateTree"]
+      "public": [
+        "terminateTree"
+      ]
     }
   },
   "cAbi": {
@@ -203,31 +329,45 @@
     },
     "sysprims_containment_close": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprims_containment_identity": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprims_containment_poll": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprims_containment_spawn": {
       "disposition": "exposed",
-      "public": ["spawnContained"]
+      "public": [
+        "spawnContained"
+      ]
     },
     "sysprims_containment_terminate": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprims_containment_wait": {
       "disposition": "exposed",
-      "public": ["ContainedProcess"]
+      "public": [
+        "ContainedProcess"
+      ]
     },
     "sysprims_force_kill": {
       "disposition": "exposed",
-      "public": ["forceKill"]
+      "public": [
+        "forceKill"
+      ]
     },
     "sysprims_free_string": {
       "disposition": "excluded",
@@ -247,15 +387,21 @@
     },
     "sysprims_proc_ancestors": {
       "disposition": "exposed",
-      "public": ["ancestors"]
+      "public": [
+        "ancestors"
+      ]
     },
     "sysprims_proc_descendants": {
       "disposition": "exposed",
-      "public": ["descendants"]
+      "public": [
+        "descendants"
+      ]
     },
     "sysprims_proc_descendants_ex": {
       "disposition": "exposed",
-      "public": ["descendants"]
+      "public": [
+        "descendants"
+      ]
     },
     "sysprims_proc_get": {
       "disposition": "excluded",
@@ -263,7 +409,9 @@
     },
     "sysprims_proc_get_ex": {
       "disposition": "exposed",
-      "public": ["procGet"]
+      "public": [
+        "procGet"
+      ]
     },
     "sysprims_proc_guard_runner_create": {
       "disposition": "excluded",
@@ -283,7 +431,9 @@
     },
     "sysprims_proc_guard_step": {
       "disposition": "exposed",
-      "public": ["guardStep"]
+      "public": [
+        "guardStep"
+      ]
     },
     "sysprims_proc_kill_descendants": {
       "disposition": "excluded",
@@ -291,7 +441,9 @@
     },
     "sysprims_proc_kill_descendants_ex": {
       "disposition": "exposed",
-      "public": ["killDescendants"]
+      "public": [
+        "killDescendants"
+      ]
     },
     "sysprims_proc_list": {
       "disposition": "excluded",
@@ -299,55 +451,81 @@
     },
     "sysprims_proc_list_ex": {
       "disposition": "exposed",
-      "public": ["processList"]
+      "public": [
+        "processList"
+      ]
     },
     "sysprims_proc_list_fds": {
       "disposition": "exposed",
-      "public": ["listFds"]
+      "public": [
+        "listFds"
+      ]
     },
     "sysprims_proc_listening_ports": {
       "disposition": "exposed",
-      "public": ["listeningPorts"]
+      "public": [
+        "listeningPorts"
+      ]
     },
     "sysprims_proc_wait_pid": {
       "disposition": "exposed",
-      "public": ["waitPID"]
+      "public": [
+        "waitPID"
+      ]
     },
     "sysprims_run_nohup": {
       "disposition": "exposed",
-      "public": ["runNohup"]
+      "public": [
+        "runNohup"
+      ]
     },
     "sysprims_run_setsid": {
       "disposition": "exposed",
-      "public": ["runSetsid"]
+      "public": [
+        "runSetsid"
+      ]
     },
     "sysprims_self_getpgid": {
       "disposition": "exposed",
-      "public": ["selfPGID"]
+      "public": [
+        "selfPGID"
+      ]
     },
     "sysprims_self_getsid": {
       "disposition": "exposed",
-      "public": ["selfSID"]
+      "public": [
+        "selfSID"
+      ]
     },
     "sysprims_signal_send": {
       "disposition": "exposed",
-      "public": ["signalSend"]
+      "public": [
+        "signalSend"
+      ]
     },
     "sysprims_signal_send_group": {
       "disposition": "exposed",
-      "public": ["signalSendGroup"]
+      "public": [
+        "signalSendGroup"
+      ]
     },
     "sysprims_spawn_in_group": {
       "disposition": "exposed",
-      "public": ["spawnInGroup"]
+      "public": [
+        "spawnInGroup"
+      ]
     },
     "sysprims_terminate": {
       "disposition": "exposed",
-      "public": ["terminate"]
+      "public": [
+        "terminate"
+      ]
     },
     "sysprims_terminate_tree": {
       "disposition": "exposed",
-      "public": ["terminateTree"]
+      "public": [
+        "terminateTree"
+      ]
     },
     "sysprims_timeout_run": {
       "disposition": "excluded",

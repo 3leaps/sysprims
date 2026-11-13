@@ -13,33 +13,46 @@ from . import _sysprims as _native
 
 __all__ = [
     "ContainedProcess",
+    "MAX_SAFE_PID",
+    "ProcessHandle",
     "RECURRENCE_CONTRACT",
     "RECURRENCE_CORPUS_DIGEST",
     "RECURRENCE_REFUSAL_REASONS",
     "RecurrenceQueryError",
     "RecurrenceRefusal",
     "RecurrenceRule",
+    "SIGALRM",
     "SIGHUP",
     "SIGINT",
     "SIGKILL",
+    "SIGPIPE",
+    "SIGQUIT",
     "SIGTERM",
     "SIGUSR1",
     "SIGUSR2",
+    "SignalBinding",
     "SysprimsError",
     "SysprimsErrorCode",
     "abi_version",
     "ancestors",
     "descendants",
     "force_kill",
+    "force_kill_group",
     "force_kill_many",
     "guard_step",
+    "kill_by_name",
     "kill_descendants",
+    "kill_group_by_name",
     "kill_many",
     "list_fds",
     "listening_ports",
+    "match_signal_names",
+    "open_process_handle",
+    "open_process_handle_verified",
     "platform",
     "proc_get",
     "process_list",
+    "resolve_signal_name",
     "run_nohup",
     "run_setsid",
     "run_with_timeout",
@@ -50,9 +63,12 @@ __all__ = [
     "spawn_contained",
     "spawn_in_group",
     "terminate",
+    "terminate_group",
     "terminate_many",
     "terminate_tree",
     "tzdb_version",
+    "validate_pgid",
+    "validate_pid",
     "wait_pid",
 ]
 
@@ -71,13 +87,17 @@ RECURRENCE_REFUSAL_REASONS: Final[tuple[str, ...]] = (
 
 SIGHUP: Final[int] = _native.SIGHUP
 SIGINT: Final[int] = _native.SIGINT
+SIGQUIT: Final[int] = _native.SIGQUIT
 SIGKILL: Final[int] = _native.SIGKILL
+SIGPIPE: Final[int] = _native.SIGPIPE
+SIGALRM: Final[int] = _native.SIGALRM
 SIGTERM: Final[int] = _native.SIGTERM
 SIGUSR1: Final[int] = _native.SIGUSR1
 SIGUSR2: Final[int] = _native.SIGUSR2
 
 _U32_MAX: Final[int] = 0xFFFF_FFFF
 _MAX_SAFE_PID: Final[int] = 0x7FFF_FFFF
+MAX_SAFE_PID: Final[int] = _MAX_SAFE_PID
 _MAX_DURATION_MS: Final[int] = 86_400_000
 
 _BATCH_KILL_SCHEMA_ID: Final[str] = (
@@ -165,6 +185,16 @@ def _require_pid(value: Any, name: str = "pid") -> int:
             f"{name} must be between 1 and {_MAX_SAFE_PID}",
         )
     return iv
+
+
+def validate_pid(pid: int) -> None:
+    """Validate that pid is a safe single-process target (1 <= pid <= MAX_SAFE_PID)."""
+    _require_pid(pid, "pid")
+
+
+def validate_pgid(pgid: int) -> None:
+    """Validate that pgid is a safe process-group target (1 <= pgid <= MAX_SAFE_PID)."""
+    _require_pid(pgid, "pgid")
 
 
 def _require_bool(value: Any, name: str) -> bool:
@@ -558,6 +588,212 @@ def force_kill_many(pids: Sequence[int]) -> dict[str, Any]:
         "succeeded": succeeded,
         "failed": failed,
     }
+
+
+def terminate_group(pgid: int) -> None:
+    """Send `SIGTERM` to process group `pgid` (Unix only)."""
+    signal_send_group(pgid, SIGTERM)
+
+
+def force_kill_group(pgid: int) -> None:
+    """Send `SIGKILL` to process group `pgid` (Unix only)."""
+    signal_send_group(pgid, SIGKILL)
+
+
+def resolve_signal_name(signal_name: str) -> int:
+    """Resolve a signal number by canonical name (`SIGTERM`), short name (`TERM`), or short ID (`term`)."""
+    if not isinstance(signal_name, str):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            f"signal_name must be a str, not {type(signal_name).__name__}",
+        )
+    try:
+        return int(_native.resolve_signal_name(signal_name))
+    except _native.RawSysprimsError as exc:
+        raise SysprimsError(*exc.args) from None
+
+
+def match_signal_names(pattern: str) -> list[str]:
+    """Return canonical signal names matching a simple `*`/`?` glob pattern."""
+    if not isinstance(pattern, str):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            f"pattern must be a str, not {type(pattern).__name__}",
+        )
+    return [str(item) for item in _native.match_signal_names(pattern)]
+
+
+def kill_by_name(pid: int, signal_name: str) -> None:
+    """Resolve `signal_name` and send it to `pid`."""
+    checked_pid = _require_pid(pid, "pid")
+    if not isinstance(signal_name, str):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            f"signal_name must be a str, not {type(signal_name).__name__}",
+        )
+    _call_void(_native.kill_by_name, checked_pid, signal_name)
+
+
+def kill_group_by_name(pgid: int, signal_name: str) -> None:
+    """Resolve `signal_name` and send it to process group `pgid` (Unix only)."""
+    checked_pgid = _require_pid(pgid, "pgid")
+    if not isinstance(signal_name, str):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            f"signal_name must be a str, not {type(signal_name).__name__}",
+        )
+    _call_void(_native.kill_group_by_name, checked_pgid, signal_name)
+
+
+class SignalBinding:
+    """Signal binding strength constants for `ProcessHandle` (`bound` or `checked_numeric`)."""
+
+    BOUND: Final[str] = "bound"
+    CHECKED_NUMERIC: Final[str] = "checked_numeric"
+
+
+class ProcessHandle:
+    """Signal and exit-watch handle bound to a verified process incarnation.
+
+    Supports `with open_process_handle(pid) as h:` context management; exiting
+    the `with` block closes the underlying OS handle without terminating the
+    target process.
+    """
+
+    __slots__ = ("_raw",)
+
+    def __init__(self, _raw: Any, *, _internal: bool = False) -> None:
+        if not _internal:
+            raise TypeError(
+                "ProcessHandle must be created via open_process_handle() or open_process_handle_verified()"
+            )
+        self._raw = _raw
+
+    @property
+    def pid(self) -> int:
+        """Numeric PID (`1..=MAX_SAFE_PID`) verified at handle creation."""
+        return int(self._raw.pid())
+
+    @property
+    def start_identity(self) -> str:
+        """Canonical native start-identity string captured at handle creation."""
+        return str(self._raw.start_identity())
+
+    @property
+    def binding(self) -> str:
+        """Binding strength (`'bound'` or `'checked_numeric'`)."""
+        return str(self._raw.binding())
+
+    @property
+    def closed(self) -> bool:
+        """Whether `close()` has been called on this handle."""
+        return bool(self._raw.closed())
+
+    def exited(self) -> bool:
+        """Check whether whole-process exit has been observed (latched once True)."""
+        try:
+            return bool(self._raw.exited())
+        except _native.RawSysprimsError as exc:
+            raise SysprimsError(*exc.args) from None
+
+    def signal(self, sig: int) -> str:
+        """Deliver `sig` to the bound process, returning the binding strength (`'bound'` or `'checked_numeric'`)."""
+        checked_sig = _require_int(sig, "signal")
+        try:
+            return str(self._raw.signal(checked_sig))
+        except _native.RawSysprimsError as exc:
+            raise SysprimsError(*exc.args) from None
+
+    def signal_by_name(self, signal_name: str) -> str:
+        """Resolve `signal_name` and deliver it to the bound process."""
+        if not isinstance(signal_name, str):
+            raise SysprimsError(
+                SysprimsErrorCode.INVALID_ARGUMENT,
+                f"signal_name must be a str, not {type(signal_name).__name__}",
+            )
+        try:
+            return str(self._raw.signal_by_name(signal_name))
+        except _native.RawSysprimsError as exc:
+            raise SysprimsError(*exc.args) from None
+
+    def terminate(self) -> str:
+        """Deliver `SIGTERM` to the bound process."""
+        try:
+            return str(self._raw.terminate())
+        except _native.RawSysprimsError as exc:
+            raise SysprimsError(*exc.args) from None
+
+    def force_kill(self) -> str:
+        """Deliver `SIGKILL` to the bound process."""
+        try:
+            return str(self._raw.force_kill())
+        except _native.RawSysprimsError as exc:
+            raise SysprimsError(*exc.args) from None
+
+    def close(self) -> None:
+        """Release the underlying OS descriptor/handle early (idempotent)."""
+        self._raw.close()
+
+    def __enter__(self) -> ProcessHandle:
+        if self.closed:
+            raise SysprimsError(
+                SysprimsErrorCode.INVALID_ARGUMENT,
+                "process handle is closed",
+            )
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
+
+    def __repr__(self) -> str:
+        state = "closed" if self.closed else "open"
+        return (
+            f"<ProcessHandle pid={self.pid} start_identity={self.start_identity!r} "
+            f"binding={self.binding!r} {state}>"
+        )
+
+    def __copy__(self) -> ProcessHandle:
+        raise TypeError("ProcessHandle cannot be copied")
+
+    def __deepcopy__(self, memo: Any) -> ProcessHandle:
+        raise TypeError("ProcessHandle cannot be deep-copied")
+
+    def __reduce__(self) -> Any:
+        raise TypeError("ProcessHandle cannot be pickled")
+
+
+def open_process_handle(
+    pid: int,
+    *,
+    expected_start_identity: str | None = None,
+) -> ProcessHandle:
+    """Open a `ProcessHandle` bound to the verified process incarnation at `pid`."""
+    checked_pid = _require_pid(pid, "pid")
+    if expected_start_identity is not None and not isinstance(
+        expected_start_identity, str
+    ):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            f"expected_start_identity must be a str, not {type(expected_start_identity).__name__}",
+        )
+    try:
+        raw = _native.RawProcessHandle.open(checked_pid, expected_start_identity)
+    except _native.RawSysprimsError as exc:
+        raise SysprimsError(*exc.args) from None
+    return ProcessHandle(raw, _internal=True)
+
+
+def open_process_handle_verified(
+    pid: int,
+    expected_start_identity: str,
+) -> ProcessHandle:
+    """Open a `ProcessHandle` for `pid`, requiring its native start-identity to match `expected_start_identity`."""
+    if not isinstance(expected_start_identity, str):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT,
+            f"expected_start_identity must be a str, not {type(expected_start_identity).__name__}",
+        )
+    return open_process_handle(pid, expected_start_identity=expected_start_identity)
 
 
 # =============================================================================

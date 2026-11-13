@@ -30,12 +30,21 @@ use sysprims_core::{SysprimsError, SysprimsResult};
 /// We reject these at the API boundary to prevent accidental mass termination.
 pub const MAX_SAFE_PID: u32 = i32::MAX as u32;
 
-/// Validate that a PID is safe to use with POSIX signal functions.
+pub(crate) const TERMINATE_SIGNAL: i32 = SIGTERM;
+pub(crate) const FORCE_KILL_SIGNAL: i32 = SIGKILL;
+
+pub mod handle;
+pub use handle::{
+    open_process_handle, open_process_handle_verified, with_forced_checked_numeric_for_test,
+    ProcessHandle, SignalBinding,
+};
+
+/// Validate that a parameter (`pid` or `pgid`) is safe to use with POSIX signal functions.
 ///
 /// Returns an error if:
 /// - `pid == 0`: Would signal the caller's process group
 /// - `pid > i32::MAX`: Would overflow to negative, triggering broadcast semantics
-fn validate_pid(pid: u32, param_name: &str) -> SysprimsResult<()> {
+fn validate_pid_param(pid: u32, param_name: &str) -> SysprimsResult<()> {
     if pid == 0 {
         return Err(SysprimsError::invalid_argument(format!(
             "{param_name} must be > 0"
@@ -50,6 +59,16 @@ fn validate_pid(pid: u32, param_name: &str) -> SysprimsResult<()> {
         )));
     }
     Ok(())
+}
+
+/// Validate that a PID is safe (`1..=MAX_SAFE_PID`) per ADR-0011.
+pub fn validate_pid(pid: u32) -> SysprimsResult<()> {
+    validate_pid_param(pid, "pid")
+}
+
+/// Validate that a PGID is safe (`1..=MAX_SAFE_PID`) per ADR-0011.
+pub fn validate_pgid(pgid: u32) -> SysprimsResult<()> {
+    validate_pid_param(pgid, "pgid")
 }
 
 #[derive(Debug)]
@@ -72,7 +91,7 @@ fn validate_pid_list(pids: &[u32], param_name: &str) -> SysprimsResult<()> {
     }
 
     for &pid in pids {
-        validate_pid(pid, param_name)?;
+        validate_pid_param(pid, param_name)?;
     }
 
     Ok(())
@@ -88,6 +107,20 @@ mod windows;
 // This crate is explicitly about signals, so re-exporting these at the crate
 // root is intentional and ergonomic.
 pub use rsfulmen::foundry::signals::*;
+
+/// User-defined signal 1 (`30` on macOS, `10` on Linux and other platforms).
+#[cfg(target_os = "macos")]
+pub const SIGUSR1: i32 = 30;
+/// User-defined signal 1 (`30` on macOS, `10` on Linux and other platforms).
+#[cfg(not(target_os = "macos"))]
+pub const SIGUSR1: i32 = 10;
+
+/// User-defined signal 2 (`31` on macOS, `12` on Linux and other platforms).
+#[cfg(target_os = "macos")]
+pub const SIGUSR2: i32 = 31;
+/// User-defined signal 2 (`31` on macOS, `12` on Linux and other platforms).
+#[cfg(not(target_os = "macos"))]
+pub const SIGUSR2: i32 = 12;
 
 fn resolve_signal_number(signal_name: &str) -> Option<i32> {
     let trimmed = signal_name.trim();
@@ -172,7 +205,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// sysprims_signal::kill(4242, SIGTERM).ok();
 /// ```
 pub fn kill(pid: u32, signal: i32) -> SysprimsResult<()> {
-    validate_pid(pid, "pid")?;
+    validate_pid(pid)?;
 
     #[cfg(unix)]
     return unix::kill_impl(pid, signal);
@@ -239,6 +272,13 @@ pub fn force_kill_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
     kill_many(pids, SIGKILL)
 }
 
+/// Resolve a signal number by name (`SIGTERM`, `TERM`, `sigterm`, or short ID `term`).
+pub fn resolve_signal_name(signal_name: &str) -> SysprimsResult<i32> {
+    resolve_signal_number(signal_name).ok_or_else(|| {
+        SysprimsError::invalid_argument(format!("unknown signal name: {signal_name}"))
+    })
+}
+
 /// Send a signal to a process, resolving the signal number by name.
 ///
 /// This uses rsfulmen's catalog plus a small normalization layer:
@@ -252,10 +292,14 @@ pub fn force_kill_many(pids: &[u32]) -> SysprimsResult<BatchKillResult> {
 /// sysprims_signal::kill_by_name(1234, "TERM").ok();
 /// ```
 pub fn kill_by_name(pid: u32, signal_name: &str) -> SysprimsResult<()> {
-    let signal = resolve_signal_number(signal_name).ok_or_else(|| {
-        SysprimsError::invalid_argument(format!("unknown signal name: {signal_name}"))
-    })?;
+    let signal = resolve_signal_name(signal_name)?;
     kill(pid, signal)
+}
+
+/// Send a signal to a process group, resolving the signal number by name.
+pub fn kill_group_by_name(pgid: u32, signal_name: &str) -> SysprimsResult<()> {
+    let signal = resolve_signal_name(signal_name)?;
+    killpg(pgid, signal)
 }
 
 /// Send a signal to a process group.
@@ -280,7 +324,7 @@ pub fn kill_by_name(pid: u32, signal_name: &str) -> SysprimsResult<()> {
 /// sysprims_signal::killpg(4242, SIGTERM).ok();
 /// ```
 pub fn killpg(pgid: u32, signal: i32) -> SysprimsResult<()> {
-    validate_pid(pgid, "pgid")?;
+    validate_pgid(pgid)?;
 
     #[cfg(unix)]
     return unix::killpg_impl(pgid, signal);
@@ -489,5 +533,214 @@ mod tests {
     fn killpg_is_not_supported_on_windows() {
         let err = killpg(1234, SIGTERM).unwrap_err();
         assert!(matches!(err, SysprimsError::NotSupported { .. }));
+    }
+
+    // ========================================================================
+    // ProcessHandle Tests
+    // ========================================================================
+
+    fn spawn_sleep_child() -> std::process::Child {
+        #[cfg(unix)]
+        {
+            std::process::Command::new("sleep")
+                .arg("30")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn sleep child")
+        }
+        #[cfg(windows)]
+        {
+            std::process::Command::new("ping")
+                .args(["-n", "30", "127.0.0.1"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn ping child")
+        }
+    }
+
+    #[test]
+    fn process_handle_rejects_invalid_pids() {
+        let err_zero = open_process_handle(0).unwrap_err();
+        assert!(matches!(err_zero, SysprimsError::InvalidArgument { .. }));
+
+        let err_max = open_process_handle(u32::MAX).unwrap_err();
+        assert!(matches!(err_max, SysprimsError::InvalidArgument { .. }));
+
+        let err_boundary = open_process_handle(MAX_SAFE_PID + 1).unwrap_err();
+        assert!(matches!(
+            err_boundary,
+            SysprimsError::InvalidArgument { .. }
+        ));
+    }
+
+    #[test]
+    fn process_handle_verified_rejects_empty_and_mismatched_start_identity() {
+        let self_pid = std::process::id();
+        let err_empty = open_process_handle_verified(self_pid, "   ").unwrap_err();
+        assert!(matches!(err_empty, SysprimsError::InvalidArgument { .. }));
+
+        let handle = open_process_handle(self_pid).expect("open self handle");
+        assert_eq!(handle.pid(), self_pid);
+        assert!(!handle.start_identity().is_empty());
+
+        let verified = open_process_handle_verified(self_pid, handle.start_identity())
+            .expect("open verified self handle");
+        assert_eq!(verified.start_identity(), handle.start_identity());
+
+        let err_mismatch = open_process_handle_verified(self_pid, "0000000000.999999").unwrap_err();
+        assert!(matches!(err_mismatch, SysprimsError::NotFound { .. }));
+    }
+
+    #[test]
+    fn process_handle_lifecycle_and_latched_exit() {
+        let mut child = spawn_sleep_child();
+        let pid = child.id();
+
+        let handle = open_process_handle(pid).expect("open child handle");
+        assert_eq!(handle.pid(), pid);
+        assert!(!handle.start_identity().is_empty());
+        assert!(!handle.exited().expect("exited check on live child"));
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(handle.binding(), SignalBinding::CheckedNumeric);
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        assert_eq!(handle.binding(), SignalBinding::Bound);
+
+        let binding = handle.force_kill().expect("force_kill bound child");
+        assert_eq!(binding, handle.binding());
+
+        let _ = child.wait();
+
+        // Wait briefly for OS exit observation if needed, then verify latched true.
+        let mut observed_exit = false;
+        for _ in 0..50 {
+            if handle.exited().expect("exited check after wait") {
+                observed_exit = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            observed_exit,
+            "expected exited() to become true after child exit"
+        );
+        assert!(handle.exited().expect("latched exited check"));
+
+        // Second signal after exit must refuse with NotFound without signaling numeric PID.
+        let second = handle.force_kill().unwrap_err();
+        assert!(matches!(second, SysprimsError::NotFound { .. }));
+
+        // Opening a new handle on the reaped PID (or with the old start_identity) must fail.
+        let reopen = open_process_handle_verified(pid, handle.start_identity()).unwrap_err();
+        assert!(matches!(reopen, SysprimsError::NotFound { .. }));
+
+        handle.close();
+        assert!(handle.is_closed());
+        handle.close(); // idempotent
+        let err_closed = handle.exited().unwrap_err();
+        assert!(matches!(err_closed, SysprimsError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn process_handle_detects_unreaped_zombie_exit_and_refuses_signal() {
+        let mut child = spawn_sleep_child();
+        let pid = child.id();
+        let handle = open_process_handle(pid).expect("open child handle");
+
+        let _ = child.kill();
+        // Deliberately do NOT wait() yet so child becomes an unreaped zombie on Unix.
+        let mut observed_exit = false;
+        for _ in 0..100 {
+            if handle.exited().expect("exited poll on zombie") {
+                observed_exit = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(observed_exit, "expected exited() on unreaped zombie");
+        let sig_err = handle.terminate().unwrap_err();
+        assert!(matches!(sig_err, SysprimsError::NotFound { .. }));
+
+        // Opening a fresh ProcessHandle on an unreaped zombie must also return NotFound.
+        let zombie_open = open_process_handle(pid).unwrap_err();
+        assert!(matches!(zombie_open, SysprimsError::NotFound { .. }));
+
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn process_handle_error_messages_do_not_leak_paths_or_cmdline() {
+        let err = open_process_handle(MAX_SAFE_PID).unwrap_err();
+        let msg = err.to_string();
+        assert!(!msg.contains("/Users/"));
+        assert!(!msg.contains("/home/"));
+        assert!(!msg.contains("sleep"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn process_handle_fd_is_cloexec_and_not_inherited_by_exec_children() {
+        let baseline = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "ls /dev/fd 2>/dev/null || ls /proc/self/fd 2>/dev/null",
+            ])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("list baseline child fds");
+        assert!(baseline.status.success());
+        let baseline_count = String::from_utf8_lossy(&baseline.stdout)
+            .split_whitespace()
+            .filter_map(|s| s.parse::<i32>().ok())
+            .count();
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let h = open_process_handle(std::process::id()).expect("open self handle");
+            assert!(!h.exited().expect("self is alive"));
+            handles.push(h);
+        }
+
+        let after = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "ls /dev/fd 2>/dev/null || ls /proc/self/fd 2>/dev/null",
+            ])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("list child fds with 8 open ProcessHandles");
+        assert!(after.status.success());
+        let after_count = String::from_utf8_lossy(&after.stdout)
+            .split_whitespace()
+            .filter_map(|s| s.parse::<i32>().ok())
+            .count();
+
+        // A non-CLOEXEC kqueue/pidfd opened in the parent would increase the child's
+        // open FD count by 8. With FD_CLOEXEC set, the child FD count is unchanged.
+        assert_eq!(
+            after_count, baseline_count,
+            "ProcessHandle FDs must not be inherited across exec"
+        );
+        drop(handles);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_checked_numeric_fallback_works_when_forced() {
+        with_forced_checked_numeric_for_test(|| {
+            let mut child = spawn_sleep_child();
+            let pid = child.id();
+            let handle = open_process_handle(pid).expect("open fallback handle");
+            assert_eq!(handle.binding(), SignalBinding::CheckedNumeric);
+            assert!(!handle.exited().expect("exited check"));
+            let b = handle.force_kill().expect("force_kill via fallback");
+            assert_eq!(b, SignalBinding::CheckedNumeric);
+            let _ = child.wait();
+            assert!(handle.exited().expect("exited after wait"));
+        });
     }
 }

@@ -38,6 +38,19 @@ def _recurrence_v0_dir() -> Path:
     )
 
 
+def _signal_vectors_path() -> Path:
+    override = os.environ.get("SIGNAL_CONFORMANCE_VECTORS")
+    if override:
+        return Path(override)
+    return (
+        Path(__file__).resolve().parents[3]
+        / "testdata"
+        / "conformance"
+        / "signal"
+        / "vectors.json"
+    )
+
+
 class SysprimsMetadataAndValidationTests(unittest.TestCase):
     def test_metadata_and_constants(self) -> None:
         self.assertEqual(sysprims.abi_version(), 1)
@@ -148,6 +161,227 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
             if proc2.poll() is None:
                 proc2.kill()
                 proc2.wait(timeout=5)
+
+    def test_signal_catalog_and_process_handle(self) -> None:
+        self.assertEqual(sysprims.MAX_SAFE_PID, 2_147_483_647)
+        self.assertEqual(sysprims.resolve_signal_name("SIGTERM"), sysprims.SIGTERM)
+        self.assertEqual(sysprims.resolve_signal_name("term"), sysprims.SIGTERM)
+        self.assertEqual(sysprims.resolve_signal_name("SIGKILL"), sysprims.SIGKILL)
+        self.assertEqual(sysprims.match_signal_names("SIGU*"), ["SIGUSR1", "SIGUSR2"])
+
+        with self.assertRaises(TypeError):
+            sysprims.ProcessHandle(object())
+
+        me = os.getpid()
+        with sysprims.open_process_handle(me) as self_h:
+            self.assertEqual(self_h.pid, me)
+            self.assertTrue(len(self_h.start_identity) > 0)
+            self.assertIn(
+                self_h.binding,
+                (
+                    sysprims.SignalBinding.BOUND,
+                    sysprims.SignalBinding.CHECKED_NUMERIC,
+                ),
+            )
+            self.assertFalse(self_h.exited())
+            with self.assertRaises(TypeError):
+                copy.copy(self_h)
+            with self.assertRaises(TypeError):
+                copy.deepcopy(self_h)
+            with self.assertRaises(TypeError):
+                pickle.dumps(self_h)
+
+            with sysprims.open_process_handle_verified(
+                me, self_h.start_identity
+            ) as verified:
+                self.assertEqual(verified.start_identity, self_h.start_identity)
+
+            with self.assertRaises(sysprims.SysprimsError) as mismatch_ctx:
+                sysprims.open_process_handle_verified(me, "0000000000.999999")
+            self.assertEqual(
+                mismatch_ctx.exception.code,
+                sysprims.SysprimsErrorCode.NOT_FOUND,
+            )
+
+        self.assertTrue(self_h.closed)
+        with self.assertRaises(sysprims.SysprimsError) as closed_ctx:
+            self_h.exited()
+        self.assertEqual(
+            closed_ctx.exception.code,
+            sysprims.SysprimsErrorCode.INVALID_ARGUMENT,
+        )
+
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            with sysprims.open_process_handle(child.pid) as ch:
+                self.assertFalse(ch.exited())
+                used_binding = ch.force_kill()
+                self.assertEqual(used_binding, ch.binding)
+                child.wait(timeout=10)
+                self.assertTrue(ch.exited())
+                self.assertTrue(ch.exited())  # latched
+                with self.assertRaises(sysprims.SysprimsError) as second_ctx:
+                    ch.force_kill()
+                self.assertEqual(
+                    second_ctx.exception.code,
+                    sysprims.SysprimsErrorCode.NOT_FOUND,
+                )
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+
+    def test_signal_conformance_vectors(self) -> None:
+        doc = json.loads(_signal_vectors_path().read_text(encoding="utf-8"))
+        self.assertEqual(doc["schema"], "sysprims-signal-conformance/v1")
+
+        ndjson_lines: list[dict[str, object]] = []
+
+        constants = doc["constants"]
+        self.assertEqual(constants["max_safe_pid"], sysprims.MAX_SAFE_PID)
+        common = constants["signals_common"]
+        self.assertEqual(common["SIGHUP"], sysprims.SIGHUP)
+        self.assertEqual(common["SIGINT"], sysprims.SIGINT)
+        self.assertEqual(common["SIGQUIT"], sysprims.SIGQUIT)
+        self.assertEqual(common["SIGKILL"], sysprims.SIGKILL)
+        self.assertEqual(common["SIGPIPE"], sysprims.SIGPIPE)
+        self.assertEqual(common["SIGALRM"], sysprims.SIGALRM)
+        self.assertEqual(common["SIGTERM"], sysprims.SIGTERM)
+        plat_key = "darwin" if sys.platform == "darwin" else "other"
+        plat = constants["signals_platform"][plat_key]
+        self.assertEqual(plat["SIGUSR1"], sysprims.SIGUSR1)
+        self.assertEqual(plat["SIGUSR2"], sysprims.SIGUSR2)
+
+        ndjson_lines.append(
+            {
+                "suite": "constants",
+                "id": "signal-constants",
+                "max_safe_pid": sysprims.MAX_SAFE_PID,
+                "sighup": sysprims.SIGHUP,
+                "sigint": sysprims.SIGINT,
+                "sigquit": sysprims.SIGQUIT,
+                "sigkill": sysprims.SIGKILL,
+                "sigpipe": sysprims.SIGPIPE,
+                "sigalrm": sysprims.SIGALRM,
+                "sigterm": sysprims.SIGTERM,
+                "sigusr1": sysprims.SIGUSR1,
+                "sigusr2": sysprims.SIGUSR2,
+            }
+        )
+
+        for case in doc["pid_validation_cases"]:
+            cid = case["id"]
+            kind = case["kind"]
+            val = case["value"]
+            expected = case["expected"]
+            if expected == "ok":
+                if kind == "pid":
+                    sysprims.validate_pid(val)
+                else:
+                    sysprims.validate_pgid(val)
+                got = "ok"
+            else:
+                with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                    if kind == "pid":
+                        sysprims.validate_pid(val)
+                    else:
+                        sysprims.validate_pgid(val)
+                got = ctx.exception.code.name.lower()
+                self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "pid-validation",
+                    "id": cid,
+                    "kind": kind,
+                    "outcome": got,
+                }
+            )
+
+        for case in doc["batch_validation_cases"]:
+            cid = case["id"]
+            pids = case["pids"]
+            expected = case["expected"]
+            with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                sysprims.kill_many(pids, sysprims.SIGTERM)
+            got = ctx.exception.code.name.lower()
+            self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "batch-validation",
+                    "id": cid,
+                    "outcome": got,
+                }
+            )
+
+        for case in doc["resolve_signal_cases"]:
+            cid = case["id"]
+            inp = case["input"]
+            expected = case["expected"]
+            if expected == "ok":
+                signum = sysprims.resolve_signal_name(inp)
+                want_signum = getattr(sysprims, case["signal"])
+                self.assertEqual(signum, want_signum, cid)
+                ndjson_lines.append(
+                    {
+                        "suite": "resolve-signal",
+                        "id": cid,
+                        "outcome": "ok",
+                        "signum": signum,
+                    }
+                )
+            else:
+                with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                    sysprims.resolve_signal_name(inp)
+                got = ctx.exception.code.name.lower()
+                self.assertEqual(got, expected, cid)
+                ndjson_lines.append(
+                    {
+                        "suite": "resolve-signal",
+                        "id": cid,
+                        "outcome": got,
+                    }
+                )
+
+        for case in doc["match_signal_cases"]:
+            cid = case["id"]
+            got_matches = sysprims.match_signal_names(case["pattern"])
+            self.assertEqual(got_matches, case["expected"], cid)
+            ndjson_lines.append(
+                {
+                    "suite": "match-signal",
+                    "id": cid,
+                    "matches": got_matches,
+                }
+            )
+
+        for case in doc["process_handle_validation_cases"]:
+            cid = case["id"]
+            pid = os.getpid() if case["pid"] == "self" else case["pid"]
+            expected = case["expected"]
+            with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                if "expected_start_identity" in case:
+                    sysprims.open_process_handle_verified(
+                        pid, case["expected_start_identity"]
+                    )
+                else:
+                    sysprims.open_process_handle(pid)
+            got = ctx.exception.code.name.lower()
+            self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "process-handle-validation",
+                    "id": cid,
+                    "outcome": got,
+                }
+            )
+
+        out_path = os.environ.get("SIGNAL_NDJSON_OUT")
+        if out_path:
+            Path(out_path).write_text(
+                "".join(f"{_jcs(row)}\n" for row in ndjson_lines),
+                encoding="utf-8",
+                newline="\n",
+            )
 
     def test_timeout_session_and_containment(self) -> None:
         ok = sysprims.run_with_timeout(
