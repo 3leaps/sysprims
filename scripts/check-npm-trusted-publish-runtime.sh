@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workflow=".github/workflows/typescript-npm-publish.yml"
+workflow=".github/workflows/registry-publish.yml"
 min_node="22.14.0"
 min_npm="11.5.1"
 

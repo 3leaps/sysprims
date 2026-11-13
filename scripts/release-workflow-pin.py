@@ -8,9 +8,9 @@ Every file under `.github/workflows/` and `.github/actions/` is listed in
 and a local composite action is code a workflow executes without a commit SHA
 in `uses:`, so the pin covers both directories rather than guessing from
 triggers. Every workflow must also declare read-only top-level permissions
-including `contents: read`, and every job must be read-only except the two
-reviewed workflow_dispatch-only jobs (`typescript-npm-publish.yml` `publish`
-and `go-bindings.yml` `update-go-bindings`).
+including `contents: read`, and every job must be read-only except the
+reviewed workflow_dispatch-only jobs (`registry-publish.yml` `publish-pypi` /
+`publish-npm` and `go-bindings.yml` `update-go-bindings`).
 
 Modes:
   check                 verify the working tree against config/release/release-workflow.sha256
@@ -43,13 +43,18 @@ RELEASE_MUTATION = re.compile(
     r"\bgh\s+release\b|\bgh\s+api\b[^\n]*releases|"
     r"api\.github\.com/repos/[^\s\"']*/releases|\bcreateRelease\b"
 )
-# Only these two reviewed workflow_dispatch-only jobs may request write scopes:
-# - typescript-npm-publish.yml publish: id-token: write behind publish-npm
+# Only these reviewed workflow_dispatch-only jobs may request write scopes:
+# - registry-publish.yml publish-pypi: id-token: write behind publish-pypi
+# - registry-publish.yml publish-npm: id-token: write behind publish-npm
 # - go-bindings.yml update-go-bindings: contents + pull-requests write to open
 #   the prebuilt-library PR
 ALLOWED_JOB_PERMISSIONS = {
-    (".github/workflows/typescript-npm-publish.yml", "publish"): (
-        {"contents": "read", "actions": "read", "id-token": "write"},
+    (".github/workflows/registry-publish.yml", "publish-pypi"): (
+        {"contents": "read", "id-token": "write"},
+        "publish-pypi",
+    ),
+    (".github/workflows/registry-publish.yml", "publish-npm"): (
+        {"contents": "read", "id-token": "write"},
         "publish-npm",
     ),
     (".github/workflows/go-bindings.yml", "update-go-bindings"): (

@@ -324,11 +324,15 @@ sed_in_place 's/^  contents: read$/  contents: write/' "$repo/.github/workflows/
 pin_with
 refused 'ci.yml must declare read-only top-level permissions' check
 git -C "$repo" checkout -q -- .
-sed_in_place 's/^    environment: publish-npm$/    environment: other-env/' "$repo/.github/workflows/typescript-npm-publish.yml"
+sed_in_place 's/^    environment: publish-npm$/    environment: other-env/' "$repo/.github/workflows/registry-publish.yml"
 pin_with
 refused 'grants more than read' check
 git -C "$repo" checkout -q -- .
-sed_in_place 's/^  workflow_dispatch:$/  push:\n  workflow_dispatch:/' "$repo/.github/workflows/typescript-npm-publish.yml"
+sed_in_place 's/^    environment: publish-pypi$/    environment: other-env/' "$repo/.github/workflows/registry-publish.yml"
+pin_with
+refused 'grants more than read' check
+git -C "$repo" checkout -q -- .
+sed_in_place 's/^  workflow_dispatch:$/  push:\n  workflow_dispatch:/' "$repo/.github/workflows/registry-publish.yml"
 pin_with
 refused 'must trigger on workflow_dispatch only' check
 git -C "$repo" checkout -q -- .

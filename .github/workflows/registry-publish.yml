@@ -1,0 +1,269 @@
+name: Registry Publish
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.5.0); dispatch with --ref matching this tag"
+        required: true
+        type: string
+      registry:
+        description: "Target registry"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - pypi
+          - npm
+      dry_run:
+        description: "Stage, verify, and compare without publishing to PyPI or npm"
+        required: false
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  stage:
+    name: Stage and Verify Published Release Assets
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      stage_pypi: ${{ steps.version.outputs.stage_pypi }}
+      stage_npm: ${{ steps.version.outputs.stage_npm }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '24.22.1'
+      - name: Verify workflow dispatch ref and materialize tag messages
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF:-}" != "refs/tags/${RELEASE_TAG}" ]; then
+            echo "::error::Workflow must be dispatched with --ref ${RELEASE_TAG} (got GITHUB_REF=${GITHUB_REF:-})"
+            exit 1
+          fi
+          MESSAGE_DIR="$RUNNER_TEMP/sysprims-tag-messages"
+          export MESSAGE_DIR RELEASE_TAG
+          mkdir -p "$MESSAGE_DIR"
+          node scripts/release-materialize-tag-messages.mjs
+          echo "SYSPRIMS_TAG_MESSAGE_DIR=$MESSAGE_DIR" >> "$GITHUB_ENV"
+      - name: Guard exact tags, complete version pack, and provenance
+        id: version
+        env:
+          SYSPRIMS_RELEASE_TAG: ${{ inputs.tag }}
+          TARGET_REGISTRY: ${{ inputs.registry }}
+        run: |
+          set -euo pipefail
+          SYSPRIMS_TAG_GUARD_MODE=post-tag bash scripts/release-guard-tag-version.sh
+          make release-guard-provenance TAG="$SYSPRIMS_RELEASE_TAG"
+          FILE_VERSION="$(cat VERSION)"
+          COMMIT_SHA="$(git rev-parse 'HEAD^{commit}')"
+          eval "$(python3 -I - "$FILE_VERSION" "$TARGET_REGISTRY" <<'PY'
+          import json, pathlib, sys
+          version, registry = sys.argv[1], sys.argv[2]
+          plan_path = pathlib.Path(f"docs/releases/v{version}.json")
+          raw = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.is_file() else {}
+          surfaces = raw.get("surfaces", {})
+          py_disp = (surfaces.get("python") or {}).get("disposition", "skip")
+          ts_cfg = surfaces.get("typescript") or {}
+          ts_disp = "publish" if ("python" in surfaces and ts_cfg.get("disposition") == "publish") else "skip"
+          stage_pypi = "true" if (registry in ("all", "pypi") and py_disp == "publish") else "false"
+          stage_npm = "true" if (registry in ("all", "npm") and ts_disp == "publish") else "false"
+          print(f"STAGE_PYPI={stage_pypi}")
+          print(f"STAGE_NPM={stage_npm}")
+          PY
+          )"
+          {
+            echo "version=$FILE_VERSION"
+            echo "commit=$COMMIT_SHA"
+            echo "stage_pypi=$STAGE_PYPI"
+            echo "stage_npm=$STAGE_NPM"
+          } >> "$GITHUB_OUTPUT"
+      - name: Install release verification tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends minisign
+          DECERNOR_URL="https://github.com/3leaps/decernor/releases/download/v0.2.3/decernor-0.2.3-linux-amd64.tar.gz"
+          DECERNOR_SHA256="ab7f0bb947353991bbab2945ab17cf49e5807c07ed392978d4a7de08eb804776"
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          curl -fsSL "$DECERNOR_URL" -o "$TMP_DIR/decernor.tar.gz"
+          echo "${DECERNOR_SHA256}  $TMP_DIR/decernor.tar.gz" | sha256sum -c -
+          tar -xzf "$TMP_DIR/decernor.tar.gz" -C "$TMP_DIR"
+          DECERNOR_BIN="$(find "$TMP_DIR" -type f -name decernor -perm -u+x | head -n 1)"
+          test -n "$DECERNOR_BIN"
+          sudo install -m 0755 "$DECERNOR_BIN" /usr/local/bin/decernor
+          decernor --version
+      - name: Stage and verify signed PyPI distributions from immutable GitHub Release
+        if: ${{ steps.version.outputs.stage_pypi == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYSPRIMS_RELEASE_TAG: ${{ inputs.tag }}
+          STAGE_COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/release-stage-published.sh --pypi-only
+          node scripts/npm-release.mjs verify-pypi \
+            --published-dir dist/published-pypi \
+            --anchor dist/published-pypi.anchor \
+            --tag "$SYSPRIMS_RELEASE_TAG" \
+            --commit "$STAGE_COMMIT"
+      - name: Upload attested PyPI stage
+        if: ${{ steps.version.outputs.stage_pypi == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: pypi-release-stage
+          path: |
+            dist/published-pypi/*
+            dist/published-pypi.anchor
+          if-no-files-found: error
+          retention-days: 1
+      - name: Stage, verify, and compare signed npm tarballs from immutable GitHub Release
+        if: ${{ steps.version.outputs.stage_npm == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYSPRIMS_RELEASE_TAG: ${{ inputs.tag }}
+          STAGE_COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/release-stage-published.sh --npm-only
+          node scripts/npm-release.mjs stage-published \
+            --published-dir dist/published-npm \
+            --anchor dist/published-npm.anchor \
+            --stage dist/npm-stage \
+            --tag "$SYSPRIMS_RELEASE_TAG" \
+            --commit "$STAGE_COMMIT"
+          node scripts/npm-release.mjs compare \
+            --stage dist/npm-stage \
+            --tag "$SYSPRIMS_RELEASE_TAG" \
+            --commit "$STAGE_COMMIT"
+      - name: Upload attested npm stage
+        if: ${{ steps.version.outputs.stage_npm == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: npm-release-stage
+          path: dist/npm-stage
+          if-no-files-found: error
+          retention-days: 1
+  publish-pypi:
+    name: Publish to PyPI (OIDC)
+    needs: stage
+    if: ${{ !inputs.dry_run && needs.stage.outputs.stage_pypi == 'true' }}
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    environment: publish-pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '24.22.1'
+      - name: Download attested PyPI stage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: pypi-release-stage
+          path: dist
+      - name: Verify attested PyPI stage against tag and commit
+        env:
+          SYSPRIMS_RELEASE_TAG: ${{ inputs.tag }}
+          STAGE_COMMIT: ${{ needs.stage.outputs.commit }}
+        run: |
+          set -euo pipefail
+          HEAD_COMMIT="$(git rev-parse 'HEAD^{commit}')"
+          if [ "$HEAD_COMMIT" != "$STAGE_COMMIT" ]; then
+            echo "::error::Checked out commit $HEAD_COMMIT does not match staged commit $STAGE_COMMIT"
+            exit 1
+          fi
+          node scripts/npm-release.mjs verify-pypi \
+            --published-dir dist/published-pypi \
+            --anchor dist/published-pypi.anchor \
+            --tag "$SYSPRIMS_RELEASE_TAG" \
+            --commit "$HEAD_COMMIT"
+      - name: Publish to PyPI via Trusted Publisher OIDC
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          packages-dir: dist/published-pypi
+          attestations: true
+  publish-npm:
+    name: Publish to npm (OIDC)
+    needs: stage
+    if: ${{ !inputs.dry_run && needs.stage.outputs.stage_npm == 'true' }}
+    runs-on: ubuntu-24.04  # pin:runner=linux-x64
+    environment: publish-npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '24.22.1'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Ensure trusted publishing npm runtime
+        env:
+          MIN_TRUSTED_PUBLISH_NODE: '22.14.0'
+          MIN_TRUSTED_PUBLISH_NPM: '11.5.1'
+        run: |
+          npm install -g "npm@${MIN_TRUSTED_PUBLISH_NPM}"
+          node -e '
+            const got = process.versions.node.split(".").map(Number);
+            const min = process.env.MIN_TRUSTED_PUBLISH_NODE.split(".").map(Number);
+            if (got[0] < min[0] ||
+                (got[0] === min[0] && (got[1] < min[1] ||
+                (got[1] === min[1] && got[2] < min[2])))) process.exit(1);
+          '
+          NPM_VERSION="$(npm --version)" node -e '
+            const got = process.env.NPM_VERSION.split(".").map(Number);
+            const min = process.env.MIN_TRUSTED_PUBLISH_NPM.split(".").map(Number);
+            if (got[0] < min[0] ||
+                (got[0] === min[0] && (got[1] < min[1] ||
+                (got[1] === min[1] && got[2] < min[2])))) process.exit(1);
+          '
+      - name: Download attested npm stage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: npm-release-stage
+          path: dist/npm-stage
+      - name: Verify stage and publish resumably via OIDC
+        env:
+          SYSPRIMS_RELEASE_TAG: ${{ inputs.tag }}
+          STAGE_COMMIT: ${{ needs.stage.outputs.commit }}
+        run: |
+          set -euo pipefail
+          HEAD_COMMIT="$(git rev-parse 'HEAD^{commit}')"
+          if [ "$HEAD_COMMIT" != "$STAGE_COMMIT" ]; then
+            echo "::error::Checked out commit $HEAD_COMMIT does not match staged commit $STAGE_COMMIT"
+            exit 1
+          fi
+          unset NODE_AUTH_TOKEN NPM_TOKEN
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc-oidc"
+          printf '%s\n' \
+            'registry=https://registry.npmjs.org/' \
+            'always-auth=false' \
+            > "$NPM_CONFIG_USERCONFIG"
+          node scripts/npm-release.mjs verify \
+            --stage dist/npm-stage \
+            --tag "$SYSPRIMS_RELEASE_TAG" \
+            --commit "$HEAD_COMMIT"
+          node scripts/npm-release.mjs publish \
+            --stage dist/npm-stage \
+            --tag "$SYSPRIMS_RELEASE_TAG" \
+            --commit "$HEAD_COMMIT"

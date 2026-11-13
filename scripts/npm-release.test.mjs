@@ -12,16 +12,19 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
+import { spawnSync } from "node:child_process";
 import {
 	parseRegistryMetadata,
 	publishResumably,
+	stagePublished,
+	verifyPublishedPypi,
 	verifyStage,
 } from "./npm-release.mjs";
 
 const roots = [];
-after(() =>
-	roots.forEach((root) => rmSync(root, { recursive: true, force: true })),
-);
+after(() => {
+	for (const root of roots) rmSync(root, { recursive: true, force: true });
+});
 const names = [
 	"darwin-arm64",
 	"linux-arm64-gnu",
@@ -370,4 +373,131 @@ process.exit(44);
 	} finally {
 		process.env.PATH = previousPath;
 	}
+});
+
+test("npm default pollAttempts allows up to 36 attempts (180s CDN propagation)", () => {
+	const { stage, manifest } = fixture();
+	let queries = 0;
+	let clock = 0;
+	const completed = publishResumably(stage, manifest, {
+		publishPackage: () => {},
+		sleepFn: () => {
+			clock += 5000;
+		},
+		nowFn: () => clock,
+		queryState: (entry) => {
+			if (entry.name !== "@3leaps/sysprims-darwin-arm64") {
+				return { state: "present", sha256: entry.sha256, sri: entry.sri };
+			}
+			queries += 1;
+			// Initial pre-publish check (1) + 20 post-publish poll attempts (> legacy 12 limit)
+			if (queries <= 15) return { state: "absent" };
+			return { state: "present", sha256: entry.sha256, sri: entry.sri };
+		},
+	});
+	assert.equal(completed.length, 8);
+});
+
+function formatAnchor(tag, object, commit, files) {
+	return [
+		`tag=${tag}`,
+		`object=${object}`,
+		`commit=${commit}`,
+		...files.map(({ name, sha256 }) => `file=${sha256} ${name}`),
+		"",
+	].join("\n");
+}
+
+test("stagePublished builds verified zero-rebuild stage from signed npm tarballs", () => {
+	const root = mkdtempSync(join(tmpdir(), "sysprims-npm-published-"));
+	roots.push(root);
+	const published = join(root, "published-npm");
+	const stage = join(root, "npm-stage");
+	mkdirSync(published, { recursive: true });
+	const tag = "v1.2.3";
+	const object = "abcdef0123456789abcdef0123456789abcdef01";
+	const commit = "0123456789abcdef0123456789abcdef01234567";
+	const files = [];
+	const createTgz = [
+		"import io, json, sys, tarfile",
+		"out_path, pkg_name, pkg_version = sys.argv[1], sys.argv[2], sys.argv[3]",
+		"payload = json.dumps({'name': pkg_name, 'version': pkg_version}).encode('utf-8')",
+		"with tarfile.open(out_path, 'w:gz') as tf:",
+		"    info = tarfile.TarInfo('package/package.json')",
+		"    info.size = len(payload)",
+		"    info.mode = 0o644",
+		"    tf.addfile(info, io.BytesIO(payload))",
+	].join("\n");
+	for (const name of names) {
+		const filename = `${name.replace("@", "").replace("/", "-")}-1.2.3.tgz`;
+		const tgzPath = join(published, filename);
+		const res = spawnSync(
+			"python3",
+			["-I", "-c", createTgz, tgzPath, name, "1.2.3"],
+			{ encoding: "utf8" },
+		);
+		assert.equal(res.status, 0, res.stderr);
+		const sha256 = createHash("sha256")
+			.update(readFileSync(tgzPath))
+			.digest("hex");
+		files.push({ name: filename, sha256 });
+	}
+	const anchorPath = join(root, "published-npm.anchor");
+	writeFileSync(anchorPath, formatAnchor(tag, object, commit, files));
+	const manifest = stagePublished(published, anchorPath, stage, tag, commit);
+	assert.equal(manifest.packages.length, 8);
+	assert.equal(manifest.packages[7].name, "@3leaps/sysprims");
+
+	// Path traversal in manifest filename is rejected by verifyStage
+	const tamperedManifest = structuredClone(manifest);
+	tamperedManifest.packages[0].filename = "../outside.tgz";
+	writeFileSync(
+		join(stage, "manifest.json"),
+		`${JSON.stringify(tamperedManifest, null, 2)}\n`,
+	);
+	assert.throws(
+		() => verifyStage(stage, tag, commit),
+		/invalid staged tarball filename/,
+	);
+
+	// Mutating a published tarball fails closed against the anchor
+	writeFileSync(join(published, files[0].name), "corrupted\n");
+	assert.throws(
+		() => stagePublished(published, anchorPath, stage, tag, commit),
+		/digest mismatch/,
+	);
+});
+
+test("verifyPublishedPypi enforces exact 5 PYTHON_WHEEL_TAGS + 1 sdist and anchor digests", () => {
+	const root = mkdtempSync(join(tmpdir(), "sysprims-pypi-published-"));
+	roots.push(root);
+	const published = join(root, "published-pypi");
+	mkdirSync(published, { recursive: true });
+	const tag = "v1.2.3";
+	const object = "abcdef0123456789abcdef0123456789abcdef01";
+	const commit = "0123456789abcdef0123456789abcdef01234567";
+	const distNames = [
+		"sysprims-1.2.3-cp310-abi3-macosx_11_0_arm64.whl",
+		"sysprims-1.2.3-cp310-abi3-macosx_11_0_x86_64.whl",
+		"sysprims-1.2.3-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+		"sysprims-1.2.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+		"sysprims-1.2.3-cp310-abi3-win_amd64.whl",
+		"sysprims-1.2.3.tar.gz",
+	];
+	const files = distNames.map((name) => {
+		const p = join(published, name);
+		writeFileSync(p, `payload-${name}\n`);
+		const sha256 = createHash("sha256").update(readFileSync(p)).digest("hex");
+		return { name, sha256 };
+	});
+	const anchorPath = join(root, "published-pypi.anchor");
+	writeFileSync(anchorPath, formatAnchor(tag, object, commit, files));
+	assert.doesNotThrow(() =>
+		verifyPublishedPypi(published, anchorPath, tag, commit),
+	);
+	writeFileSync(join(published, distNames[0]), "tampered\n");
+	assert.throws(
+		() => verifyPublishedPypi(published, anchorPath, tag, commit),
+		/digest mismatch/,
+	);
 });

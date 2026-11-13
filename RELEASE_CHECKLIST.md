@@ -255,13 +255,16 @@ the recurrence module is present), keep release execution in this order:
    local `dist/release`, promotes the draft, and requires `.draft == false && .immutable == true`),
    then download and verify the published immutable release into `dist/published`
    with `make release-stage-published`.
-4. Publish the six crates.io library crates in dependency order with
+4. Publish the seven crates.io library crates in dependency order with
    `make release-crates-publish` (from this detached tag checkout).
-5. When the plan marks TypeScript `publish`, run N-API prebuilds and resumable
-   npm publication from the verified tag.
+5. When the plan marks Python and/or TypeScript `publish`, run `.github/workflows/registry-publish.yml`
+   from the verified tag ref (`--ref "v${VERSION}" -f tag="v${VERSION}"`) to publish
+   the signed PyPI distributions (`publish-pypi`) and signed npm tarballs (`publish-npm`)
+   directly from the immutable GitHub Release with zero rebuild.
 6. Run `make release-verify-registries` (and `make release-guard-remote`) to
-   verify crates.io, Go module proxy, and npm (including Sigstore SLSA v1
-   provenance attestations across all eight `@3leaps/sysprims*` packages).
+   verify crates.io, Go module proxy, PyPI (including PEP 740 provenance
+   attestations), and npm (including Sigstore SLSA v1 provenance attestations
+   and byte identity across all eight `@3leaps/sysprims*` packages).
 
 If any step fails or produces unexpected artifacts, pause before moving to the
 next step.
@@ -273,7 +276,7 @@ next step.
 - [ ] (Recommended) Run the validation workflow against the tag:
   ```bash
   VERSION=$(cat VERSION)
-  gh workflow run "Validate Release" -f tag="v${VERSION}"
+  gh workflow run "Validate Release" --ref "v${VERSION}" -f tag="v${VERSION}"
   ```
 - [ ] Note the Release workflow run id and successful attempt for the tag
   (`gh run list --workflow release.yml --branch vX.Y.Z`); `make release-download`
@@ -285,6 +288,8 @@ next step.
   - FFI library tarball
   - C header (sysprims.h)
   - SBOM (sysprims-X.Y.Z.cdx.json)
+  - Five Python `cp310-abi3` wheels + sdist (`sysprims-X.Y.Z-*.whl`, `sysprims-X.Y.Z.tar.gz`)
+  - Eight npm tarballs (`3leaps-sysprims*-X.Y.Z.tgz`)
   - Licenses (LICENSE-MIT, LICENSE-APACHE)
 
   Go bindings:
@@ -304,8 +309,8 @@ next step.
     - windows-amd64 → `x86_64-pc-windows-gnu` (msys2/MinGW-w64)
     - windows-arm64 → `aarch64-pc-windows-gnullvm` (llvm-mingw), since v0.1.16
 
-  Do not run TypeScript prebuild or npm publication workflows yet; they run
-  after crates.io publication and signed GitHub release upload.
+  Do not run `registry-publish.yml` yet; it runs after crates.io publication
+  and immutable signed GitHub Release promotion.
 
   Integrity rule: anything we intentionally publish as a release asset must be covered by the signed checksum manifests.
 
@@ -325,6 +330,7 @@ What gets published:
 | Crate | crates.io |
 |-------|-----------|
 | `sysprims-core` | yes (first) |
+| `sysprims-evidence` | yes |
 | `sysprims-signal` | yes (after core is indexed) |
 | `sysprims-session` | yes (after core is indexed) |
 | `sysprims-proc` | yes (after signal is indexed) |
@@ -486,52 +492,60 @@ on HEAD.
    downloads the published release into `dist/published` and verifies both
    minisign and OpenPGP signing-subkey signatures and all asset checksums.
 
-### TypeScript bindings publication (after immutable release promotion)
+### PyPI and npm registry publication (after immutable release promotion)
 
-Run these only after the signed GitHub release is published and crates.io
-publication is complete:
+Run `.github/workflows/registry-publish.yml` only after the signed GitHub
+release is promoted to `.immutable == true` and crates.io publication is
+complete:
 
-1. Run prebuilds workflow on the tag (builds N-API binaries for all platforms):
-
-   ```bash
-   VERSION=$(cat VERSION)
-   gh workflow run "TypeScript N-API Prebuilds" --ref "v${VERSION}"
-   ```
-
-   Wait for completion. This builds `.node` binaries and stages npm package directories.
-
-2. Run npm publish workflow on the tag (requires OIDC trusted publishing):
+1. Optional dry-run stage and registry comparison (no OIDC environment entered):
 
    ```bash
    VERSION=$(cat VERSION)
-   gh workflow run "TypeScript npm Publish" --ref "v${VERSION}"
+   gh workflow run registry-publish.yml --ref "v${VERSION}" \
+     -f tag="v${VERSION}" -f registry=all -f dry_run=true
    ```
 
-The workflow first stages all eight packages outside the protected environment
-and without OIDC. It records package name/version, tarball filename, SHA-256,
-SRI, and content manifest in a tag-and-commit-bound artifact. A dry run ends
-after staging and registry comparison. The protected publish job receives only
-that artifact and publishes each absent package or verifies an already-present
-package is byte-identical. All seven native packages must be present and exact
-before the root package can publish; a same-version mismatch is blocking.
+2. Run live OIDC publication to PyPI (`publish-pypi`) and npm (`publish-npm`)
+   directly from the signed immutable GitHub Release (zero rebuild):
+
+   ```bash
+   VERSION=$(cat VERSION)
+   gh workflow run registry-publish.yml --ref "v${VERSION}" \
+     -f tag="v${VERSION}" -f registry=all -f dry_run=false
+   ```
+
+The `stage` job runs outside the protected OIDC environments and without
+`id-token: write`. It downloads and verifies the signed Python wheels + sdist
+(`scripts/release-stage-published.sh --pypi-only`) and the signed npm `.tgz`
+tarballs (`scripts/release-stage-published.sh --npm-only`) directly from the
+immutable GitHub Release, verifying the `decernor` tag signature and both
+minisign and OpenPGP checksum signatures. A dry run ends after staging and
+registry comparison. The protected `publish-pypi` (`environment: publish-pypi`)
+and `publish-npm` (`environment: publish-npm`) jobs receive only the verified
+staged artifacts, re-verify their anchor digests against the tagged commit, and
+publish via Trusted Publishing OIDC (PEP 740 attestations on PyPI and Sigstore
+SLSA v1 provenance on npm). All seven native npm packages must be present and
+byte-identical before `@3leaps/sysprims` can publish (with a 180s CDN readiness
+poll window); a same-version mismatch is blocking.
 
 The workflow validates:
    - Running from a `v*` tag ref (required for OIDC and environment protection)
    - Node.js >= 22.14.0 and npm >= 11.5.1 for npm trusted publishing
-   - VERSION file and package.json match the tag
-   - Prebuilds were built from the same commit as the tag
+   - VERSION file, tag signatures, and release plan match the tag
+   - Published GitHub Release is `.immutable == true` and all staged bytes match signed `SHA256SUMS`
 
-Note: npm publish uses OIDC trusted publishing (no NPM_TOKEN). The workflow
-must be dispatched from the `v*` release tag ref (`--ref "v${VERSION}"`) so
-that the Fulcio certificate SAN, OIDC workflow extensions, and SLSA v1
-provenance statement bind `refs/tags/v${VERSION}` (`main` and branch refs are
-refused by the workflow and by `make release-verify-registries`). The publish
-job intentionally uses Node.js 24 even though validation/prebuild jobs remain
-on Node.js 20.
+Note: both PyPI and npm publish use OIDC trusted publishing (no long-lived API
+tokens). The workflow must be dispatched from the `v*` release tag ref
+(`--ref "v${VERSION}"`) so that the Fulcio certificate SAN, OIDC workflow
+extensions, PEP 740 attestations, and SLSA v1 provenance statements bind
+`refs/tags/v${VERSION}` (`main` and branch refs are refused by the workflow and
+by `make release-verify-registries`).
 
 3. After every planned registry/module surface resolves, verify crates.io, Go
-   module proxy, and npm (including Sigstore SLSA v1 provenance attestations on
-   all eight `@3leaps/sysprims*` packages) from the detached tag checkout:
+   module proxy, PyPI (PEP 740 provenance attestations), and npm (Sigstore SLSA
+   v1 provenance attestations and byte identity on all eight `@3leaps/sysprims*`
+   packages) from the detached tag checkout:
 
    ```bash
    make release-verify-registries
@@ -598,7 +612,7 @@ git push origin main
 | `make release-create-draft`| Create the draft with every signed asset; never replaces                       |
 | `make release-publish`     | Sole maintainer-cued draft → immutable public promotion                        |
 | `make release-stage-published` | Download and verify the published GitHub release into `dist/published`     |
-| `make release-verify-registries` | Verify crates.io, Go proxy, and npm (with SLSA provenance attestations)  |
+| `make release-verify-registries` | Verify crates.io, Go proxy, PyPI (PEP 740 attestations), and npm (SLSA provenance) |
 | `make release-pack-npm-redirector` | Build the bare-name npm redirector tarball (`sysprims-X.Y.Z.tgz`)      |
 | `make release-guard-remote`| Verify the remote release, registries/modules, and native runtime              |
 | `make release`             | Full preparation workflow (clean → draft; remains draft)                       |
