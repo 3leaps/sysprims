@@ -164,6 +164,7 @@ def run_setsid(
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     wait: bool = False,
+    schema_id: str | None = None,
 ) -> dict[str, Any]: ...
 def run_nohup(
     argv: Sequence[str],
@@ -172,12 +173,14 @@ def run_nohup(
     env: Mapping[str, str] | None = None,
     wait: bool = False,
     output_file: str | None = None,
+    schema_id: str | None = None,
 ) -> dict[str, Any]: ...
 def spawn_in_group(
     argv: Sequence[str],
     *,
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
+    schema_id: str | None = None,
 ) -> dict[str, Any]: ...
 
 class ContainedProcess:

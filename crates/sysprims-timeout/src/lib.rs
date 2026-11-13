@@ -785,6 +785,11 @@ pub fn spawn_in_group(config: SpawnInGroupConfig) -> SysprimsResult<SpawnInGroup
     if config.argv.is_empty() {
         return Err(SysprimsError::invalid_argument("argv must not be empty"));
     }
+    if config.argv[0].is_empty() {
+        return Err(SysprimsError::invalid_argument(
+            "argv[0] (command) must not be empty",
+        ));
+    }
 
     #[cfg(unix)]
     return unix::spawn_in_group_impl(config);

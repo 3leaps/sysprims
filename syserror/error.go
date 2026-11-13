@@ -173,6 +173,26 @@ func PermissionDenied(pid uint32, operation string) *Error {
 	}
 }
 
+// PermissionDeniedCommand constructs an ErrPermissionDenied error for a command
+// name matching SysprimsError::permission_denied_command.
+func PermissionDeniedCommand(command string) *Error {
+	return &Error{
+		Code:      ErrPermissionDenied,
+		Message:   fmt.Sprintf("Permission denied: cannot execute '%s'", command),
+		Operation: command,
+	}
+}
+
+// PermissionDeniedPath constructs an ErrPermissionDenied error for a filesystem
+// path and operation matching SysprimsError::permission_denied_path.
+func PermissionDeniedPath(path, operation string) *Error {
+	return &Error{
+		Code:      ErrPermissionDenied,
+		Message:   fmt.Sprintf("Permission denied for '%s' on path '%s'", operation, path),
+		Operation: operation,
+	}
+}
+
 // NotSupported constructs an ErrNotSupported error matching
 // SysprimsError::not_supported.
 func NotSupported(feature, platform string) *Error {
