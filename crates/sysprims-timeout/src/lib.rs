@@ -833,6 +833,8 @@ pub fn terminate_tree(
         )));
     }
 
+    managed::validate_terminate_tree_config(&config)?;
+
     let mut warnings: Vec<String> = Vec::new();
     let pgid: Option<u32> = None;
     let reliability = TreeKillReliability::BestEffort;

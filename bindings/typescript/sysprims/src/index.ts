@@ -897,13 +897,29 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
   }
 
   if (config.grace_timeout_ms != null) {
-    validateDuration(config.grace_timeout_ms, "grace_timeout_ms");
+    validateDuration(config.grace_timeout_ms, "grace_timeout_ms", 86_400_000);
   }
   if (config.kill_timeout_ms != null) {
-    validateDuration(config.kill_timeout_ms, "kill_timeout_ms");
+    validateDuration(config.kill_timeout_ms, "kill_timeout_ms", 86_400_000);
   }
-  if (config.signal != null) validateSignal(config.signal, "signal");
-  if (config.kill_signal != null) validateSignal(config.kill_signal, "kill_signal");
+  if (config.signal != null) {
+    validateSignal(config.signal, "signal");
+    if (config.signal === 0) {
+      throw new SysprimsError(
+        SysprimsErrorCode.InvalidArgument,
+        "signal 0 is not a valid termination policy",
+      );
+    }
+  }
+  if (config.kill_signal != null) {
+    validateSignal(config.kill_signal, "kill_signal");
+    if (config.kill_signal === 0) {
+      throw new SysprimsError(
+        SysprimsErrorCode.InvalidArgument,
+        "kill_signal 0 is not a valid termination policy",
+      );
+    }
+  }
 
   const cfg: TerminateTreeConfig = {
     schema_id:

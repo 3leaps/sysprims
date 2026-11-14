@@ -433,18 +433,19 @@ jobs:
           cargo test -p sysprims-proc --test observation
           cargo test -p sysprims-signal
           cargo test -p sysprims-session
+          cargo test -p sysprims-timeout
       - name: Go module (standalone, pure Go)
         env:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          test -z "$(gofmt -l ./evidence ./procobserve ./syserror ./signal ./session)"
+          test -z "$(gofmt -l ./evidence ./procobserve ./syserror ./signal ./session ./timeout)"
           if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
             echo "go.mod must not contain replace directives" >&2
             exit 1
           fi
-          go vet ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/...
-          go test -count=1 ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/...
+          go vet ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...
+          go test -count=1 ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...
       - name: Go module security (gosec, govulncheck)
         if: runner.os == 'Linux'
         env:
@@ -453,8 +454,9 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
           go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-          "$(go env GOPATH)/bin/gosec" ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/...
-          "$(go env GOPATH)/bin/govulncheck" ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/...
+          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...)
+          "$(go env GOPATH)/bin/gosec" "${pkgs[@]}"
+          "$(go env GOPATH)/bin/govulncheck" "${pkgs[@]}"
       - name: Go module alone (outside the repository, no SKIP allowed)
         env:
           GOWORK: 'off'
@@ -464,6 +466,7 @@ jobs:
           parity="$PWD/crates/sysprims-evidence/tests/parity-cases.json"
           sigvec="$PWD/testdata/conformance/signal/vectors.json"
           sessvec="$PWD/testdata/conformance/session/vectors.json"
+          timeoutvec="$PWD/testdata/conformance/timeout/vectors.json"
           standalone="$(mktemp -d)/sysprims-evidence-go"
           mkdir -p "$standalone"
           cp go.mod go.sum LICENSE-MIT LICENSE-APACHE NOTICE "$standalone/"
@@ -472,15 +475,18 @@ jobs:
           cp -R syserror "$standalone/syserror"
           cp -R signal "$standalone/signal"
           cp -R session "$standalone/session"
+          cp -R timeout "$standalone/timeout"
           cd "$standalone"
+          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...)
           EVIDENCE_CORPUS_DIR="$corpus" \
             EVIDENCE_PARITY_CASES="$parity" \
             SIGNAL_CONFORMANCE_VECTORS="$sigvec" \
             SESSION_CONFORMANCE_VECTORS="$sessvec" \
-            go test -count=1 -v ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... \
+            TIMEOUT_CONFORMANCE_VECTORS="$timeoutvec" \
+            go test -count=1 -v "${pkgs[@]}" \
             | tee "$RUNNER_TEMP/go-evidence-standalone.log"
           if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-evidence-standalone.log"; then
-            echo "standalone evidence/signal/session Go tests must not skip" >&2
+            echo "standalone evidence/signal/session/timeout Go tests must not skip" >&2
             exit 1
           fi
       - name: Rust/Go agreement
@@ -488,6 +494,7 @@ jobs:
           bash scripts/evidence-crosscheck.sh
           bash scripts/signal-crosscheck.sh
           bash scripts/session-crosscheck.sh
+          bash scripts/containment-crosscheck.sh
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-24.04  # pin:runner=linux-x64

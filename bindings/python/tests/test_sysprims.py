@@ -64,6 +64,19 @@ def _session_vectors_path() -> Path:
     )
 
 
+def _timeout_vectors_path() -> Path:
+    override = os.environ.get("TIMEOUT_CONFORMANCE_VECTORS")
+    if override:
+        return Path(override)
+    return (
+        Path(__file__).resolve().parents[3]
+        / "testdata"
+        / "conformance"
+        / "timeout"
+        / "vectors.json"
+    )
+
+
 class SysprimsMetadataAndValidationTests(unittest.TestCase):
     def test_metadata_and_constants(self) -> None:
         self.assertEqual(sysprims.abi_version(), 1)
@@ -697,6 +710,133 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
                 ndjson_lines.append(row)
 
         out_path = os.environ.get("SESSION_NDJSON_OUT")
+        if out_path:
+            Path(out_path).write_text(
+                "".join(f"{_jcs(row)}\n" for row in ndjson_lines),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+    def test_timeout_conformance_vectors(self) -> None:
+        doc = json.loads(_timeout_vectors_path().read_text(encoding="utf-8"))
+        self.assertEqual(doc["schema"], "sysprims-timeout-conformance/v1")
+
+        ndjson_lines: list[dict[str, object]] = []
+        schemas = doc["schemas"]
+        ndjson_lines.append(
+            {
+                "suite": "schemas",
+                "timeout_result_v1_1": schemas["timeout_result_v1_1"],
+                "terminate_tree_config_v1": schemas["terminate_tree_config_v1"],
+                "terminate_tree_result_v1": schemas["terminate_tree_result_v1"],
+                "containment_spawn_config_v1": schemas["containment_spawn_config_v1"],
+                "containment_snapshot_v1": schemas["containment_snapshot_v1"],
+            }
+        )
+
+        for case in doc["terminate_tree_validation_cases"]:
+            cid = case["id"]
+            pid = case["pid"]
+            expected = case["expected"]
+            cfg: dict[str, object] = {}
+            for field in (
+                "schema_id",
+                "grace_timeout_ms",
+                "kill_timeout_ms",
+                "signal",
+                "kill_signal",
+            ):
+                if field in case:
+                    cfg[field] = case[field]
+            with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                sysprims.terminate_tree(pid, cfg if cfg else None)
+            got = ctx.exception.code.name.lower()
+            self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "terminate-tree-validation",
+                    "id": cid,
+                    "outcome": got,
+                }
+            )
+
+        for case in doc["spawn_contained_validation_cases"]:
+            cid = case["id"]
+            argv = case["argv"]
+            expected = case["expected"]
+            kwargs: dict[str, object] = {}
+            for field in (
+                "cwd",
+                "execution_timeout_ms",
+                "grace_timeout_ms",
+                "kill_timeout_ms",
+                "signal",
+                "kill_signal",
+            ):
+                if field in case:
+                    kwargs[field] = case[field]
+            with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                proc = sysprims.spawn_contained(argv, **kwargs)  # type: ignore[arg-type]
+                proc.close()
+            got = ctx.exception.code.name.lower()
+            self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "spawn-contained-validation",
+                    "id": cid,
+                    "outcome": got,
+                }
+            )
+
+        for case in doc["containment_lifecycle_cases"]:
+            cid = case["id"]
+            op = case["op"]
+            argv = case["argv"]
+            wait_timeout_ms = int(case.get("wait_timeout_ms", 5000))
+            expected_obj = (
+                case["expected_windows"]
+                if sys.platform == "win32"
+                else case["expected_unix"]
+            )
+            kwargs = {}
+            for field in (
+                "execution_timeout_ms",
+                "grace_timeout_ms",
+                "kill_timeout_ms",
+            ):
+                if field in case:
+                    kwargs[field] = case[field]
+            try:
+                with sysprims.spawn_contained(argv, **kwargs) as proc:  # type: ignore[arg-type]
+                    if op in ("wait", "deadline"):
+                        snap = proc.wait(timeout_ms=wait_timeout_ms)
+                    else:
+                        snap = proc.terminate()
+                    self.assertEqual(
+                        snap["schema_id"], schemas["containment_snapshot_v1"]
+                    )
+                    row: dict[str, object] = {
+                        "suite": "containment-lifecycle",
+                        "id": cid,
+                        "outcome": "ok",
+                        "handle_state": snap["handle_state"],
+                        "leader_status": snap["leader_status"],
+                        "tree_kill_reliability": snap["tree_kill_reliability"],
+                        "boundary_strength": snap["boundary_strength"],
+                        "exited": snap["exited"],
+                        "timed_out": snap["timed_out"],
+                    }
+            except sysprims.SysprimsError as err:
+                row = {
+                    "suite": "containment-lifecycle",
+                    "id": cid,
+                    "outcome": err.code.name.lower(),
+                }
+            for k, v in expected_obj.items():
+                self.assertEqual(row[k], v, f"{cid}.{k}")
+            ndjson_lines.append(row)
+
+        out_path = os.environ.get("TIMEOUT_NDJSON_OUT")
         if out_path:
             Path(out_path).write_text(
                 "".join(f"{_jcs(row)}\n" for row in ndjson_lines),

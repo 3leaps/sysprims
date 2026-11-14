@@ -1067,6 +1067,8 @@ dependencies = [
 name = "sysprims-timeout"
 version = "0.4.0"
 dependencies = [
+ "canonprims-core",
+ "canonprims-json",
  "libc",
  "rsfulmen",
  "serde",

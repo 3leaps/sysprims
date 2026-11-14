@@ -195,6 +195,7 @@ tests="${root}/bindings/python/tests"
 corpus="${root}/crates/sysprims-recurrence/tests/recurrence-v0"
 sigvec="${root}/testdata/conformance/signal/vectors.json"
 sessvec="${root}/testdata/conformance/session/vectors.json"
+timeoutvec="${root}/testdata/conformance/timeout/vectors.json"
 (
 	cd "${work}" &&
 		SYSPRIMS_RECURRENCE_V0_DIR="${corpus}" \
@@ -203,6 +204,8 @@ sessvec="${root}/testdata/conformance/session/vectors.json"
 			SIGNAL_NDJSON_OUT="${work}/py.signal.results" \
 			SESSION_CONFORMANCE_VECTORS="${sessvec}" \
 			SESSION_NDJSON_OUT="${work}/py.session.results" \
+			TIMEOUT_CONFORMANCE_VECTORS="${timeoutvec}" \
+			TIMEOUT_NDJSON_OUT="${work}/py.timeout.results" \
 			"${venv_python}" -I -m unittest discover -v -s "${tests}" -t "${tests}"
 ) 2>"${work}/unittest.log" || {
 	cat "${work}/unittest.log" >&2
@@ -238,6 +241,14 @@ if [ ! -s "${work}/py.session.results" ] || ! cmp -s "${work}/rust.session.resul
 	exit 1
 fi
 echo "python-check: session conformance agrees with Rust ($(wc -l <"${work}/py.session.results" | tr -d ' ') vectors)" >&2
+
+cargo run --quiet --locked -p sysprims-timeout --example timeout-diff >"${work}/rust.timeout.results"
+if [ ! -s "${work}/py.timeout.results" ] || ! cmp -s "${work}/rust.timeout.results" "${work}/py.timeout.results"; then
+	echo "python-check: timeout conformance results differ (rust vs python):" >&2
+	diff -u "${work}/rust.timeout.results" "${work}/py.timeout.results" | head -30 >&2 || true
+	exit 1
+fi
+echo "python-check: timeout conformance agrees with Rust ($(wc -l <"${work}/py.timeout.results" | tr -d ' ') vectors)" >&2
 
 # Build and verify source distribution (sdist) determinism, isolation + offline buildability.
 "${venv_python}" -I -m maturin sdist \

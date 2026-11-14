@@ -1,0 +1,192 @@
+{
+  "schema": "sysprims-timeout-conformance/v1",
+  "schemas": {
+    "timeout_result_v1_1": "https://schemas.3leaps.dev/sysprims/timeout/v1.1.0/timeout-result.schema.json",
+    "terminate_tree_config_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json",
+    "terminate_tree_result_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-result.schema.json",
+    "containment_spawn_config_v1": "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-spawn-config.schema.json",
+    "containment_snapshot_v1": "https://schemas.3leaps.dev/sysprims/timeout/v1.0.0/containment-snapshot.schema.json"
+  },
+  "terminate_tree_validation_cases": [
+    {
+      "id": "pid-zero",
+      "pid": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "pid-above-max-safe",
+      "pid": 2147483648,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "wrong-schema-id",
+      "pid": 1,
+      "schema_id": "https://schemas.3leaps.dev/sysprims/process/v9.9.9/wrong.schema.json",
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "grace-timeout-overflow",
+      "pid": 1,
+      "grace_timeout_ms": 86400001,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "kill-timeout-overflow",
+      "pid": 1,
+      "kill_timeout_ms": 86400001,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "signal-zero",
+      "pid": 1,
+      "signal": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "signal-too-high",
+      "pid": 1,
+      "signal": 99,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "kill-signal-zero",
+      "pid": 1,
+      "kill_signal": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "kill-signal-too-high",
+      "pid": 1,
+      "kill_signal": 99,
+      "expected": "invalid_argument"
+    }
+  ],
+  "spawn_contained_validation_cases": [
+    {
+      "id": "empty-argv",
+      "argv": [],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "empty-argv0",
+      "argv": [""],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "empty-cwd",
+      "argv": ["true"],
+      "cwd": "",
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "execution-timeout-zero",
+      "argv": ["true"],
+      "execution_timeout_ms": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "execution-timeout-overflow",
+      "argv": ["true"],
+      "execution_timeout_ms": 86400001,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "grace-timeout-overflow",
+      "argv": ["true"],
+      "grace_timeout_ms": 86400001,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "kill-timeout-overflow",
+      "argv": ["true"],
+      "kill_timeout_ms": 86400001,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "signal-zero",
+      "argv": ["true"],
+      "signal": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "signal-too-high",
+      "argv": ["true"],
+      "signal": 99,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "kill-signal-zero",
+      "argv": ["true"],
+      "kill_signal": 0,
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "kill-signal-too-high",
+      "argv": ["true"],
+      "kill_signal": 99,
+      "expected": "invalid_argument"
+    }
+  ],
+  "containment_lifecycle_cases": [
+    {
+      "id": "fast-complete",
+      "op": "wait",
+      "argv": ["true"],
+      "grace_timeout_ms": 50,
+      "kill_timeout_ms": 200,
+      "wait_timeout_ms": 5000,
+      "expected_unix": {
+        "outcome": "ok",
+        "handle_state": "inert",
+        "leader_status": "completed",
+        "tree_kill_reliability": "guaranteed",
+        "boundary_strength": "cooperative_group",
+        "exited": true,
+        "timed_out": false
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "terminate-running",
+      "op": "terminate",
+      "argv": ["sleep", "30"],
+      "grace_timeout_ms": 50,
+      "kill_timeout_ms": 500,
+      "expected_unix": {
+        "outcome": "ok",
+        "handle_state": "inert",
+        "leader_status": "terminated",
+        "tree_kill_reliability": "guaranteed",
+        "boundary_strength": "cooperative_group",
+        "exited": true,
+        "timed_out": false
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "execution-deadline",
+      "op": "deadline",
+      "argv": ["sleep", "30"],
+      "execution_timeout_ms": 150,
+      "grace_timeout_ms": 20,
+      "kill_timeout_ms": 200,
+      "wait_timeout_ms": 3000,
+      "expected_unix": {
+        "outcome": "ok",
+        "handle_state": "inert",
+        "leader_status": "timed_out",
+        "tree_kill_reliability": "guaranteed",
+        "boundary_strength": "cooperative_group",
+        "exited": true,
+        "timed_out": false
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    }
+  ]
+}
