@@ -7,7 +7,13 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { loadSysprims } from "../src/ffi";
-import { ContainedProcess, SysprimsError, SysprimsErrorCode, spawnContained } from "../src/index";
+import {
+  ContainedProcess,
+  SysprimsError,
+  SysprimsErrorCode,
+  spawnContained,
+  terminateTree,
+} from "../src/index";
 
 const unixTest = os.platform() === "win32" ? test.skip : test;
 const windowsTest = os.platform() === "win32" ? test : test.skip;
@@ -248,4 +254,169 @@ unixTest("explicit close unregisters finalizer and never closes twice", () => {
     ],
     { timeout: 10000, stdio: "pipe" },
   );
+});
+
+function jcs(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => jcs(item)).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${jcs(obj[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function errorCodeSlug(err: unknown): string {
+  assert.ok(err instanceof SysprimsError, `expected SysprimsError, got ${err}`);
+  switch (err.code) {
+    case SysprimsErrorCode.Ok:
+      return "ok";
+    case SysprimsErrorCode.InvalidArgument:
+      return "invalid_argument";
+    case SysprimsErrorCode.SpawnFailed:
+      return "spawn_failed";
+    case SysprimsErrorCode.Timeout:
+      return "timeout";
+    case SysprimsErrorCode.PermissionDenied:
+      return "permission_denied";
+    case SysprimsErrorCode.NotFound:
+      return "not_found";
+    case SysprimsErrorCode.NotSupported:
+      return "not_supported";
+    case SysprimsErrorCode.GroupCreationFailed:
+      return "group_creation_failed";
+    case SysprimsErrorCode.System:
+      return "system";
+    case SysprimsErrorCode.Internal:
+      return "internal";
+    default:
+      throw new Error(`unknown error code: ${err.code}`);
+  }
+}
+
+function timeoutVectorsPath(): string {
+  const override = process.env.TIMEOUT_CONFORMANCE_VECTORS;
+  if (override && override.length > 0) {
+    return override;
+  }
+  return path.resolve(__dirname, "../../../../../testdata/conformance/timeout/vectors.json");
+}
+
+test("timeout conformance vectors (4-language parity)", async () => {
+  const doc = JSON.parse(fs.readFileSync(timeoutVectorsPath(), "utf8"));
+  assert.equal(doc.schema, "sysprims-timeout-conformance/v1");
+
+  const ndjsonLines: Array<Record<string, unknown>> = [];
+  const schemas = doc.schemas;
+
+  ndjsonLines.push({
+    suite: "schemas",
+    timeout_result_v1_1: schemas.timeout_result_v1_1,
+    terminate_tree_config_v1: schemas.terminate_tree_config_v1,
+    terminate_tree_result_v1: schemas.terminate_tree_result_v1,
+    containment_spawn_config_v1: schemas.containment_spawn_config_v1,
+    containment_snapshot_v1: schemas.containment_snapshot_v1,
+  });
+
+  for (const c of doc.terminate_tree_validation_cases) {
+    let got = "ok";
+    try {
+      const cfg: Record<string, unknown> = {};
+      for (const field of [
+        "schema_id",
+        "grace_timeout_ms",
+        "kill_timeout_ms",
+        "signal",
+        "kill_signal",
+      ]) {
+        if (c[field] !== undefined) {
+          cfg[field] = c[field];
+        }
+      }
+      terminateTree(c.pid, Object.keys(cfg).length > 0 ? cfg : undefined);
+      assert.fail(`expected ${c.id} to throw`);
+    } catch (err) {
+      got = errorCodeSlug(err);
+    }
+    assert.equal(got, c.expected, c.id);
+    ndjsonLines.push({
+      suite: "terminate-tree-validation",
+      id: c.id,
+      outcome: got,
+    });
+  }
+
+  for (const c of doc.spawn_contained_validation_cases) {
+    let got = "ok";
+    try {
+      const h = await spawnContained(c.argv, {
+        cwd: c.cwd,
+        executionTimeoutMs: c.execution_timeout_ms,
+        graceTimeoutMs: c.grace_timeout_ms,
+        killTimeoutMs: c.kill_timeout_ms,
+        signal: c.signal,
+        killSignal: c.kill_signal,
+      });
+      await h.close();
+      assert.fail(`expected ${c.id} to throw`);
+    } catch (err) {
+      got = errorCodeSlug(err);
+    }
+    assert.equal(got, c.expected, c.id);
+    ndjsonLines.push({
+      suite: "spawn-contained-validation",
+      id: c.id,
+      outcome: got,
+    });
+  }
+
+  for (const c of doc.containment_lifecycle_cases) {
+    const expectedObj = os.platform() === "win32" ? c.expected_windows : c.expected_unix;
+    const waitTimeoutMs = typeof c.wait_timeout_ms === "number" ? c.wait_timeout_ms : 5000;
+    let row: Record<string, unknown>;
+    try {
+      const h = await spawnContained(c.argv, {
+        executionTimeoutMs: c.execution_timeout_ms,
+        graceTimeoutMs: c.grace_timeout_ms,
+        killTimeoutMs: c.kill_timeout_ms,
+      });
+      try {
+        const snap =
+          c.op === "wait" || c.op === "deadline"
+            ? await h.wait({ timeoutMs: waitTimeoutMs })
+            : await h.terminate();
+        assert.equal(snap.schema_id, schemas.containment_snapshot_v1);
+        row = {
+          suite: "containment-lifecycle",
+          id: c.id,
+          outcome: "ok",
+          handle_state: snap.handle_state,
+          leader_status: snap.leader_status,
+          tree_kill_reliability: snap.tree_kill_reliability,
+          boundary_strength: snap.boundary_strength,
+          exited: snap.exited,
+          timed_out: snap.timed_out,
+        };
+      } finally {
+        await h.close();
+      }
+    } catch (err) {
+      row = {
+        suite: "containment-lifecycle",
+        id: c.id,
+        outcome: errorCodeSlug(err),
+      };
+    }
+    for (const [k, v] of Object.entries(expectedObj)) {
+      assert.equal(row[k], v, `${c.id}.${k}`);
+    }
+    ndjsonLines.push(row);
+  }
+
+  const outPath = process.env.TIMEOUT_NDJSON_OUT;
+  if (outPath && outPath.length > 0) {
+    fs.writeFileSync(outPath, ndjsonLines.map((row) => `${jcs(row)}\n`).join(""), "utf8");
+  }
 });

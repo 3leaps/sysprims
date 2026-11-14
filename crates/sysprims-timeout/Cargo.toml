@@ -34,5 +34,7 @@ sysprims-session = { workspace = true }
 windows-sys = { workspace = true }
 
 [dev-dependencies]
+canonprims-core = { workspace = true }
+canonprims-json = { workspace = true }
 serde_json.workspace = true
 sysprims-session = { workspace = true }

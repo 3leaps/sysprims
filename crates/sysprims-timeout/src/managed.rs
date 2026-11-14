@@ -307,6 +307,22 @@ pub fn validate_spawn_request(
     Ok(config)
 }
 
+pub(crate) fn validate_terminate_tree_config(config: &TerminateTreeConfig) -> SysprimsResult<()> {
+    if config.grace_timeout_ms > MAX_DURATION_MS {
+        return Err(SysprimsError::invalid_argument(format!(
+            "grace_timeout_ms exceeds maximum of {MAX_DURATION_MS}"
+        )));
+    }
+    if config.kill_timeout_ms > MAX_DURATION_MS {
+        return Err(SysprimsError::invalid_argument(format!(
+            "kill_timeout_ms exceeds maximum of {MAX_DURATION_MS}"
+        )));
+    }
+    validate_platform_signal(config.signal, "signal")?;
+    validate_platform_signal(config.kill_signal, "kill_signal")?;
+    Ok(())
+}
+
 fn platform_max_signal() -> i32 {
     #[cfg(target_os = "linux")]
     {

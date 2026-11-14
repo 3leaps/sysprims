@@ -279,7 +279,7 @@ goneat-version: ## Print PATH goneat vs Makefile pin
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
 
-check: fmt-check lint test evidence-test signal-test session-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
+check: fmt-check lint test evidence-test signal-test session-test timeout-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
 
 # The public-surface scan uses limensafe with a maintainer catalog named by
@@ -376,6 +376,14 @@ session-test: ## Test sysprims-session, pure-Go syserror + session packages, and
 
 session-crosscheck: ## Compare Rust and Go session NDJSON outputs and verify out-of-tree Go build
 	@bash scripts/session-crosscheck.sh
+
+timeout-test: ## Test sysprims-timeout, pure-Go syserror + timeout packages, and parity
+	$(CARGO) test -p sysprims-timeout
+	GOWORK=off CGO_ENABLED=0 go vet ./syserror/... ./timeout/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./syserror/... ./timeout/...
+	@$(MAKE) --no-print-directory timeout-crosscheck
+
+timeout-crosscheck: ## Compare Rust and Go timeout NDJSON outputs and verify out-of-tree Go build
+	@bash scripts/containment-crosscheck.sh
 
 python-check: ## Build, install, and test the Python abi3 wheel and offline sdist
 	@PYTHON=$(PYTHON) ./scripts/python-check.sh
