@@ -1,5 +1,4 @@
 package gowork
 
-// This package exists solely so repo-root Go tooling (goneat/golangci-lint)
-// has at least one package to evaluate. The actual Go binding module lives
-// under bindings/go/sysprims.
+// This package exists so repo-root Go tooling (goneat/golangci-lint)
+// always has a root-level package alongside the pure-Go packages in the root module.

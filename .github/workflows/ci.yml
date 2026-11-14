@@ -7,11 +7,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
-  # Pinned llvm-mingw release tag for Windows arm64 GNU toolchain. Bump here
-  # and in go-bindings.yml / release.yml together when advancing. See
-  # docs/standards/platform-support.md for toolchain policy.
-  LLVM_MINGW_VERSION: '20260407'
-  CBINDGEN_VERSION: '0.29.2'
   GOVULNCHECK_VERSION: 'v1.9.0'
   GOSEC_VERSION: 'v2.29.0'
 permissions:
@@ -102,20 +97,11 @@ jobs:
           node-version: '22.23.4'
           cache: npm
           cache-dependency-path: bindings/typescript/sysprims/package-lock.json
-      - uses: ./.github/actions/setup-rust
-        with:
-          toolchain: 1.88.0  # pin:rust=msrv
-      - name: Install pinned cbindgen
-        run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
       - name: Install TypeScript tooling
         working-directory: bindings/typescript/sysprims
         run: npm ci --ignore-scripts
-      - name: Generate current C header
-        run: cbindgen --config cbindgen.toml --crate sysprims-ffi --output "${RUNNER_TEMP}/sysprims.h"
       - name: Check capability, export, and documentation drift
         working-directory: bindings/typescript/sysprims
-        env:
-          SYSPRIMS_C_HEADER: ${{ runner.temp }}/sysprims.h
         run: npm run api:check
   windows-cross-check:
     name: Windows Cross-Target Check (no SDK)
@@ -158,8 +144,6 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Run tests
         run: cargo test --workspace --all-features
-      - name: Run FFI smoke tests
-        run: cargo test -p sysprims-ffi
   # Port bindings invariant tests (self-listener discoverable)
   # Windows runs GNU toolchain (MinGW) to match our Go/FFI build target.
   test-proc-ports:
@@ -211,129 +195,41 @@ jobs:
         run: cargo build --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
       - name: Test with musl
         run: cargo test --workspace --exclude sysprims-ts-napi --target x86_64-unknown-linux-musl
-  # Go bindings tests
-  # Windows cgo requires a GNU-ABI C toolchain:
-  # - windows-amd64 uses msys2/MinGW-w64 (x86_64-pc-windows-gnu)
-  # - windows-arm64 uses llvm-mingw (aarch64-pc-windows-gnullvm), since v0.1.16
-  # See docs/standards/platform-support.md and ADR-0012 for details.
+  # Pure-Go module tests (CGO_ENABLED=0) across Linux, macOS, Windows x64, and Windows arm64
   test-go:
-    name: Test Go Bindings (${{ matrix.lib_dir }})
+    name: Test Pure-Go Modules (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04  # pin:runner=linux-x64
-            lib_dir: linux-amd64
-            lib_name: libsysprims_ffi.a
-          - os: macos-15  # pin:runner=macos-arm64
-            lib_dir: darwin-arm64
-            lib_name: libsysprims_ffi.a
-          - os: windows-2025  # pin:runner=windows-x64
-            lib_dir: windows-amd64
-            lib_name: libsysprims_ffi.a
-            rust_target: x86_64-pc-windows-gnu
-            win_toolchain: msys2
-          - os: windows-latest-arm64-s
-            lib_dir: windows-arm64
-            lib_name: libsysprims_ffi.a
-            rust_target: aarch64-pc-windows-gnullvm
-            win_toolchain: llvm-mingw
+        os:
+          - ubuntu-24.04  # pin:runner=linux-x64
+          - macos-15  # pin:runner=macos-arm64
+          - windows-2025  # pin:runner=windows-x64
+          - windows-latest-arm64-s
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
         with:
           go-version: '1.26.10'
-      - uses: ./.github/actions/setup-rust
-        with:
-          toolchain: 1.98.1  # pin:rust=stable
-          targets: ${{ matrix.rust_target }}
-      - name: Install MinGW (Windows x64, msys2)
-        if: matrix.win_toolchain == 'msys2'
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc
-          path-type: inherit
-      - name: Install llvm-mingw (Windows arm64, pinned)
-        if: matrix.win_toolchain == 'llvm-mingw'
-        shell: pwsh
+      - name: Run pure-Go tests (CGO_ENABLED=0)
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
         run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = '${{ env.LLVM_MINGW_VERSION }}'
-          $zipName = "llvm-mingw-$tag-ucrt-aarch64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$tag/$zipName"
-          Write-Host "Downloading pinned llvm-mingw $tag from: $url"
-          $zipPath = Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip'
-          Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
-          $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
-          Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
-          $topDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
-          $binDir = Join-Path $topDir.FullName 'bin'
-          if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
-          Add-Content -Path $env:GITHUB_PATH -Value $binDir
-      - name: Install cbindgen
-        run: cargo install cbindgen --version ${{ env.CBINDGEN_VERSION }} --locked
-      - name: Build FFI library (Unix)
-        if: runner.os != 'Windows'
-        run: cargo build --release -p sysprims-ffi
-      - name: Regenerate Go header (Unix)
-        if: runner.os != 'Windows'
-        run: make header-go
-      - name: Build FFI library (Windows x64, msys2)
-        if: matrix.win_toolchain == 'msys2'
-        shell: msys2 {0}
-        run: cargo build --release --target ${{ matrix.rust_target }} -p sysprims-ffi
-      - name: Build FFI library (Windows arm64, llvm-mingw)
-        if: matrix.win_toolchain == 'llvm-mingw'
-        shell: pwsh
-        run: cargo build --release --target ${{ matrix.rust_target }} -p sysprims-ffi
-      - name: Regenerate Go header (Windows)
-        if: runner.os == 'Windows'
-        run: make header-go
-      - name: Copy FFI to local lib (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
-          cp target/release/${{ matrix.lib_name }} bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
-      - name: Copy FFI to local lib (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}
-          cp target/${{ matrix.rust_target }}/release/${{ matrix.lib_name }} \
-            bindings/go/sysprims/lib/local/${{ matrix.lib_dir }}/
-      - name: Run Go tests (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cd bindings/go/sysprims
+          go vet ./...
           go test -v ./...
-      - name: govulncheck (Go bindings)
-        if: matrix.lib_dir == 'linux-amd64'
-        working-directory: bindings/go/sysprims
+      - name: govulncheck (root Go module)
+        if: runner.os == 'Linux'
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
           "$(go env GOPATH)/bin/govulncheck" ./...
-      - name: Run Go tests (Windows x64, msys2)
-        if: matrix.win_toolchain == 'msys2'
-        shell: msys2 {0}
-        env:
-          CGO_ENABLED: "1"
-          CC: gcc
-        run: |
-          cd bindings/go/sysprims
-          go test -v ./...
-      - name: Run Go tests (Windows arm64, llvm-mingw)
-        if: matrix.win_toolchain == 'llvm-mingw'
-        shell: pwsh
-        working-directory: bindings/go/sysprims
-        env:
-          CGO_ENABLED: "1"
-          CC: aarch64-w64-mingw32-gcc
-          CXX: aarch64-w64-mingw32-g++
-          AR: llvm-ar
-        run: go test -v ./...
   recurrence:
     # Rust crate and pure-Go module for contract recurrence/v0: each passes the
     # pinned corpus, and their outputs agree byte for byte (corpus NDJSON and
@@ -430,7 +326,7 @@ jobs:
       - name: Rust crate
         run: |
           cargo test -p sysprims-evidence
-          cargo test -p sysprims-proc --test observation
+          cargo test -p sysprims-proc
           cargo test -p sysprims-signal
           cargo test -p sysprims-session
           cargo test -p sysprims-timeout
@@ -439,13 +335,14 @@ jobs:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          test -z "$(gofmt -l ./evidence ./procobserve ./syserror ./signal ./session ./timeout)"
+          test -z "$(gofmt -l ./evidence ./procobserve ./syserror ./signal ./session ./timeout ./proc)"
           if grep -Eq '^[[:space:]]*replace([[:space:]]|\()' go.mod; then
             echo "go.mod must not contain replace directives" >&2
             exit 1
           fi
-          go vet ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...
-          go test -count=1 ./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...
+          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/... ./proc/...)
+          go vet "${pkgs[@]}"
+          go test -count=1 "${pkgs[@]}"
       - name: Go module security (gosec, govulncheck)
         if: runner.os == 'Linux'
         env:
@@ -454,7 +351,7 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
           go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...)
+          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/... ./proc/...)
           "$(go env GOPATH)/bin/gosec" "${pkgs[@]}"
           "$(go env GOPATH)/bin/govulncheck" "${pkgs[@]}"
       - name: Go module alone (outside the repository, no SKIP allowed)
@@ -467,6 +364,7 @@ jobs:
           sigvec="$PWD/testdata/conformance/signal/vectors.json"
           sessvec="$PWD/testdata/conformance/session/vectors.json"
           timeoutvec="$PWD/testdata/conformance/timeout/vectors.json"
+          procvec="$PWD/testdata/conformance/proc/vectors.json"
           standalone="$(mktemp -d)/sysprims-evidence-go"
           mkdir -p "$standalone"
           cp go.mod go.sum LICENSE-MIT LICENSE-APACHE NOTICE "$standalone/"
@@ -476,17 +374,19 @@ jobs:
           cp -R signal "$standalone/signal"
           cp -R session "$standalone/session"
           cp -R timeout "$standalone/timeout"
+          cp -R proc "$standalone/proc"
           cd "$standalone"
-          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/...)
+          pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/... ./proc/...)
           EVIDENCE_CORPUS_DIR="$corpus" \
             EVIDENCE_PARITY_CASES="$parity" \
             SIGNAL_CONFORMANCE_VECTORS="$sigvec" \
             SESSION_CONFORMANCE_VECTORS="$sessvec" \
             TIMEOUT_CONFORMANCE_VECTORS="$timeoutvec" \
+            PROC_CONFORMANCE_VECTORS="$procvec" \
             go test -count=1 -v "${pkgs[@]}" \
             | tee "$RUNNER_TEMP/go-evidence-standalone.log"
           if grep -q -- '--- SKIP' "$RUNNER_TEMP/go-evidence-standalone.log"; then
-            echo "standalone evidence/signal/session/timeout Go tests must not skip" >&2
+            echo "standalone evidence/signal/session/timeout/proc Go tests must not skip" >&2
             exit 1
           fi
       - name: Rust/Go agreement
@@ -495,6 +395,7 @@ jobs:
           bash scripts/signal-crosscheck.sh
           bash scripts/session-crosscheck.sh
           bash scripts/containment-crosscheck.sh
+          bash scripts/proc-crosscheck.sh
   license-check:
     name: License & Dependency Check
     runs-on: ubuntu-24.04  # pin:runner=linux-x64

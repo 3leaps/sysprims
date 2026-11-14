@@ -77,6 +77,19 @@ def _timeout_vectors_path() -> Path:
     )
 
 
+def _proc_vectors_path() -> Path:
+    override = os.environ.get("PROC_CONFORMANCE_VECTORS")
+    if override:
+        return Path(override)
+    return (
+        Path(__file__).resolve().parents[3]
+        / "testdata"
+        / "conformance"
+        / "proc"
+        / "vectors.json"
+    )
+
+
 class SysprimsMetadataAndValidationTests(unittest.TestCase):
     def test_metadata_and_constants(self) -> None:
         self.assertEqual(sysprims.abi_version(), 1)
@@ -981,6 +994,190 @@ class SysprimsRecurrenceCorpusTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             rule.next_after("not-a-timestamp")
+
+    def test_proc_conformance_vectors(self) -> None:
+        doc = json.loads(_proc_vectors_path().read_text(encoding="utf-8"))
+        self.assertEqual(doc["suite"], "sysprims-proc-conformance")
+
+        ndjson_lines: list[dict[str, object]] = []
+        ndjson_lines.append(
+            {
+                "suite": "schemas",
+                "process_info_v1": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/process-info.schema.json",
+                "process_info_sampled_v1": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/process-info-sampled.schema.json",
+                "descendants_result_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/descendants-result.schema.json",
+                "descendants_result_sampled_v1": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/descendants-result-sampled.schema.json",
+                "ancestors_result_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/ancestors-result.schema.json",
+                "wait_pid_result_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/wait-pid-result.schema.json",
+                "fd_snapshot_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json",
+                "port_bindings_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-bindings.schema.json",
+                "port_filter_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-filter.schema.json",
+                "guard_event_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/guard-event.schema.json",
+            }
+        )
+
+        synthetic_tree = doc["synthetic_tree"]
+        presets = {
+            "interactive": {"interval_ms": 3000, "sample_duration_ms": 2000},
+            "background": {"interval_ms": 180000, "sample_duration_ms": 3000},
+            "watchdog": {"interval_ms": 300000, "sample_duration_ms": 5000},
+        }
+
+        def matches_filter(proc: dict[str, object], flt: dict[str, object]) -> bool:
+            if "name_contains" in flt:
+                if str(flt["name_contains"]).lower() not in str(proc["name"]).lower():
+                    return False
+            if "name_equals" in flt and proc["name"] != flt["name_equals"]:
+                return False
+            if "user_equals" in flt and proc.get("user") != flt["user_equals"]:
+                return False
+            if "pid_in" in flt and proc["pid"] not in flt["pid_in"]:  # type: ignore[operator]
+                return False
+            if "ppid" in flt and proc["ppid"] != flt["ppid"]:
+                return False
+            if "state_in" in flt and proc["state"] not in flt["state_in"]:  # type: ignore[operator]
+                return False
+            if "cpu_above" in flt and not (
+                float(proc["cpu_percent"]) > float(flt["cpu_above"])
+            ):  # type: ignore[arg-type]
+                return False
+            if "memory_above_kb" in flt and not (
+                int(proc["memory_kb"]) > int(flt["memory_above_kb"])
+            ):  # type: ignore[arg-type]
+                return False
+            if "running_for_at_least_secs" in flt and not (
+                int(proc["elapsed_seconds"]) >= int(flt["running_for_at_least_secs"])
+            ):  # type: ignore[arg-type]
+                return False
+            return True
+
+        def select_targets(
+            tree: dict[str, object], flt: dict[str, object], cascade: bool
+        ) -> list[int]:
+            matched_roots: list[int] = []
+            children_map: dict[int, list[int]] = {}
+            for lvl in tree["levels"]:  # type: ignore[attr-defined]
+                for p in lvl["processes"]:
+                    ppid = int(p["ppid"])
+                    pid = int(p["pid"])
+                    children_map.setdefault(ppid, []).append(pid)
+                    if matches_filter(p, flt):
+                        matched_roots.append(pid)
+            root_pid = int(tree["root_pid"])  # type: ignore[arg-type]
+            selected = {pid for pid in matched_roots if pid != root_pid}
+            if cascade:
+                stack = list(matched_roots)
+                visited: set[int] = set()
+                while stack:
+                    cur = stack.pop()
+                    if cur in visited:
+                        continue
+                    visited.add(cur)
+                    if cur != root_pid:
+                        selected.add(cur)
+                    for child in children_map.get(cur, []):
+                        if child not in visited:
+                            stack.append(child)
+            return sorted(selected)
+
+        for v in doc["vectors"]:
+            vid = v["id"]
+            kind = v["kind"]
+            if kind == "validate_pid":
+                with self.assertRaises(sysprims.SysprimsError, msg=vid) as ctx:
+                    sysprims.proc_get(int(v["pid"]))
+                got = ctx.exception.code.name.lower()
+                self.assertEqual(got, v["expected_error_category"], vid)
+                ndjson_lines.append({"id": vid, "kind": kind, "outcome": got})
+            elif kind == "validate_filter":
+                with self.assertRaises(sysprims.SysprimsError, msg=vid) as ctx:
+                    sysprims.process_list(v["filter"])
+                got = ctx.exception.code.name.lower()
+                self.assertEqual(got, v["expected_error_category"], vid)
+                ndjson_lines.append({"id": vid, "kind": kind, "outcome": got})
+            elif kind == "validate_port_filter":
+                with self.assertRaises(sysprims.SysprimsError, msg=vid) as ctx:
+                    sysprims.listening_ports(
+                        {"protocol": "tcp", "local_port": int(v["local_port"])}
+                    )
+                got = ctx.exception.code.name.lower()
+                self.assertEqual(got, v["expected_error_category"], vid)
+                ndjson_lines.append({"id": vid, "kind": kind, "outcome": got})
+            elif kind == "guard_preset":
+                p = presets[v["preset"]]
+                self.assertEqual(p["interval_ms"], v["expected"]["interval_ms"], vid)
+                self.assertEqual(
+                    p["sample_duration_ms"], v["expected"]["sample_duration_ms"], vid
+                )
+                ndjson_lines.append(
+                    {
+                        "id": vid,
+                        "kind": kind,
+                        "preset": v["preset"],
+                        "interval_ms": p["interval_ms"],
+                        "sample_duration_ms": p["sample_duration_ms"],
+                    }
+                )
+            elif kind == "select_targets":
+                got_pids = select_targets(
+                    synthetic_tree, v["filter"], bool(v["cascade"])
+                )
+                self.assertEqual(got_pids, v["expected_pids"], vid)
+                ndjson_lines.append(
+                    {
+                        "id": vid,
+                        "kind": kind,
+                        "cascade": bool(v["cascade"]),
+                        "matched_pids": got_pids,
+                    }
+                )
+            elif kind == "live_probe_self":
+                self_pid = os.getpid()
+                self_info = sysprims.proc_get(self_pid)
+                anc = sysprims.ancestors(self_pid, max_depth=3)
+                desc = sysprims.descendants(self_pid, max_levels=1)
+                guard = sysprims.guard_step(
+                    {
+                        "rule": {
+                            "root_pid": self_pid,
+                            "max_levels": 1,
+                            "cpu_mode": "lifetime",
+                        },
+                        "action": {
+                            "kind": "kill_descendants",
+                            "signal": 15,
+                            "cascade": False,
+                        },
+                        "action_enabled": False,
+                        "max_targets": 8,
+                    }
+                )
+                ndjson_lines.append(
+                    {
+                        "id": vid,
+                        "kind": kind,
+                        "ancestors_chain_non_empty": len(anc["chain"]) > 0
+                        and anc["chain"][0]["pid"] == self_pid,
+                        "ancestors_schema_id": anc["schema_id"],
+                        "descendants_schema_id": desc["schema_id"],
+                        "fd_snapshot_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json",
+                        "guard_event_schema_id": guard["schema_id"],
+                        "port_bindings_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-bindings.schema.json",
+                        "process_info_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/process-info.schema.json",
+                        "self_found": self_info["pid"] == self_pid
+                        and bool(self_info["name"]),
+                    }
+                )
+            else:
+                self.fail(f"unknown vector kind: {kind}")
+
+        out_path = os.environ.get("PROC_NDJSON_OUT")
+        if out_path:
+            Path(out_path).write_text(
+                "".join(f"{_jcs(row)}\n" for row in ndjson_lines),
+                encoding="utf-8",
+                newline="\n",
+            )
 
 
 if __name__ == "__main__":

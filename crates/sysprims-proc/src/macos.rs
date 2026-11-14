@@ -669,7 +669,28 @@ fn read_vnode_fd_path(pid: pid_t, fd: i32) -> Option<String> {
 
             let tail = &buf[written.saturating_sub(MAXPATHLEN)..written];
             let end = tail.iter().position(|&b| b == 0).unwrap_or(tail.len());
-            return Some(String::from_utf8_lossy(&tail[..end]).into_owned());
+            let mut path = String::from_utf8_lossy(&tail[..end]).into_owned();
+            if !path.is_empty() && !path.ends_with(" (deleted)") {
+                let mut is_deleted = false;
+                if written >= 32 {
+                    let mode = u16::from_ne_bytes([buf[28], buf[29]]);
+                    let nlink = u16::from_ne_bytes([buf[30], buf[31]]);
+                    if (mode & libc::S_IFMT) == libc::S_IFREG && nlink == 0 {
+                        is_deleted = true;
+                    }
+                }
+                if !is_deleted && path.starts_with('/') {
+                    if let Err(err) = std::fs::symlink_metadata(&path) {
+                        if err.kind() == std::io::ErrorKind::NotFound {
+                            is_deleted = true;
+                        }
+                    }
+                }
+                if is_deleted {
+                    path.push_str(" (deleted)");
+                }
+            }
+            return Some(path);
         }
 
         buffer_size = (buffer_size * 2).min(max_buffer_size);

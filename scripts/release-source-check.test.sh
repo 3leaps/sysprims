@@ -14,20 +14,18 @@ export PYTHONDONTWRITEBYTECODE=1
 # 2. Synthetic workspace controls.
 repo="$fixture_dir/source"
 mkdir -p "$repo/crates/sysprims-core/src" "$repo/crates/sysprims-signal/src" \
-	"$repo/bindings/typescript/sysprims/native/src" "$repo/ffi/sysprims-ffi/src" "$repo/config/release"
+	"$repo/bindings/typescript/sysprims/native/src" "$repo/config/release"
 git -C "$repo" init -q -b main
 git -C "$repo" config user.name fixture
 git -C "$repo" config user.email fixture@example.invalid
 git -C "$repo" config commit.gpgsign false
-printf '[workspace]\nmembers = ["crates/sysprims-core", "crates/sysprims-signal", "ffi/sysprims-ffi", "bindings/typescript/sysprims/native"]\n\n[workspace.package]\npublish = false\n' >"$repo/Cargo.toml"
+printf '[workspace]\nmembers = ["crates/sysprims-core", "crates/sysprims-signal", "bindings/typescript/sysprims/native"]\n\n[workspace.package]\npublish = false\n' >"$repo/Cargo.toml"
 for crate in sysprims-core sysprims-signal; do
 	printf '[package]\nname = "%s"\npublish = true\nreadme = "README.md"\ninclude = ["src/**"]\n\n[lib]\npath = "src/lib.rs"\n' "$crate" \
 		>"$repo/crates/$crate/Cargo.toml"
 	printf '// synthetic\n' >"$repo/crates/$crate/src/lib.rs"
 	printf 'synthetic\n' >"$repo/crates/$crate/README.md"
 done
-printf '[package]\nname = "sysprims-ffi"\npublish.workspace = true\n\n[lib]\npath = "src/lib.rs"\n' >"$repo/ffi/sysprims-ffi/Cargo.toml"
-printf '// synthetic\n' >"$repo/ffi/sysprims-ffi/src/lib.rs"
 printf '[package]\nname = "sysprims-ts-napi"\npublish.workspace = true\n\n[lib]\npath = "src/lib.rs"\n' >"$repo/bindings/typescript/sysprims/native/Cargo.toml"
 printf '// synthetic\n' >"$repo/bindings/typescript/sysprims/native/src/lib.rs"
 printf 'fn main() {}\n' >"$repo/bindings/typescript/sysprims/native/build.rs"
@@ -44,18 +42,12 @@ refuse() {
 	git -C "$repo" reset -q --hard "$base"
 }
 
-# Allowlisted unpublished FFI/N-API crates must remain unpublished.
+# Allowlisted unpublished N-API crate must remain unpublished.
 printf '[package]\nname = "sysprims-ts-napi"\npublish = true\n\n[lib]\npath = "src/lib.rs"\n' >"$repo/bindings/typescript/sysprims/native/Cargo.toml"
 fixture_commit "$repo" napi-publish-true
 refuse 'allowlisted FFI/binding crate must set publish = false'
-printf '[package]\nname = "sysprims-ffi"\npublish = true\n\n[lib]\npath = "src/lib.rs"\n' >"$repo/ffi/sysprims-ffi/Cargo.toml"
-fixture_commit "$repo" ffi-publish-true
-refuse 'allowlisted FFI/binding crate must set publish = false'
 printf '[package]\nname = "sysprims-ts-napi"\npublish.workspace = true\nbuild = "tools/gen.rs"\n' >"$repo/bindings/typescript/sysprims/native/Cargo.toml"
 fixture_commit "$repo" napi-custom-build
-refuse 'build script'
-printf 'fn main() {}\n' >"$repo/ffi/sysprims-ffi/build.rs"
-fixture_commit "$repo" ffi-build-rs
 refuse 'build script'
 
 printf '[toolchain]\nchannel = "nightly"\n' >"$repo/rust-toolchain.toml"

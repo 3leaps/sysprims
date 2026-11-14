@@ -77,13 +77,14 @@ export function releaseTagSet(root = defaultRoot, commit = "HEAD", releaseTag = 
   const prefixesText = blob(root, resolved, "config/release/release-tags.txt");
   if (prefixesText === null) fail(`config/release/release-tags.txt is missing at ${resolved}`);
   const recurrence = blob(root, resolved, "go/recurrence/go.mod") !== null;
+  const legacyGoBindings = blob(root, resolved, "bindings/go/sysprims/go.mod") !== null || blob(root, resolved, "go.mod") === null;
   const tags = [];
   for (const prefix of parsePrefixes(prefixesText)) {
-    if (prefix === "bindings/go/sysprims/v" && disposition !== "publish") continue;
+    if (prefix === "bindings/go/sysprims/v" && (disposition !== "publish" || !legacyGoBindings)) continue;
     if (prefix === "go/recurrence/v" && !recurrence) continue;
     tags.push(`${prefix}${version}`);
   }
-  return { commit: resolved, version, goDisposition: disposition, recurrence, tags };
+  return { commit: resolved, version, goDisposition: disposition, recurrence, legacyGoBindings, tags };
 }
 
 // Message bytes of an annotated tag: everything after the header, without a

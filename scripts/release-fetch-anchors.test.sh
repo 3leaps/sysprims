@@ -33,7 +33,7 @@ payload="$fixture_dir/payload"
 mkdir "$payload"
 for name in LICENSE-APACHE LICENSE-MIT "release-notes-$tag.md" "sbom-$version.cdx.json" \
 	"sysprims-$version-"{darwin-amd64,darwin-arm64,linux-amd64-musl,linux-amd64,linux-arm64-musl,linux-arm64}.tar.gz \
-	"sysprims-$version-"{windows-amd64,windows-arm64}.zip "sysprims-ffi-$version-libs.tar.gz" sysprims.h; do
+	"sysprims-$version-"{windows-amd64,windows-arm64}.zip; do
 	printf '%s\n' "$name" >"$payload/$name"
 done
 for missing in expected-fingerprints.txt expected-fingerprints.ndjson; do

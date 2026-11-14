@@ -1,0 +1,209 @@
+{
+  "suite": "sysprims-proc-conformance",
+  "version": "1.0.0",
+  "synthetic_tree": {
+    "root_pid": 100,
+    "max_levels": 3,
+    "levels": [
+      {
+        "level": 1,
+        "processes": [
+          {
+            "pid": 200,
+            "ppid": 100,
+            "name": "worker-alpha",
+            "user": "alice",
+            "cpu_percent": 25.5,
+            "memory_kb": 4096,
+            "elapsed_seconds": 120,
+            "state": "running",
+            "cmdline": ["worker-alpha", "--id=1"]
+          },
+          {
+            "pid": 201,
+            "ppid": 100,
+            "name": "helper-beta",
+            "user": "bob",
+            "cpu_percent": 2.0,
+            "memory_kb": 1024,
+            "elapsed_seconds": 60,
+            "state": "sleeping",
+            "cmdline": ["helper-beta"]
+          },
+          {
+            "pid": 202,
+            "ppid": 100,
+            "name": "worker-gamma",
+            "user": "alice",
+            "cpu_percent": 5.0,
+            "memory_kb": 1536,
+            "elapsed_seconds": 30,
+            "state": "sleeping",
+            "cmdline": ["worker-gamma"]
+          }
+        ]
+      },
+      {
+        "level": 2,
+        "processes": [
+          {
+            "pid": 300,
+            "ppid": 200,
+            "name": "leaf-a1",
+            "user": "alice",
+            "cpu_percent": 8.0,
+            "memory_kb": 3072,
+            "elapsed_seconds": 90,
+            "state": "running",
+            "cmdline": ["leaf-a1"]
+          },
+          {
+            "pid": 301,
+            "ppid": 202,
+            "name": "leaf-g1",
+            "user": "alice",
+            "cpu_percent": 1.0,
+            "memory_kb": 512,
+            "elapsed_seconds": 15,
+            "state": "sleeping",
+            "cmdline": ["leaf-g1"]
+          }
+        ]
+      },
+      {
+        "level": 3,
+        "processes": [
+          {
+            "pid": 400,
+            "ppid": 300,
+            "name": "subleaf-a1-1",
+            "user": "alice",
+            "cpu_percent": 0.5,
+            "memory_kb": 256,
+            "elapsed_seconds": 10,
+            "state": "sleeping",
+            "cmdline": ["subleaf-a1-1"]
+          }
+        ]
+      }
+    ]
+  },
+  "vectors": [
+    {
+      "id": "pid-zero-rejected",
+      "kind": "validate_pid",
+      "pid": 0,
+      "expected_error_category": "invalid_argument"
+    },
+    {
+      "id": "pid-above-i32-max-rejected",
+      "kind": "validate_pid",
+      "pid": 2147483648,
+      "expected_error_category": "invalid_argument"
+    },
+    {
+      "id": "filter-cpu-above-100-rejected",
+      "kind": "validate_filter",
+      "filter": {
+        "cpu_above": 105.0
+      },
+      "expected_error_category": "invalid_argument"
+    },
+    {
+      "id": "filter-cpu-negative-rejected",
+      "kind": "validate_filter",
+      "filter": {
+        "cpu_above": -1.0
+      },
+      "expected_error_category": "invalid_argument"
+    },
+    {
+      "id": "port-filter-zero-rejected",
+      "kind": "validate_port_filter",
+      "local_port": 0,
+      "expected_error_category": "invalid_argument"
+    },
+    {
+      "id": "guard-preset-interactive",
+      "kind": "guard_preset",
+      "preset": "interactive",
+      "expected": {
+        "interval_ms": 3000,
+        "preset": "interactive",
+        "sample_duration_ms": 2000
+      }
+    },
+    {
+      "id": "guard-preset-background",
+      "kind": "guard_preset",
+      "preset": "background",
+      "expected": {
+        "interval_ms": 180000,
+        "preset": "background",
+        "sample_duration_ms": 3000
+      }
+    },
+    {
+      "id": "guard-preset-watchdog",
+      "kind": "guard_preset",
+      "preset": "watchdog",
+      "expected": {
+        "interval_ms": 300000,
+        "preset": "watchdog",
+        "sample_duration_ms": 5000
+      }
+    },
+    {
+      "id": "select-targets-name-no-cascade",
+      "kind": "select_targets",
+      "filter": {
+        "name_contains": "WORKER"
+      },
+      "cascade": false,
+      "expected_pids": [200, 202]
+    },
+    {
+      "id": "select-targets-name-with-cascade",
+      "kind": "select_targets",
+      "filter": {
+        "name_contains": "WORKER"
+      },
+      "cascade": true,
+      "expected_pids": [200, 202, 300, 301, 400]
+    },
+    {
+      "id": "select-targets-cpu-and-state",
+      "kind": "select_targets",
+      "filter": {
+        "cpu_above": 10.0,
+        "state_in": ["running"]
+      },
+      "cascade": false,
+      "expected_pids": [200]
+    },
+    {
+      "id": "select-targets-memory-and-user",
+      "kind": "select_targets",
+      "filter": {
+        "memory_above_kb": 2048,
+        "user_equals": "alice"
+      },
+      "cascade": false,
+      "expected_pids": [200, 300]
+    },
+    {
+      "id": "live-probe-self-schemas",
+      "kind": "live_probe_self",
+      "expected": {
+        "ancestors_chain_non_empty": true,
+        "ancestors_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/ancestors-result.schema.json",
+        "descendants_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/descendants-result.schema.json",
+        "fd_snapshot_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/fd-snapshot.schema.json",
+        "guard_event_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/guard-event.schema.json",
+        "port_bindings_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/port-bindings.schema.json",
+        "process_info_schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.1.0/process-info.schema.json",
+        "self_found": true
+      }
+    }
+  ]
+}
