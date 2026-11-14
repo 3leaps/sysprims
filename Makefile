@@ -12,7 +12,7 @@
 
 
 .PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check
-.PHONY: evidence-test evidence-crosscheck signal-test signal-crosscheck python-check test-python build-python
+.PHONY: evidence-test evidence-crosscheck signal-test signal-crosscheck session-test session-crosscheck python-check test-python build-python
 .PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
@@ -279,7 +279,7 @@ goneat-version: ## Print PATH goneat vs Makefile pin
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
 
-check: fmt-check lint test evidence-test signal-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
+check: fmt-check lint test evidence-test signal-test session-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
 
 # The public-surface scan uses limensafe with a maintainer catalog named by
@@ -368,6 +368,14 @@ signal-test: ## Test sysprims-signal, pure-Go syserror + signal packages, and pa
 
 signal-crosscheck: ## Compare Rust and Go signal NDJSON outputs and verify out-of-tree Go build
 	@bash scripts/signal-crosscheck.sh
+
+session-test: ## Test sysprims-session, pure-Go syserror + session packages, and parity
+	$(CARGO) test -p sysprims-session
+	GOWORK=off CGO_ENABLED=0 go vet ./syserror/... ./session/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./syserror/... ./session/...
+	@$(MAKE) --no-print-directory session-crosscheck
+
+session-crosscheck: ## Compare Rust and Go session NDJSON outputs and verify out-of-tree Go build
+	@bash scripts/session-crosscheck.sh
 
 python-check: ## Build, install, and test the Python abi3 wheel and offline sdist
 	@PYTHON=$(PYTHON) ./scripts/python-check.sh

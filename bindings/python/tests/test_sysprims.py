@@ -51,6 +51,19 @@ def _signal_vectors_path() -> Path:
     )
 
 
+def _session_vectors_path() -> Path:
+    override = os.environ.get("SESSION_CONFORMANCE_VECTORS")
+    if override:
+        return Path(override)
+    return (
+        Path(__file__).resolve().parents[3]
+        / "testdata"
+        / "conformance"
+        / "session"
+        / "vectors.json"
+    )
+
+
 class SysprimsMetadataAndValidationTests(unittest.TestCase):
     def test_metadata_and_constants(self) -> None:
         self.assertEqual(sysprims.abi_version(), 1)
@@ -487,6 +500,209 @@ class SysprimsProcessAndControlTests(unittest.TestCase):
                 self.assertEqual(term_snap["leader_status"], "terminated")
             finally:
                 sleep_handle.close()
+
+    def test_session_conformance_vectors(self) -> None:
+        doc = json.loads(_session_vectors_path().read_text(encoding="utf-8"))
+        self.assertEqual(doc["schema"], "sysprims-session-conformance/v1")
+
+        ndjson_lines: list[dict[str, object]] = []
+        schemas = doc["schemas"]
+        ndjson_lines.append(
+            {
+                "suite": "schemas",
+                "run_setsid_config_v1": schemas["run_setsid_config_v1"],
+                "run_nohup_config_v1": schemas["run_nohup_config_v1"],
+                "session_spawn_result_v1": schemas["session_spawn_result_v1"],
+                "spawn_in_group_config_v1": schemas["spawn_in_group_config_v1"],
+                "spawn_in_group_result_v1": schemas["spawn_in_group_result_v1"],
+            }
+        )
+
+        for case in doc["config_validation_cases"]:
+            cid = case["id"]
+            verb = case["verb"]
+            schema_id = case["schema_id"]
+            argv = case["argv"]
+            expected = case["expected"]
+            with self.assertRaises(sysprims.SysprimsError, msg=cid) as ctx:
+                if verb == "setsid":
+                    sysprims.run_setsid(argv, wait=True, schema_id=schema_id)
+                elif verb == "nohup":
+                    sysprims.run_nohup(argv, wait=True, schema_id=schema_id)
+                else:
+                    sysprims.spawn_in_group(argv, schema_id=schema_id)
+            got = ctx.exception.code.name.lower()
+            self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "config-validation",
+                    "id": cid,
+                    "verb": verb,
+                    "outcome": got,
+                }
+            )
+
+        for case in doc["self_introspection_cases"]:
+            cid = case["id"]
+            op = case["op"]
+            expected = (
+                case["expected_windows"]
+                if sys.platform == "win32"
+                else case["expected_unix"]
+            )
+            try:
+                val = (
+                    sysprims.self_getpgid()
+                    if op == "self_getpgid"
+                    else sysprims.self_getsid()
+                )
+                got = "ok" if val > 0 else "invalid_value"
+            except sysprims.SysprimsError as err:
+                got = err.code.name.lower()
+            self.assertEqual(got, expected, cid)
+            ndjson_lines.append(
+                {
+                    "suite": "self-introspection",
+                    "id": cid,
+                    "op": op,
+                    "outcome": got,
+                }
+            )
+
+        for case in doc["spawn_cases"]:
+            cid = case["id"]
+            verb = case["verb"]
+            argv = case["argv"]
+            wait = bool(case.get("wait", False))
+            use_temp_output = bool(case.get("use_temp_output_file", False))
+            use_symlink_output = bool(case.get("use_symlink_output_file", False))
+            expected_obj = (
+                case["expected_windows"]
+                if sys.platform == "win32"
+                else case["expected_unix"]
+            )
+
+            if verb == "setsid":
+                try:
+                    res = sysprims.run_setsid(argv, wait=wait)
+                    self.assertEqual(
+                        res["schema_id"], schemas["session_spawn_result_v1"]
+                    )
+                    structural_match = (
+                        isinstance(res["pid"], int)
+                        and res["pid"] > 0
+                        and res["pid"] == res["sid"]
+                        and res["pid"] == res["pgid"]
+                    )
+                    row: dict[str, object] = {
+                        "suite": "spawn",
+                        "id": cid,
+                        "outcome": "ok",
+                        "verb": res["verb"],
+                        "status": res["status"],
+                        "session_kind": res["session_kind"],
+                        "identifier_provenance": res["identifier_provenance"],
+                        "structural_ids_match": structural_match,
+                        "exit_code": res["exit_code"],
+                    }
+                except sysprims.SysprimsError as err:
+                    row = {
+                        "suite": "spawn",
+                        "id": cid,
+                        "outcome": err.code.name.lower(),
+                    }
+                for k, v in expected_obj.items():
+                    self.assertEqual(row[k], v, f"{cid}.{k}")
+                ndjson_lines.append(row)
+
+            elif verb == "nohup":
+                with tempfile.TemporaryDirectory() as tmp:
+                    output_file: str | None = None
+                    if use_symlink_output:
+                        target_path = Path(tmp) / "target.log"
+                        link_path = Path(tmp) / "link.log"
+                        target_path.write_text("existing", encoding="utf-8")
+                        if sys.platform != "win32":
+                            link_path.symlink_to(target_path)
+                        output_file = str(link_path)
+                    elif use_temp_output:
+                        output_file = str(Path(tmp) / "nohup.out")
+
+                    caller_sid = (
+                        sysprims.self_getsid() if sys.platform != "win32" else 0
+                    )
+                    caller_pgid = (
+                        sysprims.self_getpgid() if sys.platform != "win32" else 0
+                    )
+                    try:
+                        res = sysprims.run_nohup(
+                            argv, wait=wait, output_file=output_file
+                        )
+                        self.assertEqual(
+                            res["schema_id"], schemas["session_spawn_result_v1"]
+                        )
+                        inherited_match = (
+                            isinstance(res["pid"], int)
+                            and res["pid"] > 0
+                            and res["sid"] == caller_sid
+                            and res["pgid"] == caller_pgid
+                        )
+                        row = {
+                            "suite": "spawn",
+                            "id": cid,
+                            "outcome": "ok",
+                            "verb": res["verb"],
+                            "status": res["status"],
+                            "session_kind": res["session_kind"],
+                            "identifier_provenance": res["identifier_provenance"],
+                            "inherited_context_matches": inherited_match,
+                            "exit_code": res["exit_code"],
+                        }
+                    except sysprims.SysprimsError as err:
+                        row = {
+                            "suite": "spawn",
+                            "id": cid,
+                            "outcome": err.code.name.lower(),
+                        }
+                    for k, v in expected_obj.items():
+                        self.assertEqual(row[k], v, f"{cid}.{k}")
+                    ndjson_lines.append(row)
+
+            elif verb == "spawn_in_group":
+                try:
+                    res = sysprims.spawn_in_group(argv)
+                    self.assertEqual(
+                        res["schema_id"], schemas["spawn_in_group_result_v1"]
+                    )
+                    structural_match = (
+                        isinstance(res["pid"], int)
+                        and res["pid"] > 0
+                        and res["pgid"] == res["pid"]
+                    )
+                    row = {
+                        "suite": "spawn",
+                        "id": cid,
+                        "outcome": "ok",
+                        "structural_ids_match": structural_match,
+                        "tree_kill_reliability": res["tree_kill_reliability"],
+                    }
+                except sysprims.SysprimsError as err:
+                    row = {
+                        "suite": "spawn",
+                        "id": cid,
+                        "outcome": err.code.name.lower(),
+                    }
+                for k, v in expected_obj.items():
+                    self.assertEqual(row[k], v, f"{cid}.{k}")
+                ndjson_lines.append(row)
+
+        out_path = os.environ.get("SESSION_NDJSON_OUT")
+        if out_path:
+            Path(out_path).write_text(
+                "".join(f"{_jcs(row)}\n" for row in ndjson_lines),
+                encoding="utf-8",
+                newline="\n",
+            )
 
 
 class SysprimsRecurrenceCorpusTests(unittest.TestCase):

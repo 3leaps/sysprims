@@ -888,8 +888,13 @@ def run_setsid(
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     wait: bool = False,
+    schema_id: str | None = None,
 ) -> dict[str, Any]:
     """Spawn `argv` in a detached session (`setsid` on Unix, detached console/group on Windows)."""
+    if schema_id is not None and (not isinstance(schema_id, str) or not schema_id):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "schema_id must be a non-empty string"
+        )
     checked_argv = _require_argv(argv)
     checked_env = _require_env(env)
     _require_bool(wait, "wait")
@@ -898,7 +903,7 @@ def run_setsid(
             SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string"
         )
     wire: dict[str, Any] = {
-        "schema_id": _RUN_SETSID_SCHEMA_ID,
+        "schema_id": schema_id if schema_id is not None else _RUN_SETSID_SCHEMA_ID,
         "argv": checked_argv,
         "wait": wait,
     }
@@ -916,8 +921,13 @@ def run_nohup(
     env: Mapping[str, str] | None = None,
     wait: bool = False,
     output_file: str | None = None,
+    schema_id: str | None = None,
 ) -> dict[str, Any]:
     """Spawn `argv` with `SIGHUP` ignored in the inherited session (Unix only)."""
+    if schema_id is not None and (not isinstance(schema_id, str) or not schema_id):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "schema_id must be a non-empty string"
+        )
     checked_argv = _require_argv(argv)
     checked_env = _require_env(env)
     _require_bool(wait, "wait")
@@ -933,7 +943,7 @@ def run_nohup(
             "output_file must be a non-empty string",
         )
     wire: dict[str, Any] = {
-        "schema_id": _RUN_NOHUP_SCHEMA_ID,
+        "schema_id": schema_id if schema_id is not None else _RUN_NOHUP_SCHEMA_ID,
         "argv": checked_argv,
         "wait": wait,
     }
@@ -951,8 +961,13 @@ def spawn_in_group(
     *,
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
+    schema_id: str | None = None,
 ) -> dict[str, Any]:
     """Spawn `argv` in a new process group or Windows Job Object."""
+    if schema_id is not None and (not isinstance(schema_id, str) or not schema_id):
+        raise SysprimsError(
+            SysprimsErrorCode.INVALID_ARGUMENT, "schema_id must be a non-empty string"
+        )
     checked_argv = _require_argv(argv)
     checked_env = _require_env(env)
     if cwd is not None and (not isinstance(cwd, str) or not cwd):
@@ -960,7 +975,7 @@ def spawn_in_group(
             SysprimsErrorCode.INVALID_ARGUMENT, "cwd must be a non-empty string"
         )
     wire: dict[str, Any] = {
-        "schema_id": _SPAWN_IN_GROUP_SCHEMA_ID,
+        "schema_id": schema_id if schema_id is not None else _SPAWN_IN_GROUP_SCHEMA_ID,
         "argv": checked_argv,
     }
     if cwd is not None:

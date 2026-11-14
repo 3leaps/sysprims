@@ -1042,7 +1042,11 @@ dependencies = [
 name = "sysprims-session"
 version = "0.4.0"
 dependencies = [
+ "canonprims-core",
+ "canonprims-json",
  "libc",
+ "serde",
+ "serde_json",
  "sysprims-core",
 ]
 

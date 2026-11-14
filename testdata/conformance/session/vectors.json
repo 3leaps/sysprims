@@ -1,0 +1,185 @@
+{
+  "schema": "sysprims-session-conformance/v1",
+  "schemas": {
+    "run_setsid_config_v1": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json",
+    "run_nohup_config_v1": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json",
+    "session_spawn_result_v1": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/session-spawn-result.schema.json",
+    "spawn_in_group_config_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
+    "spawn_in_group_result_v1": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-result.schema.json"
+  },
+  "config_validation_cases": [
+    {
+      "id": "setsid-empty-argv",
+      "verb": "setsid",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json",
+      "argv": [],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "setsid-empty-argv0",
+      "verb": "setsid",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json",
+      "argv": [""],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "setsid-wrong-schema-id",
+      "verb": "setsid",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/session/v9.9.9/wrong.schema.json",
+      "argv": ["true"],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "nohup-empty-argv",
+      "verb": "nohup",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json",
+      "argv": [],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "nohup-empty-argv0",
+      "verb": "nohup",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json",
+      "argv": [""],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "nohup-wrong-schema-id",
+      "verb": "nohup",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/session/v9.9.9/wrong.schema.json",
+      "argv": ["true"],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "spawn-in-group-empty-argv",
+      "verb": "spawn_in_group",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
+      "argv": [],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "spawn-in-group-empty-argv0",
+      "verb": "spawn_in_group",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
+      "argv": [""],
+      "expected": "invalid_argument"
+    },
+    {
+      "id": "spawn-in-group-wrong-schema-id",
+      "verb": "spawn_in_group",
+      "schema_id": "https://schemas.3leaps.dev/sysprims/process/v9.9.9/wrong.schema.json",
+      "argv": ["true"],
+      "expected": "invalid_argument"
+    }
+  ],
+  "self_introspection_cases": [
+    {
+      "id": "self-getpgid",
+      "op": "self_getpgid",
+      "expected_unix": "ok",
+      "expected_windows": "not_supported"
+    },
+    {
+      "id": "self-getsid",
+      "op": "self_getsid",
+      "expected_unix": "ok",
+      "expected_windows": "not_supported"
+    }
+  ],
+  "spawn_cases": [
+    {
+      "id": "setsid-wait-exit-0",
+      "verb": "setsid",
+      "argv": ["sh", "-c", "exit 0"],
+      "wait": true,
+      "expected_unix": {
+        "outcome": "ok",
+        "verb": "setsid",
+        "status": "completed",
+        "session_kind": "new_session",
+        "identifier_provenance": "setsid_structural_child_pid",
+        "structural_ids_match": true,
+        "exit_code": 0
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "setsid-wait-exit-17",
+      "verb": "setsid",
+      "argv": ["sh", "-c", "exit 17"],
+      "wait": true,
+      "expected_unix": {
+        "outcome": "ok",
+        "verb": "setsid",
+        "status": "completed",
+        "session_kind": "new_session",
+        "identifier_provenance": "setsid_structural_child_pid",
+        "structural_ids_match": true,
+        "exit_code": 17
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "setsid-missing-command",
+      "verb": "setsid",
+      "argv": ["nonexistent_sysprims_session_cmd_987654"],
+      "wait": true,
+      "expected_unix": {
+        "outcome": "not_found"
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "nohup-wait-exit-0",
+      "verb": "nohup",
+      "argv": ["sh", "-c", "exit 0"],
+      "wait": true,
+      "use_temp_output_file": true,
+      "expected_unix": {
+        "outcome": "ok",
+        "verb": "nohup",
+        "status": "completed",
+        "session_kind": "inherited_session",
+        "identifier_provenance": "caller_context_before_spawn",
+        "inherited_context_matches": true,
+        "exit_code": 0
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "nohup-symlink-output-rejected",
+      "verb": "nohup",
+      "argv": ["sh", "-c", "exit 0"],
+      "wait": true,
+      "use_symlink_output_file": true,
+      "expected_unix": {
+        "outcome": "permission_denied"
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    },
+    {
+      "id": "spawn-in-group-structural",
+      "verb": "spawn_in_group",
+      "argv": ["sh", "-c", "exit 0"],
+      "wait": false,
+      "expected_unix": {
+        "outcome": "ok",
+        "structural_ids_match": true,
+        "tree_kill_reliability": "best_effort"
+      },
+      "expected_windows": {
+        "outcome": "not_supported"
+      }
+    }
+  ]
+}
