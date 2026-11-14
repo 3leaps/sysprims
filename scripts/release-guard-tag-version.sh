@@ -91,10 +91,12 @@ post-tag)
 		fi
 	done <<<"$PREFIXES"
 	if ! in_set "bindings/go/sysprims/${EXPECTED_TAG}"; then
-		[ -n "$GO_RETAINED" ] || fail "Go skip plan has no retained_version"
-		retained="bindings/go/sysprims/v${GO_RETAINED}"
-		lines="$(git ls-remote --tags "$REMOTE" "refs/tags/${retained}" "refs/tags/${retained}^{}")"
-		printf '%s\n' "$lines" | grep -Fq "refs/tags/${retained}^{}" || fail "retained annotated Go tag ${retained} is missing"
+		if git cat-file -e "${HEAD_COMMIT}:bindings/go/sysprims/go.mod" 2>/dev/null || ! git cat-file -e "${HEAD_COMMIT}:go.mod" 2>/dev/null; then
+			[ -n "$GO_RETAINED" ] || fail "Go skip plan has no retained_version"
+			retained="bindings/go/sysprims/v${GO_RETAINED}"
+			lines="$(git ls-remote --tags "$REMOTE" "refs/tags/${retained}" "refs/tags/${retained}^{}")"
+			printf '%s\n' "$lines" | grep -Fq "refs/tags/${retained}^{}" || fail "retained annotated Go tag ${retained} is missing"
+		fi
 	fi
 	node "$SCRIPT_DIR/release-integrity.mjs" provenance --root "$PROJECT_ROOT"
 	echo "[ok] post-tag guard: exact remote annotated tags, provenance, and version plan agree at ${HEAD_COMMIT}"

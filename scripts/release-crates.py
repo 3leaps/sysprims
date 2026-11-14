@@ -19,7 +19,7 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLAN = ROOT / "config/release/publishable-crates.txt"
-UNPUBLISHED = ("sysprims-cli", "sysprims-ffi", "sysprims-ts-napi")
+UNPUBLISHED = ("sysprims-cli", "sysprims-ts-napi")
 
 
 def read_plan(path=PLAN):

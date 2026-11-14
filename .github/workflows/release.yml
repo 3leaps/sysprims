@@ -5,10 +5,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   MACOSX_DEPLOYMENT_TARGET: "11.0"
-  # Pinned llvm-mingw release tag for Windows arm64 GNU toolchain. Bump here
-  # and in go-bindings.yml / ci.yml together when advancing. See
-  # docs/standards/platform-support.md for toolchain policy.
-  LLVM_MINGW_VERSION: '20260407'
 permissions:
   contents: read
 jobs:
@@ -70,50 +66,6 @@ jobs:
             echo "typescript_disposition=$TS_DISP"
           } >> "$GITHUB_OUTPUT"
           echo "Version validated: $FILE_VERSION (python=$PY_DISP, typescript=$TS_DISP)"
-  verify-go-bindings-assets:
-    name: Verify Go Binding Assets
-    runs-on: ubuntu-24.04  # pin:runner=linux-x64
-    needs: validate-version
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ github.ref }}
-      - name: Verify Go module contains prebuilt libs
-        run: |
-          set -euo pipefail
-
-          echo "Verifying Go binding assets are present in this tag commit"
-
-          test -f bindings/go/sysprims/go.mod
-          test -f bindings/go/sysprims/include/sysprims.h
-
-          # Go bindings must be usable via `go get` without requiring Rust.
-          # The static libs must be present under bindings/go/sysprims/lib/<platform>/.
-          for platform in \
-            darwin-amd64 \
-            darwin-arm64 \
-            linux-amd64 \
-            linux-amd64-musl \
-            linux-arm64 \
-            linux-arm64-musl \
-            windows-amd64 \
-            windows-arm64
-          do
-            path="bindings/go/sysprims/lib/${platform}/libsysprims_ffi.a"
-            if [ ! -f "$path" ]; then
-              echo "ERROR: missing $path"
-              echo "Release tags MUST point at a commit that includes the prebuilt Go binding libs."
-              echo "Do not announce this release."
-              echo "Fix: merge the go-bindings update commit/PR and re-tag a new version."
-              exit 1
-            fi
-            if [ ! -s "$path" ]; then
-              echo "ERROR: empty $path"
-              exit 1
-            fi
-          done
-
-          echo "Go binding assets verified."
   verify-cargo-package:
     name: Verify Core Cargo Package
     runs-on: ubuntu-24.04  # pin:runner=linux-x64
@@ -162,13 +114,6 @@ jobs:
           else
             cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-cli
           fi
-      - name: Build FFI
-        run: |
-          if [ -n "${{ matrix.glibc }}" ]; then
-            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p sysprims-ffi
-          else
-            cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-ffi
-          fi
       - name: Package CLI
         shell: bash
         run: |
@@ -198,75 +143,11 @@ jobs:
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
           VERSION=${{ needs.validate-version.outputs.version }}
           tar -czf sysprims-${VERSION}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
-      - name: Package FFI
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          resolve_target() {
-            file="$1"
-            candidates=("${{ matrix.target }}")
-            if [ -n "${{ matrix.glibc }}" ]; then
-              candidates+=("${{ matrix.target }}.${{ matrix.glibc }}")
-            fi
-            for c in "${candidates[@]}"; do
-              if [ -f "target/${c}/release/${file}" ]; then
-                echo "$c"
-                return 0
-              fi
-            done
-            echo "ERROR: ${file} not found for candidates: ${candidates[*]}" >&2
-            find target -maxdepth 4 -path "*/release/${file}" -print || true
-            exit 1
-          }
-
-          TARGET_DIR="$(resolve_target libsysprims_ffi.a)"
-
-          mkdir -p dist/ffi/${{ matrix.artifact_suffix }}
-          cp "target/${TARGET_DIR}/release/libsysprims_ffi.a" dist/ffi/${{ matrix.artifact_suffix }}/
-      - name: Package FFI (shared)
-        if: ${{ matrix.glibc != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          resolve_target() {
-            file="$1"
-            candidates=("${{ matrix.target }}")
-            if [ -n "${{ matrix.glibc }}" ]; then
-              candidates+=("${{ matrix.target }}.${{ matrix.glibc }}")
-            fi
-            for c in "${candidates[@]}"; do
-              if [ -f "target/${c}/release/${file}" ]; then
-                echo "$c"
-                return 0
-              fi
-            done
-            echo "ERROR: ${file} not found for candidates: ${candidates[*]}" >&2
-            find target -maxdepth 4 -path "*/release/${file}" -print || true
-            exit 1
-          }
-
-          TARGET_DIR="$(resolve_target libsysprims_ffi.so)"
-
-          mkdir -p dist/ffi-shared/${{ matrix.artifact_suffix }}
-          cp "target/${TARGET_DIR}/release/libsysprims_ffi.so" dist/ffi-shared/${{ matrix.artifact_suffix }}/
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-${{ matrix.artifact_suffix }}
           path: sysprims-${{ needs.validate-version.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
-      - name: Upload FFI artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-${{ matrix.artifact_suffix }}
-          path: dist/ffi/${{ matrix.artifact_suffix }}
-      - name: Upload FFI artifact (shared)
-        if: ${{ matrix.glibc != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-shared-${{ matrix.artifact_suffix }}
-          path: dist/ffi-shared/${{ matrix.artifact_suffix }}
   # Build macOS targets (cross-compile both from arm64 runner)
   build-macos:
     name: Build macOS
@@ -287,10 +168,6 @@ jobs:
         run: |
           cargo build --release --target x86_64-apple-darwin -p sysprims-cli
           cargo build --release --target aarch64-apple-darwin -p sysprims-cli
-      - name: Build FFI (both targets)
-        run: |
-          cargo build --release --target x86_64-apple-darwin -p sysprims-ffi
-          cargo build --release --target aarch64-apple-darwin -p sysprims-ffi
       - name: Package CLI (darwin-amd64)
         run: |
           mkdir -p dist/cli-amd64
@@ -303,16 +180,6 @@ jobs:
           cp target/aarch64-apple-darwin/release/sysprims dist/cli-arm64/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli-arm64/
           tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz -C dist/cli-arm64 .
-      - name: Package FFI
-        run: |
-          mkdir -p dist/ffi/darwin-amd64 dist/ffi/darwin-arm64
-          cp target/x86_64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-amd64/
-          cp target/aarch64-apple-darwin/release/libsysprims_ffi.a dist/ffi/darwin-arm64/
-      - name: Package FFI (shared)
-        run: |
-          mkdir -p dist/ffi-shared/darwin-amd64 dist/ffi-shared/darwin-arm64
-          cp target/x86_64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-amd64/
-          cp target/aarch64-apple-darwin/release/libsysprims_ffi.dylib dist/ffi-shared/darwin-arm64/
       - name: Upload CLI artifact (darwin-amd64)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -323,26 +190,6 @@ jobs:
         with:
           name: cli-darwin-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz
-      - name: Upload FFI artifact (darwin-amd64)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-darwin-amd64
-          path: dist/ffi/darwin-amd64
-      - name: Upload FFI artifact (shared, darwin-amd64)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-shared-darwin-amd64
-          path: dist/ffi-shared/darwin-amd64
-      - name: Upload FFI artifact (darwin-arm64)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-darwin-arm64
-          path: dist/ffi/darwin-arm64
-      - name: Upload FFI artifact (shared, darwin-arm64)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-shared-darwin-arm64
-          path: dist/ffi-shared/darwin-arm64
   # Build Windows targets using GNU toolchain for CGo compatibility
   # CGo requires MinGW, so we build with x86_64-pc-windows-gnu target
   build-windows:
@@ -368,9 +215,6 @@ jobs:
       - name: Build CLI (GNU target)
         shell: msys2 {0}
         run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-cli
-      - name: Build FFI (GNU target)
-        shell: msys2 {0}
-        run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-ffi
       - name: Package CLI
         shell: bash
         run: |
@@ -378,26 +222,12 @@ jobs:
           cp target/x86_64-pc-windows-gnu/release/sysprims.exe dist/cli/sysprims.exe
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
           cd dist/cli && 7z a -tzip ../../sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip .
-      - name: Package FFI
-        shell: bash
-        run: |
-          mkdir -p dist/ffi/windows-amd64
-          cp target/x86_64-pc-windows-gnu/release/libsysprims_ffi.a dist/ffi/windows-amd64/
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-windows-amd64
           path: sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip
-      - name: Upload FFI artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-windows-amd64
-          path: dist/ffi/windows-amd64
   # Build Windows arm64 using native arm64 runner.
-  # CLI is built for aarch64-pc-windows-msvc (native Windows ABI).
-  # FFI is built for aarch64-pc-windows-gnullvm using llvm-mingw so the static
-  # .a and import library .dll.a are Go-cgo compatible (same as windows-amd64
-  # which uses msys2/MinGW-w64). See ADR-0012 §4.
   build-windows-arm64:
     name: Build Windows arm64
     runs-on: windows-latest-arm64-s
@@ -406,33 +236,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.ref }}
-      - name: Install llvm-mingw (aarch64 ucrt, pinned)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = '${{ env.LLVM_MINGW_VERSION }}'
-          $zipName = "llvm-mingw-$tag-ucrt-aarch64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$tag/$zipName"
-          Write-Host "Downloading pinned llvm-mingw $tag from: $url"
-          $zipPath = Join-Path $env:RUNNER_TEMP 'llvm-mingw.zip'
-          Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
-          $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
-          Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
-          $topDir = Get-ChildItem -Path $extractRoot -Directory | Select-Object -First 1
-          $binDir = Join-Path $topDir.FullName 'bin'
-          if (-not (Test-Path $binDir)) { throw "llvm-mingw bin directory not found at $binDir" }
-          Add-Content -Path $env:GITHUB_PATH -Value $binDir
       - name: Install Rust toolchain
         uses: ./.github/actions/setup-rust
         with:
           toolchain: 1.98.1  # pin:rust=stable
-          targets: aarch64-pc-windows-msvc,aarch64-pc-windows-gnullvm
+          targets: aarch64-pc-windows-msvc
       - name: Build CLI (MSVC)
         shell: pwsh
         run: cargo build --release --target aarch64-pc-windows-msvc -p sysprims-cli
-      - name: Build FFI (gnullvm, for Go cgo)
-        shell: pwsh
-        run: cargo build --release --target aarch64-pc-windows-gnullvm -p sysprims-ffi
       - name: Package CLI
         shell: pwsh
         run: |
@@ -442,94 +253,11 @@ jobs:
           Copy-Item LICENSE-MIT, LICENSE-APACHE dist/cli/
           $version = "${{ needs.validate-version.outputs.version }}"
           Compress-Archive -Path dist/cli/* -DestinationPath "sysprims-${version}-windows-arm64.zip"
-      - name: Package FFI (static, GNU ABI for Go cgo)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path dist/ffi/windows-arm64 | Out-Null
-          Copy-Item target/aarch64-pc-windows-gnullvm/release/libsysprims_ffi.a dist/ffi/windows-arm64/
-      - name: Package FFI (shared, GNU ABI)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path dist/ffi-shared/windows-arm64 | Out-Null
-          $out = 'target/aarch64-pc-windows-gnullvm/release'
-          Copy-Item "$out/sysprims_ffi.dll" dist/ffi-shared/windows-arm64/
-          if (Test-Path "$out/libsysprims_ffi.dll.a") {
-            Copy-Item "$out/libsysprims_ffi.dll.a" dist/ffi-shared/windows-arm64/
-          }
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: cli-windows-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-windows-arm64.zip
-      - name: Upload FFI artifact (static)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-windows-arm64
-          path: dist/ffi/windows-arm64
-      - name: Upload FFI artifact (shared)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-shared-windows-arm64
-          path: dist/ffi-shared/windows-arm64
-  # Build Windows x64 shared library using MSVC toolchain
-  # This lane is intended for non-cgo shared-lib consumers.
-  build-windows-msvc:
-    name: Build Windows x64 (MSVC, shared)
-    runs-on: windows-2025  # pin:runner=windows-x64
-    needs: validate-version
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ github.ref }}
-      - name: Install Rust toolchain
-        uses: ./.github/actions/setup-rust
-        with:
-          toolchain: 1.98.1  # pin:rust=stable
-          targets: x86_64-pc-windows-msvc
-      - name: Build FFI (MSVC target)
-        shell: pwsh
-        run: cargo build --release --target x86_64-pc-windows-msvc -p sysprims-ffi
-      - name: Package FFI (shared)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path dist/ffi-shared/windows-amd64 | Out-Null
-          Copy-Item target/x86_64-pc-windows-msvc/release/sysprims_ffi.dll dist/ffi-shared/windows-amd64/
-
-          # Import library name can vary by toolchain version.
-          if (Test-Path target/x86_64-pc-windows-msvc/release/sysprims_ffi.dll.lib) {
-            Copy-Item target/x86_64-pc-windows-msvc/release/sysprims_ffi.dll.lib dist/ffi-shared/windows-amd64/
-          }
-          if (Test-Path target/x86_64-pc-windows-msvc/release/sysprims_ffi.lib) {
-            Copy-Item target/x86_64-pc-windows-msvc/release/sysprims_ffi.lib dist/ffi-shared/windows-amd64/
-          }
-      - name: Upload FFI artifact (shared)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-shared-windows-amd64
-          path: dist/ffi-shared/windows-amd64
-  # Generate C header via cbindgen
-  cbindgen:
-    name: Generate C Header
-    runs-on: ubuntu-24.04  # pin:runner=linux-x64
-    container:
-      image: ghcr.io/fulmenhq/goneat-tools-runner-glibc@sha256:616a4b5361d2cf7d32ac32496d58e9c288660d5606f0a27efdbf56e3a462ab2d
-      options: --user root
-    needs: validate-version
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ github.ref }}
-      - name: Generate C header
-        run: |
-          cbindgen --config cbindgen.toml --crate sysprims-ffi --output sysprims.h
-      - name: Upload header
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: c-header
-          path: sysprims.h
   # Generate SBOM for compliance (CycloneDX format via Syft)
   sbom:
     name: Generate SBOM
@@ -550,187 +278,6 @@ jobs:
         with:
           name: sbom
           path: sbom-${{ needs.validate-version.outputs.version }}.cdx.json
-  # Package all FFI libs into single bundle
-  verify-ffi-shared-assets:
-    name: Verify FFI Shared Artifacts
-    runs-on: ubuntu-24.04  # pin:runner=linux-x64
-    needs: [validate-version, build-linux, build-macos, build-windows-msvc, build-windows-arm64]
-    steps:
-      - name: Download shared-lib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          pattern: ffi-shared-*
-          path: ffi-shared-libs
-      - name: Verify expected shared libs present
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          require_file() {
-            local path="$1"
-            if [ ! -f "$path" ]; then
-              echo "ERROR: missing required shared lib: $path" >&2
-              echo "Available files:" >&2
-              find ffi-shared-libs -type f -maxdepth 4 -print || true
-              exit 1
-            fi
-          }
-
-          # Expected shared libs (ADR-0012/ADR-0014):
-          # - Linux glibc only
-          # - macOS
-          # - Windows MSVC (x64 and arm64)
-          require_file "ffi-shared-libs/ffi-shared-linux-amd64/libsysprims_ffi.so"
-          require_file "ffi-shared-libs/ffi-shared-linux-arm64/libsysprims_ffi.so"
-          require_file "ffi-shared-libs/ffi-shared-darwin-amd64/libsysprims_ffi.dylib"
-          require_file "ffi-shared-libs/ffi-shared-darwin-arm64/libsysprims_ffi.dylib"
-          require_file "ffi-shared-libs/ffi-shared-windows-amd64/sysprims_ffi.dll"
-          require_file "ffi-shared-libs/ffi-shared-windows-arm64/sysprims_ffi.dll"
-
-          # Must not exist (musl is Go-only).
-          if find ffi-shared-libs -maxdepth 2 -type d -name 'ffi-shared-*-musl' | grep -q .; then
-            echo "ERROR: unexpected musl shared-lib artifacts present" >&2
-            find ffi-shared-libs -maxdepth 2 -type d -name 'ffi-shared-*-musl' -print >&2 || true
-            exit 1
-          fi
-
-          echo "[ok] Shared-lib artifacts verified"
-  package-ffi-bundle:
-    name: Package FFI Bundle
-    runs-on: ubuntu-24.04  # pin:runner=linux-x64
-    needs:
-      - validate-version
-      - build-linux
-      - build-macos
-      - build-windows
-      - build-windows-arm64
-      - build-windows-msvc
-      - cbindgen
-      - verify-ffi-shared-assets
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ github.ref }}
-      - name: Download all FFI artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          pattern: ffi-*
-          path: ffi-libs
-      - name: Download C header
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: c-header
-          path: ffi-libs
-      - name: Package FFI bundle
-        run: |
-          set -euo pipefail
-          VERSION=${{ needs.validate-version.outputs.version }}
-          mkdir -p bundle/lib bundle/include
-
-          require_file() {
-            local path="$1"
-            if [ ! -f "$path" ]; then
-              echo "ERROR: required file missing: $path" >&2
-              exit 1
-            fi
-          }
-
-          copy_static() {
-            local platform="$1"
-            local src="ffi-libs/ffi-${platform}/libsysprims_ffi.a"
-            require_file "$src"
-            mkdir -p "bundle/lib/${platform}/static"
-            cp "$src" "bundle/lib/${platform}/static/"
-          }
-
-          copy_shared_linux() {
-            local platform="$1"
-            local src="ffi-libs/ffi-shared-${platform}/libsysprims_ffi.so"
-            require_file "$src"
-            mkdir -p "bundle/lib/${platform}/shared"
-            cp "$src" "bundle/lib/${platform}/shared/"
-          }
-
-          copy_shared_darwin() {
-            local platform="$1"
-            local src="ffi-libs/ffi-shared-${platform}/libsysprims_ffi.dylib"
-            require_file "$src"
-            mkdir -p "bundle/lib/${platform}/shared"
-            cp "$src" "bundle/lib/${platform}/shared/"
-          }
-
-          copy_shared_windows() {
-            local platform="$1"
-            local dll="ffi-libs/ffi-shared-${platform}/sysprims_ffi.dll"
-            require_file "$dll"
-            mkdir -p "bundle/lib/${platform}/shared"
-            cp "$dll" "bundle/lib/${platform}/shared/"
-
-            # Optional import libraries (kept if present).
-            # windows-amd64 ships MSVC-built .lib/.dll.lib from build-windows-msvc.
-            # windows-arm64 ships GNU-built .dll.a from build-windows-arm64.
-            for importlib in sysprims_ffi.lib sysprims_ffi.dll.lib libsysprims_ffi.dll.a; do
-              if [ -f "ffi-libs/ffi-shared-${platform}/${importlib}" ]; then
-                cp "ffi-libs/ffi-shared-${platform}/${importlib}" "bundle/lib/${platform}/shared/"
-              fi
-            done
-          }
-
-          # Static libs (Go/cgo + static consumers): all platforms use GNU-ABI .a.
-          # Windows arm64 produced via llvm-mingw (aarch64-pc-windows-gnullvm);
-          # windows-amd64 via msys2/MinGW-w64. Both are Go-cgo compatible.
-          copy_static linux-amd64
-          copy_static linux-amd64-musl
-          copy_static linux-arm64
-          copy_static linux-arm64-musl
-          copy_static darwin-amd64
-          copy_static darwin-arm64
-          copy_static windows-amd64
-          copy_static windows-arm64
-
-          # Shared libs (runtime loaders): glibc Linux, macOS, Windows.
-          copy_shared_linux linux-amd64
-          copy_shared_linux linux-arm64
-          copy_shared_darwin darwin-amd64
-          copy_shared_darwin darwin-arm64
-          copy_shared_windows windows-amd64
-          copy_shared_windows windows-arm64
-
-          # Add header
-          require_file ffi-libs/sysprims.h
-          cp ffi-libs/sysprims.h bundle/include/
-
-          # Add metadata
-          echo "$VERSION" > bundle/VERSION
-          cp LICENSE-MIT LICENSE-APACHE bundle/
-
-          # Create manifest
-          cat > bundle/MANIFEST.json << EOF
-          {
-            "name": "sysprims-ffi",
-            "version": "$VERSION",
-            "platforms": [
-              "linux-amd64",
-              "linux-amd64-musl",
-              "linux-arm64",
-              "linux-arm64-musl",
-              "darwin-amd64",
-              "darwin-arm64",
-              "windows-amd64",
-              "windows-arm64"
-            ],
-            "notes": {
-              "windows-arm64": "Go bindings supported via llvm-mingw (aarch64-pc-windows-gnullvm) since v0.1.16"
-            }
-          }
-          EOF
-
-          tar -czf sysprims-ffi-${VERSION}-libs.tar.gz -C bundle .
-      - name: Upload FFI bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: ffi-bundle
-          path: sysprims-ffi-${{ needs.validate-version.outputs.version }}-libs.tar.gz
   # Build Python abi3 wheels (macOS arm64 + x86_64 cross, Windows x64, Linux manylinux2014) and sdist
   build-wheels:
     name: Build Python Wheel (${{ matrix.artifact_suffix }})
@@ -1123,16 +670,11 @@ jobs:
     if: |
       always() &&
       needs.validate-version.result == 'success' &&
-      needs.verify-go-bindings-assets.result == 'success' &&
       needs.build-linux.result == 'success' &&
       needs.build-macos.result == 'success' &&
       needs.build-windows.result == 'success' &&
       needs.build-windows-arm64.result == 'success' &&
-      needs.cbindgen.result == 'success' &&
       needs.sbom.result == 'success' &&
-      needs.package-ffi-bundle.result == 'success' &&
-      needs.build-windows-msvc.result == 'success' &&
-      needs.verify-ffi-shared-assets.result == 'success' &&
       (needs.validate-version.outputs.python_disposition != 'publish' || (
         needs.build-wheels.result == 'success' &&
         needs.build-wheel-linux-amd64.result == 'success' &&
@@ -1146,16 +688,11 @@ jobs:
     runs-on: ubuntu-24.04  # pin:runner=linux-x64
     needs:
       - validate-version
-      - verify-go-bindings-assets
       - build-linux
       - build-macos
       - build-windows
       - build-windows-arm64
-      - cbindgen
       - sbom
-      - package-ffi-bundle
-      - build-windows-msvc
-      - verify-ffi-shared-assets
       - build-wheels
       - build-wheel-linux-amd64
       - build-wheel-linux-arm64
@@ -1170,16 +707,6 @@ jobs:
         with:
           pattern: cli-*
           path: release-cli
-      - name: Download FFI bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: ffi-bundle
-          path: release-ffi
-      - name: Download C header
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: c-header
-          path: release-header
       - name: Download SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
@@ -1210,12 +737,6 @@ jobs:
           # CLI archives
           find release-cli -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} release/ \;
 
-          # FFI bundle
-          mv release-ffi/*.tar.gz release/
-
-          # Header
-          mv release-header/sysprims.h release/
-
           # SBOM
           mv release-sbom/*.json release/
 
@@ -1242,11 +763,3 @@ jobs:
           name: release-packages-${{ github.ref_name }}
           path: release/*
           if-no-files-found: error
-
-# NOTE: Go bindings require committed prebuilt libs under
-# bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a so `go get` works.
-# We prepare those libs via a separate workflow (`go-bindings.yml`) BEFORE tagging.
-#
-# The `verify-go-bindings-assets` job gates this release so we never publish
-# a version where Go can fetch the module but cannot link.
-# (intentionally no job here)

@@ -49,7 +49,6 @@ languages:
   - language: go
     paths:
       - go.mod
-      - bindings/go/sysprims/go.mod
       - go/recurrence/go.mod
   - language: rust
     paths:

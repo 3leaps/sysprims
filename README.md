@@ -98,18 +98,16 @@ workflows run from the verified core tag.
 | --- | --- |
 | Rust crates | `sysprims-core`, `sysprims-evidence`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and `sysprims-recurrence` at `0.4.0` |
 | Rust workspace | Repository tag `v0.4.0` |
-| Go module (cgo bindings) | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.4.0` |
-| Go evidence & observation (pure Go) | `github.com/3leaps/sysprims/evidence@v0.4.0`, `github.com/3leaps/sysprims/procobserve@v0.4.0` |
+| Go module (pure Go, `CGO_ENABLED=0`) | `github.com/3leaps/sysprims/{syserror,signal,session,timeout,proc,evidence,procobserve}@v0.4.0` |
 | Go recurrence module | `github.com/3leaps/sysprims/go/recurrence@v0.4.0` |
 | Python | `pip install sysprims==0.4.0` |
 | TypeScript | `npm install @3leaps/sysprims@0.4.0` |
 | PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release; use the core revision recorded by that companion release |
 
-The canonical `v0.4.0` and path-prefixed
-`bindings/go/sysprims/v0.4.0` and `go/recurrence/v0.4.0` tags identify the same
+The canonical `v0.4.0` and path-prefixed `go/recurrence/v0.4.0` tags identify the same
 core commit. `sysprims-pty` has an independent version and tag lifecycle; it is
 not included in the core tag. Only the seven Rust library crates are published
-to crates.io; the CLI, C FFI crate, TypeScript N-API crate, and Python `PyO3`
+to crates.io; the CLI, TypeScript N-API crate, and Python `PyO3`
 crate are release-built but not published as Rust crates.
 
 Managed contained spawn is available in Go as `SpawnContained`, in Python as
@@ -405,9 +403,7 @@ See [Platform Support Matrix](docs/standards/platform-support.md) for the canoni
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware.
 
-**Windows arm64 Go bindings** are built for `aarch64-pc-windows-gnullvm` via llvm-mingw and ship from v0.1.16 onward.
-Consumers need [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) installed with `aarch64-w64-mingw32-gcc`
-on PATH so cgo can link. See [Language Bindings Guide](docs/guides/language-bindings.md#windows-go-cgo-toolchain).
+**Go packages (`CGO_ENABLED=0`)**: All Go packages under `github.com/3leaps/sysprims` (`syserror`, `signal`, `session`, `timeout`, `proc`, `evidence`, `procobserve`, and `go/recurrence`) are pure Go and require no C toolchain or prebuilt static libraries on any platform.
 
 ### Feature Parity
 
@@ -420,66 +416,51 @@ on PATH so cgo can link. See [Language Bindings Guide](docs/guides/language-bind
 | Process enumeration | /proc          | libproc                | Toolhelp32    |
 | Port enumeration    | /proc/net/\*   | libproc (current user) | Not yet       |
 
-## FFI and Language Bindings
+## Language Packages and Bindings
 
-sysprims exposes a C-ABI for integration with other languages:
-
-```c
-#include "sysprims.h"
-
-char* result = NULL;
-SysprimsErrorCode err = sysprims_proc_list(NULL, &result);
-if (err == SYSPRIMS_OK) {
-    printf("%s\n", result);
-    sysprims_free_string(result);  // Always use sysprims allocator
-}
-```
-
-**Language bindings:**
-
-| Language   | Status           | Package                                                   |
-| ---------- | ---------------- | --------------------------------------------------------- |
-| Go         | Available | `github.com/3leaps/sysprims/bindings/go/sysprims@v0.4.0` |
-| Python     | Available | `pip install sysprims==0.4.0`                             |
-| TypeScript | Available | `npm install @3leaps/sysprims@0.4.0`                      |
+| Language   | Implementation | Package                                                   |
+| ---------- | -------------- | --------------------------------------------------------- |
+| Go         | Pure Go (`CGO_ENABLED=0`) | `github.com/3leaps/sysprims/{syserror,signal,session,timeout,proc,evidence,procobserve}@v0.4.0` |
+| Python     | Native PyO3 (`cp310-abi3`) | `pip install sysprims==0.4.0`                             |
+| TypeScript | Native N-API (`napi-rs`) | `npm install @3leaps/sysprims@0.4.0`                      |
 
 ### As a Go Library
 
-If your Go binary also links another Rust `staticlib` via cgo, you may see link-time
-duplicate symbol errors such as `_rust_eh_personality`. Use the shared-library mode
-to avoid Rust runtime symbol collisions.
+The Go implementation is pure Go (`CGO_ENABLED=0`) under `module github.com/3leaps/sysprims`:
 
 ```go
 import (
     "time"
 
-    "github.com/3leaps/sysprims/bindings/go/sysprims"
+    "github.com/3leaps/sysprims/proc"
+    "github.com/3leaps/sysprims/signal"
+    "github.com/3leaps/sysprims/timeout"
 )
 
 // Example target PID
 pid := uint32(1234)
 
 // Send signal to process
-_ = sysprims.Kill(pid, sysprims.SIGTERM)
+_ = signal.Kill(pid, signal.SIGTERM)
 
 // Run command with timeout
-result, err := sysprims.RunWithTimeout(
+result, err := timeout.RunWithTimeout(
     "make", []string{"build"},
     5*time.Minute,
-    sysprims.DefaultTimeoutConfig(),
+    timeout.DefaultTimeoutConfig(),
 )
 
 // Map listening port to owning process
-proto := sysprims.ProtocolTCP
+proto := proc.ProtocolTCP
 port := uint16(8080)
-snap, _ := sysprims.ListeningPorts(&sysprims.PortFilter{
+snap, _ := proc.ListeningPorts(&proc.PortFilter{
     Protocol:  &proto,
     LocalPort: &port,
 })
 _ = snap
 
-// Get process with v0.1.14 opt-in fields (env + thread_count)
-info, _ := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
+// Get process with opt-in fields (env + thread_count)
+info, _ := proc.GetProcessWithOptions(pid, &proc.ProcessOptions{
     IncludeEnv:     true,
     IncludeThreads: true,
 })
@@ -489,11 +470,11 @@ _ = err
 
 // Find and kill actively hot descendants (monitor sampling)
 cpu := 90.0
-killResult, _ := sysprims.KillDescendantsWithOptions(pid, &sysprims.KillDescendantsOptions{
-    Signal:         sysprims.SIGKILL,
-    CpuMode:        sysprims.CpuModeMonitor,
+killResult, _ := proc.KillDescendantsWithOptions(pid, &proc.KillDescendantsOptions{
+    Signal:         signal.SIGKILL,
+    CpuMode:        proc.CpuModeMonitor,
     SampleDuration: 3 * time.Second,
-    Filter: &sysprims.ProcessFilter{
+    Filter: &proc.ProcessFilter{
         CPUAbove: &cpu,
     },
 })
@@ -501,22 +482,6 @@ _ = killResult
 ```
 
 For a migration-focused walkthrough, see `docs/guides/replace-shell-outs-go.md`.
-
-**Shared mode (recommended for multi-Rust cgo builds):**
-
-```bash
-# glibc + macOS + Windows
-go test -v -tags=sysprims_shared ./...
-
-# musl / Alpine
-go test -v -tags="musl,sysprims_shared" ./...
-```
-
-**Local development (use locally built shared libs under lib-shared/local):**
-
-```bash
-go test -v -tags="sysprims_shared,sysprims_shared_local" ./...
-```
 
 ### As a TypeScript Library
 

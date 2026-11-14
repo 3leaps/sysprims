@@ -40,8 +40,8 @@ import tomllib
 
 TARGET_TABLES = ("lib", "bin", "test", "bench", "example")
 ALLOWED_UNPUBLISHED_MEMBERS = {
-    "ffi/sysprims-ffi",
     "bindings/typescript/sysprims/native",
+    "ffi/sysprims-ffi",
 }
 ALLOWED_BUILD_SCRIPTS = {
     "bindings/typescript/sysprims/native/build.rs",

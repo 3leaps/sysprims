@@ -46,8 +46,6 @@ RELEASE_MUTATION = re.compile(
 # Only these reviewed workflow_dispatch-only jobs may request write scopes:
 # - registry-publish.yml publish-pypi: id-token: write behind publish-pypi
 # - registry-publish.yml publish-npm: id-token: write behind publish-npm
-# - go-bindings.yml update-go-bindings: contents + pull-requests write to open
-#   the prebuilt-library PR
 ALLOWED_JOB_PERMISSIONS = {
     (".github/workflows/registry-publish.yml", "publish-pypi"): (
         {"contents": "read", "id-token": "write"},
@@ -56,10 +54,6 @@ ALLOWED_JOB_PERMISSIONS = {
     (".github/workflows/registry-publish.yml", "publish-npm"): (
         {"contents": "read", "id-token": "write"},
         "publish-npm",
-    ),
-    (".github/workflows/go-bindings.yml", "update-go-bindings"): (
-        {"contents": "write", "pull-requests": "write"},
-        None,
     ),
 }
 WORKFLOW_DISPATCH_ONLY = {path for path, _ in ALLOWED_JOB_PERMISSIONS}
