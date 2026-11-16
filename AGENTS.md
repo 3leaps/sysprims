@@ -168,7 +168,7 @@ Before writing or modifying any code that **sends signals** or **terminates proc
 - **Use PID 0, 1, or u32::MAX in signal-sending tests** (see Safety Protocols above)
 - **Bypass PID validation in signal code without explicit maintainer approval**
 - **Run signal-sending tests without verifying target PIDs are safe**
-- **Locally build or commit prebuilt native libraries** (Go `.a`/`.so`/`.dylib`, TypeScript `.node`) — these come from CI workflows (`go-bindings.yml`, `typescript-napi-prebuilds.yml`); see `RELEASE_CHECKLIST.md`
+- **Locally build or commit prebuilt native libraries** (TypeScript `.node`) — these come from CI workflows (`typescript-napi-prebuilds.yml`); see `RELEASE_CHECKLIST.md`
 
 ## Critical Rules
 

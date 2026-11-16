@@ -52,10 +52,11 @@ Targets that read no tag (for example `release-guard-provenance`,
 
 - [ ] Update `VERSION` file with new semver (e.g., `0.1.1`)
 - [ ] Create `docs/releases/vX.Y.Z.json` with the exact publish/skip decision for
-  Rust, CLI, FFI, Go, and TypeScript, retained versions for skipped surfaces,
-  `provenance_policy: commit_footer`, and both lock phases. A new Go publish
-  starts at `go.lock_phase: pre_build`; Go Bindings Prep changes it to
-  `resolved` atomically with rebuilt libraries, header, hashes, and smokes.
+  Rust, CLI, Go, Python, and TypeScript, retained versions for skipped
+  surfaces, `provenance_policy: commit_footer`, and `go.lock_phase: resolved`.
+  From v0.5.0 the plan must not declare an `ffi` surface (plans before v0.5.0
+  required it, and their Go publishes moved from `pre_build` to `resolved` in
+  the retired Go Bindings Prep step).
 - [ ] Sync version to Cargo.toml: `make version-sync`
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
 - [ ] **Advance CHANGELOG footer compare-links** (reference-style definitions at the bottom of
@@ -74,7 +75,7 @@ Targets that read no tag (for example `release-guard-provenance`,
   replaced together. It is not run in CI, and it is not repeated after the
   final preflight (that would dirty the tag target).
 - [ ] Run `make release-plan-check version-check`. Do not tag a cut whose
-  plan, manifests, lock evidence, or Go prebuilt hashes disagree.
+  plan, manifests, or lock evidence disagree.
 
 ### Scope Control (Recommended)
 
@@ -83,11 +84,11 @@ Targets that read no tag (for example `release-guard-provenance`,
 
 ### Release Pack Verification
 
-- [ ] Run `make pr-final`. At this point a Go publish plan may truthfully remain
-  `pre_build`; full version checking validates the prior committed native
-  manifest without allowing it to claim the new version.
-- [ ] Do not run the final `make release-preflight` until Go Bindings Prep is
-  merged and `go.lock_phase` is `resolved`.
+- [ ] Run `make pr-final`.
+- [ ] From v0.5.0 the Go surface is pure Go (`CGO_ENABLED=0`) with no prebuilt
+  native libraries, so there is no Go bindings prep step and the release plan
+  uses `go.lock_phase: resolved`. Releases up to v0.4.0 ran a separate Go
+  Bindings Prep workflow and tagged its merge commit.
 
 ### Commit & Tag
 
@@ -122,48 +123,21 @@ Targets that read no tag (for example `release-guard-provenance`,
   git log --oneline HEAD..origin/main
   ```
 
-  If there's divergence, resolve it before proceeding. The Go bindings workflow
-  runs on the remote HEAD, so any unpushed local commits will cause the PR merge
-  to diverge from your local state. See [Troubleshooting: Local/Remote Divergence](#troubleshooting-localremote-divergence).
+  If there's divergence, resolve it before proceeding. Release workflows run on
+  the remote HEAD, so any unpushed local commits will cause the PR merge to
+  diverge from your local state. See [Troubleshooting: Local/Remote Divergence](#troubleshooting-localremote-divergence).
 
-- [ ] Go bindings prep (required):
-  - [ ] **Order:** the version/changelog/release-notes commit must already be on `main` before
-    running this workflow. Prebuilt libs are built from `main` and must embed the release
-    version. This merge commit becomes the tag target.
-  - Run the workflow `.github/workflows/go-bindings.yml` for this version (manual; do not run on every push).
-    ```bash
-    VERSION=$(cat VERSION)
-    gh workflow run "Go Bindings (Prep)" -f version="${VERSION}"
-    ```
-  - Find the created PR and review/merge it:
-    ```bash
-    VERSION=$(cat VERSION)
-    gh pr list --search "go-bindings/v${VERSION}" --state open
-    gh pr view --web "go-bindings/v${VERSION}"
-    ```
-  - Confirm the PR actually adds the platform libs before merging:
-    - `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a`
-    - `bindings/go/sysprims/prebuilt-manifest.json` with exact hashes and
-      per-platform runtime version results
-  - Note: the workflow also regenerates `bindings/go/sysprims/include/sysprims.h`; it may not
-    appear in the PR diff when the regenerated header is byte-identical to `main`.
-  - Prepare and use an exact squash message whose body contains the complete
-    standard attribution footer. Merge the PR so the prebuilt libs are present
-    on `main` before tagging.
-  - After merge: inspect `git log -1 --format=%B` and run
-    `make release-guard-provenance`. This merge commit is the tag target; a
-    missing footer is blocking and must follow the signed receipt exception
-    path rather than rewriting public `main`.
-  - Ensure `main` is green again.
+- [ ] Final preflight (required): the release pack merge commit is the tag
+  target.
+  - Ensure `main` is green on the release pack merge commit.
   - Run `make release-preflight` (with `SYSPRIMS_RELEASE_TAG` exported and no
     bare `RELEASE_TAG`, as set at the start of this checklist) on this
-    synchronized final `main`. It requires
-    `go.lock_phase: resolved`, exact prebuilt hashes/smokes, clean local/remote
-    state, the complete commit attribution footer (or approved signed receipt),
-    and all normal gates. **It must pass before tagging.**
+    synchronized final `main`. It requires `go.lock_phase: resolved`, clean
+    local/remote state, the complete commit attribution footer (or approved
+    signed receipt), and all normal gates. **It must pass before tagging.**
 
 - [ ] TypeScript bindings validation (recommended):
-  - After the Go bindings PR is merged (and `main` is green), run the TypeScript workflow on `main`.
+  - After the release pack is merged (and `main` is green), run the TypeScript workflow on `main`.
     This is the normal order: push/merge to `main` first, then run the manual TS workflow on that exact commit.
     ```bash
     gh workflow run "TypeScript Bindings" --ref main
@@ -191,8 +165,8 @@ Targets that read no tag (for example `release-guard-provenance`,
 
 - [ ] Prepare the annotation messages: `make release-prepare-tag-message`.
   It creates one file per tag in `SYSPRIMS_TAG_MESSAGE_DIR` (`v${VERSION}.txt`,
-  `bindings__go__sysprims__v${VERSION}.txt` when the Go binding is published,
-  `go__recurrence__v${VERSION}.txt` when the recurrence module is present) and
+  and `go__recurrence__v${VERSION}.txt` when the recurrence module is present;
+  releases up to v0.4.0 also had `bindings__go__sysprims__v${VERSION}.txt`) and
   never overwrites a file. Complete each one: subject `Release ${VERSION}` for
   the canonical tag and the tag name for the others, the release text, and the
   complete attribution footer. The tag scripts and the post-tag guards refuse a
@@ -211,8 +185,8 @@ Targets that read no tag (for example `release-guard-provenance`,
   commit those. Both land on `main` through review before the release pack.
 
 - [ ] Create every tag, signed, local only: `make release-tag`. All tags point
-  at the merge SHA of the Go Bindings Prep PR (the release's
-  provenance-anchored commit) and peel to that one commit. Later `main` recuts
+  at the release pack merge SHA (the release's provenance-anchored commit) and
+  peel to that one commit. Later `main` recuts
   never move the tags.
 
 - [ ] Verify them: `make release-verify-tag` (message bytes, tagger, common
@@ -224,7 +198,8 @@ Targets that read no tag (for example `release-guard-provenance`,
 Notes:
 
 - Go requires a path-prefixed tag for each module in a subdirectory:
-  `bindings/go/sysprims/vX.Y.Z` and `go/recurrence/vX.Y.Z`
+  `go/recurrence/vX.Y.Z` (and, through v0.4.0, `bindings/go/sysprims/vX.Y.Z`).
+  The root module `github.com/3leaps/sysprims` uses the canonical `vX.Y.Z` tag
   ([ADR-0017](docs/decisions/ADR-0017-recurrence-go-module-and-release-tags.md)).
 - Python (PyPI) and TypeScript (npm) do not use git tags for version resolution in the same way.
 - See `docs/decisions/ADR-0012-language-bindings-distribution.md` and `docs/guides/language-bindings.md` for details.
@@ -285,29 +260,13 @@ next step.
   - Eight CLI archives (darwin-amd64, darwin-arm64, linux-amd64,
     linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64,
     windows-arm64)
-  - FFI library tarball
-  - C header (sysprims.h)
   - SBOM (sysprims-X.Y.Z.cdx.json)
   - Five Python `cp310-abi3` wheels + sdist (`sysprims-X.Y.Z-*.whl`, `sysprims-X.Y.Z.tar.gz`)
   - Eight npm tarballs (`3leaps-sysprims*-X.Y.Z.tgz`)
   - Licenses (LICENSE-MIT, LICENSE-APACHE)
 
-  Go bindings:
-  - Confirm `bindings/go/sysprims/lib/<platform>/libsysprims_ffi.a` is present in the tagged commit so `go get` works without Rust.
-    Quick check:
-    ```bash
-    VERSION=$(cat VERSION)
-    git ls-tree -r --name-only "v${VERSION}" bindings/go/sysprims/lib | sed -n '1,20p'
-    ```
-    If this is empty, do not tag/publish; the Go bindings prep step above was not completed.
-  - Confirm `bindings/go/sysprims/include/sysprims.h` is present in the tagged commit:
-    ```bash
-    VERSION=$(cat VERSION)
-    git cat-file -e "v${VERSION}:bindings/go/sysprims/include/sysprims.h"
-    ```
-  - Confirm Windows uses GNU-ABI FFI assets for cgo compatibility:
-    - windows-amd64 → `x86_64-pc-windows-gnu` (msys2/MinGW-w64)
-    - windows-arm64 → `aarch64-pc-windows-gnullvm` (llvm-mingw), since v0.1.16
+  Go: the root module and `go/recurrence` are pure Go and resolve from the
+  tags; `make release-verify-registries` checks them on the Go module proxy.
 
   Do not run `registry-publish.yml` yet; it runs after crates.io publication
   and immutable signed GitHub Release promotion.
@@ -337,7 +296,6 @@ What gets published:
 | `sysprims-timeout` | yes |
 | `sysprims-recurrence` | yes (last) |
 | `sysprims-cli` | **never** (`publish = false`) |
-| `sysprims-ffi` | **no** (`publish = false`) |
 | `sysprims-ts-napi` | **no** (`publish = false`) |
 
 Workspace `publish` stays `false`. The public Rust libraries opt in.
@@ -366,14 +324,12 @@ make release-crates-publish     # one confirmed upload per crate, waits for the 
       Already-published crates are skipped, so a rerun resumes in order.
 - [ ] On the first upload of a crate name, expect standalone dry-runs for
       dependent crates to fail until predecessor crates are actually indexed.
-- [ ] Do **not** `cargo publish -p sysprims-cli`, `sysprims-ffi`, or
-      `sysprims-ts-napi`.
+- [ ] Do **not** `cargo publish -p sysprims-cli` or `sysprims-ts-napi`.
 
 Negative control:
 
 ```bash
 cargo publish --dry-run -p sysprims-cli
-cargo publish --dry-run -p sysprims-ffi
 cargo publish --dry-run -p sysprims-ts-napi
 # expected: error, crate cannot be published
 ```

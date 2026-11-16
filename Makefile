@@ -8,7 +8,7 @@
 #   make bootstrap  - Install tools (sfetch -> goneat)
 #   make check      - Run all quality checks (fmt, lint, test, deny)
 #   make fmt        - Format code (cargo fmt + goneat assess format --fix)
-#   make build      - Build all crates and FFI
+#   make build      - Build all crates
 
 
 .PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check

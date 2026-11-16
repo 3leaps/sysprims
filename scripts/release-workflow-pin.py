@@ -10,7 +10,7 @@ in `uses:`, so the pin covers both directories rather than guessing from
 triggers. Every workflow must also declare read-only top-level permissions
 including `contents: read`, and every job must be read-only except the
 reviewed workflow_dispatch-only jobs (`registry-publish.yml` `publish-pypi` /
-`publish-npm` and `go-bindings.yml` `update-go-bindings`).
+`publish-npm`).
 
 Modes:
   check                 verify the working tree against config/release/release-workflow.sha256

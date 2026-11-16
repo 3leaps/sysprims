@@ -131,7 +131,7 @@ cp "$fixture_root/Makefile" "$repo2/Makefile"
 cp "$fixture_root/scripts/"{release-stage-published.sh,release-integrity.mjs,version-pack.mjs,verify-signatures.sh,sign-release-assets.sh,generate-checksums.sh} "$repo2/scripts/"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$repo2/scripts/release-guard-tag-version.sh"
 chmod +x "$repo2/scripts/release-guard-tag-version.sh"
-printf '{"schema":"sysprims-release-plan/v1","version":"%s","provenance_policy":"commit_footer","surfaces":{"rust":{"disposition":"publish"},"cli":{"disposition":"publish"},"ffi":{"disposition":"publish"},"go":{"disposition":"publish","lock_phase":"resolved"},"typescript":{"disposition":"publish"},"python":{"disposition":"publish"}}}\n' "$v2" \
+printf '{"schema":"sysprims-release-plan/v1","version":"%s","provenance_policy":"commit_footer","surfaces":{"rust":{"disposition":"publish"},"cli":{"disposition":"publish"},"go":{"disposition":"publish","lock_phase":"resolved"},"typescript":{"disposition":"publish"},"python":{"disposition":"publish"}}}\n' "$v2" \
 	>"$repo2/docs/releases/v$v2.json"
 printf 'notes\n' >"$repo2/docs/releases/v$v2.md"
 gpg --homedir "$fixture_dir/gpg" --batch --armor --export-options export-minimal --export "$subkey!" \
