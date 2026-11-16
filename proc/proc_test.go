@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -16,6 +17,38 @@ import (
 	"github.com/3leaps/sysprims/signal"
 	"github.com/3leaps/sysprims/syserror"
 )
+
+// sleepChildEnv and sleepChildArg together make the test binary act as a
+// portable long-lived child process (instead of relying on a platform `sleep`
+// command). Both are required so a stray environment variable alone cannot
+// turn the whole test binary into a sleeper that runs no tests.
+const (
+	sleepChildEnv = "SYSPRIMS_PROC_TEST_SLEEP_CHILD"
+	sleepChildArg = "-sysprims-proc-test-sleep-child"
+)
+
+func TestMain(m *testing.M) {
+	if os.Getenv(sleepChildEnv) == "1" && len(os.Args) == 2 && os.Args[1] == sleepChildArg {
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// startSleepChild re-executes the test binary as a child that sleeps for 30s.
+func startSleepChild(t *testing.T) *exec.Cmd {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable failed: %v", err)
+	}
+	cmd := exec.Command(exe, sleepChildArg)
+	cmd.Env = append(os.Environ(), sleepChildEnv+"=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep child: %v", err)
+	}
+	return cmd
+}
 
 func codeOf(err error) syserror.ErrorCode {
 	code, _ := syserror.CodeOf(err)
@@ -349,21 +382,23 @@ func TestListeningPortsSelfListener(t *testing.T) {
 }
 
 func TestWaitPIDAndKillDescendantsLiveChild(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping unix sleep child test on windows")
-	}
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start sleep child: %v", err)
-	}
+	cmd := startSleepChild(t)
 	childPID := uint32(cmd.Process.Pid)
+	// The reaper only calls cmd.Wait once released. On Windows the test checks
+	// WaitPID before release: the open process handle held by cmd.Process
+	// keeps the PID from being reused by another process.
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseReaper := func() { releaseOnce.Do(func() { close(release) }) }
 	reaped := make(chan struct{})
 	go func() {
+		<-release
 		_ = cmd.Wait()
 		close(reaped)
 	}()
 	defer func() {
 		_ = cmd.Process.Kill()
+		releaseReaper()
 		<-reaped
 	}()
 
@@ -388,6 +423,20 @@ func TestWaitPIDAndKillDescendantsLiveChild(t *testing.T) {
 		t.Fatalf("KillDescendants succeeded = %v, want %d", killRes.Succeeded, childPID)
 	}
 
+	if runtime.GOOS == "windows" {
+		waitRes, err := WaitPID(childPID, 5*time.Second)
+		if err != nil {
+			t.Fatalf("WaitPID before reap failed: %v", err)
+		}
+		if !waitRes.Exited {
+			t.Fatalf("expected WaitPID to report exited, got %+v", waitRes)
+		}
+		releaseReaper()
+		<-reaped
+		return
+	}
+
+	releaseReaper()
 	<-reaped
 	waitRes, err := WaitPID(childPID, 500*time.Millisecond)
 	if err != nil && codeOf(err) != syserror.ErrNotFound {
