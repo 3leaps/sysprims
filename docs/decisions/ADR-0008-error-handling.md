@@ -185,7 +185,7 @@ Bad:
 
 ```
 "Error"
-"Permission denied at /home/user/.config/secret.txt"
+"Permission denied at /home/someone/.config/secret.txt"
 ```
 
 ## Consequences
