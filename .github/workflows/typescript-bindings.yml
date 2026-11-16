@@ -35,7 +35,7 @@ jobs:
           patterns=(
             '^bindings/typescript/sysprims/'
             '^crates/sysprims-(core|proc|session|signal|timeout)/'
-            '^testdata/conformance/(signal|session|timeout)/'
+            '^testdata/conformance/(proc|signal|session|timeout)/'
             '^Cargo\.(lock|toml)$'
             '^\.github/workflows/typescript-bindings\.yml$'
           )

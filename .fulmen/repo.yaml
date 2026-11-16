@@ -1,0 +1,11 @@
+schema: "contract:taxonomy/v0/repo-declaration.schema.json"
+class: prims
+profile: B
+profile_status: locked
+leaf: false
+category: library
+env_prefix: SYSPRIMS_
+umbrella_prefix: null
+surfaces: [library, cli]
+bindings: {rust: shipped, go: shipped, typescript: shipped, python: shipped}
+extensions: []

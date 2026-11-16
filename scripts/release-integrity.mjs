@@ -121,8 +121,6 @@ export function expectedInventory(version, surfaces = undefined) {
     `sysprims-${version}-linux-arm64.tar.gz`,
     `sysprims-${version}-windows-amd64.zip`,
     `sysprims-${version}-windows-arm64.zip`,
-    `sysprims-ffi-${version}-libs.tar.gz`,
-    "sysprims.h",
     ...extra,
   ].sort();
   const checksummed = [...base, "SHA256SUMS", "SHA512SUMS"].sort();
@@ -451,11 +449,13 @@ export function remoteRequirements(root, commit, version) {
     if (type !== "blob" || (mode !== "100644" && mode !== "100755")) fail(`evidence/doc.go at ${set.commit} is not a regular file`);
     modules.push({ path: "github.com/3leaps/sysprims", version, absentAt: null });
   }
-  modules.push({
-    path: "github.com/3leaps/sysprims/bindings/go/sysprims",
-    version: go.disposition === "publish" ? version : go.retained_version,
-    absentAt: go.disposition === "publish" ? null : version,
-  });
+  if (set.legacyGoBindings) {
+    modules.push({
+      path: "github.com/3leaps/sysprims/bindings/go/sysprims",
+      version: go.disposition === "publish" ? version : go.retained_version,
+      absentAt: go.disposition === "publish" ? null : version,
+    });
+  }
   if (set.recurrence) modules.push({ path: "github.com/3leaps/sysprims/go/recurrence", version, absentAt: null });
   return { crates, modules };
 }

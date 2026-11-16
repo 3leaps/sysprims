@@ -41,9 +41,6 @@ const baseOwnedPaths = [
   "VERSION",
   "Cargo.toml",
   "Cargo.lock",
-  "bindings/go/sysprims/README.md",
-  "bindings/go/sysprims/go.mod",
-  "bindings/go/sysprims/prebuilt-manifest.json",
   "bindings/python/pyproject.toml",
   "bindings/python/Cargo.toml",
   "bindings/python/Cargo.lock",
@@ -54,6 +51,12 @@ const baseOwnedPaths = [
       `bindings/typescript/sysprims/npm/${directory}/package.json`,
   ),
 ];
+const legacyGoOwnedPaths = [
+  "bindings/go/sysprims/README.md",
+  "bindings/go/sysprims/go.mod",
+  "bindings/go/sysprims/prebuilt-manifest.json",
+];
+const rootGoModulePath = "github.com/3leaps/sysprims";
 const goModulePath = "github.com/3leaps/sysprims/bindings/go/sysprims";
 const goPlatforms = [
   "darwin-amd64",
@@ -242,15 +245,24 @@ function run(root, command, args, options = {}) {
   return result.stdout;
 }
 
+function ownedPathsForRoot(root) {
+  const hasLegacyGo = existsSync(join(root, "bindings/go/sysprims"));
+  if (hasLegacyGo) {
+    return [...baseOwnedPaths, ...legacyGoOwnedPaths];
+  }
+  return [...baseOwnedPaths, "go.mod"];
+}
+
 function preflight(root) {
-  for (const relativePath of baseOwnedPaths) {
+  const owned = ownedPathsForRoot(root);
+  for (const relativePath of owned) {
     const path = join(root, relativePath);
     if (!existsSync(path)) {
       fail(`required version-pack path is missing: ${relativePath}`);
     }
   }
 
-  for (const relativePath of baseOwnedPaths.filter((path) =>
+  for (const relativePath of owned.filter((path) =>
     path.endsWith(".json"),
   )) {
     readJson(join(root, relativePath));
@@ -260,7 +272,7 @@ function preflight(root) {
   const metadata = JSON.parse(
     run(root, "cargo", ["metadata", "--no-deps", "--format-version", "1"]),
   );
-  const paths = new Set(baseOwnedPaths);
+  const paths = new Set(owned);
   const canonicalRoot = realpathSync(root);
   for (const pkg of metadata.packages) {
     const manifestPath = relative(
@@ -633,6 +645,22 @@ function checkJson(root, expected, plan, errors) {
 }
 
 function checkGo(root, expected, plan, errors) {
+  if (!existsSync(join(root, "bindings/go/sysprims"))) {
+    const rootGoModPath = join(root, "go.mod");
+    if (!existsSync(rootGoModPath)) {
+      errors.push("root go.mod is missing");
+      return;
+    }
+    const rootGoMod = readFileSync(rootGoModPath, "utf8");
+    const rootModuleLines = rootGoMod.match(/^module\s+(.+)$/gm) ?? [];
+    if (rootModuleLines.length !== 1 || rootModuleLines[0] !== `module ${rootGoModulePath}`) {
+      errors.push(`Root Go module path must be exactly ${rootGoModulePath}`);
+    }
+    if (/^\s*replace\b/m.test(rootGoMod)) {
+      errors.push("root go.mod must not contain replace directives");
+    }
+    return;
+  }
   const goVersion = plannedVersion(plan.surfaces.go, expected);
   const goMod = readFileSync(join(root, "bindings/go/sysprims/go.mod"), "utf8");
   const moduleLines = goMod.match(/^module\s+(.+)$/gm) ?? [];
@@ -1012,6 +1040,7 @@ function replaceExactlyOnce(text, pattern, replacement, label) {
 }
 
 function updateGoReadme(root, version) {
+  if (!existsSync(join(root, "bindings/go/sysprims/README.md"))) return;
   const { plan } = readReleasePlan(root, version);
   if (plan.surfaces.go.disposition === "skip") return;
   const readmePath = join(root, "bindings/go/sysprims/README.md");

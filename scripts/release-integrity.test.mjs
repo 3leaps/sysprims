@@ -281,9 +281,10 @@ test("registry promotion requires every listed crate and all Go modules from the
   assert.deepEqual(live.crates, listed);
   assert.ok(live.crates.includes("sysprims-evidence"));
   assert.ok(live.crates.includes("sysprims-recurrence"));
+  const headLegacyGo = spawnSync("git", ["ls-tree", "HEAD", "--", "bindings/go/sysprims/go.mod"], { encoding: "utf8" }).stdout.trim() !== "";
   assert.deepEqual(live.modules.map((module) => module.path), [
     "github.com/3leaps/sysprims",
-    "github.com/3leaps/sysprims/bindings/go/sysprims",
+    ...(headLegacyGo ? ["github.com/3leaps/sysprims/bindings/go/sysprims"] : []),
     "github.com/3leaps/sysprims/go/recurrence",
   ]);
 
@@ -505,13 +506,13 @@ test("every published npm package must carry exactly the tag commit as gitHead",
 });
 
 test("modern release plans expand inventory with 6 Python assets and 8 npm tarballs and check PyPI", () => {
-  assert.equal(expectedInventory("0.3.0").base.length, 16);
+  assert.equal(expectedInventory("0.3.0").base.length, 14);
   const full = expectedInventory("0.4.0", {
     python: { disposition: "publish" },
     typescript: { disposition: "publish" },
   });
-  assert.equal(full.base.length, 30);
-  assert.equal(full.signed.length, 38);
+  assert.equal(full.base.length, 28);
+  assert.equal(full.signed.length, 36);
   for (const tag of PYTHON_WHEEL_TAGS) {
     assert.ok(full.base.includes(`sysprims-0.4.0-${tag}.whl`));
   }
@@ -524,16 +525,16 @@ test("modern release plans expand inventory with 6 Python assets and 8 npm tarba
     python: { disposition: "skip", retained_version: "0.3.9" },
     typescript: { disposition: "publish" },
   });
-  assert.equal(pySkip.base.length, 24);
+  assert.equal(pySkip.base.length, 22);
 
   const tsSkip = expectedInventory("0.4.0", {
     python: { disposition: "publish" },
     typescript: { disposition: "skip", retained_version: "0.3.9" },
   });
-  assert.equal(tsSkip.base.length, 22);
+  assert.equal(tsSkip.base.length, 20);
 
   const { root, tagCommit, lookup, plan } = taggedPlanFixture();
-  assert.equal(inventoryForCommit(root, tagCommit, "1.2.3").base.length, 30);
+  assert.equal(inventoryForCommit(root, tagCommit, "1.2.3").base.length, 28);
 
   // Missing wheel on PyPI is refused.
   assert.throws(() => remoteRegistries(root, tagCommit, "1.2.3", {
@@ -856,11 +857,11 @@ exec "${process.execPath}" "$@"
   assert.deepEqual(uploads.map((line) => line.split(" ")[1]).sort(), [...signed].sort());
   // Staging files altered while the release is being created never reach it.
   reset();
-  const expectedHeader = hash(readFileSync(join(dist, "sysprims.h")));
-  result = draft({ FIXTURE_SWAP: join(dist, "sysprims.h") });
+  const expectedSbom = hash(readFileSync(join(dist, "sbom-1.2.3.cdx.json")));
+  result = draft({ FIXTURE_SWAP: join(dist, "sbom-1.2.3.cdx.json") });
   assert.equal(result.status, 0, result.stderr);
-  const uploadedHeader = lines().find((line) => line.startsWith("upload sysprims.h ")).split(" ")[2];
-  assert.equal(uploadedHeader, expectedHeader, "a staging-directory change reached the upload");
+  const uploadedSbom = lines().find((line) => line.startsWith("upload sbom-1.2.3.cdx.json ")).split(" ")[2];
+  assert.equal(uploadedSbom, expectedSbom, "a staging-directory change reached the upload");
   // The snapshot is removed afterwards.
   const snapshotDir = create.split(" ").find((word) => word.endsWith("/SHA256SUMS")).replace(/\/SHA256SUMS$/, "");
   for (const left of [snapshotDir, `${snapshotDir}.anchor`, `${snapshotDir}.remote`]) assert.ok(!existsSyncLocal(left), `snapshot residue left behind: ${left}`);
@@ -899,7 +900,7 @@ exec "${process.execPath}" "$@"
   assert.equal(created().length, 0);
   // Same count, one CI file swapped for a signed-set file that is not CI-built.
   reset();
-  const swapped = fileLines().filter((line) => !line.endsWith(" sysprims.h"));
+  const swapped = fileLines().filter((line) => !line.endsWith(" sbom-1.2.3.cdx.json"));
   swapped.push(`file=${hash(readFileSync(join(dist, "sysprims-minisign.pub")))} sysprims-minisign.pub`);
   writeFileSync(served, swapped.join("\n") + "\n");
   result = draft();

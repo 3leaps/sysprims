@@ -2,7 +2,12 @@ export type JsonObject = Record<string, unknown>;
 
 // Process types
 
-export type ProcessState = "running" | "sleeping" | "stopped" | "zombie" | "unknown";
+export type ProcessState =
+	| "running"
+	| "sleeping"
+	| "stopped"
+	| "zombie"
+	| "unknown";
 export type CpuMode = "lifetime" | "monitor";
 
 /**
@@ -10,19 +15,19 @@ export type CpuMode = "lifetime" | "monitor";
  * Matches schema: process-info.schema.json#/definitions/process_info
  */
 export interface ProcessInfo {
-  pid: number;
-  ppid: number;
-  name: string;
-  user?: string | null;
-  cpu_percent: number;
-  memory_kb: number;
-  elapsed_seconds: number;
-  start_time_unix_ms?: number | null;
-  exe_path?: string | null;
-  state: ProcessState;
-  cmdline: string[];
-  env?: Record<string, string> | null;
-  thread_count?: number | null;
+	pid: number;
+	ppid: number;
+	name: string;
+	user?: string | null;
+	cpu_percent: number;
+	memory_kb: number;
+	elapsed_seconds: number;
+	start_time_unix_ms?: number | null;
+	exe_path?: string | null;
+	state: ProcessState;
+	cmdline: string[];
+	env?: Record<string, string> | null;
+	thread_count?: number | null;
 }
 
 /**
@@ -30,15 +35,15 @@ export interface ProcessInfo {
  * All fields use snake_case to match FFI expectations directly.
  */
 export interface ProcessFilter {
-  name_contains?: string;
-  name_equals?: string;
-  user_equals?: string;
-  pid_in?: number[];
-  ppid?: number;
-  state_in?: ProcessState[];
-  cpu_above?: number;
-  memory_above_kb?: number;
-  running_for_at_least_secs?: number;
+	name_contains?: string;
+	name_equals?: string;
+	user_equals?: string;
+	pid_in?: number[];
+	ppid?: number;
+	state_in?: ProcessState[];
+	cpu_above?: number;
+	memory_above_kb?: number;
+	running_for_at_least_secs?: number;
 }
 
 /**
@@ -47,8 +52,8 @@ export interface ProcessFilter {
  * Uses camelCase at the TypeScript API boundary; converted to snake_case for FFI.
  */
 export interface ProcessOptions {
-  includeEnv?: boolean;
-  includeThreads?: boolean;
+	includeEnv?: boolean;
+	includeThreads?: boolean;
 }
 
 /**
@@ -56,9 +61,9 @@ export interface ProcessOptions {
  * Matches schema: process-info.schema.json
  */
 export interface ProcessSnapshot {
-  schema_id: string;
-  timestamp: string;
-  processes: ProcessInfo[];
+	schema_id: string;
+	timestamp: string;
+	processes: ProcessInfo[];
 }
 
 // Wait PID
@@ -68,101 +73,101 @@ export interface ProcessSnapshot {
  * Matches schema: wait-pid-result.schema.json
  */
 export interface WaitPidResult {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  pid: number;
-  exited: boolean;
-  timed_out: boolean;
-  exit_code?: number | null;
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	pid: number;
+	exited: boolean;
+	timed_out: boolean;
+	exit_code?: number | null;
+	warnings: string[];
 }
 
 // Terminate tree
 
 export interface TerminateTreeConfig {
-  schema_id?: string;
-  grace_timeout_ms?: number | null;
-  kill_timeout_ms?: number | null;
-  signal?: number | null;
-  kill_signal?: number | null;
+	schema_id?: string;
+	grace_timeout_ms?: number | null;
+	kill_timeout_ms?: number | null;
+	signal?: number | null;
+	kill_signal?: number | null;
 }
 
 export interface TerminateTreeResult {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  pid: number;
-  pgid?: number | null;
-  signal_sent: number;
-  kill_signal?: number | null;
-  escalated: boolean;
-  exited: boolean;
-  timed_out: boolean;
-  tree_kill_reliability: "guaranteed" | "best_effort";
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	pid: number;
+	pgid?: number | null;
+	signal_sent: number;
+	kill_signal?: number | null;
+	escalated: boolean;
+	exited: boolean;
+	timed_out: boolean;
+	tree_kill_reliability: "guaranteed" | "best_effort";
+	warnings: string[];
 }
 
 // Spawn in group
 
 export interface SpawnInGroupConfig {
-  schema_id?: string;
-  argv: string[];
-  cwd?: string | null;
-  env?: Record<string, string> | null;
+	schema_id?: string;
+	argv: string[];
+	cwd?: string | null;
+	env?: Record<string, string> | null;
 }
 
 export interface SpawnInGroupResult {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  pid: number;
-  pgid?: number | null;
-  tree_kill_reliability: "guaranteed" | "best_effort";
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	pid: number;
+	pgid?: number | null;
+	tree_kill_reliability: "guaranteed" | "best_effort";
+	warnings: string[];
 }
 
 // Session spawn
 
 export interface RunSetsidConfig {
-  schema_id?: string;
-  argv: string[];
-  cwd?: string | null;
-  env?: Record<string, string> | null;
-  wait?: boolean;
+	schema_id?: string;
+	argv: string[];
+	cwd?: string | null;
+	env?: Record<string, string> | null;
+	wait?: boolean;
 }
 
 export interface RunNohupConfig {
-  schema_id?: string;
-  argv: string[];
-  cwd?: string | null;
-  env?: Record<string, string> | null;
-  wait?: boolean;
-  output_file?: string | null;
+	schema_id?: string;
+	argv: string[];
+	cwd?: string | null;
+	env?: Record<string, string> | null;
+	wait?: boolean;
+	output_file?: string | null;
 }
 
 export type SessionSpawnVerb = "setsid" | "nohup";
 export type SessionSpawnStatus = "spawned" | "completed";
 export type SessionKind = "new_session" | "inherited_session";
 export type SessionIdentifierProvenance =
-  | "setsid_structural_child_pid"
-  | "caller_context_before_spawn";
+	| "setsid_structural_child_pid"
+	| "caller_context_before_spawn";
 
 export interface SessionSpawnResult {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  verb: SessionSpawnVerb;
-  status: SessionSpawnStatus;
-  pid: number | null;
-  sid: number | null;
-  pgid: number | null;
-  session_kind: SessionKind;
-  identifier_provenance: SessionIdentifierProvenance;
-  exit_code: number | null;
-  signal: number | null;
-  output_file: string | null;
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	verb: SessionSpawnVerb;
+	status: SessionSpawnStatus;
+	pid: number | null;
+	sid: number | null;
+	pgid: number | null;
+	session_kind: SessionKind;
+	identifier_provenance: SessionIdentifierProvenance;
+	exit_code: number | null;
+	signal: number | null;
+	output_file: string | null;
+	warnings: string[];
 }
 
 // Port types
@@ -174,12 +179,12 @@ export type Protocol = "tcp" | "udp";
  * Matches schema: port-bindings.schema.json#/definitions/port_binding
  */
 export interface PortBinding {
-  protocol: Protocol;
-  local_addr?: string | null;
-  local_port: number;
-  state?: string | null;
-  pid?: number | null;
-  process?: ProcessInfo;
+	protocol: Protocol;
+	local_addr?: string | null;
+	local_port: number;
+	state?: string | null;
+	pid?: number | null;
+	process?: ProcessInfo;
 }
 
 /**
@@ -187,8 +192,8 @@ export interface PortBinding {
  * All fields use snake_case to match FFI expectations directly.
  */
 export interface PortFilter {
-  protocol?: Protocol;
-  local_port?: number;
+	protocol?: Protocol;
+	local_port?: number;
 }
 
 /**
@@ -196,11 +201,11 @@ export interface PortFilter {
  * Matches schema: port-bindings.schema.json
  */
 export interface PortBindingsSnapshot {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  bindings: PortBinding[];
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	bindings: PortBinding[];
+	warnings: string[];
 }
 
 // File descriptors
@@ -208,22 +213,22 @@ export interface PortBindingsSnapshot {
 export type FdKind = "file" | "socket" | "pipe" | "unknown";
 
 export interface FdInfo {
-  fd: number;
-  kind: FdKind;
-  path?: string | null;
+	fd: number;
+	kind: FdKind;
+	path?: string | null;
 }
 
 export interface FdFilter {
-  kind?: FdKind;
+	kind?: FdKind;
 }
 
 export interface FdSnapshot {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  pid: number;
-  fds: FdInfo[];
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	pid: number;
+	fds: FdInfo[];
+	warnings: string[];
 }
 
 // Signal operations
@@ -231,17 +236,17 @@ export interface FdSnapshot {
 export type SignalBinding = "bound" | "checked_numeric";
 
 export interface OpenProcessHandleOptions {
-  expectedStartIdentity?: string;
+	expectedStartIdentity?: string;
 }
 
 export interface BatchKillFailure {
-  pid: number;
-  error: string;
+	pid: number;
+	error: string;
 }
 
 export interface BatchKillResult {
-  succeeded: number[];
-  failed: BatchKillFailure[];
+	succeeded: number[];
+	failed: BatchKillFailure[];
 }
 
 // Descendants types
@@ -250,8 +255,8 @@ export interface BatchKillResult {
  * A single level in a descendants traversal result.
  */
 export interface DescendantsLevel {
-  level: number;
-  processes: ProcessInfo[];
+	level: number;
+	processes: ProcessInfo[];
 }
 
 /**
@@ -259,64 +264,64 @@ export interface DescendantsLevel {
  * Matches schema: descendants-result.schema.json
  */
 export interface DescendantsResult {
-  schema_id: string;
-  root_pid: number;
-  max_levels: number;
-  levels: DescendantsLevel[];
-  total_found: number;
-  matched_by_filter: number;
-  timestamp: string;
-  platform: string;
+	schema_id: string;
+	root_pid: number;
+	max_levels: number;
+	levels: DescendantsLevel[];
+	total_found: number;
+	matched_by_filter: number;
+	timestamp: string;
+	platform: string;
 }
 
 /**
  * Options for descendants traversal.
  */
 export interface DescendantsOptions extends ProcessOptions {
-  /** Maximum depth (1 = children only). Omit or use Infinity for all levels. */
-  maxLevels?: number;
-  /** Optional filter applied to descendant processes. */
-  filter?: ProcessFilter;
-  /** CPU measurement mode used for cpu_above evaluation. */
-  cpuMode?: CpuMode;
-  /** Sampling interval in milliseconds (used with monitor mode). */
-  sampleDurationMs?: number;
+	/** Maximum depth (1 = children only). Omit or use Infinity for all levels. */
+	maxLevels?: number;
+	/** Optional filter applied to descendant processes. */
+	filter?: ProcessFilter;
+	/** CPU measurement mode used for cpu_above evaluation. */
+	cpuMode?: CpuMode;
+	/** Sampling interval in milliseconds (used with monitor mode). */
+	sampleDurationMs?: number;
 }
 
 /**
  * Options for kill-descendants operation.
  */
 export interface KillDescendantsOptions {
-  /** Maximum depth. Omit or use Infinity for all levels. */
-  maxLevels?: number;
-  /** Optional filter applied to descendant processes. */
-  filter?: ProcessFilter;
-  /** CPU measurement mode used for cpu_above evaluation. */
-  cpuMode?: CpuMode;
-  /** Sampling interval in milliseconds (used with monitor mode). */
-  sampleDurationMs?: number;
-  /** Expand each matched PID to include its descendant subtree. */
-  cascade?: boolean;
+	/** Maximum depth. Omit or use Infinity for all levels. */
+	maxLevels?: number;
+	/** Optional filter applied to descendant processes. */
+	filter?: ProcessFilter;
+	/** CPU measurement mode used for cpu_above evaluation. */
+	cpuMode?: CpuMode;
+	/** Sampling interval in milliseconds (used with monitor mode). */
+	sampleDurationMs?: number;
+	/** Expand each matched PID to include its descendant subtree. */
+	cascade?: boolean;
 }
 
 /**
  * A single failure in a kill-descendants operation.
  */
 export interface KillDescendantsFailure {
-  pid: number;
-  error: string;
+	pid: number;
+	error: string;
 }
 
 /**
  * Result of a kill-descendants operation.
  */
 export interface KillDescendantsResult {
-  schema_id: string;
-  signal_sent: number;
-  root_pid: number;
-  succeeded: number[];
-  failed: KillDescendantsFailure[];
-  skipped_safety: number;
+	schema_id: string;
+	signal_sent: number;
+	root_pid: number;
+	succeeded: number[];
+	failed: KillDescendantsFailure[];
+	skipped_safety: number;
 }
 
 // Ancestors types
@@ -326,116 +331,116 @@ export interface KillDescendantsResult {
  * Matches schema: ancestors-result.schema.json
  */
 export interface AncestorsResult {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  pid: number;
-  chain: ProcessInfo[];
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	pid: number;
+	chain: ProcessInfo[];
+	warnings: string[];
 }
 
 /**
  * Options for ancestors traversal.
  */
 export interface AncestorsOptions {
-  /** Maximum depth to walk (default: 64). */
-  maxDepth?: number;
-  /** Optional extended process fields. */
-  includeEnv?: boolean;
-  includeThreads?: boolean;
+	/** Maximum depth to walk (default: 64). */
+	maxDepth?: number;
+	/** Optional extended process fields. */
+	includeEnv?: boolean;
+	includeThreads?: boolean;
 }
 
 /**
  * Rule config for one guard evaluation cycle.
  */
 export interface GuardRule {
-  root_pid: number;
-  max_levels?: number;
-  name_contains?: string;
-  name_equals?: string;
-  user_equals?: string;
-  pid_in?: number[];
-  ppid?: number;
-  state_in?: ProcessState[];
-  cpu_above?: number;
-  memory_above_kb?: number;
-  running_for_at_least_secs?: number;
-  cpu_mode?: CpuMode;
-  sample_duration_ms?: number;
+	root_pid: number;
+	max_levels?: number;
+	name_contains?: string;
+	name_equals?: string;
+	user_equals?: string;
+	pid_in?: number[];
+	ppid?: number;
+	state_in?: ProcessState[];
+	cpu_above?: number;
+	memory_above_kb?: number;
+	running_for_at_least_secs?: number;
+	cpu_mode?: CpuMode;
+	sample_duration_ms?: number;
 }
 
 /**
  * Action config for one guard cycle.
  */
 export interface GuardAction {
-  kind?: "kill_descendants";
-  signal?: number;
-  cascade?: boolean;
+	kind?: "kill_descendants";
+	signal?: number;
+	cascade?: boolean;
 }
 
 /**
  * One-shot guard step input.
  */
 export interface GuardConfig {
-  rule: GuardRule;
-  action?: GuardAction;
-  action_enabled?: boolean;
-  max_targets?: number;
+	rule: GuardRule;
+	action?: GuardAction;
+	action_enabled?: boolean;
+	max_targets?: number;
 }
 
 /**
  * Structured output from one guard step.
  */
 export interface GuardEvent {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  matched: number;
-  targeted: number;
-  killed: number;
-  failed: number;
-  skipped_safety: number;
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	matched: number;
+	targeted: number;
+	killed: number;
+	failed: number;
+	skipped_safety: number;
+	warnings: string[];
 }
 
 export interface SpawnContainedOptions {
-  cwd?: string | null;
-  env?: Record<string, string> | null;
-  executionTimeoutMs?: number;
-  graceTimeoutMs?: number;
-  killTimeoutMs?: number;
-  signal?: number;
-  killSignal?: number;
+	cwd?: string | null;
+	env?: Record<string, string> | null;
+	executionTimeoutMs?: number;
+	graceTimeoutMs?: number;
+	killTimeoutMs?: number;
+	signal?: number;
+	killSignal?: number;
 }
 
 export interface ContainmentIdentity {
-  pid: number;
-  start_time_unix_ms: number;
-  exe_path: string;
+	pid: number;
+	start_time_unix_ms: number;
+	exe_path: string;
 }
 
 export interface ContainmentCompletion {
-  status: "empty" | "survivors" | "unknown";
-  observation: string;
-  observed_count?: number;
-  survivor_pids?: number[];
+	status: "empty" | "survivors" | "unknown";
+	observation: string;
+	observed_count?: number;
+	survivor_pids?: number[];
 }
 
 export interface ContainmentSnapshot {
-  schema_id: string;
-  timestamp: string;
-  platform: string;
-  handle_state: "active" | "inert";
-  leader_status: "running" | "completed" | "timed_out" | "terminated";
-  identity: ContainmentIdentity;
-  tree_kill_reliability: "guaranteed" | "unproven" | "best_effort";
-  boundary_strength: "cooperative_group" | "kernel_enforced_job" | "unknown";
-  pgid?: number | null;
-  signal_sent?: number | null;
-  kill_signal?: number | null;
-  escalated?: boolean | null;
-  exited?: boolean | null;
-  timed_out?: boolean | null;
-  completion?: ContainmentCompletion;
-  warnings: string[];
+	schema_id: string;
+	timestamp: string;
+	platform: string;
+	handle_state: "active" | "inert";
+	leader_status: "running" | "completed" | "timed_out" | "terminated";
+	identity: ContainmentIdentity;
+	tree_kill_reliability: "guaranteed" | "unproven" | "best_effort";
+	boundary_strength: "cooperative_group" | "kernel_enforced_job" | "unknown";
+	pgid?: number | null;
+	signal_sent?: number | null;
+	kill_signal?: number | null;
+	escalated?: boolean | null;
+	exited?: boolean | null;
+	timed_out?: boolean | null;
+	completion?: ContainmentCompletion;
+	warnings: string[];
 }

@@ -1,115 +1,115 @@
 import { ContainedProcess, spawnContained } from "./containment";
 import { SysprimsError, SysprimsErrorCode } from "./errors";
 import {
-  callBoolOut,
-  callI32Out,
-  callJsonReturn,
-  callStringOut,
-  callU32Out,
-  callVoid,
-  loadSysprims,
+	callBoolOut,
+	callI32Out,
+	callJsonReturn,
+	callStringOut,
+	callU32Out,
+	callVoid,
+	loadSysprims,
 } from "./ffi";
 import type {
-  AncestorsOptions,
-  AncestorsResult,
-  BatchKillFailure,
-  BatchKillResult,
-  CpuMode,
-  DescendantsOptions,
-  DescendantsResult,
-  FdFilter,
-  FdSnapshot,
-  GuardConfig,
-  GuardEvent,
-  KillDescendantsOptions,
-  KillDescendantsResult,
-  OpenProcessHandleOptions,
-  PortBindingsSnapshot,
-  PortFilter,
-  ProcessFilter,
-  ProcessInfo,
-  ProcessOptions,
-  ProcessSnapshot,
-  RunNohupConfig,
-  RunSetsidConfig,
-  SessionSpawnResult,
-  SignalBinding,
-  SpawnInGroupConfig,
-  SpawnInGroupResult,
-  TerminateTreeConfig,
-  TerminateTreeResult,
-  WaitPidResult,
+	AncestorsOptions,
+	AncestorsResult,
+	BatchKillFailure,
+	BatchKillResult,
+	CpuMode,
+	DescendantsOptions,
+	DescendantsResult,
+	FdFilter,
+	FdSnapshot,
+	GuardConfig,
+	GuardEvent,
+	KillDescendantsOptions,
+	KillDescendantsResult,
+	OpenProcessHandleOptions,
+	PortBindingsSnapshot,
+	PortFilter,
+	ProcessFilter,
+	ProcessInfo,
+	ProcessOptions,
+	ProcessSnapshot,
+	RunNohupConfig,
+	RunSetsidConfig,
+	SessionSpawnResult,
+	SignalBinding,
+	SpawnInGroupConfig,
+	SpawnInGroupResult,
+	TerminateTreeConfig,
+	TerminateTreeResult,
+	WaitPidResult,
 } from "./types";
 import {
-  MAX_SAFE_PID,
-  U32_MAX,
-  validateDuration,
-  validateMaxLevels,
-  validatePgid,
-  validatePid,
-  validatePort,
-  validateProcessFilter,
-  validateSignal,
-  validateU32,
+	MAX_SAFE_PID,
+	U32_MAX,
+	validateDuration,
+	validateMaxLevels,
+	validatePgid,
+	validatePid,
+	validatePort,
+	validateProcessFilter,
+	validateSignal,
+	validateU32,
 } from "./validation";
 
 export {
-  ContainedProcess,
-  MAX_SAFE_PID,
-  spawnContained,
-  SysprimsError,
-  SysprimsErrorCode,
-  validatePgid,
-  validatePid,
+	ContainedProcess,
+	MAX_SAFE_PID,
+	spawnContained,
+	SysprimsError,
+	SysprimsErrorCode,
+	validatePgid,
+	validatePid,
 };
 export type { ContainedProcessWaitOptions } from "./containment";
 export type {
-  AncestorsOptions,
-  AncestorsResult,
-  BatchKillFailure,
-  BatchKillResult,
-  ContainmentCompletion,
-  ContainmentIdentity,
-  ContainmentSnapshot,
-  CpuMode,
-  DescendantsLevel,
-  DescendantsOptions,
-  DescendantsResult,
-  FdFilter,
-  FdInfo,
-  FdKind,
-  FdSnapshot,
-  GuardAction,
-  GuardConfig,
-  GuardEvent,
-  GuardRule,
-  KillDescendantsFailure,
-  KillDescendantsOptions,
-  KillDescendantsResult,
-  OpenProcessHandleOptions,
-  PortBinding,
-  PortBindingsSnapshot,
-  PortFilter,
-  ProcessFilter,
-  ProcessInfo,
-  ProcessOptions,
-  ProcessSnapshot,
-  ProcessState,
-  Protocol,
-  RunNohupConfig,
-  RunSetsidConfig,
-  SessionIdentifierProvenance,
-  SessionKind,
-  SessionSpawnResult,
-  SessionSpawnStatus,
-  SessionSpawnVerb,
-  SignalBinding,
-  SpawnContainedOptions,
-  SpawnInGroupConfig,
-  SpawnInGroupResult,
-  TerminateTreeConfig,
-  TerminateTreeResult,
-  WaitPidResult,
+	AncestorsOptions,
+	AncestorsResult,
+	BatchKillFailure,
+	BatchKillResult,
+	ContainmentCompletion,
+	ContainmentIdentity,
+	ContainmentSnapshot,
+	CpuMode,
+	DescendantsLevel,
+	DescendantsOptions,
+	DescendantsResult,
+	FdFilter,
+	FdInfo,
+	FdKind,
+	FdSnapshot,
+	GuardAction,
+	GuardConfig,
+	GuardEvent,
+	GuardRule,
+	KillDescendantsFailure,
+	KillDescendantsOptions,
+	KillDescendantsResult,
+	OpenProcessHandleOptions,
+	PortBinding,
+	PortBindingsSnapshot,
+	PortFilter,
+	ProcessFilter,
+	ProcessInfo,
+	ProcessOptions,
+	ProcessSnapshot,
+	ProcessState,
+	Protocol,
+	RunNohupConfig,
+	RunSetsidConfig,
+	SessionIdentifierProvenance,
+	SessionKind,
+	SessionSpawnResult,
+	SessionSpawnStatus,
+	SessionSpawnVerb,
+	SignalBinding,
+	SpawnContainedOptions,
+	SpawnInGroupConfig,
+	SpawnInGroupResult,
+	TerminateTreeConfig,
+	TerminateTreeResult,
+	WaitPidResult,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -117,65 +117,68 @@ export type {
 // -----------------------------------------------------------------------------
 
 function serializeProcessOptions(options?: ProcessOptions): string {
-  if (!options) {
-    return "";
-  }
+	if (!options) {
+		return "";
+	}
 
-  const wire: { include_env?: boolean; include_threads?: boolean } = {};
-  if (options.includeEnv === true) {
-    wire.include_env = true;
-  }
-  if (options.includeThreads === true) {
-    wire.include_threads = true;
-  }
+	const wire: { include_env?: boolean; include_threads?: boolean } = {};
+	if (options.includeEnv === true) {
+		wire.include_env = true;
+	}
+	if (options.includeThreads === true) {
+		wire.include_threads = true;
+	}
 
-  if (!wire.include_env && !wire.include_threads) {
-    return "";
-  }
+	if (!wire.include_env && !wire.include_threads) {
+		return "";
+	}
 
-  return JSON.stringify(wire);
+	return JSON.stringify(wire);
 }
 
 function serializeDescendantsConfig(options?: {
-  filter?: ProcessFilter;
-  cpuMode?: CpuMode;
-  sampleDurationMs?: number;
-  cascade?: boolean;
+	filter?: ProcessFilter;
+	cpuMode?: CpuMode;
+	sampleDurationMs?: number;
+	cascade?: boolean;
 }): string {
-  if (!options) {
-    return "";
-  }
+	if (!options) {
+		return "";
+	}
 
-  const wire: Record<string, unknown> = {};
+	const wire: Record<string, unknown> = {};
 
-  if (options.filter) {
-    validateProcessFilter(options.filter);
-    Object.assign(wire, options.filter);
-  }
+	if (options.filter) {
+		validateProcessFilter(options.filter);
+		Object.assign(wire, options.filter);
+	}
 
-  if (options.cpuMode !== undefined) {
-    if (options.cpuMode !== "lifetime" && options.cpuMode !== "monitor") {
-      throw new SysprimsError(
-        SysprimsErrorCode.InvalidArgument,
-        `invalid cpuMode: ${String(options.cpuMode)}`,
-      );
-    }
-    wire.cpu_mode = options.cpuMode;
-  }
+	if (options.cpuMode !== undefined) {
+		if (options.cpuMode !== "lifetime" && options.cpuMode !== "monitor") {
+			throw new SysprimsError(
+				SysprimsErrorCode.InvalidArgument,
+				`invalid cpuMode: ${String(options.cpuMode)}`,
+			);
+		}
+		wire.cpu_mode = options.cpuMode;
+	}
 
-  if (options.sampleDurationMs !== undefined) {
-    wire.sample_duration_ms = validateDuration(options.sampleDurationMs, "sampleDurationMs");
-  }
+	if (options.sampleDurationMs !== undefined) {
+		wire.sample_duration_ms = validateDuration(
+			options.sampleDurationMs,
+			"sampleDurationMs",
+		);
+	}
 
-  if (options.cascade === true) {
-    wire.cascade = true;
-  }
+	if (options.cascade === true) {
+		wire.cascade = true;
+	}
 
-  if (Object.keys(wire).length === 0) {
-    return "";
-  }
+	if (Object.keys(wire).length === 0) {
+		return "";
+	}
 
-  return JSON.stringify(wire);
+	return JSON.stringify(wire);
 }
 
 /**
@@ -187,11 +190,11 @@ function serializeDescendantsConfig(options?: {
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
 export function procGet(pid: number, options?: ProcessOptions): ProcessInfo {
-  validatePid(pid);
-  const lib = loadSysprims();
-  const optionsJson = serializeProcessOptions(options);
-  const result = callJsonReturn(() => lib.sysprimsProcGetEx(pid, optionsJson));
-  return result as ProcessInfo;
+	validatePid(pid);
+	const lib = loadSysprims();
+	const optionsJson = serializeProcessOptions(options);
+	const result = callJsonReturn(() => lib.sysprimsProcGetEx(pid, optionsJson));
+	return result as ProcessInfo;
 }
 
 /**
@@ -221,13 +224,18 @@ export function procGet(pid: number, options?: ProcessOptions): ProcessInfo {
  * // Filter by multiple criteria
  * const heavy = processList({ cpu_above: 50, memory_above_kb: 100000 });
  */
-export function processList(filter?: ProcessFilter, options?: ProcessOptions): ProcessSnapshot {
-  validateProcessFilter(filter);
-  const lib = loadSysprims();
-  const filterJson = filter ? JSON.stringify(filter) : "";
-  const optionsJson = serializeProcessOptions(options);
-  const result = callJsonReturn(() => lib.sysprimsProcListEx(filterJson, optionsJson));
-  return result as ProcessSnapshot;
+export function processList(
+	filter?: ProcessFilter,
+	options?: ProcessOptions,
+): ProcessSnapshot {
+	validateProcessFilter(filter);
+	const lib = loadSysprims();
+	const filterJson = filter ? JSON.stringify(filter) : "";
+	const optionsJson = serializeProcessOptions(options);
+	const result = callJsonReturn(() =>
+		lib.sysprimsProcListEx(filterJson, optionsJson),
+	);
+	return result as ProcessSnapshot;
 }
 
 /**
@@ -257,11 +265,13 @@ export function processList(filter?: ProcessFilter, options?: ProcessOptions): P
  * const http = listeningPorts({ local_port: 8080 });
  */
 export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
-  if (filter?.local_port !== undefined) validatePort(filter.local_port);
-  const lib = loadSysprims();
-  const filterJson = filter ? JSON.stringify(filter) : "";
-  const result = callJsonReturn(() => lib.sysprimsProcListeningPorts(filterJson));
-  return result as PortBindingsSnapshot;
+	if (filter?.local_port !== undefined) validatePort(filter.local_port);
+	const lib = loadSysprims();
+	const filterJson = filter ? JSON.stringify(filter) : "";
+	const result = callJsonReturn(() =>
+		lib.sysprimsProcListeningPorts(filterJson),
+	);
+	return result as PortBindingsSnapshot;
 }
 
 // -----------------------------------------------------------------------------
@@ -292,15 +302,18 @@ export function listeningPorts(filter?: PortFilter): PortBindingsSnapshot {
  * // Filter descendants by name
  * const result = descendants(1234, { filter: { name_contains: "worker" } });
  */
-export function descendants(pid: number, options?: DescendantsOptions): DescendantsResult {
-  validatePid(pid);
-  const maxLevels = validateMaxLevels(options?.maxLevels);
-  const configJson = serializeDescendantsConfig(options);
-  const optionsJson = serializeProcessOptions(options);
-  const lib = loadSysprims();
-  return callJsonReturn(() =>
-    lib.sysprimsProcDescendants(pid, maxLevels, configJson, optionsJson),
-  ) as DescendantsResult;
+export function descendants(
+	pid: number,
+	options?: DescendantsOptions,
+): DescendantsResult {
+	validatePid(pid);
+	const maxLevels = validateMaxLevels(options?.maxLevels);
+	const configJson = serializeDescendantsConfig(options);
+	const optionsJson = serializeProcessOptions(options);
+	const lib = loadSysprims();
+	return callJsonReturn(() =>
+		lib.sysprimsProcDescendants(pid, maxLevels, configJson, optionsJson),
+	) as DescendantsResult;
 }
 
 /**
@@ -328,18 +341,18 @@ export function descendants(pid: number, options?: DescendantsOptions): Descenda
  * });
  */
 export function killDescendants(
-  pid: number,
-  signal = 15,
-  options?: KillDescendantsOptions,
+	pid: number,
+	signal = 15,
+	options?: KillDescendantsOptions,
 ): KillDescendantsResult {
-  validatePid(pid);
-  validateSignal(signal);
-  const maxLevels = validateMaxLevels(options?.maxLevels);
-  const configJson = serializeDescendantsConfig(options);
-  const lib = loadSysprims();
-  return callJsonReturn(() =>
-    lib.sysprimsProcKillDescendants(pid, maxLevels, signal, configJson),
-  ) as KillDescendantsResult;
+	validatePid(pid);
+	validateSignal(signal);
+	const maxLevels = validateMaxLevels(options?.maxLevels);
+	const configJson = serializeDescendantsConfig(options);
+	const lib = loadSysprims();
+	return callJsonReturn(() =>
+		lib.sysprimsProcKillDescendants(pid, maxLevels, signal, configJson),
+	) as KillDescendantsResult;
 }
 
 /**
@@ -348,22 +361,29 @@ export function killDescendants(
  * Actions are gated by `action_enabled`; when false, this is evaluate-only.
  */
 export function guardStep(config: GuardConfig): GuardEvent {
-  validatePid(config.rule.root_pid, "rule.root_pid");
-  if (config.rule.max_levels !== undefined) validateU32(config.rule.max_levels, "rule.max_levels");
-  validateProcessFilter(config.rule, "rule");
-  if (config.rule.sample_duration_ms !== undefined) {
-    validateDuration(config.rule.sample_duration_ms, "rule.sample_duration_ms");
-  }
-  if (config.action?.signal !== undefined) validateSignal(config.action.signal, "action.signal");
-  if (config.max_targets !== undefined) {
-    validateU32(config.max_targets, "max_targets");
-    if (config.max_targets === 0) {
-      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "max_targets must be >= 1");
-    }
-  }
-  const lib = loadSysprims();
-  const configJson = JSON.stringify(config);
-  return callJsonReturn(() => lib.sysprimsProcGuardStep(configJson)) as GuardEvent;
+	validatePid(config.rule.root_pid, "rule.root_pid");
+	if (config.rule.max_levels !== undefined)
+		validateU32(config.rule.max_levels, "rule.max_levels");
+	validateProcessFilter(config.rule, "rule");
+	if (config.rule.sample_duration_ms !== undefined) {
+		validateDuration(config.rule.sample_duration_ms, "rule.sample_duration_ms");
+	}
+	if (config.action?.signal !== undefined)
+		validateSignal(config.action.signal, "action.signal");
+	if (config.max_targets !== undefined) {
+		validateU32(config.max_targets, "max_targets");
+		if (config.max_targets === 0) {
+			throw new SysprimsError(
+				SysprimsErrorCode.InvalidArgument,
+				"max_targets must be >= 1",
+			);
+		}
+	}
+	const lib = loadSysprims();
+	const configJson = JSON.stringify(config);
+	return callJsonReturn(() =>
+		lib.sysprimsProcGuardStep(configJson),
+	) as GuardEvent;
 }
 
 // -----------------------------------------------------------------------------
@@ -382,18 +402,24 @@ export function guardStep(config: GuardConfig): GuardEvent {
  * @throws {SysprimsError} NotFound if starting process does not exist
  * @throws {SysprimsError} InvalidArgument if pid is 0
  */
-export function ancestors(pid: number, options?: AncestorsOptions): AncestorsResult {
-  validatePid(pid);
-  const maxDepth = validateU32(options?.maxDepth ?? 64, "maxDepth");
-  const optionsJson = serializeProcessOptions(
-    options?.includeEnv || options?.includeThreads
-      ? { includeEnv: options?.includeEnv, includeThreads: options?.includeThreads }
-      : undefined,
-  );
-  const lib = loadSysprims();
-  return callJsonReturn(() =>
-    lib.sysprimsProcAncestors(pid, maxDepth, optionsJson),
-  ) as AncestorsResult;
+export function ancestors(
+	pid: number,
+	options?: AncestorsOptions,
+): AncestorsResult {
+	validatePid(pid);
+	const maxDepth = validateU32(options?.maxDepth ?? 64, "maxDepth");
+	const optionsJson = serializeProcessOptions(
+		options?.includeEnv || options?.includeThreads
+			? {
+					includeEnv: options?.includeEnv,
+					includeThreads: options?.includeThreads,
+				}
+			: undefined,
+	);
+	const lib = loadSysprims();
+	return callJsonReturn(() =>
+		lib.sysprimsProcAncestors(pid, maxDepth, optionsJson),
+	) as AncestorsResult;
 }
 
 // -----------------------------------------------------------------------------
@@ -408,11 +434,11 @@ export function ancestors(pid: number, options?: AncestorsOptions): AncestorsRes
  * - Windows: process wait APIs when available
  */
 export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
-  validatePid(pid);
-  validateDuration(timeoutMs, "timeoutMs", U32_MAX);
-  const lib = loadSysprims();
-  const result = callJsonReturn(() => lib.sysprimsProcWaitPid(pid, timeoutMs));
-  return result as WaitPidResult;
+	validatePid(pid);
+	validateDuration(timeoutMs, "timeoutMs", U32_MAX);
+	const lib = loadSysprims();
+	const result = callJsonReturn(() => lib.sysprimsProcWaitPid(pid, timeoutMs));
+	return result as WaitPidResult;
 }
 
 // -----------------------------------------------------------------------------
@@ -425,11 +451,11 @@ export function waitPID(pid: number, timeoutMs: number): WaitPidResult {
  * Best-effort behavior: fields may be missing and warnings may be present.
  */
 export function listFds(pid: number, filter?: FdFilter): FdSnapshot {
-  validatePid(pid);
-  const lib = loadSysprims();
-  const filterJson = filter ? JSON.stringify(filter) : "";
-  const result = callJsonReturn(() => lib.sysprimsProcListFds(pid, filterJson));
-  return result as FdSnapshot;
+	validatePid(pid);
+	const lib = loadSysprims();
+	const filterJson = filter ? JSON.stringify(filter) : "";
+	const result = callJsonReturn(() => lib.sysprimsProcListFds(pid, filterJson));
+	return result as FdSnapshot;
 }
 
 // -----------------------------------------------------------------------------
@@ -443,8 +469,8 @@ export function listFds(pid: number, filter?: FdFilter): FdSnapshot {
  * @throws {SysprimsError} NotSupported on Windows (POSIX concept)
  */
 export function selfPGID(): number {
-  const lib = loadSysprims();
-  return callU32Out(() => lib.sysprimsSelfGetpgid());
+	const lib = loadSysprims();
+	return callU32Out(() => lib.sysprimsSelfGetpgid());
 }
 
 /**
@@ -454,8 +480,8 @@ export function selfPGID(): number {
  * @throws {SysprimsError} NotSupported on Windows (POSIX concept)
  */
 export function selfSID(): number {
-  const lib = loadSysprims();
-  return callU32Out(() => lib.sysprimsSelfGetsid());
+	const lib = loadSysprims();
+	return callU32Out(() => lib.sysprimsSelfGetsid());
 }
 
 // -----------------------------------------------------------------------------
@@ -463,9 +489,9 @@ export function selfSID(): number {
 // -----------------------------------------------------------------------------
 
 const RUN_SETSID_CONFIG_SCHEMA_ID =
-  "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json";
+	"https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-setsid-config.schema.json";
 const RUN_NOHUP_CONFIG_SCHEMA_ID =
-  "https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json";
+	"https://schemas.3leaps.dev/sysprims/session/v1.0.0/run-nohup-config.schema.json";
 
 /**
  * Run a command in a new POSIX session.
@@ -475,12 +501,14 @@ const RUN_NOHUP_CONFIG_SCHEMA_ID =
  * derived from the child PID.
  */
 export function runSetsid(config: RunSetsidConfig): SessionSpawnResult {
-  const lib = loadSysprims();
-  const cfg: RunSetsidConfig = {
-    schema_id: config.schema_id || RUN_SETSID_CONFIG_SCHEMA_ID,
-    ...config,
-  };
-  return callJsonReturn(() => lib.sysprimsRunSetsid(JSON.stringify(cfg))) as SessionSpawnResult;
+	const lib = loadSysprims();
+	const cfg: RunSetsidConfig = {
+		schema_id: config.schema_id || RUN_SETSID_CONFIG_SCHEMA_ID,
+		...config,
+	};
+	return callJsonReturn(() =>
+		lib.sysprimsRunSetsid(JSON.stringify(cfg)),
+	) as SessionSpawnResult;
 }
 
 /**
@@ -493,12 +521,14 @@ export function runSetsid(config: RunSetsidConfig): SessionSpawnResult {
  * symlink. `wait: true` blocks the calling thread.
  */
 export function runNohup(config: RunNohupConfig): SessionSpawnResult {
-  const lib = loadSysprims();
-  const cfg: RunNohupConfig = {
-    schema_id: config.schema_id || RUN_NOHUP_CONFIG_SCHEMA_ID,
-    ...config,
-  };
-  return callJsonReturn(() => lib.sysprimsRunNohup(JSON.stringify(cfg))) as SessionSpawnResult;
+	const lib = loadSysprims();
+	const cfg: RunNohupConfig = {
+		schema_id: config.schema_id || RUN_NOHUP_CONFIG_SCHEMA_ID,
+		...config,
+	};
+	return callJsonReturn(() =>
+		lib.sysprimsRunNohup(JSON.stringify(cfg)),
+	) as SessionSpawnResult;
 }
 
 // -----------------------------------------------------------------------------
@@ -527,10 +557,10 @@ export function runNohup(config: RunNohupConfig): SessionSpawnResult {
  * signalSend(1234, 15);
  */
 export function signalSend(pid: number, signal: number): void {
-  validatePid(pid);
-  validateSignal(signal);
-  const lib = loadSysprims();
-  callVoid(() => lib.sysprimsSignalSend(pid, signal));
+	validatePid(pid);
+	validateSignal(signal);
+	const lib = loadSysprims();
+	callVoid(() => lib.sysprimsSignalSend(pid, signal));
 }
 
 /**
@@ -546,10 +576,10 @@ export function signalSend(pid: number, signal: number): void {
  * @throws {SysprimsError} NotSupported on Windows
  */
 export function signalSendGroup(pgid: number, signal: number): void {
-  validatePid(pgid, "pgid");
-  validateSignal(signal);
-  const lib = loadSysprims();
-  callVoid(() => lib.sysprimsSignalSendGroup(pgid, signal));
+	validatePid(pgid, "pgid");
+	validateSignal(signal);
+	const lib = loadSysprims();
+	callVoid(() => lib.sysprimsSignalSendGroup(pgid, signal));
 }
 
 /**
@@ -563,9 +593,9 @@ export function signalSendGroup(pgid: number, signal: number): void {
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
 export function terminate(pid: number): void {
-  validatePid(pid);
-  const lib = loadSysprims();
-  callVoid(() => lib.sysprimsTerminate(pid));
+	validatePid(pid);
+	const lib = loadSysprims();
+	callVoid(() => lib.sysprimsTerminate(pid));
 }
 
 /**
@@ -579,18 +609,21 @@ export function terminate(pid: number): void {
  * @throws {SysprimsError} PermissionDenied if access is denied
  */
 export function forceKill(pid: number): void {
-  validatePid(pid);
-  const lib = loadSysprims();
-  callVoid(() => lib.sysprimsForceKill(pid));
+	validatePid(pid);
+	const lib = loadSysprims();
+	callVoid(() => lib.sysprimsForceKill(pid));
 }
 
 function validatePidList(pids: number[]): void {
-  if (!Array.isArray(pids) || pids.length === 0) {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pids must not be empty");
-  }
-  for (const pid of pids) {
-    validatePid(pid);
-  }
+	if (!Array.isArray(pids) || pids.length === 0) {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"pids must not be empty",
+		);
+	}
+	for (const pid of pids) {
+		validatePid(pid);
+	}
 }
 
 /**
@@ -600,20 +633,20 @@ function validatePidList(pids: number[]): void {
  * Individual failures are collected and returned.
  */
 export function killMany(pids: number[], signal: number): BatchKillResult {
-  validatePidList(pids);
-  validateSignal(signal);
+	validatePidList(pids);
+	validateSignal(signal);
 
-  const result: BatchKillResult = { succeeded: [], failed: [] };
-  for (const pid of pids) {
-    try {
-      signalSend(pid, signal);
-      result.succeeded.push(pid);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
-    }
-  }
-  return result;
+	const result: BatchKillResult = { succeeded: [], failed: [] };
+	for (const pid of pids) {
+		try {
+			signalSend(pid, signal);
+			result.succeeded.push(pid);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
+		}
+	}
+	return result;
 }
 
 /**
@@ -623,19 +656,19 @@ export function killMany(pids: number[], signal: number): BatchKillResult {
  * On Windows: calls TerminateProcess.
  */
 export function terminateMany(pids: number[]): BatchKillResult {
-  validatePidList(pids);
+	validatePidList(pids);
 
-  const result: BatchKillResult = { succeeded: [], failed: [] };
-  for (const pid of pids) {
-    try {
-      terminate(pid);
-      result.succeeded.push(pid);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
-    }
-  }
-  return result;
+	const result: BatchKillResult = { succeeded: [], failed: [] };
+	for (const pid of pids) {
+		try {
+			terminate(pid);
+			result.succeeded.push(pid);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
+		}
+	}
+	return result;
 }
 
 /**
@@ -645,19 +678,19 @@ export function terminateMany(pids: number[]): BatchKillResult {
  * On Windows: calls TerminateProcess.
  */
 export function forceKillMany(pids: number[]): BatchKillResult {
-  validatePidList(pids);
+	validatePidList(pids);
 
-  const result: BatchKillResult = { succeeded: [], failed: [] };
-  for (const pid of pids) {
-    try {
-      forceKill(pid);
-      result.succeeded.push(pid);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
-    }
-  }
-  return result;
+	const result: BatchKillResult = { succeeded: [], failed: [] };
+	for (const pid of pids) {
+		try {
+			forceKill(pid);
+			result.succeeded.push(pid);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			result.failed.push({ pid, error: msg } satisfies BatchKillFailure);
+		}
+	}
+	return result;
 }
 
 export const SIGHUP = 1;
@@ -671,70 +704,82 @@ export const SIGUSR1: number = process.platform === "darwin" ? 30 : 10;
 export const SIGUSR2: number = process.platform === "darwin" ? 31 : 12;
 
 export function terminateGroup(pgid: number): void {
-  signalSendGroup(pgid, SIGTERM);
+	signalSendGroup(pgid, SIGTERM);
 }
 
 export function forceKillGroup(pgid: number): void {
-  signalSendGroup(pgid, SIGKILL);
+	signalSendGroup(pgid, SIGKILL);
 }
 
 export function resolveSignalName(signalName: string): number {
-  if (typeof signalName !== "string") {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signalName must be a string");
-  }
-  const lib = loadSysprims();
-  return callI32Out(() => lib.sysprimsResolveSignalName(signalName));
+	if (typeof signalName !== "string") {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"signalName must be a string",
+		);
+	}
+	const lib = loadSysprims();
+	return callI32Out(() => lib.sysprimsResolveSignalName(signalName));
 }
 
 export function matchSignalNames(pattern: string): string[] {
-  if (typeof pattern !== "string") {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "pattern must be a string");
-  }
-  const lib = loadSysprims();
-  return lib.sysprimsMatchSignalNames(pattern);
+	if (typeof pattern !== "string") {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"pattern must be a string",
+		);
+	}
+	const lib = loadSysprims();
+	return lib.sysprimsMatchSignalNames(pattern);
 }
 
 export function killByName(pid: number, signalName: string): void {
-  validatePid(pid);
-  if (typeof signalName !== "string") {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signalName must be a string");
-  }
-  const lib = loadSysprims();
-  callVoid(() => lib.sysprimsKillByName(pid, signalName));
+	validatePid(pid);
+	if (typeof signalName !== "string") {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"signalName must be a string",
+		);
+	}
+	const lib = loadSysprims();
+	callVoid(() => lib.sysprimsKillByName(pid, signalName));
 }
 
 export function killGroupByName(pgid: number, signalName: string): void {
-  validatePid(pgid, "pgid");
-  if (typeof signalName !== "string") {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "signalName must be a string");
-  }
-  const lib = loadSysprims();
-  callVoid(() => lib.sysprimsKillGroupByName(pgid, signalName));
+	validatePid(pgid, "pgid");
+	if (typeof signalName !== "string") {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"signalName must be a string",
+		);
+	}
+	const lib = loadSysprims();
+	callVoid(() => lib.sysprimsKillGroupByName(pgid, signalName));
 }
 
 let processHandleBackstop: FinalizationRegistry<bigint> | null = null;
 
 function getProcessHandleBackstop(): FinalizationRegistry<bigint> {
-  if (processHandleBackstop === null) {
-    processHandleBackstop = new FinalizationRegistry<bigint>((token) => {
-      try {
-        const lib = loadSysprims();
-        lib.sysprimsProcessHandleClose(token);
-      } catch {
-        // Leak backstop only.
-      }
-    });
-  }
-  return processHandleBackstop;
+	if (processHandleBackstop === null) {
+		processHandleBackstop = new FinalizationRegistry<bigint>((token) => {
+			try {
+				const lib = loadSysprims();
+				lib.sysprimsProcessHandleClose(token);
+			} catch {
+				// Leak backstop only.
+			}
+		});
+	}
+	return processHandleBackstop;
 }
 
 const PROCESS_HANDLE_INTERNAL = Symbol("ProcessHandleInternal");
 
 interface ProcessHandleOpenWire {
-  token: string;
-  pid: number;
-  start_identity: string;
-  binding: SignalBinding;
+	token: string;
+	pid: number;
+	start_identity: string;
+	binding: SignalBinding;
 }
 
 /**
@@ -743,137 +788,148 @@ interface ProcessHandleOpenWire {
  * Raw OS descriptors/handles are retained in Rust and never exposed across FFI.
  */
 export class ProcessHandle {
-  #token: bigint | null;
-  readonly #pid: number;
-  readonly #startIdentity: string;
-  readonly #binding: SignalBinding;
+	#token: bigint | null;
+	readonly #pid: number;
+	readonly #startIdentity: string;
+	readonly #binding: SignalBinding;
 
-  /** @internal */
-  constructor(
-    guard: symbol,
-    token: bigint,
-    pid: number,
-    startIdentity: string,
-    binding: SignalBinding,
-  ) {
-    if (guard !== PROCESS_HANDLE_INTERNAL) {
-      throw new SysprimsError(
-        SysprimsErrorCode.InvalidArgument,
-        "ProcessHandle cannot be constructed directly; use openProcessHandle",
-      );
-    }
-    this.#token = token;
-    this.#pid = pid;
-    this.#startIdentity = startIdentity;
-    this.#binding = binding;
-    getProcessHandleBackstop().register(this, token, this);
-  }
+	/** @internal */
+	constructor(
+		guard: symbol,
+		token: bigint,
+		pid: number,
+		startIdentity: string,
+		binding: SignalBinding,
+	) {
+		if (guard !== PROCESS_HANDLE_INTERNAL) {
+			throw new SysprimsError(
+				SysprimsErrorCode.InvalidArgument,
+				"ProcessHandle cannot be constructed directly; use openProcessHandle",
+			);
+		}
+		this.#token = token;
+		this.#pid = pid;
+		this.#startIdentity = startIdentity;
+		this.#binding = binding;
+		getProcessHandleBackstop().register(this, token, this);
+	}
 
-  #requireToken(): bigint {
-    if (this.#token == null) {
-      throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "process handle is closed");
-    }
-    return this.#token;
-  }
+	#requireToken(): bigint {
+		if (this.#token == null) {
+			throw new SysprimsError(
+				SysprimsErrorCode.InvalidArgument,
+				"process handle is closed",
+			);
+		}
+		return this.#token;
+	}
 
-  get pid(): number {
-    return this.#pid;
-  }
+	get pid(): number {
+		return this.#pid;
+	}
 
-  get startIdentity(): string {
-    return this.#startIdentity;
-  }
+	get startIdentity(): string {
+		return this.#startIdentity;
+	}
 
-  get binding(): SignalBinding {
-    return this.#binding;
-  }
+	get binding(): SignalBinding {
+		return this.#binding;
+	}
 
-  get closed(): boolean {
-    return this.#token == null;
-  }
+	get closed(): boolean {
+		return this.#token == null;
+	}
 
-  exited(): boolean {
-    const token = this.#requireToken();
-    const lib = loadSysprims();
-    return callBoolOut(() => lib.sysprimsProcessHandleExited(token));
-  }
+	exited(): boolean {
+		const token = this.#requireToken();
+		const lib = loadSysprims();
+		return callBoolOut(() => lib.sysprimsProcessHandleExited(token));
+	}
 
-  signal(sig: number): SignalBinding {
-    const token = this.#requireToken();
-    validateSignal(sig);
-    const lib = loadSysprims();
-    return callStringOut(() => lib.sysprimsProcessHandleSignal(token, sig)) as SignalBinding;
-  }
+	signal(sig: number): SignalBinding {
+		const token = this.#requireToken();
+		validateSignal(sig);
+		const lib = loadSysprims();
+		return callStringOut(() =>
+			lib.sysprimsProcessHandleSignal(token, sig),
+		) as SignalBinding;
+	}
 
-  signalByName(signalName: string): SignalBinding {
-    this.#requireToken();
-    const sig = resolveSignalName(signalName);
-    return this.signal(sig);
-  }
+	signalByName(signalName: string): SignalBinding {
+		this.#requireToken();
+		const sig = resolveSignalName(signalName);
+		return this.signal(sig);
+	}
 
-  terminate(): SignalBinding {
-    return this.signal(SIGTERM);
-  }
+	terminate(): SignalBinding {
+		return this.signal(SIGTERM);
+	}
 
-  forceKill(): SignalBinding {
-    return this.signal(SIGKILL);
-  }
+	forceKill(): SignalBinding {
+		return this.signal(SIGKILL);
+	}
 
-  close(): void {
-    const token = this.#token;
-    if (token == null) {
-      return;
-    }
-    this.#token = null;
-    getProcessHandleBackstop().unregister(this);
-    const lib = loadSysprims();
-    callVoid(() => lib.sysprimsProcessHandleClose(token));
-  }
+	close(): void {
+		const token = this.#token;
+		if (token == null) {
+			return;
+		}
+		this.#token = null;
+		getProcessHandleBackstop().unregister(this);
+		const lib = loadSysprims();
+		callVoid(() => lib.sysprimsProcessHandleClose(token));
+	}
 
-  [Symbol.dispose](): void {
-    this.close();
-  }
+	[Symbol.dispose](): void {
+		this.close();
+	}
 
-  toJSON(): never {
-    throw new SysprimsError(SysprimsErrorCode.InvalidArgument, "ProcessHandle is not serializable");
-  }
+	toJSON(): never {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"ProcessHandle is not serializable",
+		);
+	}
 }
 
-export function openProcessHandle(pid: number, options?: OpenProcessHandleOptions): ProcessHandle {
-  validatePid(pid);
-  if (
-    options?.expectedStartIdentity !== undefined &&
-    typeof options.expectedStartIdentity !== "string"
-  ) {
-    throw new SysprimsError(
-      SysprimsErrorCode.InvalidArgument,
-      "expectedStartIdentity must be a string",
-    );
-  }
-  const lib = loadSysprims();
-  const wire = callJsonReturn(() =>
-    lib.sysprimsProcessHandleOpen(pid, options?.expectedStartIdentity ?? null),
-  ) as ProcessHandleOpenWire;
-  return new ProcessHandle(
-    PROCESS_HANDLE_INTERNAL,
-    BigInt(wire.token),
-    wire.pid,
-    wire.start_identity,
-    wire.binding,
-  );
+export function openProcessHandle(
+	pid: number,
+	options?: OpenProcessHandleOptions,
+): ProcessHandle {
+	validatePid(pid);
+	if (
+		options?.expectedStartIdentity !== undefined &&
+		typeof options.expectedStartIdentity !== "string"
+	) {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"expectedStartIdentity must be a string",
+		);
+	}
+	const lib = loadSysprims();
+	const wire = callJsonReturn(() =>
+		lib.sysprimsProcessHandleOpen(pid, options?.expectedStartIdentity ?? null),
+	) as ProcessHandleOpenWire;
+	return new ProcessHandle(
+		PROCESS_HANDLE_INTERNAL,
+		BigInt(wire.token),
+		wire.pid,
+		wire.start_identity,
+		wire.binding,
+	);
 }
 
 export function openProcessHandleVerified(
-  pid: number,
-  expectedStartIdentity: string,
+	pid: number,
+	expectedStartIdentity: string,
 ): ProcessHandle {
-  if (typeof expectedStartIdentity !== "string") {
-    throw new SysprimsError(
-      SysprimsErrorCode.InvalidArgument,
-      "expectedStartIdentity must be a string",
-    );
-  }
-  return openProcessHandle(pid, { expectedStartIdentity });
+	if (typeof expectedStartIdentity !== "string") {
+		throw new SysprimsError(
+			SysprimsErrorCode.InvalidArgument,
+			"expectedStartIdentity must be a string",
+		);
+	}
+	return openProcessHandle(pid, { expectedStartIdentity });
 }
 
 // -----------------------------------------------------------------------------
@@ -888,50 +944,55 @@ export function openProcessHandleVerified(
  * Note: this is a PID-only API. On Unix, if `pid` is a process group leader,
  * sysprims may use group kill for better coverage.
  */
-export function terminateTree(pid: number, config?: TerminateTreeConfig): TerminateTreeResult {
-  validatePid(pid);
+export function terminateTree(
+	pid: number,
+	config?: TerminateTreeConfig,
+): TerminateTreeResult {
+	validatePid(pid);
 
-  if (!config) {
-    const lib = loadSysprims();
-    return callJsonReturn(() => lib.sysprimsTerminateTree(pid, "")) as TerminateTreeResult;
-  }
+	if (!config) {
+		const lib = loadSysprims();
+		return callJsonReturn(() =>
+			lib.sysprimsTerminateTree(pid, ""),
+		) as TerminateTreeResult;
+	}
 
-  if (config.grace_timeout_ms != null) {
-    validateDuration(config.grace_timeout_ms, "grace_timeout_ms", 86_400_000);
-  }
-  if (config.kill_timeout_ms != null) {
-    validateDuration(config.kill_timeout_ms, "kill_timeout_ms", 86_400_000);
-  }
-  if (config.signal != null) {
-    validateSignal(config.signal, "signal");
-    if (config.signal === 0) {
-      throw new SysprimsError(
-        SysprimsErrorCode.InvalidArgument,
-        "signal 0 is not a valid termination policy",
-      );
-    }
-  }
-  if (config.kill_signal != null) {
-    validateSignal(config.kill_signal, "kill_signal");
-    if (config.kill_signal === 0) {
-      throw new SysprimsError(
-        SysprimsErrorCode.InvalidArgument,
-        "kill_signal 0 is not a valid termination policy",
-      );
-    }
-  }
+	if (config.grace_timeout_ms != null) {
+		validateDuration(config.grace_timeout_ms, "grace_timeout_ms", 86_400_000);
+	}
+	if (config.kill_timeout_ms != null) {
+		validateDuration(config.kill_timeout_ms, "kill_timeout_ms", 86_400_000);
+	}
+	if (config.signal != null) {
+		validateSignal(config.signal, "signal");
+		if (config.signal === 0) {
+			throw new SysprimsError(
+				SysprimsErrorCode.InvalidArgument,
+				"signal 0 is not a valid termination policy",
+			);
+		}
+	}
+	if (config.kill_signal != null) {
+		validateSignal(config.kill_signal, "kill_signal");
+		if (config.kill_signal === 0) {
+			throw new SysprimsError(
+				SysprimsErrorCode.InvalidArgument,
+				"kill_signal 0 is not a valid termination policy",
+			);
+		}
+	}
 
-  const cfg: TerminateTreeConfig = {
-    schema_id:
-      config.schema_id ||
-      "https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json",
-    ...config,
-  };
+	const cfg: TerminateTreeConfig = {
+		schema_id:
+			config.schema_id ||
+			"https://schemas.3leaps.dev/sysprims/process/v1.0.0/terminate-tree-config.schema.json",
+		...config,
+	};
 
-  const lib = loadSysprims();
-  return callJsonReturn(() =>
-    lib.sysprimsTerminateTree(pid, JSON.stringify(cfg)),
-  ) as TerminateTreeResult;
+	const lib = loadSysprims();
+	return callJsonReturn(() =>
+		lib.sysprimsTerminateTree(pid, JSON.stringify(cfg)),
+	) as TerminateTreeResult;
 }
 
 // -----------------------------------------------------------------------------
@@ -939,12 +1000,14 @@ export function terminateTree(pid: number, config?: TerminateTreeConfig): Termin
 // -----------------------------------------------------------------------------
 
 export function spawnInGroup(config: SpawnInGroupConfig): SpawnInGroupResult {
-  const lib = loadSysprims();
-  const cfg: SpawnInGroupConfig = {
-    schema_id:
-      config.schema_id ||
-      "https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
-    ...config,
-  };
-  return callJsonReturn(() => lib.sysprimsSpawnInGroup(JSON.stringify(cfg))) as SpawnInGroupResult;
+	const lib = loadSysprims();
+	const cfg: SpawnInGroupConfig = {
+		schema_id:
+			config.schema_id ||
+			"https://schemas.3leaps.dev/sysprims/process/v1.0.0/spawn-in-group-config.schema.json",
+		...config,
+	};
+	return callJsonReturn(() =>
+		lib.sysprimsSpawnInGroup(JSON.stringify(cfg)),
+	) as SpawnInGroupResult;
 }

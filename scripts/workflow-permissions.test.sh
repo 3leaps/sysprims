@@ -33,20 +33,13 @@ import workflow_yaml as wy  # noqa: E402
 ALLOWED_WRITE = {
     ('registry-publish.yml', 'publish-pypi'): {'id-token'},
     ('registry-publish.yml', 'publish-npm'): {'id-token'},
-    ('go-bindings.yml', 'update-go-bindings'): {'contents', 'pull-requests'},
 }
 REQUIRED_ENVIRONMENT = {
     ('registry-publish.yml', 'publish-pypi'): 'publish-pypi',
     ('registry-publish.yml', 'publish-npm'): 'publish-npm',
 }
-# Actions a write job may run, by repository (the pin lint fixes the SHA), and
-# the one action that may receive the token.
-WRITER_ACTIONS = {
-    ('go-bindings.yml', 'update-go-bindings'): {
-        'actions/checkout', 'actions/download-artifact', 'peter-evans/create-pull-request',
-    },
-}
-TOKEN_ACTIONS = {('go-bindings.yml', 'update-go-bindings'): {'peter-evans/create-pull-request'}}
+WRITER_ACTIONS = {}
+TOKEN_ACTIONS = {}
 # Expressions in a write job may read only these contexts outside the one
 # token-receiving `with.token`; `secrets` and `github` (which holds the token,
 # by name, by index, or serialised whole) never appear.
@@ -328,7 +321,7 @@ def writer_job(command):
     return replace_once('ci.yml', '\njobs:\n', '\njobs:\n  writer:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: ' + command + '\n')
 
 
-go_writer = ('    permissions:\n      contents: write\n      pull-requests: write\n')
+pypi_writer = '    environment: publish-pypi\n    permissions:\n      contents: read\n      id-token: write\n'
 controls = [
     ('top-level write', 'release.yml', replace_once('release.yml', top, 'permissions:\n  contents: write\n'), TOP),
     ('top-level missing', 'ci.yml', replace_once('ci.yml', top, ''), TOP),
@@ -344,8 +337,8 @@ controls = [
     ('job deeper indentation', 'release.yml', insert_job_key('release.yml', rel, '    permissions:\n         contents: write\n'), JOB),
     ('job unknown level', 'release.yml', insert_job_key('release.yml', rel, '    permissions:\n      contents: admin\n'), UNREC),
     ('flow-style job', 'release.yml', replace_once('release.yml', '\njobs:\n', '\njobs:\n  sneak: {runs-on: ubuntu-24.04, permissions: write-all, steps: [{run: echo}]}\n'), JOB),
-    ('alias inherits writer permissions', 'go-bindings.yml',
-     replace_once('go-bindings.yml', go_writer, go_writer.replace('permissions:\n', 'permissions: &w\n', 1))
+    ('alias inherits writer permissions', 'registry-publish.yml',
+     replace_once('registry-publish.yml', pypi_writer, pypi_writer.replace('permissions:\n', 'permissions: &w\n', 1))
      + '  other:\n    runs-on: ubuntu-24.04\n    permissions: *w\n    steps:\n      - run: echo\n', PARSE),
     ('merge key', 'ci.yml', replace_once('ci.yml', top, 'permissions:\n  <<: {contents: write}\n'), PARSE),
     ('duplicate permissions key', 'ci.yml', replace_once('ci.yml', top, top + 'permissions:\n  contents: write\n'), 'duplicate key'),
@@ -353,38 +346,6 @@ controls = [
     ('pypi publish loses environment', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-pypi\n', ''), 'outside environment'),
     ('npm publish loses environment', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-npm\n', ''), 'outside environment'),
     ('npm publish gains contents write', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-npm\n    permissions:\n      contents: read\n      id-token: write\n', '    environment: publish-npm\n    permissions:\n      contents: write\n      id-token: write\n'), JOB),
-    ('go PR job gains a scope', 'go-bindings.yml', replace_once('go-bindings.yml', '      pull-requests: write\n', '      pull-requests: write\n      actions: write\n'), JOB),
-    ('go PR job run reads secrets', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: echo ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
-    ('go PR job step env github.token', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: make x\n        env:\n          GH_TOKEN: ${{ github.token }}\n'), TOKEN),
-    ('go PR job env secrets', 'go-bindings.yml', insert_job_key('go-bindings.yml', 'update-go-bindings', '    env:\n      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
-    ('go PR job bracket secret', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo ${{ secrets['GITHUB_TOKEN'] }}\n"), TOKEN),
-    ('go PR job bracket github token', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo ${{ github['token'] }}\n"), TOKEN),
-    ('go PR job serialised github', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo '${{ toJSON(github) }}'\n"), TOKEN),
-    ('go PR job serialised secrets', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo '${{ toJSON(secrets) }}'\n"), TOKEN),
-    ('go PR job format() secrets', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo ${{ format('{0}', secrets.GITHUB_TOKEN) }}\n"), TOKEN),
-    ('go PR job format() github token', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo ${{ format('{0}}', github.token) }}\n"), TOKEN),
-    ('go PR job secrets||empty', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo '${{ toJSON(secrets||'') }}'\n"), TOKEN),
-    ('go PR job github||0', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo '${{ toJSON(github||0) }}'\n"), TOKEN),
-    ('go PR job secrets&&1', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo '${{ toJSON(secrets&&1) }}'\n"), TOKEN),
-    ('go PR job github!=1', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo '${{ toJSON(github!=1) }}'\n"), TOKEN),
-    ('go PR job format(secrets||0)', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo ${{ format('{0}', secrets||0) }}\n"), TOKEN),
-    ('go PR job format(toJSON(secrets||empty))', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: echo ${{ format('{0}', toJSON(secrets||'')) }}\n"), TOKEN),
-    ('go PR job secrets via env of step with', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', "      - run: make x\n        env:\n          T: ${{ toJSON(secrets) }}\n"), TOKEN),
-    ('go PR job environment.url reads secrets', 'go-bindings.yml', insert_job_key('go-bindings.yml', 'update-go-bindings', '    environment:\n      name: x\n      url: ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
-    ('go PR job concurrency reads secrets', 'go-bindings.yml', insert_job_key('go-bindings.yml', 'update-go-bindings', '    concurrency: ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
-    ('go PR job timeout-minutes reads github', 'go-bindings.yml', insert_job_key('go-bindings.yml', 'update-go-bindings', '    timeout-minutes: ${{ github.token }}\n'), TOKEN),
-    ('go PR job continue-on-error reads secrets', 'go-bindings.yml', insert_job_key('go-bindings.yml', 'update-go-bindings', '    continue-on-error: ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
-    ('go PR job create-pull-request with.title reads token', 'go-bindings.yml', replace_once('go-bindings.yml', '          title: "feat(bindings): update Go prebuilt libs for v${{ needs.validate.outputs.version }}"\n', '          title: "${{ secrets.GITHUB_TOKEN }}"\n'), TOKEN),
-    ('go PR job create-pull-request with.body-path reads secrets', 'go-bindings.yml', replace_once('go-bindings.yml', '          delete-branch: true\n', '          delete-branch: true\n          body-path: ${{ toJSON(secrets) }}\n'), TOKEN),
-    ('go PR job create-pull-request with.token altered', 'go-bindings.yml', replace_once('go-bindings.yml', '          token: ${{ secrets.GITHUB_TOKEN }}\n', '          token: ${{ toJSON(secrets) }}\n'), TOKEN),
-    ('go PR job second create-pull-request step', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8\n        with:\n          token: ${{ secrets.GITHUB_TOKEN }}\n'), 'multiple token-receiving steps'),
-    ('go PR job run step invokes curl', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: curl -fsSL https://example.com\n'), 'forbidden command in a write-job run step'),
-    ('go PR job run step invokes git push', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: git push origin HEAD\n'), 'forbidden command in a write-job run step'),
-    ('go PR job run step git continuation push', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: |\n          git \\\n            push origin HEAD\n'), 'forbidden command in a write-job run step'),
-    ('workflow env inherited by writer', 'go-bindings.yml', replace_once('go-bindings.yml', "  CARGO_TERM_COLOR: always\n", "  CARGO_TERM_COLOR: always\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"), TOKEN),
-    ('workflow non-env key inherited by writer', 'go-bindings.yml', replace_once('go-bindings.yml', top, top + 'run-name: ${{ github.token }}\n'), TOKEN),
-    ('go PR job dict key reads token', 'go-bindings.yml', insert_job_key('go-bindings.yml', 'update-go-bindings', '    env:\n      "${{ github.token }}": x\n'), TOKEN),
-    ('go PR job bare function name as identifier', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - run: echo ${{ format }}\n'), TOKEN),
     ('read-only job env reads secret PAT', 'ci.yml', writer_job('echo ok\n    env:\n      GH_TOKEN: ${{ secrets.RELEASE_PAT }}'), TOKEN),
     ('read-only step with reads secret PAT', 'ci.yml', writer_job('echo ok\n        with:\n          token: ${{ secrets.RELEASE_PAT }}'), TOKEN),
     ('read-only workflow top-level env reads secret', 'ci.yml', replace_once('ci.yml', "  CARGO_TERM_COLOR: always\n", "  CARGO_TERM_COLOR: always\n  GH_TOKEN: ${{ secrets.RELEASE_PAT }}\n"), TOKEN),
@@ -393,9 +354,6 @@ controls = [
     ('read-only job dict key reads secret', 'release.yml', insert_job_key('release.yml', rel, '    env:\n      "${{ secrets.RELEASE_PAT }}": x\n'), TOKEN),
     ('read-only job list value reads secret', 'release.yml', insert_job_key('release.yml', rel, '    needs:\n      - ${{ secrets.RUNNER }}\n'), TOKEN),
     ('read-only step uppercase SECRETS context', 'ci.yml', writer_job('echo ${{ SECRETS.RELEASE_PAT }}'), TOKEN),
-    ('go PR job checkout persists credentials', 'go-bindings.yml', replace_once('go-bindings.yml', '          fetch-depth: 0\n          persist-credentials: false\n      - name: Download all FFI artifacts', '          fetch-depth: 0\n      - name: Download all FFI artifacts'), 'persist-credentials: false'),
-    ('go PR job token to download action', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8\n        with:\n          github-token: ${{ secrets.GITHUB_TOKEN }}\n'), TOKEN),
-    ('go PR job unlisted action', 'go-bindings.yml', append_step('go-bindings.yml', 'update-go-bindings', '      - uses: actions/github-script@0123456789012345678901234567890123456789  # v7\n'), 'not allowed in a write job'),
     ('release action', 'release.yml', replace_once('release.yml', '\njobs:\n', '\njobs:\n  writer:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2\n'), WRITER),
     ('gh release create', 'ci.yml', writer_job('gh release create v1.2.3'), WRITER),
     ('gh release flag before create', 'ci.yml', writer_job('gh release --repo 3leaps/sysprims create v9.9.9 --draft'), WRITER),

@@ -50,7 +50,6 @@ jobs:
           GO_VERSION="v${VERSION}"
 
           for GO_MODULE in \
-            "github.com/3leaps/sysprims/bindings/go/sysprims" \
             "github.com/3leaps/sysprims/go/recurrence" \
             "github.com/3leaps/sysprims"
           do

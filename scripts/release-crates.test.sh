@@ -25,7 +25,7 @@ order = ['sysprims-core', 'sysprims-signal', 'sysprims-session', 'sysprims-proc'
 graph = [pkg('sysprims-core'), pkg('sysprims-signal', ['sysprims-core']), pkg('sysprims-session', ['sysprims-core']),
          pkg('sysprims-proc', ['sysprims-core', 'sysprims-signal']),
          pkg('sysprims-timeout', ['sysprims-core', 'sysprims-proc', 'sysprims-signal', 'sysprims-session']),
-         pkg('sysprims-cli', ['sysprims-core'], publish=[]), pkg('sysprims-ffi', ['sysprims-core'], publish=[])]
+         pkg('sysprims-cli', ['sysprims-core'], publish=[]), pkg('sysprims-ts-napi', ['sysprims-core'], publish=[])]
 rc.validate(graph, order, manifests(order))
 
 def rejects(packages, names, mans, needle):
@@ -41,8 +41,8 @@ swapped = ['sysprims-core', 'sysprims-proc', 'sysprims-signal', 'sysprims-sessio
 rejects(graph, swapped, manifests(swapped), 'sysprims-proc must follow sysprims-signal')
 rejects(graph, order[:-1], manifests(order[:-1]), 'missing from the list: sysprims-timeout')
 rejects(graph, order, {**manifests(order), 'sysprims-core': {'package': {'publish': False}}}, 'explicitly set publish = true')
-leaky = graph[:-1] + [pkg('sysprims-ffi', ['sysprims-core'])]
-rejects(leaky, order, manifests(order), 'missing from the list: sysprims-ffi')
+leaky = graph[:-1] + [pkg('sysprims-ts-napi', ['sysprims-core'])]
+rejects(leaky, order, manifests(order), 'missing from the list: sysprims-ts-napi')
 internal = [p if p['name'] != 'sysprims-timeout' else pkg('sysprims-timeout', ['sysprims-cli']) for p in graph]
 rejects(internal, order, manifests(order), 'depends on unpublished workspace crate sysprims-cli')
 with_rec = graph + [pkg('sysprims-recurrence')]

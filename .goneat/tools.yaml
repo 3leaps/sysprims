@@ -45,7 +45,6 @@ scopes:
       - cargo-audit
       - cargo-edit
       - cargo-nextest
-      - cbindgen
   all:
     description: All tools from all scopes
     tools:
@@ -63,7 +62,6 @@ scopes:
       - cargo-audit
       - cargo-edit
       - cargo-nextest
-      - cbindgen
       # Languages (bindings)
       - go
       - uv
@@ -92,7 +90,6 @@ scopes:
       - cargo-audit
       - cargo-edit
       - cargo-nextest
-      - cbindgen
   bindings:
     description: Language toolchains for FFI bindings (Go, Python, TypeScript)
     tools:
@@ -339,27 +336,6 @@ tools:
         - manual
     install_commands:
       manual: cargo install cargo-nextest --locked --version 0.9.128
-    cooling:
-      enabled: true
-      alert_only: true
-  cbindgen:
-    name: cbindgen
-    description: Generate C headers from Rust FFI code (version matches CI CBINDGEN_VERSION)
-    kind: system
-    detect_command: cbindgen --version
-    platforms:
-      - darwin
-      - linux
-      - windows
-    installer_priority:
-      darwin:
-        - manual
-      linux:
-        - manual
-      windows:
-        - manual
-    install_commands:
-      manual: cargo install cbindgen --locked --version 0.29.2
     cooling:
       enabled: true
       alert_only: true

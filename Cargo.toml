@@ -9,7 +9,6 @@ members = [
     "crates/sysprims-evidence",
     "crates/sysprims-recurrence",
     "crates/sysprims-cli",
-    "ffi/sysprims-ffi",
     "bindings/typescript/sysprims/native",
 ]
 

@@ -41,8 +41,6 @@ EXPECTED=(
 	"sysprims-${VERSION}-linux-arm64.tar.gz"
 	"sysprims-${VERSION}-windows-amd64.zip"
 	"sysprims-${VERSION}-windows-arm64.zip"
-	"sysprims-ffi-${VERSION}-libs.tar.gz"
-	sysprims.h
 )
 if git -C "$ROOT" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null 2>&1; then
 	inv_out="$(

@@ -175,8 +175,6 @@ core = [
     f"sysprims-{version}-linux-arm64.tar.gz",
     f"sysprims-{version}-windows-amd64.zip",
     f"sysprims-{version}-windows-arm64.zip",
-    f"sysprims-ffi-{version}-libs.tar.gz",
-    "sysprims.h",
 ]
 for name in core:
     (out / name).write_text(f"{name}\n", encoding="utf-8")
@@ -256,7 +254,7 @@ resign_remote2
 (cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" SYSPRIMS_DECERNOR_BIN="$decernor" \
 	SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE="$fixture_dir/release2.json" SYSPRIMS_REMOTE_ASSET_DIR="$remote2" \
 	./scripts/release-stage-published.sh >/dev/null)
-[[ "$(find "$repo2/dist/published" -maxdepth 1 -type f | wc -l | tr -d ' ')" == "38" ]]
+[[ "$(find "$repo2/dist/published" -maxdepth 1 -type f | wc -l | tr -d ' ')" == "36" ]]
 
 (cd "$repo2" && SYSPRIMS_RELEASE_TAG="v$v2" SYSPRIMS_DECERNOR_BIN="$decernor" \
 	SYSPRIMS_PUBLISHED_RELEASE_METADATA_FILE="$fixture_dir/release2.json" SYSPRIMS_REMOTE_ASSET_DIR="$remote2" \

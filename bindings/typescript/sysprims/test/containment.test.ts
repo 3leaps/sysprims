@@ -8,223 +8,289 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { loadSysprims } from "../src/ffi";
 import {
-  ContainedProcess,
-  SysprimsError,
-  SysprimsErrorCode,
-  spawnContained,
-  terminateTree,
+	ContainedProcess,
+	SysprimsError,
+	SysprimsErrorCode,
+	spawnContained,
+	terminateTree,
 } from "../src/index";
 
 const unixTest = os.platform() === "win32" ? test.skip : test;
 const windowsTest = os.platform() === "win32" ? test : test.skip;
 
 function isInvalid(error: unknown): boolean {
-  return error instanceof SysprimsError && error.code === SysprimsErrorCode.InvalidArgument;
+	return (
+		error instanceof SysprimsError &&
+		error.code === SysprimsErrorCode.InvalidArgument
+	);
 }
 
 test("spawnContained rejects empty argv and signal 0", async () => {
-  await assert.rejects(() => spawnContained([]), isInvalid);
-  await assert.rejects(() => spawnContained(["true"], { signal: 0 }), isInvalid);
+	await assert.rejects(() => spawnContained([]), isInvalid);
+	await assert.rejects(
+		() => spawnContained(["true"], { signal: 0 }),
+		isInvalid,
+	);
 });
 
-unixTest("spawnContained happy path, dispose twice, and stale reuse", async () => {
-  const first = await spawnContained(["true"], { graceTimeoutMs: 50, killTimeoutMs: 200 });
-  const snap = await first.wait({ timeoutMs: 5000 });
-  assert.equal(snap.leader_status, "completed");
-  assert.equal(snap.tree_kill_reliability, "guaranteed");
-  assert.equal(snap.boundary_strength, "cooperative_group");
-  assert.ok(snap.completion?.status === "empty" || snap.completion?.status === "unknown");
-  await first.close();
-  await first.close();
-  await assert.rejects(() => first.poll(), isInvalid);
+unixTest(
+	"spawnContained happy path, dispose twice, and stale reuse",
+	async () => {
+		const first = await spawnContained(["true"], {
+			graceTimeoutMs: 50,
+			killTimeoutMs: 200,
+		});
+		const snap = await first.wait({ timeoutMs: 5000 });
+		assert.equal(snap.leader_status, "completed");
+		assert.equal(snap.tree_kill_reliability, "guaranteed");
+		assert.equal(snap.boundary_strength, "cooperative_group");
+		assert.ok(
+			snap.completion?.status === "empty" ||
+				snap.completion?.status === "unknown",
+		);
+		await first.close();
+		await first.close();
+		await assert.rejects(() => first.poll(), isInvalid);
 
-  const second = await spawnContained(["true"], { graceTimeoutMs: 50, killTimeoutMs: 200 });
-  await assert.rejects(() => first.identity(), isInvalid);
-  await second.close();
-});
+		const second = await spawnContained(["true"], {
+			graceTimeoutMs: 50,
+			killTimeoutMs: 200,
+		});
+		await assert.rejects(() => first.identity(), isInvalid);
+		await second.close();
+	},
+);
 
-unixTest("terminate keeps spawn reliability and second call is inert", async () => {
-  const handle = await spawnContained(["sleep", "30"], {
-    graceTimeoutMs: 50,
-    killTimeoutMs: 500,
-  });
-  const before = await handle.identity();
-  const snap = await handle.terminate();
-  assert.equal(snap.leader_status, "terminated");
-  assert.equal(snap.tree_kill_reliability, before.tree_kill_reliability);
-  const again = await handle.terminate();
-  assert.equal(again.handle_state, "inert");
-  await handle.close();
-});
+unixTest(
+	"terminate keeps spawn reliability and second call is inert",
+	async () => {
+		const handle = await spawnContained(["sleep", "30"], {
+			graceTimeoutMs: 50,
+			killTimeoutMs: 500,
+		});
+		const before = await handle.identity();
+		const snap = await handle.terminate();
+		assert.equal(snap.leader_status, "terminated");
+		assert.equal(snap.tree_kill_reliability, before.tree_kill_reliability);
+		const again = await handle.terminate();
+		assert.equal(again.handle_state, "inert");
+		await handle.close();
+	},
+);
 
-unixTest("cancel wait during terminate leaves native owned or inert", async () => {
-  const handle = await spawnContained(["sleep", "30"], {
-    graceTimeoutMs: 80,
-    killTimeoutMs: 500,
-  });
-  const controller = new AbortController();
-  const waitPromise = handle.wait({ timeoutMs: 5000, signal: controller.signal });
-  const terminatePromise = handle.terminate();
-  controller.abort();
-  await assert.rejects(
-    () => waitPromise,
-    (error: unknown) => {
-      return error instanceof SysprimsError && error.code === SysprimsErrorCode.Timeout;
-    },
-  );
-  const terminated = await terminatePromise;
-  assert.ok(terminated.handle_state === "inert" || terminated.leader_status === "terminated");
-  const poll = await handle.poll();
-  assert.equal(poll.handle_state, "inert");
-  await handle.close();
-});
+unixTest(
+	"cancel wait during terminate leaves native owned or inert",
+	async () => {
+		const handle = await spawnContained(["sleep", "30"], {
+			graceTimeoutMs: 80,
+			killTimeoutMs: 500,
+		});
+		const controller = new AbortController();
+		const waitPromise = handle.wait({
+			timeoutMs: 5000,
+			signal: controller.signal,
+		});
+		const terminatePromise = handle.terminate();
+		controller.abort();
+		await assert.rejects(
+			() => waitPromise,
+			(error: unknown) => {
+				return (
+					error instanceof SysprimsError &&
+					error.code === SysprimsErrorCode.Timeout
+				);
+			},
+		);
+		const terminated = await terminatePromise;
+		assert.ok(
+			terminated.handle_state === "inert" ||
+				terminated.leader_status === "terminated",
+		);
+		const poll = await handle.poll();
+		assert.equal(poll.handle_state, "inert");
+		await handle.close();
+	},
+);
 
 unixTest("close races wait and terminate", async () => {
-  const handle = await spawnContained(["sleep", "30"], {
-    graceTimeoutMs: 50,
-    killTimeoutMs: 500,
-  });
-  const [waitResult, terminateResult, closeResult] = await Promise.allSettled([
-    handle.wait({ timeoutMs: 2000 }),
-    handle.terminate(),
-    handle.close(),
-  ]);
-  if (closeResult.status === "rejected") {
-    await handle.identity();
-    await handle.close();
-  } else {
-    await handle.close();
-    await assert.rejects(() => handle.identity(), isInvalid);
-  }
-  for (const result of [waitResult, terminateResult]) {
-    if (result.status === "rejected") {
-      assert.ok(isInvalid(result.reason), `unexpected race error: ${result.reason}`);
-    } else {
-      assert.equal(result.value.handle_state, "inert");
-      assert.equal(result.value.leader_status, "terminated");
-    }
-  }
-  if (waitResult.status === "fulfilled" && terminateResult.status === "fulfilled") {
-    assert.deepEqual(waitResult.value.identity, terminateResult.value.identity);
-    assert.deepEqual(waitResult.value.completion, terminateResult.value.completion);
-  }
+	const handle = await spawnContained(["sleep", "30"], {
+		graceTimeoutMs: 50,
+		killTimeoutMs: 500,
+	});
+	const [waitResult, terminateResult, closeResult] = await Promise.allSettled([
+		handle.wait({ timeoutMs: 2000 }),
+		handle.terminate(),
+		handle.close(),
+	]);
+	if (closeResult.status === "rejected") {
+		await handle.identity();
+		await handle.close();
+	} else {
+		await handle.close();
+		await assert.rejects(() => handle.identity(), isInvalid);
+	}
+	for (const result of [waitResult, terminateResult]) {
+		if (result.status === "rejected") {
+			assert.ok(
+				isInvalid(result.reason),
+				`unexpected race error: ${result.reason}`,
+			);
+		} else {
+			assert.equal(result.value.handle_state, "inert");
+			assert.equal(result.value.leader_status, "terminated");
+		}
+	}
+	if (
+		waitResult.status === "fulfilled" &&
+		terminateResult.status === "fulfilled"
+	) {
+		assert.deepEqual(waitResult.value.identity, terminateResult.value.identity);
+		assert.deepEqual(
+			waitResult.value.completion,
+			terminateResult.value.completion,
+		);
+	}
 });
 
 unixTest("failed close keeps the token retryable", async () => {
-  const handle = await spawnContained(["sleep", "30"], {
-    graceTimeoutMs: 50,
-    killTimeoutMs: 500,
-  });
-  const native = loadSysprims();
-  const original = native.sysprimsContainmentClose;
-  native.sysprimsContainmentClose = async () => ({
-    code: SysprimsErrorCode.InvalidArgument,
-    message: "forced close failure",
-  });
-  try {
-    await assert.rejects(() => handle.close(), isInvalid);
-    await handle.identity();
-  } finally {
-    native.sysprimsContainmentClose = original;
-  }
-  await handle.close();
-  await assert.rejects(() => handle.identity(), isInvalid);
+	const handle = await spawnContained(["sleep", "30"], {
+		graceTimeoutMs: 50,
+		killTimeoutMs: 500,
+	});
+	const native = loadSysprims();
+	const original = native.sysprimsContainmentClose;
+	native.sysprimsContainmentClose = async () => ({
+		code: SysprimsErrorCode.InvalidArgument,
+		message: "forced close failure",
+	});
+	try {
+		await assert.rejects(() => handle.close(), isInvalid);
+		await handle.identity();
+	} finally {
+		native.sysprimsContainmentClose = original;
+	}
+	await handle.close();
+	await assert.rejects(() => handle.identity(), isInvalid);
 });
 
 unixTest("already-aborted wait does not launch after abort", async () => {
-  const handle = await spawnContained(["true"], { graceTimeoutMs: 50, killTimeoutMs: 200 });
-  const controller = new AbortController();
-  controller.abort();
-  await assert.rejects(
-    () => handle.wait({ timeoutMs: 5000, signal: controller.signal }),
-    (error: unknown) => error instanceof SysprimsError && error.code === SysprimsErrorCode.Timeout,
-  );
-  await handle.close();
+	const handle = await spawnContained(["true"], {
+		graceTimeoutMs: 50,
+		killTimeoutMs: 200,
+	});
+	const controller = new AbortController();
+	controller.abort();
+	await assert.rejects(
+		() => handle.wait({ timeoutMs: 5000, signal: controller.signal }),
+		(error: unknown) =>
+			error instanceof SysprimsError &&
+			error.code === SysprimsErrorCode.Timeout,
+	);
+	await handle.close();
 });
 
 test("invalid high signal does not spawn", async () => {
-  const marker = path.join(os.tmpdir(), `sysprims-ts-high-signal-${process.pid}.marker`);
-  try {
-    fs.rmSync(marker, { force: true });
-  } catch {
-    // absent is fine
-  }
-  await assert.rejects(() => spawnContained(["touch", marker], { signal: 99 }), isInvalid);
-  assert.equal(fs.existsSync(marker), false);
+	const marker = path.join(
+		os.tmpdir(),
+		`sysprims-ts-high-signal-${process.pid}.marker`,
+	);
+	try {
+		fs.rmSync(marker, { force: true });
+	} catch {
+		// absent is fine
+	}
+	await assert.rejects(
+		() => spawnContained(["touch", marker], { signal: 99 }),
+		isInvalid,
+	);
+	assert.equal(fs.existsSync(marker), false);
 });
 
 windowsTest("windows managed spawn fails before spawn", async () => {
-  const marker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sysprims-no-spawn-")), "marker");
-  try {
-    await assert.rejects(
-      () => spawnContained(["cmd", "/C", `echo spawned>"${marker}"`]),
-      (error: unknown) =>
-        error instanceof SysprimsError && error.code === SysprimsErrorCode.NotSupported,
-    );
-    assert.equal(fs.existsSync(marker), false);
-  } finally {
-    fs.rmSync(path.dirname(marker), { recursive: true, force: true });
-  }
+	const marker = path.join(
+		fs.mkdtempSync(path.join(os.tmpdir(), "sysprims-no-spawn-")),
+		"marker",
+	);
+	try {
+		await assert.rejects(
+			() => spawnContained(["cmd", "/C", `echo spawned>"${marker}"`]),
+			(error: unknown) =>
+				error instanceof SysprimsError &&
+				error.code === SysprimsErrorCode.NotSupported,
+		);
+		assert.equal(fs.existsSync(marker), false);
+	} finally {
+		fs.rmSync(path.dirname(marker), { recursive: true, force: true });
+	}
 });
 
 test("ContainedProcess is a class", () => {
-  assert.equal(typeof ContainedProcess, "function");
+	assert.equal(typeof ContainedProcess, "function");
 });
 
 for (const [name, argv, expected] of [
-  ["long-lived", ["sleep", "30"], "timed_out"],
-  ["fast", ["true"], "completed"],
+	["long-lived", ["sleep", "30"], "timed_out"],
+	["fast", ["true"], "completed"],
 ] as const) {
-  unixTest(`native deadline with delayed first observation: ${name}`, async () => {
-    const handle = await spawnContained([...argv], {
-      executionTimeoutMs: 200,
-      graceTimeoutMs: 20,
-      killTimeoutMs: 200,
-    });
-    try {
-      await delay(450);
-      const deadline = performance.now() + 3000;
-      let observed = await handle.identity();
-      while (observed.handle_state !== "inert" && performance.now() < deadline) {
-        await delay(10);
-        observed = await handle.identity();
-      }
-      assert.equal(observed.handle_state, "inert");
-      const result = await handle.wait({ timeoutMs: 1000 });
-      assert.equal(result.leader_status, expected);
-      if (expected === "completed") assert.equal(result.timed_out, false);
-    } finally {
-      await handle.close();
-    }
-  });
+	unixTest(
+		`native deadline with delayed first observation: ${name}`,
+		async () => {
+			const handle = await spawnContained([...argv], {
+				executionTimeoutMs: 200,
+				graceTimeoutMs: 20,
+				killTimeoutMs: 200,
+			});
+			try {
+				await delay(450);
+				const deadline = performance.now() + 3000;
+				let observed = await handle.identity();
+				while (
+					observed.handle_state !== "inert" &&
+					performance.now() < deadline
+				) {
+					await delay(10);
+					observed = await handle.identity();
+				}
+				assert.equal(observed.handle_state, "inert");
+				const result = await handle.wait({ timeoutMs: 1000 });
+				assert.equal(result.leader_status, expected);
+				if (expected === "completed") assert.equal(result.timed_out, false);
+			} finally {
+				await handle.close();
+			}
+		},
+	);
 }
 
 unixTest("bounded wait returns while another operation finalizes", async () => {
-  const handle = await spawnContained(["sleep", "30"], { graceTimeoutMs: 800, killTimeoutMs: 200 });
-  const terminating = handle.terminate();
-  try {
-    await delay(100);
-    const started = performance.now();
-    const result = await handle.wait({ timeoutMs: 10 });
-    const elapsed = performance.now() - started;
-    assert.equal(result.handle_state, "active");
-    assert.equal(result.leader_status, "running");
-    assert.ok(elapsed < 300, `10ms wait took ${elapsed}ms`);
-    assert.equal((await terminating).leader_status, "terminated");
-  } finally {
-    await terminating;
-    await handle.close();
-  }
+	const handle = await spawnContained(["sleep", "30"], {
+		graceTimeoutMs: 800,
+		killTimeoutMs: 200,
+	});
+	const terminating = handle.terminate();
+	try {
+		await delay(100);
+		const started = performance.now();
+		const result = await handle.wait({ timeoutMs: 10 });
+		const elapsed = performance.now() - started;
+		assert.equal(result.handle_state, "active");
+		assert.equal(result.leader_status, "running");
+		assert.ok(elapsed < 300, `10ms wait took ${elapsed}ms`);
+		assert.equal((await terminating).leader_status, "terminated");
+	} finally {
+		await terminating;
+		await handle.close();
+	}
 });
 
 unixTest("explicit close unregisters finalizer and never closes twice", () => {
-  // Isolate a deterministic FinalizationRegistry scheduler from the suite.
-  // Flushing it represents a GC finalization turn after explicit close.
-  execFileSync(
-    process.execPath,
-    [
-      "-e",
-      `
+	// Isolate a deterministic FinalizationRegistry scheduler from the suite.
+	// Flushing it represents a GC finalization turn after explicit close.
+	execFileSync(
+		process.execPath,
+		[
+			"-e",
+			`
     const assert = require('node:assert/strict');
     const registries = [];
     global.FinalizationRegistry = class {
@@ -251,172 +317,181 @@ unixTest("explicit close unregisters finalizer and never closes twice", () => {
       assert.equal(calls, 1);
     })().catch(error => { console.error(error); process.exitCode = 1; });
   `,
-    ],
-    { timeout: 10000, stdio: "pipe" },
-  );
+		],
+		{ timeout: 10000, stdio: "pipe" },
+	);
 });
 
 function jcs(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => jcs(item)).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const keys = Object.keys(obj).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${jcs(obj[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
+	if (Array.isArray(value)) {
+		return `[${value.map((item) => jcs(item)).join(",")}]`;
+	}
+	if (value !== null && typeof value === "object") {
+		const obj = value as Record<string, unknown>;
+		const keys = Object.keys(obj).sort();
+		return `{${keys.map((k) => `${JSON.stringify(k)}:${jcs(obj[k])}`).join(",")}}`;
+	}
+	return JSON.stringify(value);
 }
 
 function errorCodeSlug(err: unknown): string {
-  assert.ok(err instanceof SysprimsError, `expected SysprimsError, got ${err}`);
-  switch (err.code) {
-    case SysprimsErrorCode.Ok:
-      return "ok";
-    case SysprimsErrorCode.InvalidArgument:
-      return "invalid_argument";
-    case SysprimsErrorCode.SpawnFailed:
-      return "spawn_failed";
-    case SysprimsErrorCode.Timeout:
-      return "timeout";
-    case SysprimsErrorCode.PermissionDenied:
-      return "permission_denied";
-    case SysprimsErrorCode.NotFound:
-      return "not_found";
-    case SysprimsErrorCode.NotSupported:
-      return "not_supported";
-    case SysprimsErrorCode.GroupCreationFailed:
-      return "group_creation_failed";
-    case SysprimsErrorCode.System:
-      return "system";
-    case SysprimsErrorCode.Internal:
-      return "internal";
-    default:
-      throw new Error(`unknown error code: ${err.code}`);
-  }
+	assert.ok(err instanceof SysprimsError, `expected SysprimsError, got ${err}`);
+	switch (err.code) {
+		case SysprimsErrorCode.Ok:
+			return "ok";
+		case SysprimsErrorCode.InvalidArgument:
+			return "invalid_argument";
+		case SysprimsErrorCode.SpawnFailed:
+			return "spawn_failed";
+		case SysprimsErrorCode.Timeout:
+			return "timeout";
+		case SysprimsErrorCode.PermissionDenied:
+			return "permission_denied";
+		case SysprimsErrorCode.NotFound:
+			return "not_found";
+		case SysprimsErrorCode.NotSupported:
+			return "not_supported";
+		case SysprimsErrorCode.GroupCreationFailed:
+			return "group_creation_failed";
+		case SysprimsErrorCode.System:
+			return "system";
+		case SysprimsErrorCode.Internal:
+			return "internal";
+		default:
+			throw new Error(`unknown error code: ${err.code}`);
+	}
 }
 
 function timeoutVectorsPath(): string {
-  const override = process.env.TIMEOUT_CONFORMANCE_VECTORS;
-  if (override && override.length > 0) {
-    return override;
-  }
-  return path.resolve(__dirname, "../../../../../testdata/conformance/timeout/vectors.json");
+	const override = process.env.TIMEOUT_CONFORMANCE_VECTORS;
+	if (override && override.length > 0) {
+		return override;
+	}
+	return path.resolve(
+		__dirname,
+		"../../../../../testdata/conformance/timeout/vectors.json",
+	);
 }
 
 test("timeout conformance vectors (4-language parity)", async () => {
-  const doc = JSON.parse(fs.readFileSync(timeoutVectorsPath(), "utf8"));
-  assert.equal(doc.schema, "sysprims-timeout-conformance/v1");
+	const doc = JSON.parse(fs.readFileSync(timeoutVectorsPath(), "utf8"));
+	assert.equal(doc.schema, "sysprims-timeout-conformance/v1");
 
-  const ndjsonLines: Array<Record<string, unknown>> = [];
-  const schemas = doc.schemas;
+	const ndjsonLines: Array<Record<string, unknown>> = [];
+	const schemas = doc.schemas;
 
-  ndjsonLines.push({
-    suite: "schemas",
-    timeout_result_v1_1: schemas.timeout_result_v1_1,
-    terminate_tree_config_v1: schemas.terminate_tree_config_v1,
-    terminate_tree_result_v1: schemas.terminate_tree_result_v1,
-    containment_spawn_config_v1: schemas.containment_spawn_config_v1,
-    containment_snapshot_v1: schemas.containment_snapshot_v1,
-  });
+	ndjsonLines.push({
+		suite: "schemas",
+		timeout_result_v1_1: schemas.timeout_result_v1_1,
+		terminate_tree_config_v1: schemas.terminate_tree_config_v1,
+		terminate_tree_result_v1: schemas.terminate_tree_result_v1,
+		containment_spawn_config_v1: schemas.containment_spawn_config_v1,
+		containment_snapshot_v1: schemas.containment_snapshot_v1,
+	});
 
-  for (const c of doc.terminate_tree_validation_cases) {
-    let got = "ok";
-    try {
-      const cfg: Record<string, unknown> = {};
-      for (const field of [
-        "schema_id",
-        "grace_timeout_ms",
-        "kill_timeout_ms",
-        "signal",
-        "kill_signal",
-      ]) {
-        if (c[field] !== undefined) {
-          cfg[field] = c[field];
-        }
-      }
-      terminateTree(c.pid, Object.keys(cfg).length > 0 ? cfg : undefined);
-      assert.fail(`expected ${c.id} to throw`);
-    } catch (err) {
-      got = errorCodeSlug(err);
-    }
-    assert.equal(got, c.expected, c.id);
-    ndjsonLines.push({
-      suite: "terminate-tree-validation",
-      id: c.id,
-      outcome: got,
-    });
-  }
+	for (const c of doc.terminate_tree_validation_cases) {
+		let got = "ok";
+		try {
+			const cfg: Record<string, unknown> = {};
+			for (const field of [
+				"schema_id",
+				"grace_timeout_ms",
+				"kill_timeout_ms",
+				"signal",
+				"kill_signal",
+			]) {
+				if (c[field] !== undefined) {
+					cfg[field] = c[field];
+				}
+			}
+			terminateTree(c.pid, Object.keys(cfg).length > 0 ? cfg : undefined);
+			assert.fail(`expected ${c.id} to throw`);
+		} catch (err) {
+			got = errorCodeSlug(err);
+		}
+		assert.equal(got, c.expected, c.id);
+		ndjsonLines.push({
+			suite: "terminate-tree-validation",
+			id: c.id,
+			outcome: got,
+		});
+	}
 
-  for (const c of doc.spawn_contained_validation_cases) {
-    let got = "ok";
-    try {
-      const h = await spawnContained(c.argv, {
-        cwd: c.cwd,
-        executionTimeoutMs: c.execution_timeout_ms,
-        graceTimeoutMs: c.grace_timeout_ms,
-        killTimeoutMs: c.kill_timeout_ms,
-        signal: c.signal,
-        killSignal: c.kill_signal,
-      });
-      await h.close();
-      assert.fail(`expected ${c.id} to throw`);
-    } catch (err) {
-      got = errorCodeSlug(err);
-    }
-    assert.equal(got, c.expected, c.id);
-    ndjsonLines.push({
-      suite: "spawn-contained-validation",
-      id: c.id,
-      outcome: got,
-    });
-  }
+	for (const c of doc.spawn_contained_validation_cases) {
+		let got = "ok";
+		try {
+			const h = await spawnContained(c.argv, {
+				cwd: c.cwd,
+				executionTimeoutMs: c.execution_timeout_ms,
+				graceTimeoutMs: c.grace_timeout_ms,
+				killTimeoutMs: c.kill_timeout_ms,
+				signal: c.signal,
+				killSignal: c.kill_signal,
+			});
+			await h.close();
+			assert.fail(`expected ${c.id} to throw`);
+		} catch (err) {
+			got = errorCodeSlug(err);
+		}
+		assert.equal(got, c.expected, c.id);
+		ndjsonLines.push({
+			suite: "spawn-contained-validation",
+			id: c.id,
+			outcome: got,
+		});
+	}
 
-  for (const c of doc.containment_lifecycle_cases) {
-    const expectedObj = os.platform() === "win32" ? c.expected_windows : c.expected_unix;
-    const waitTimeoutMs = typeof c.wait_timeout_ms === "number" ? c.wait_timeout_ms : 5000;
-    let row: Record<string, unknown>;
-    try {
-      const h = await spawnContained(c.argv, {
-        executionTimeoutMs: c.execution_timeout_ms,
-        graceTimeoutMs: c.grace_timeout_ms,
-        killTimeoutMs: c.kill_timeout_ms,
-      });
-      try {
-        const snap =
-          c.op === "wait" || c.op === "deadline"
-            ? await h.wait({ timeoutMs: waitTimeoutMs })
-            : await h.terminate();
-        assert.equal(snap.schema_id, schemas.containment_snapshot_v1);
-        row = {
-          suite: "containment-lifecycle",
-          id: c.id,
-          outcome: "ok",
-          handle_state: snap.handle_state,
-          leader_status: snap.leader_status,
-          tree_kill_reliability: snap.tree_kill_reliability,
-          boundary_strength: snap.boundary_strength,
-          exited: snap.exited,
-          timed_out: snap.timed_out,
-        };
-      } finally {
-        await h.close();
-      }
-    } catch (err) {
-      row = {
-        suite: "containment-lifecycle",
-        id: c.id,
-        outcome: errorCodeSlug(err),
-      };
-    }
-    for (const [k, v] of Object.entries(expectedObj)) {
-      assert.equal(row[k], v, `${c.id}.${k}`);
-    }
-    ndjsonLines.push(row);
-  }
+	for (const c of doc.containment_lifecycle_cases) {
+		const expectedObj =
+			os.platform() === "win32" ? c.expected_windows : c.expected_unix;
+		const waitTimeoutMs =
+			typeof c.wait_timeout_ms === "number" ? c.wait_timeout_ms : 5000;
+		let row: Record<string, unknown>;
+		try {
+			const h = await spawnContained(c.argv, {
+				executionTimeoutMs: c.execution_timeout_ms,
+				graceTimeoutMs: c.grace_timeout_ms,
+				killTimeoutMs: c.kill_timeout_ms,
+			});
+			try {
+				const snap =
+					c.op === "wait" || c.op === "deadline"
+						? await h.wait({ timeoutMs: waitTimeoutMs })
+						: await h.terminate();
+				assert.equal(snap.schema_id, schemas.containment_snapshot_v1);
+				row = {
+					suite: "containment-lifecycle",
+					id: c.id,
+					outcome: "ok",
+					handle_state: snap.handle_state,
+					leader_status: snap.leader_status,
+					tree_kill_reliability: snap.tree_kill_reliability,
+					boundary_strength: snap.boundary_strength,
+					exited: snap.exited,
+					timed_out: snap.timed_out,
+				};
+			} finally {
+				await h.close();
+			}
+		} catch (err) {
+			row = {
+				suite: "containment-lifecycle",
+				id: c.id,
+				outcome: errorCodeSlug(err),
+			};
+		}
+		for (const [k, v] of Object.entries(expectedObj)) {
+			assert.equal(row[k], v, `${c.id}.${k}`);
+		}
+		ndjsonLines.push(row);
+	}
 
-  const outPath = process.env.TIMEOUT_NDJSON_OUT;
-  if (outPath && outPath.length > 0) {
-    fs.writeFileSync(outPath, ndjsonLines.map((row) => `${jcs(row)}\n`).join(""), "utf8");
-  }
+	const outPath = process.env.TIMEOUT_NDJSON_OUT;
+	if (outPath && outPath.length > 0) {
+		fs.writeFileSync(
+			outPath,
+			ndjsonLines.map((row) => `${jcs(row)}\n`).join(""),
+			"utf8",
+		);
+	}
 });

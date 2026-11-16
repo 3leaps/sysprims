@@ -9,13 +9,13 @@ const packagePrefix = "@3leaps/sysprims-";
 const requested = new Set(process.argv.slice(2));
 const targeted = requested.size > 0;
 const packagePlatforms = {
-  "linux-x64-gnu": { os: "linux", cpu: "x64", libc: "glibc" },
-  "linux-x64-musl": { os: "linux", cpu: "x64", libc: "musl" },
-  "linux-arm64-gnu": { os: "linux", cpu: "arm64", libc: "glibc" },
-  "linux-arm64-musl": { os: "linux", cpu: "arm64", libc: "musl" },
-  "darwin-arm64": { os: "darwin", cpu: "arm64" },
-  "win32-x64-msvc": { os: "win32", cpu: "x64" },
-  "win32-arm64-msvc": { os: "win32", cpu: "arm64" },
+	"linux-x64-gnu": { os: "linux", cpu: "x64", libc: "glibc" },
+	"linux-x64-musl": { os: "linux", cpu: "x64", libc: "musl" },
+	"linux-arm64-gnu": { os: "linux", cpu: "arm64", libc: "glibc" },
+	"linux-arm64-musl": { os: "linux", cpu: "arm64", libc: "musl" },
+	"darwin-arm64": { os: "darwin", cpu: "arm64" },
+	"win32-x64-msvc": { os: "win32", cpu: "x64" },
+	"win32-arm64-msvc": { os: "win32", cpu: "arm64" },
 };
 const supportedPackages = Object.keys(packagePlatforms);
 const supportedSet = new Set(supportedPackages);
@@ -23,100 +23,125 @@ const supportedSet = new Set(supportedPackages);
 // scripts/set-platform-packages.js writes them at publish time. The declared
 // set is therefore napi.targets.
 const declaredPackages = new Set(
-  (rootPackage.napi?.targets ?? []).map((triple) => parseTriple(triple).platformArchABI),
+	(rootPackage.napi?.targets ?? []).map(
+		(triple) => parseTriple(triple).platformArchABI,
+	),
 );
 if (rootPackage.name !== "@3leaps/sysprims") {
-  throw new Error(`root package name must be @3leaps/sysprims, got ${rootPackage.name}`);
+	throw new Error(
+		`root package name must be @3leaps/sysprims, got ${rootPackage.name}`,
+	);
 }
 if (rootPackage.optionalDependencies !== undefined) {
-  throw new Error("committed package.json must not list optionalDependencies");
+	throw new Error("committed package.json must not list optionalDependencies");
 }
 if (
-  declaredPackages.size !== supportedSet.size ||
-  [...supportedSet].some((packageDir) => !declaredPackages.has(packageDir))
+	declaredPackages.size !== supportedSet.size ||
+	[...supportedSet].some((packageDir) => !declaredPackages.has(packageDir))
 ) {
-  throw new Error(`napi.targets must be exactly: ${supportedPackages.join(", ")}`);
+	throw new Error(
+		`napi.targets must be exactly: ${supportedPackages.join(", ")}`,
+	);
 }
 const platformDependencies = supportedPackages.map((packageDir) => [
-  `${packagePrefix}${packageDir}`,
-  rootPackage.version,
+	`${packagePrefix}${packageDir}`,
+	rootPackage.version,
 ]);
 
 const generatedPackages = fs
-  .readdirSync(path.join(packageRoot, "npm"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name);
+	.readdirSync(path.join(packageRoot, "npm"), { withFileTypes: true })
+	.filter((entry) => entry.isDirectory())
+	.map((entry) => entry.name);
 if (
-  generatedPackages.length !== supportedSet.size ||
-  generatedPackages.some((packageDir) => !supportedSet.has(packageDir))
+	generatedPackages.length !== supportedSet.size ||
+	generatedPackages.some((packageDir) => !supportedSet.has(packageDir))
 ) {
-  throw new Error(`generated platform packages must be exactly: ${supportedPackages.join(", ")}`);
+	throw new Error(
+		`generated platform packages must be exactly: ${supportedPackages.join(", ")}`,
+	);
 }
 
 for (const [name, dependencyVersion] of platformDependencies) {
-  const packageDir = name.slice(packagePrefix.length);
+	const packageDir = name.slice(packagePrefix.length);
 
-  const packagePath = path.join(packageRoot, "npm", packageDir, "package.json");
-  if (!fs.existsSync(packagePath)) {
-    throw new Error(`missing generated platform manifest: ${packagePath}`);
-  }
-  const platformPackage = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-  if (
-    dependencyVersion !== rootPackage.version ||
-    platformPackage.version !== rootPackage.version
-  ) {
-    throw new Error(
-      `${name} version mismatch: root=${rootPackage.version} dependency=${dependencyVersion} platform=${platformPackage.version}`,
-    );
-  }
-  if (platformPackage.name !== name) {
-    throw new Error(`${packageDir} name mismatch: expected ${name}, got ${platformPackage.name}`);
-  }
-  const expectedMain = `sysprims.${packageDir}.node`;
-  if (platformPackage.main !== expectedMain) {
-    throw new Error(
-      `${packageDir} main mismatch: expected ${expectedMain}, got ${platformPackage.main}`,
-    );
-  }
-  if (JSON.stringify(platformPackage.files) !== JSON.stringify([expectedMain])) {
-    throw new Error(`${packageDir} files must contain only ${expectedMain}`);
-  }
-  for (const [field, expected] of Object.entries(packagePlatforms[packageDir])) {
-    if (JSON.stringify(platformPackage[field]) !== JSON.stringify([expected])) {
-      throw new Error(`${packageDir} ${field} must be exactly ${expected}`);
-    }
-  }
-  if (packagePlatforms[packageDir].libc === undefined && platformPackage.libc !== undefined) {
-    throw new Error(`${packageDir} must not declare libc`);
-  }
-  if (targeted && !requested.has(packageDir)) continue;
+	const packagePath = path.join(packageRoot, "npm", packageDir, "package.json");
+	if (!fs.existsSync(packagePath)) {
+		throw new Error(`missing generated platform manifest: ${packagePath}`);
+	}
+	const platformPackage = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+	if (
+		dependencyVersion !== rootPackage.version ||
+		platformPackage.version !== rootPackage.version
+	) {
+		throw new Error(
+			`${name} version mismatch: root=${rootPackage.version} dependency=${dependencyVersion} platform=${platformPackage.version}`,
+		);
+	}
+	if (platformPackage.name !== name) {
+		throw new Error(
+			`${packageDir} name mismatch: expected ${name}, got ${platformPackage.name}`,
+		);
+	}
+	const expectedMain = `sysprims.${packageDir}.node`;
+	if (platformPackage.main !== expectedMain) {
+		throw new Error(
+			`${packageDir} main mismatch: expected ${expectedMain}, got ${platformPackage.main}`,
+		);
+	}
+	if (
+		JSON.stringify(platformPackage.files) !== JSON.stringify([expectedMain])
+	) {
+		throw new Error(`${packageDir} files must contain only ${expectedMain}`);
+	}
+	for (const [field, expected] of Object.entries(
+		packagePlatforms[packageDir],
+	)) {
+		if (JSON.stringify(platformPackage[field]) !== JSON.stringify([expected])) {
+			throw new Error(`${packageDir} ${field} must be exactly ${expected}`);
+		}
+	}
+	if (
+		packagePlatforms[packageDir].libc === undefined &&
+		platformPackage.libc !== undefined
+	) {
+		throw new Error(`${packageDir} must not declare libc`);
+	}
+	if (targeted && !requested.has(packageDir)) continue;
 
-  const packed = spawnSync("npm", ["pack", "--dry-run", "--json", `./npm/${packageDir}`], {
-    cwd: packageRoot,
-    encoding: "utf8",
-    shell: process.platform === "win32",
-  });
-  if (packed.status !== 0) {
-    throw new Error(`npm pack failed for ${name}: ${packed.stderr || packed.stdout}`);
-  }
-  const metadata = JSON.parse(packed.stdout)[0];
-  if (metadata.name !== name || metadata.version !== rootPackage.version) {
-    throw new Error(
-      `${packageDir} packed metadata mismatch: expected ${name}@${rootPackage.version}, got ${metadata.name}@${metadata.version}`,
-    );
-  }
-  const nativeFiles = metadata.files
-    .map((file) => file.path)
-    .filter((filePath) => filePath.endsWith(".node"));
-  if (JSON.stringify(nativeFiles) !== JSON.stringify([expectedMain])) {
-    throw new Error(
-      `${packageDir} packed metadata must contain only ${expectedMain} as native code`,
-    );
-  }
-  console.log(`verified ${metadata.id}`);
-  requested.delete(packageDir);
+	const packed = spawnSync(
+		"npm",
+		["pack", "--dry-run", "--json", `./npm/${packageDir}`],
+		{
+			cwd: packageRoot,
+			encoding: "utf8",
+			shell: process.platform === "win32",
+		},
+	);
+	if (packed.status !== 0) {
+		throw new Error(
+			`npm pack failed for ${name}: ${packed.stderr || packed.stdout}`,
+		);
+	}
+	const metadata = JSON.parse(packed.stdout)[0];
+	if (metadata.name !== name || metadata.version !== rootPackage.version) {
+		throw new Error(
+			`${packageDir} packed metadata mismatch: expected ${name}@${rootPackage.version}, got ${metadata.name}@${metadata.version}`,
+		);
+	}
+	const nativeFiles = metadata.files
+		.map((file) => file.path)
+		.filter((filePath) => filePath.endsWith(".node"));
+	if (JSON.stringify(nativeFiles) !== JSON.stringify([expectedMain])) {
+		throw new Error(
+			`${packageDir} packed metadata must contain only ${expectedMain} as native code`,
+		);
+	}
+	console.log(`verified ${metadata.id}`);
+	requested.delete(packageDir);
 }
 
 if (requested.size > 0) {
-  throw new Error(`unknown platform package directories: ${[...requested].join(", ")}`);
+	throw new Error(
+		`unknown platform package directories: ${[...requested].join(", ")}`,
+	);
 }

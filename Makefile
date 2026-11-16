@@ -12,14 +12,14 @@
 
 
 .PHONY: recurrence-test recurrence-crosscheck recurrence-tzdata-check
-.PHONY: evidence-test evidence-crosscheck signal-test signal-crosscheck session-test session-crosscheck python-check test-python build-python
+.PHONY: evidence-test evidence-crosscheck signal-test signal-crosscheck session-test session-crosscheck timeout-test timeout-crosscheck proc-test proc-crosscheck python-check test-python build-python
 .PHONY: release-require-tag
 .PHONY: all help bootstrap bootstrap-force tools goneat-version check test test-diabolical fmt fmt-check lint typecheck build clean version install
 .PHONY: precommit prepush pr-final deps-check audit deny miri msrv
 .PHONY: content-check surface-scan workflow-pin ci-pins-sync ci-pins-check doctor doctor-release
 .PHONY: check-windows check-windows-msvc check-windows-gnu
-.PHONY: build-release build-ffi cbindgen typescript-api-generate typescript-api-check
-.PHONY: build-local-go build-local-ffi-shared go-test header-go go-header go-prebuilt-darwin
+.PHONY: build-release typescript-api-generate typescript-api-check
+.PHONY: go-test
 .PHONY: release release-check release-clean release-download release-checksums release-sign
 .PHONY: release-export-keys release-verify-checksums release-verify-signatures
 .PHONY: release-stage-anchors release-fetch-anchors
@@ -75,13 +75,11 @@ help: ## Show available targets
 	@echo "Development:"
 	@echo "  help            Show this help message"
 	@echo "  bootstrap       Install tools (sfetch -> goneat)"
-	@echo "  build           Build all crates (debug) | build-release (release) | build-ffi (FFI + header)"
+	@echo "  build           Build all crates (debug) | build-release (release)"
 	@echo "  install         Install sysprims binary to ~/.local/bin"
 	@echo "  clean           Remove build artifacts"
-	@echo "Go, Python & TypeScript bindings:"
-	@echo "  build-local-go      Build FFI for local Go development (build-local-ffi-shared: shared)"
-	@echo "  go-test             Run Go binding tests | header-go: generate C header"
-	@echo "  go-prebuilt-darwin  Build prebuilt libs for macOS"
+	@echo "Go, Python & TypeScript:"
+	@echo "  go-test             Run pure-Go module tests (CGO_ENABLED=0)"
 	@echo "  python-check        Build and verify the Python abi3 wheel and sdist"
 	@echo "  typescript-api-generate / typescript-api-check  Generate or check TS public API docs"
 	@echo "Quality gates:"
@@ -279,7 +277,7 @@ goneat-version: ## Print PATH goneat vs Makefile pin
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo "[ok] Makefile GONEAT_VERSION=$(GONEAT_VERSION)"
 
-check: fmt-check lint test evidence-test signal-test session-test timeout-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
+check: fmt-check lint test evidence-test signal-test session-test timeout-test proc-test check-windows content-check workflow-pin release-source-check deny ## Run all quality checks
 	@echo "[ok] All quality checks passed"
 
 # The public-surface scan uses limensafe with a maintainer catalog named by
@@ -291,7 +289,7 @@ surface-scan: ## Public-surface scan (tree, commit messages, PR text, branch) wh
 # in CI as part of check.
 content-check: ## Refuse local paths, private keys, tokens and commit markers in tracked files
 	@$(PYTHON) -I -B scripts/content-check.py
-	@for dir in bindings/go/sysprims go/recurrence bindings/typescript/sysprims bindings/python; do \
+	@for dir in go/recurrence bindings/typescript/sysprims bindings/python; do \
 		for file in LICENSE-MIT LICENSE-APACHE NOTICE; do \
 			cmp -s "$$file" "$$dir/$$file" || { echo "error: $$dir/$$file differs from root $$file" >&2; exit 1; }; \
 		done; \
@@ -385,6 +383,14 @@ timeout-test: ## Test sysprims-timeout, pure-Go syserror + timeout packages, and
 timeout-crosscheck: ## Compare Rust and Go timeout NDJSON outputs and verify out-of-tree Go build
 	@bash scripts/containment-crosscheck.sh
 
+proc-test: ## Test sysprims-proc, pure-Go syserror + proc packages, and parity
+	$(CARGO) test -p sysprims-proc
+	GOWORK=off CGO_ENABLED=0 go vet ./syserror/... ./proc/... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./syserror/... ./proc/...
+	@$(MAKE) --no-print-directory proc-crosscheck
+
+proc-crosscheck: ## Compare Rust and Go proc NDJSON outputs and verify out-of-tree Go build
+	@bash scripts/proc-crosscheck.sh
+
 python-check: ## Build, install, and test the Python abi3 wheel and offline sdist
 	@PYTHON=$(PYTHON) ./scripts/python-check.sh
 
@@ -473,8 +479,7 @@ audit: ## Run cargo-audit security scan
 miri: ## Run Miri to detect undefined behavior in unsafe code (requires nightly)
 	@echo "Running Miri..."
 	@if rustup run nightly cargo miri --version >/dev/null 2>&1; then \
-		rustup run nightly cargo miri test -p sysprims-core --lib && \
-		rustup run nightly cargo miri test -p sysprims-ffi --lib; \
+		rustup run nightly cargo miri test -p sysprims-core --lib; \
 	else \
 		echo "[!!] Miri not installed. Install with:"; \
 		echo "  rustup +nightly component add miri"; \
@@ -508,23 +513,6 @@ build-release: ## Build all crates (release)
 	$(CARGO) build --workspace --release
 	@echo "[ok] Release build complete"
 
-build-ffi: cbindgen ## Build FFI library with C header
-	@echo "Building FFI library..."
-	$(CARGO) build --package sysprims-ffi --release
-	@echo "[ok] FFI build complete"
-	@echo "Library: target/release/libsysprims.*"
-	@echo "Header: ffi/sysprims-ffi/sysprims.h"
-
-cbindgen: ## Generate C header from FFI crate
-	@echo "Generating C header..."
-	@if command -v cbindgen >/dev/null 2>&1; then \
-		cbindgen --config cbindgen.toml --crate sysprims-ffi --output ffi/sysprims-ffi/sysprims.h; \
-		echo "[ok] Generated ffi/sysprims-ffi/sysprims.h"; \
-	else \
-		echo "[!!] cbindgen not found (cargo install cbindgen)"; \
-		exit 1; \
-	fi
-
 clean: ## Remove build artifacts
 	@echo "Cleaning..."
 	$(CARGO) clean
@@ -532,124 +520,15 @@ clean: ## Remove build artifacts
 	@echo "[ok] Clean complete"
 
 # -----------------------------------------------------------------------------
-# Go Bindings
+# Pure-Go Module Tests
 # -----------------------------------------------------------------------------
-#
-# Build and test Go bindings for sysprims.
-# Prebuilt static libraries are committed at release tags.
-# Local development uses lib/local/ (gitignored).
 
-GO_BINDINGS_DIR := bindings/go/sysprims
-GO_LIB_ROOT := $(GO_BINDINGS_DIR)/lib
-
-# Detect current platform
-UNAME_S := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-UNAME_M := $(shell uname -m)
-
-# Normalize architecture names for Go
-ifeq ($(UNAME_M),x86_64)
-    GO_ARCH := amd64
-endif
-ifeq ($(UNAME_M),aarch64)
-    GO_ARCH := arm64
-endif
-ifeq ($(UNAME_M),arm64)
-    GO_ARCH := arm64
-endif
-
-# Normalize OS names
-ifeq ($(UNAME_S),darwin)
-    GO_OS := darwin
-    GO_LIB_EXT := .a
-    GO_SHARED_EXT := .dylib
-    GO_LIB_PREFIX := lib
-endif
-ifeq ($(UNAME_S),linux)
-    GO_OS := linux
-    GO_LIB_EXT := .a
-    GO_SHARED_EXT := .so
-    GO_LIB_PREFIX := lib
-endif
-
-GO_LOCAL_LIB := $(GO_LIB_ROOT)/local/$(GO_OS)-$(GO_ARCH)
-GO_LOCAL_SHARED_LIB := $(GO_BINDINGS_DIR)/lib-shared/local/$(GO_OS)-$(GO_ARCH)
-
-build-local-go: ## Build FFI for local Go development
-	@echo "Building FFI for local Go development ($(GO_OS)-$(GO_ARCH))..."
-	$(CARGO) build --release -p sysprims-ffi
-	@mkdir -p $(GO_LOCAL_LIB)
-	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(GO_LOCAL_LIB)/
-	@echo "[ok] FFI library copied to $(GO_LOCAL_LIB)/"
-
-	@echo "Staging local release-like assets in $(DIST_LOCAL)/release/sysprims-ffi/..."
-	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/include
-	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(DIST_LOCAL)/release/sysprims-ffi/libsysprims_ffi.a
-	@cp ffi/sysprims-ffi/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims.h
-	@cp $(GO_BINDINGS_DIR)/include/sysprims.h $(DIST_LOCAL)/release/sysprims-ffi/include/sysprims-go.h
-	@shared_root="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
-	if [ -f "$$shared_root" ]; then \
-		mkdir -p "$(GO_LOCAL_SHARED_LIB)"; \
-		if [ "$(GO_OS)" = "darwin" ]; then \
-			install_name_tool -id "@rpath/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)" "$$shared_root" || true; \
-		fi; \
-		cp "$$shared_root" "$(GO_LOCAL_SHARED_LIB)/"; \
-		cp "$$shared_root" "$(DIST_LOCAL)/release/sysprims-ffi/"; \
-	fi
-
-	@# Also stage a release-like layout (static + shared split) for local consumers.
-	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/static
-	@cp target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_LIB_EXT) $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/static/
-	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared
-	@shared="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
-	if [ -f "$$shared" ]; then \
-		cp "$$shared" "$(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared/"; \
-	else \
-		echo "[--] Shared library not produced at $$shared (skipping)"; \
-	fi
-	@echo "Built locally from working tree." > $(DIST_LOCAL)/release/sysprims-ffi/LOCAL.txt
-	@echo "[ok] Local assets staged at $(DIST_LOCAL)/release/sysprims-ffi/"
-
-build-local-ffi-shared: ## Build shared FFI library and stage it locally
-	@echo "Building shared FFI library for local consumers ($(GO_OS)-$(GO_ARCH))..."
-	$(CARGO) build --release -p sysprims-ffi
-	@mkdir -p $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared
-	@shared="target/release/$(GO_LIB_PREFIX)sysprims_ffi$(GO_SHARED_EXT)"; \
-	if [ -f "$$shared" ]; then \
-		cp "$$shared" "$(DIST_LOCAL)/release/sysprims-ffi/"; \
-		cp "$$shared" "$(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared/"; \
-		echo "[ok] Shared library copied to $(DIST_LOCAL)/release/sysprims-ffi/lib/$(GO_OS)-$(GO_ARCH)/shared/"; \
-	else \
-		echo "[!!] Shared library not produced at $$shared"; \
-		exit 1; \
-	fi
-
-go-test: build-local-go ## Run Go binding tests
-	@echo "Running Go tests..."
-	cd $(GO_BINDINGS_DIR) && go test -v ./...
-	@echo "[ok] Go tests passed"
-
-header-go: ## Generate C header for Go bindings
-	@echo "Generating C header for Go bindings..."
-	@if command -v cbindgen >/dev/null 2>&1; then \
-		cbindgen --config cbindgen.toml --crate sysprims-ffi --output $(GO_BINDINGS_DIR)/include/sysprims.h; \
-		echo "[ok] Generated $(GO_BINDINGS_DIR)/include/sysprims.h"; \
-	else \
-		echo "[!!] cbindgen not found (cargo install cbindgen)"; \
-		exit 1; \
-	fi
-
-go-header: header-go ## Back-compat alias
-	@echo "[--] go-header is deprecated; use header-go"
-
-go-prebuilt-darwin: ## Build prebuilt libs for macOS (maintainer use)
-	@echo "Building prebuilt libs for macOS (both architectures)..."
-	rustup target add aarch64-apple-darwin x86_64-apple-darwin
-	@mkdir -p $(GO_LIB_ROOT)/darwin-arm64 $(GO_LIB_ROOT)/darwin-amd64
-	MACOSX_DEPLOYMENT_TARGET=11.0 $(CARGO) build --release --target aarch64-apple-darwin -p sysprims-ffi
-	@cp target/aarch64-apple-darwin/release/libsysprims_ffi.a $(GO_LIB_ROOT)/darwin-arm64/
-	MACOSX_DEPLOYMENT_TARGET=11.0 $(CARGO) build --release --target x86_64-apple-darwin -p sysprims-ffi
-	@cp target/x86_64-apple-darwin/release/libsysprims_ffi.a $(GO_LIB_ROOT)/darwin-amd64/
-	@echo "[ok] Built prebuilt libs for darwin-arm64 and darwin-amd64"
+go-test: ## Run pure-Go module tests (root module + go/recurrence, CGO_ENABLED=0)
+	@echo "Running pure-Go tests..."
+	GOWORK=off CGO_ENABLED=0 go vet ./...
+	GOWORK=off CGO_ENABLED=0 go test -count=1 ./...
+	cd go/recurrence && GOWORK=off CGO_ENABLED=0 go vet ./... && GOWORK=off CGO_ENABLED=0 go test -count=1 ./...
+	@echo "[ok] Pure-Go tests passed"
 
 # -----------------------------------------------------------------------------
 # Install
@@ -1010,7 +889,7 @@ release-plan-check: ## Validate the machine-readable release surface plan
 	@node scripts/version-pack.mjs plan-check
 
 version-tooling-test: ## Run isolated version and tag-guard controls
-	@node --test scripts/version-pack.test.mjs scripts/release-integrity.test.mjs scripts/npm-release.test.mjs scripts/generate-go-prebuilt-manifest.test.mjs
+	@node --test scripts/version-pack.test.mjs scripts/release-integrity.test.mjs scripts/npm-release.test.mjs
 
 MODE ?= pre-tag
 release-guard-tag-version: release-require-tag ## Validate the explicit release tag against VERSION

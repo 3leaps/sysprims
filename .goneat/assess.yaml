@@ -40,7 +40,6 @@ lint:
   # Go linting note:
   # goneat runs golangci-lint from the repo root. Root go.work includes:
   # - the root pure-Go module (.)
-  # - bindings/go/sysprims
   # - go/recurrence
   #
   # CI and Makefile module tests explicitly set GOWORK=off (and CGO_ENABLED=0

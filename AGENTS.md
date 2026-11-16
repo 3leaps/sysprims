@@ -223,10 +223,11 @@ See also [ADR-0007](docs/decisions/ADR-0007-platform-abstraction.md) for the abs
 | `crates/sysprims-core/`              | Shared types, errors, telemetry                       |
 | `crates/sysprims-timeout/`           | Process timeout with group-by-default                 |
 | `crates/sysprims-signal/`            | Signal dispatch and process groups                    |
+| `crates/sysprims-session/`           | Contained process session primitives                  |
 | `crates/sysprims-proc/`              | Process inspection and enumeration                    |
 | `crates/sysprims-cli/`               | CLI binaries                                          |
-| `ffi/sysprims-ffi/`                  | C-ABI exports via cbindgen                            |
-| `bindings/`                          | Go, Python, TypeScript wrappers                       |
+| `syserror/`, `signal/`, `session/`, `timeout/`, `proc/` | Pure-Go twin packages (`CGO_ENABLED=0`) |
+| `bindings/`                          | Python (`PyO3`) and TypeScript (`napi-rs`) wrappers   |
 | `docs/decisions/`                    | Decision Records (ADR, DDR, SDR)                      |
 | `docs/safety/`                       | Safety guides (signal dispatch, etc.)                 |
 | `docs/standards/`                    | Repository conventions and policies                   |
