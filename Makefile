@@ -90,7 +90,7 @@ help: ## Show available targets
 	@echo "  precommit / prepush / pr-final  Pre-commit, pre-push, and PR final gates"
 	@echo "  deny / audit    Run cargo-deny and cargo-audit security checks"
 	@echo "  content-check   Refuse local paths, keys, tokens and commit markers in tracked files"
-	@echo "  surface-scan    Public-surface scan when LIMENSAFE_CATALOG_PATH is set"
+	@echo "  surface-scan    Public-surface scan when LIMENSAFE_CATALOG_PATH is set (required by pr-final and release-preflight)"
 	@echo "  workflow-pin    Verify every workflow matches its reviewed digest and is read-only"
 	@echo "  ci-pins-sync / ci-pins-check  Synchronize or verify CI runner labels and Rust pins"
 	@echo "  doctor          Report host tool versions against recommended minimums (doctor-release)"
@@ -573,7 +573,8 @@ prepush: ## Run pre-push checks (thorough)
 	@$(MAKE) release-plan-check version-check version-tooling-test surface-scan
 	@echo "[ok] Pre-push checks passed"
 
-pr-final: prepush ## Final PR merge-readiness gate
+pr-final: prepush ## Final PR merge-readiness gate (requires LIMENSAFE_CATALOG_PATH and SYSPRIMS_SURFACE_PR_TEXT)
+	@SYSPRIMS_SURFACE_SCAN_REQUIRED=1 PYTHON=$(PYTHON) ./scripts/surface-scan.sh
 	@echo "[ok] PR final checks passed"
 
 deps-check: ## Check dependencies for cooling violations
@@ -809,7 +810,9 @@ release-preflight: release-require-tag release-plan-check version-check ## Verif
 	@# Check 3: Prepush quality gates
 	@$(MAKE) prepush --silent
 	@echo "[ok] Prepush checks passed"
-	@# Check 4: Release notes and local/remote sync
+	@# Check 4: Required release-scope public-surface scan (tree and every commit message)
+	@SYSPRIMS_SURFACE_SCAN_REQUIRED=1 SYSPRIMS_SURFACE_SCOPE=release PYTHON=$(PYTHON) ./scripts/surface-scan.sh
+	@# Check 5: Release notes and local/remote sync
 	@version_file=$$(cat $(VERSION_FILE)); \
 	release_notes="docs/releases/v$$version_file.md"; \
 	if [ ! -f "$$release_notes" ]; then \

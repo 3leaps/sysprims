@@ -8,7 +8,9 @@ This document walks maintainers through the build/sign/publish flow for each sys
 - Signing keys configured (see `docs/security/signing-runbook.md`)
 - Environment variables set (see step 2 below)
 - `gh` CLI authenticated with push access
-- `limensafe` and `LIMENSAFE_CATALOG_PATH` set for maintainer public-surface scans (`make surface-scan`)
+- `limensafe` installed and `LIMENSAFE_CATALOG_PATH` exported from the
+  maintainer's release environment (outside the repository). `make pr-final`
+  and `make release-preflight` require it; `make surface-scan` skips without it
 - All feature PRs for this release are merged and branch is `main`
 
 ## 1. Pre-Release Preparation
@@ -36,7 +38,7 @@ Targets that read no tag (for example `release-guard-provenance`,
 ### Code Quality Gates
 
 - [ ] Ensure `main` is clean: `git status` shows no uncommitted changes
-- [ ] Run PR final checks: `make pr-final` passes
+- [ ] Run pre-push checks: `make prepush` passes (`make pr-final` also needs the PR text; see Release Pack Verification)
 - [ ] Run full test suite: `cargo test --workspace`
 - [ ] Verify cargo-deny passes: `cargo deny check`
 - [ ] (Recommended) Run container tests locally:
@@ -84,7 +86,8 @@ Targets that read no tag (for example `release-guard-provenance`,
 
 ### Release Pack Verification
 
-- [ ] Run `make pr-final`.
+- [ ] Write the release pack PR title and body to a file outside the
+  repository and run `SYSPRIMS_SURFACE_PR_TEXT=<file> make pr-final`.
 - [ ] From v0.5.0 the Go surface is pure Go (`CGO_ENABLED=0`) with no prebuilt
   native libraries, so there is no Go bindings prep step and the release plan
   uses `go.lock_phase: resolved`. Releases up to v0.4.0 ran a separate Go
@@ -134,7 +137,9 @@ Targets that read no tag (for example `release-guard-provenance`,
     bare `RELEASE_TAG`, as set at the start of this checklist) on this
     synchronized final `main`. It requires `go.lock_phase: resolved`, clean
     local/remote state, the complete commit attribution footer (or approved
-    signed receipt), and all normal gates. **It must pass before tagging.**
+    signed receipt), all normal gates, and the release-scope public-surface
+    scan of the tree and every commit message (`LIMENSAFE_CATALOG_PATH`
+    required). **It must pass before tagging.**
 
 - [ ] TypeScript bindings validation (recommended):
   - After the release pack is merged (and `main` is green), run the TypeScript workflow on `main`.
@@ -554,7 +559,7 @@ git push origin main
 
 | Target                     | Description                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------ |
-| `make release-preflight`   | **REQUIRED**: Verify pre-tag requirements (tree, checks, version, notes, sync) |
+| `make release-preflight`   | **REQUIRED**: Verify pre-tag requirements (tree, checks, surface scan, version, notes, sync) |
 | `make release-clean`       | Remove dist/release contents                                                   |
 | `make release-plan-check`  | Validate the machine-readable per-cut surface plan                             |
 | `make release-download`    | Fetch the exact CI payload artifact (named run and attempt)                    |
