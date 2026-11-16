@@ -1,6 +1,6 @@
 # ADR-0012: Language Bindings Distribution
 
-> **Status**: Accepted
+> **Status**: Accepted; superseded in part by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): the cgo Go bindings, prebuilt libraries, and C header are retired
 > **Date**: 2026-01-15
 > **Authors**: devlead, Architecture Council
 

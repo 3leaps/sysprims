@@ -59,14 +59,13 @@ sysprims is a cross-platform process utilities library implemented in Rust with 
 
 ### Core Crates
 
-| Crate              | Responsibility                        | Key Types                                              |
-| ------------------ | ------------------------------------- | ------------------------------------------------------ |
-| `sysprims-core`    | Shared types, errors, telemetry trait | `SysprimsError`, `Signal`, `TelemetryEmitter`          |
-| `sysprims-timeout` | Process execution with deadlines      | `TimeoutConfig`, `TimeoutOutcome`, `GroupingMode`      |
-| `sysprims-signal`  | Signal dispatch and process groups    | `send_signal()`, `terminate()`, `force_kill()`         |
-| `sysprims-proc`    | Process inspection and enumeration    | `ProcessSnapshot`, `ProcessInfo`, `ProcessFilter`      |
-| `sysprims-cli`     | CLI binaries (thin wrappers)          | Binary entry points                                    |
-| `sysprims-ffi`     | C-ABI exports                         | `sysprims_timeout_run()`, `sysprims_proc_list()`, etc. |
+| Crate              | Responsibility                        | Key Types                                         |
+| ------------------ | ------------------------------------- | ------------------------------------------------- |
+| `sysprims-core`    | Shared types, errors, telemetry trait | `SysprimsError`, `Signal`, `TelemetryEmitter`     |
+| `sysprims-timeout` | Process execution with deadlines      | `TimeoutConfig`, `TimeoutOutcome`, `GroupingMode` |
+| `sysprims-signal`  | Signal dispatch and process groups    | `send_signal()`, `terminate()`, `force_kill()`    |
+| `sysprims-proc`    | Process inspection and enumeration    | `ProcessSnapshot`, `ProcessInfo`, `ProcessFilter` |
+| `sysprims-cli`     | CLI binaries (thin wrappers)          | Binary entry points                               |
 
 ### Component Interaction
 
@@ -150,42 +149,28 @@ timeout ──► CloseHandle(job) ──► all processes terminated
 }
 ```
 
-### 2. FFI Architecture
+### 2. Language Bindings
 
-The FFI layer uses the **Opaque Pointer + JSON String** pattern for maximum cross-language compatibility.
+Python and TypeScript bind the Rust crates directly; Go is a pure-Go
+reimplementation held to the same behavior by shared conformance vectors.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Language Bindings                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │   sysprims-go     │  │   sysprims-py     │  │   sysprims-ts     │          │
-│  │   (CGo)      │  │   (PyO3)     │  │  (NAPI-RS)   │          │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
-│         │                 │                 │                    │
-│         └─────────────────┼─────────────────┘                    │
-│                           │                                      │
-│                           ▼                                      │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                      C-ABI (sysprims.h)                           ││
-│  │                   Generated via cbindgen                     ││
-│  │                                                              ││
-│  │  Memory Contract:                                            ││
-│  │  • All returned char* owned by caller                        ││
-│  │  • MUST free via sysprims_free_string()                          ││
-│  │  • NEVER use C free() (Rust allocator)                       ││
-│  │                                                              ││
-│  │  Data Contract:                                              ││
-│  │  • All strings UTF-8                                         ││
-│  │  • Complex data as JSON strings                              ││
-│  │  • Schema ID embedded in all outputs                         ││
-│  └─────────────────────────────────────────────────────────────┘│
-│                           │                                      │
-│                           ▼                                      │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                       sysprims-ffi                                ││
-│  │                   (Rust implementation)                      ││
-│  └─────────────────────────────────────────────────────────────┘│
+│  sysprims-py (PyO3)        sysprims-ts-napi (napi-rs)           │
+│          │                          │                           │
+│          └────────────┬─────────────┘                           │
+│                       ▼                                         │
+│        Rust crates (sysprims-core, -signal, -session,           │
+│                     -proc, -timeout, ...)                       │
 └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  Go: github.com/3leaps/sysprims/{signal,session,timeout,proc}   │
+│      pure Go (CGO_ENABLED=0), no native library                 │
+└─────────────────────────────────────────────────────────────────┘
+
+        testdata/conformance/{signal,session,timeout,proc}
+        verified by Rust, Go, Python, and TypeScript
 ```
 
 ### 3. Schema-Driven Contracts
@@ -350,10 +335,9 @@ sysprims-pstat --json            ┌──────────────�
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Go Consumers                             │
 │                                                                  │
-│  import "github.com/3leaps/sysprims-go"                              │
-│                        │                                         │
-│                        ▼                                         │
-│  Linked: libsysprims.a (static) or libsysprims.so (dynamic)              │
+│  import "github.com/3leaps/sysprims/proc"                       │
+│                                                                  │
+│  Pure Go (CGO_ENABLED=0); no C toolchain or native library      │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -398,7 +382,7 @@ sysprims-pstat --json            ┌──────────────�
 | -------------------- | -------------------------------------- |
 | Privilege escalation | No implicit elevation; explicit errors |
 | PID injection        | Validate all external PID inputs       |
-| Memory safety        | Rust ownership; careful FFI contracts  |
+| Memory safety        | Rust ownership; PyO3/napi-rs bindings  |
 
 ### Maintainability
 
@@ -413,7 +397,8 @@ sysprims-pstat --json            ┌──────────────�
 - [ADR-0001: License Policy](./adr/0001-license-policy.md)
 - [ADR-0002: Crate Structure](./adr/0002-crate-structure.md)
 - [ADR-0003: Group-by-Default](./adr/0003-group-by-default.md)
-- [ADR-0004: FFI Design](./adr/0004-ffi-design.md)
+- [ADR-0018: Native Process Evidence Surfaces and Root Pure-Go Module](../decisions/ADR-0018-native-process-evidence-and-root-go-module.md)
+- [ADR-0019: Retire the cgo Go Bindings and the C-ABI](../decisions/ADR-0019-retire-cgo-bindings-and-c-abi.md)
 - [ADR-0005: Schema Contracts](./adr/0005-schema-contracts.md)
 - [Stack Management](./stack/README.md)
 - [Security Architecture](./security/README.md)

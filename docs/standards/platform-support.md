@@ -15,21 +15,17 @@ All CI/CD workflows, language bindings, and release assets MUST conform to this 
 
 ## Supported Platforms
 
-| Platform            | Rust Target                                                    | Go GOOS/GOARCH       | Node Platform      | Status                               |
-| ------------------- | -------------------------------------------------------------- | -------------------- | ------------------ | ------------------------------------ |
-| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`                                     | `linux/amd64`        | `linux-x64-gnu`    | **Supported**                        |
-| Linux x64 (musl)    | `x86_64-unknown-linux-musl`                                    | `linux/amd64` (musl) | `linux-x64-musl`   | **Supported**                        |
-| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`                                    | `linux/arm64`        | `linux-arm64-gnu`  | **Supported**                        |
-| Linux arm64 (musl)  | `aarch64-unknown-linux-musl`                                   | `linux/arm64` (musl) | `linux-arm64-musl` | **Supported**                        |
-| macOS arm64         | `aarch64-apple-darwin`                                         | `darwin/arm64`       | `darwin-arm64`     | **Supported**                        |
-| Windows x64         | `x86_64-pc-windows-msvc` (CLI) / `x86_64-pc-windows-gnu` (FFI) | `windows/amd64`      | `win32-x64-msvc`   | **Supported**                        |
-| Windows arm64       | `aarch64-pc-windows-msvc` (CLI) / `aarch64-pc-windows-gnullvm` (FFI) | `windows/arm64`      | `win32-arm64-msvc` | **Supported**                        |
+| Platform            | Rust Target                                                           | Go GOOS/GOARCH       | Node Platform      | Status        |
+| ------------------- | --------------------------------------------------------------------- | -------------------- | ------------------ | ------------- |
+| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`                                            | `linux/amd64`        | `linux-x64-gnu`    | **Supported** |
+| Linux x64 (musl)    | `x86_64-unknown-linux-musl`                                           | `linux/amd64` (musl) | `linux-x64-musl`   | **Supported** |
+| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`                                           | `linux/arm64`        | `linux-arm64-gnu`  | **Supported** |
+| Linux arm64 (musl)  | `aarch64-unknown-linux-musl`                                          | `linux/arm64` (musl) | `linux-arm64-musl` | **Supported** |
+| macOS arm64         | `aarch64-apple-darwin`                                                | `darwin/arm64`       | `darwin-arm64`     | **Supported** |
+| Windows x64         | `x86_64-pc-windows-gnu` (CLI) / `x86_64-pc-windows-msvc` (TS, Python) | `windows/amd64`      | `win32-x64-msvc`   | **Supported** |
+| Windows arm64       | `aarch64-pc-windows-msvc`                                             | `windows/arm64`      | `win32-arm64-msvc` | **Supported** |
 
-**Note on Windows arm64 Go bindings**: Go cgo requires a GNU-ABI C toolchain on Windows. For arm64 this is
-provided by [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (via the Rust `aarch64-pc-windows-gnullvm`
-target), since msys2/MinGW-w64 does not ship an aarch64 toolchain. Consumers building Go code against the
-arm64 prebuilt must have llvm-mingw installed and the `aarch64-w64-mingw32-gcc` driver on `PATH`. Available
-since v0.1.16.
+**Note on Go**: Go packages are pure Go (`CGO_ENABLED=0`) and need no C toolchain on any platform.
 
 ## Explicitly Unsupported Platforms
 
@@ -62,18 +58,21 @@ supported platform**:
   removal. Intel Mac consumers should plan migration to Apple Silicon. No guarantees of bug
   fixes or new feature coverage.
 
-### FFI Libraries (Go Bindings)
+### Go Packages
 
-Static libraries committed to `bindings/go/sysprims/lib/`:
+Go packages are source-only and pure Go (`CGO_ENABLED=0`); no native libraries are shipped for Go. The
+committed prebuilt static libraries used by the cgo binding module through v0.4.0 were retired in v0.5.0
+(see ADR-0019).
 
-- `darwin-arm64/libsysprims_ffi.a`
-- `linux-amd64/libsysprims_ffi.a`
-- `linux-amd64-musl/libsysprims_ffi.a`
-- `linux-arm64/libsysprims_ffi.a`
-- `linux-arm64-musl/libsysprims_ffi.a`
-- `windows-amd64/libsysprims_ffi.a` (msys2/MinGW-w64, `x86_64-pc-windows-gnu`)
-- `windows-arm64/libsysprims_ffi.a` (llvm-mingw, `aarch64-pc-windows-gnullvm`, since v0.1.16)
-- `darwin-amd64/libsysprims_ffi.a` — legacy, not officially supported (see CLI section above)
+### Python Wheels
+
+`cp310-abi3` wheels are built for:
+
+- Linux x64 and arm64 (`manylinux2014`)
+- macOS arm64 (and a legacy macOS x64 wheel, not officially supported)
+- Windows x64 (`x86_64-pc-windows-msvc`)
+
+An sdist is also published.
 
 ### TypeScript N-API Prebuilds
 
@@ -95,14 +94,14 @@ coverage remains governed by the prebuild target list above.
 
 ### GitHub Actions Runners
 
-| Platform      | Runner                      | Notes                       |
-| ------------- | --------------------------- | --------------------------- |
-| Linux x64     | `ubuntu-latest`             | Default glibc builds        |
-| Linux arm64   | `ubuntu-latest-arm64-s`     | Native arm64 builds         |
-| macOS arm64   | `macos-14`                  | Apple Silicon               |
-| Windows x64   | `windows-latest`            | MSVC for CLI, MinGW for FFI |
-| Windows arm64 | `windows-latest-arm64-s`    | MSVC for CLI/TS; llvm-mingw for Go FFI |
-| Alpine/musl   | `ubuntu-latest` + container | `node:20-alpine` or custom  |
+| Platform      | Runner                      | Notes                             |
+| ------------- | --------------------------- | --------------------------------- |
+| Linux x64     | `ubuntu-latest`             | Default glibc builds              |
+| Linux arm64   | `ubuntu-latest-arm64-s`     | Native arm64 builds               |
+| macOS arm64   | `macos-14`                  | Apple Silicon                     |
+| Windows x64   | `windows-latest`            | MinGW for CLI, MSVC for TS/Python |
+| Windows arm64 | `windows-latest-arm64-s`    | MSVC for CLI/TS                   |
+| Alpine/musl   | `ubuntu-latest` + container | `node:20-alpine` or custom        |
 
 ### Cross-Compilation
 
@@ -118,10 +117,10 @@ Native arm64-gnu builds are done on `ubuntu-latest-arm64-s` for reliability.
 
 Before any release, verify:
 
-- [ ] All 7 supported platforms have artifacts (Go bindings: 7 platforms including Windows arm64 via llvm-mingw)
+- [ ] All 7 supported platforms have artifacts (CLI and TypeScript; Go is pure Go and ships no native artifacts)
 - [ ] No unsupported platform artifacts are included
 - [ ] CI workflows reference correct runners
-- [ ] Package configurations (napi, cgo) match this matrix
+- [ ] Package configurations (napi, Python wheels) match this matrix
 - [ ] Release notes document any platform support changes
 
 ## Updating This Standard
@@ -132,7 +131,7 @@ Changes to platform support require:
 2. Update all affected workflows (`.github/workflows/*.yml`)
 3. Update binding configurations:
    - `bindings/typescript/sysprims/package.json` (napi triples)
-   - `bindings/go/sysprims/cgo_*.go` (build tags)
+   - Python wheel targets in `.github/workflows/release.yml`
 4. Update `docs/guides/language-bindings.md`
 5. Document in release notes
 

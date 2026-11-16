@@ -1,6 +1,6 @@
 # ADR-0004: FFI Design
 
-> **Status**: Accepted
+> **Status**: Superseded by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): the C-ABI is retired
 > **Date**: 2025-12-31
 > **Authors**: Architecture Council
 

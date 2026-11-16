@@ -78,7 +78,7 @@ This is the heart of the argument: a better model produces safer operations.
 
 ## Same workflow in Go, without shell-outs
 
-The same diagnosis and action path is available in Go bindings. No subprocess execution, no
+The same diagnosis and action path is available in the pure-Go packages. No subprocess execution, no
 stdout parsing, no regex-driven recovery logic.
 
 ```go
@@ -88,17 +88,18 @@ import (
     "fmt"
     "time"
 
-    "github.com/3leaps/sysprims/bindings/go/sysprims"
+    "github.com/3leaps/sysprims/proc"
+    "github.com/3leaps/sysprims/signal"
 )
 
 func diagnoseAndKill(rootPID uint32) error {
     threshold := 90.0
 
     // 1) Sample descendants in monitor mode.
-    desc, err := sysprims.DescendantsWithOptions(rootPID, &sysprims.DescendantsOptions{
-        CpuMode:        sysprims.CpuModeMonitor,
+    desc, err := proc.DescendantsWithOptions(rootPID, &proc.DescendantsOptions{
+        CpuMode:        proc.CpuModeMonitor,
         SampleDuration: 3 * time.Second,
-        Filter: &sysprims.ProcessFilter{
+        Filter: &proc.ProcessFilter{
             CPUAbove: &threshold,
         },
     })
@@ -109,11 +110,11 @@ func diagnoseAndKill(rootPID uint32) error {
     fmt.Printf("matched=%d total=%d\n", desc.MatchedByFilter, desc.TotalFound)
 
     // 2) Apply targeted kill to matching descendants.
-    res, err := sysprims.KillDescendantsWithOptions(rootPID, &sysprims.KillDescendantsOptions{
-        Signal:         sysprims.SIGKILL,
-        CpuMode:        sysprims.CpuModeMonitor,
+    res, err := proc.KillDescendantsWithOptions(rootPID, &proc.KillDescendantsOptions{
+        Signal:         signal.SIGKILL,
+        CpuMode:        proc.CpuModeMonitor,
         SampleDuration: 3 * time.Second,
-        Filter: &sysprims.ProcessFilter{
+        Filter: &proc.ProcessFilter{
             CPUAbove: &threshold,
         },
     })
@@ -131,7 +132,7 @@ You can also enrich specific process inspection using `ProcessGetWithOptions` to
 thread count when needed:
 
 ```go
-info, err := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
+info, err := proc.ProcessGetWithOptions(pid, &proc.ProcessOptions{
     IncludeEnv:     true,
     IncludeThreads: true,
 })

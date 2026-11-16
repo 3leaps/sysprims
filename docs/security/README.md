@@ -51,9 +51,11 @@ only (never from the environment), records that
 ## Tags
 
 A release tags one commit with each name in its tag set, at the same version:
-`vX.Y.Z`, `bindings/go/sysprims/vX.Y.Z` when the Go binding is published, and
-`go/recurrence/vX.Y.Z` when the recurrence Go module is present (see
-[ADR-0017](../decisions/ADR-0017-recurrence-go-module-and-release-tags.md)).
+`vX.Y.Z` and `go/recurrence/vX.Y.Z` when the recurrence Go module is present
+(see [ADR-0017](../decisions/ADR-0017-recurrence-go-module-and-release-tags.md)).
+Releases through v0.4.0 also carried `bindings/go/sysprims/vX.Y.Z`; that module
+was retired in v0.5.0 (see
+[ADR-0019](../decisions/ADR-0019-retire-cgo-bindings-and-c-abi.md)).
 Every tag must be annotated, signed by the committed signing subkey, and point
 at that one commit.
 

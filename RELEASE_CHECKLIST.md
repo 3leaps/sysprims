@@ -9,8 +9,8 @@ This document walks maintainers through the build/sign/publish flow for each sys
 - Environment variables set (see step 2 below)
 - `gh` CLI authenticated with push access
 - `limensafe` installed and `LIMENSAFE_CATALOG_PATH` exported from the
-  maintainer's release environment (outside the repository). `make pr-final`
-  and `make release-preflight` require it; `make surface-scan` skips without it
+  maintainer's release environment (outside the repository). The PR final and
+  release preflight gates require it; `make surface-scan` skips without it
 - All feature PRs for this release are merged and branch is `main`
 
 ## 1. Pre-Release Preparation

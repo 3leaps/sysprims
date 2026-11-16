@@ -7,13 +7,14 @@ last_updated: "2026-01-17"
 # Port Bindings: Getting Started
 
 This guide shows how to use sysprims to map a listening TCP/UDP port to an owning PID
-(and optionally basic process info), with a focus on the Go bindings.
+(and optionally basic process info), with a focus on the pure-Go `proc` package.
 
 ## Concept
 
 - API: `listening_ports(filter: Option<&PortFilter>) -> PortBindingsSnapshot`
-- FFI: `sysprims_proc_listening_ports(filter_json, result_json_out)` (JSON-only)
-- Go: `sysprims.ListeningPorts(filter *PortFilter) (*PortBindingsSnapshot, error)`
+- Go: `proc.ListeningPorts(filter *proc.PortFilter) (*proc.PortBindingsSnapshot, error)`
+  (`github.com/3leaps/sysprims/proc`); `proc.ProcessByPort(port, protocol)` returns
+  the owning process directly
 
 ## Output contract (best-effort)
 
@@ -21,46 +22,23 @@ This guide shows how to use sysprims to map a listening TCP/UDP port to an ownin
 - macOS: best-effort. SIP/TCC can prevent socket enumeration/attribution even for same-user processes.
 - When attribution is partial, the snapshot includes `warnings: []string`.
 
-## Preview assets (local build, release-like layout)
-
-Developers wishing to access early or pre-release assets on a preview basis can coordinate with our team
-to run local build targets.
-
-Assets will appear in `dist/local` in a layout essentially identical to how they appear in the release
-assets on GitHub (and are also often available in `dist/release` locally).
-
-The versions in `dist/local` are volatile and subject to rapid change; use only during agreed beta cycles.
-
-Example (FFI bundle):
-
-- `dist/local/release/sysprims-ffi/`
-  - `libsysprims_ffi.a`
-  - `include/sysprims.h`
-  - `include/sysprims-go.h`
-  - `LOCAL.txt`
-
 ## Go usage
 
 ### Install
 
-For released versions, add to your `go.mod` (replace with latest version from [releases](https://github.com/3leaps/sysprims/releases)):
-
-```go
-require github.com/3leaps/sysprims/bindings/go/sysprims v0.1.x
-```
-
-For local development, clone the repository and build:
+The `proc` package is pure Go (`CGO_ENABLED=0`) in the root module, which
+requires Go 1.26.0 or later (replace with the latest version from
+[releases](https://github.com/3leaps/sysprims/releases)):
 
 ```bash
-git clone https://github.com/3leaps/sysprims
-cd sysprims
-make build-local-go
+go get github.com/3leaps/sysprims@vX.Y.Z
 ```
 
-Then add a replace directive in your consumer's `go.mod`:
+For local development against a checkout, add a replace directive in your
+consumer's `go.mod`:
 
 ```go
-replace github.com/3leaps/sysprims/bindings/go/sysprims => /path/to/sysprims/bindings/go/sysprims
+replace github.com/3leaps/sysprims => /path/to/sysprims
 ```
 
 ### Example: find PID on a port
@@ -73,7 +51,7 @@ import (
     "net"
     "os"
 
-    sysprims "github.com/3leaps/sysprims/bindings/go/sysprims"
+    "github.com/3leaps/sysprims/proc"
 )
 
 func main() {
@@ -86,8 +64,8 @@ func main() {
     port := uint16(ln.Addr().(*net.TCPAddr).Port)
     pid := uint32(os.Getpid())
 
-    proto := sysprims.ProtocolTCP
-    snap, err := sysprims.ListeningPorts(&sysprims.PortFilter{Protocol: &proto, LocalPort: &port})
+    proto := proc.ProtocolTCP
+    snap, err := proc.ListeningPorts(&proc.PortFilter{Protocol: &proto, LocalPort: &port})
     if err != nil {
         panic(err)
     }

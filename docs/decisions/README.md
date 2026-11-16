@@ -14,27 +14,28 @@ This directory contains architectural, design, and security decision records for
 
 ### Architecture Decision Records (ADR)
 
-| ID                                                                | Title                                     | Status   |
-| ----------------------------------------------------------------- | ----------------------------------------- | -------- |
-| [ADR-0000](ADR-0000-adr-process.md)                               | ADR Process                               | Accepted |
-| [ADR-0001](ADR-0001-license-policy.md)                            | License Policy                            | Accepted |
-| [ADR-0002](ADR-0002-crate-structure.md)                           | Crate Structure                           | Accepted |
-| [ADR-0003](ADR-0003-group-by-default.md)                          | Group-by-Default                          | Accepted |
-| [ADR-0004](ADR-0004-ffi-design.md)                                | FFI Design                                | Accepted |
-| [ADR-0005](ADR-0005-schema-contracts.md)                          | Schema Contracts                          | Accepted |
-| [ADR-0006](ADR-0006-dependency-governance.md)                     | Dependency Governance                     | Accepted |
-| [ADR-0007](ADR-0007-platform-abstraction.md)                      | Platform Abstraction                      | Accepted |
-| [ADR-0008](ADR-0008-error-handling.md)                            | Error Handling                            | Accepted |
-| [ADR-0009](ADR-0009-logging-strategy.md)                          | Logging Strategy                          | Accepted |
-| [ADR-0010](ADR-0010-schema-management-and-versioning.md)          | Schema Management and Versioning          | Accepted |
-| [ADR-0011](ADR-0011-pid-validation-safety.md)                     | **PID Validation Safety**                 | Accepted |
-| [ADR-0012](ADR-0012-language-bindings-distribution.md)            | Language Bindings Distribution            | Accepted |
-| [ADR-0013](ADR-0013-release-asset-publishing-and-verification.md) | Release Asset Publishing and Verification | Accepted |
-| [ADR-0014](ADR-0014-ffi-artifact-groups-and-binding-consumers.md) | FFI Artifact Groups and Binding Consumers | Accepted |
-| [ADR-0015](ADR-0015-typescript-npm-publishing.md)                 | TypeScript npm Publishing Standard        | Accepted |
-| [ADR-0016](ADR-0016-session-spawn-ffi-contract.md)                 | Session Spawn FFI Contract                             | Accepted |
-| [ADR-0017](ADR-0017-recurrence-go-module-and-release-tags.md)     | Recurrence Go Module and Release Tag Set               | Accepted |
-| [ADR-0018](ADR-0018-native-process-evidence-and-root-go-module.md) | Native Process Evidence Surfaces and Root Pure-Go Module | Accepted |
+| ID                                                                 | Title                                                    | Status     |
+| ------------------------------------------------------------------ | -------------------------------------------------------- | ---------- |
+| [ADR-0000](ADR-0000-adr-process.md)                                | ADR Process                                              | Accepted   |
+| [ADR-0001](ADR-0001-license-policy.md)                             | License Policy                                           | Accepted   |
+| [ADR-0002](ADR-0002-crate-structure.md)                            | Crate Structure                                          | Accepted   |
+| [ADR-0003](ADR-0003-group-by-default.md)                           | Group-by-Default                                         | Accepted   |
+| [ADR-0004](ADR-0004-ffi-design.md)                                 | FFI Design                                               | Superseded |
+| [ADR-0005](ADR-0005-schema-contracts.md)                           | Schema Contracts                                         | Accepted   |
+| [ADR-0006](ADR-0006-dependency-governance.md)                      | Dependency Governance                                    | Accepted   |
+| [ADR-0007](ADR-0007-platform-abstraction.md)                       | Platform Abstraction                                     | Accepted   |
+| [ADR-0008](ADR-0008-error-handling.md)                             | Error Handling                                           | Accepted   |
+| [ADR-0009](ADR-0009-logging-strategy.md)                           | Logging Strategy                                         | Accepted   |
+| [ADR-0010](ADR-0010-schema-management-and-versioning.md)           | Schema Management and Versioning                         | Accepted   |
+| [ADR-0011](ADR-0011-pid-validation-safety.md)                      | **PID Validation Safety**                                | Accepted   |
+| [ADR-0012](ADR-0012-language-bindings-distribution.md)             | Language Bindings Distribution                           | Accepted   |
+| [ADR-0013](ADR-0013-release-asset-publishing-and-verification.md)  | Release Asset Publishing and Verification                | Accepted   |
+| [ADR-0014](ADR-0014-ffi-artifact-groups-and-binding-consumers.md)  | FFI Artifact Groups and Binding Consumers                | Superseded |
+| [ADR-0015](ADR-0015-typescript-npm-publishing.md)                  | TypeScript npm Publishing Standard                       | Accepted   |
+| [ADR-0016](ADR-0016-session-spawn-ffi-contract.md)                 | Session Spawn FFI Contract                               | Accepted   |
+| [ADR-0017](ADR-0017-recurrence-go-module-and-release-tags.md)      | Recurrence Go Module and Release Tag Set                 | Accepted   |
+| [ADR-0018](ADR-0018-native-process-evidence-and-root-go-module.md) | Native Process Evidence Surfaces and Root Pure-Go Module | Accepted   |
+| [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md)              | Retire the cgo Go Bindings and the C-ABI                 | Accepted   |
 
 ### Design Decision Records (DDR)
 

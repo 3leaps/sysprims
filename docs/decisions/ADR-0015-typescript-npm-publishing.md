@@ -1,6 +1,6 @@
 # ADR-0015: TypeScript npm Publishing Standard
 
-> **Status**: Accepted
+> **Status**: Accepted; superseded in part by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): no `bindings/go/sysprims/v*` tag from v0.5.0
 > **Date**: 2026-01-31
 > **Authors**: cicd, devlead
 

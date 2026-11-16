@@ -1,6 +1,6 @@
 # ADR-0008: Error Handling Strategy
 
-> **Status**: Accepted
+> **Status**: Accepted; superseded in part by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): the C-ABI (FFI) error surface is retired; the error codes remain
 > **Date**: 2025-12-31
 > **Authors**: Architecture Council
 
