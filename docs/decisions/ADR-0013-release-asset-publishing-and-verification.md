@@ -1,6 +1,6 @@
 # ADR-0013: Release Asset Publishing and Verification
 
-> **Status**: Proposed  
+> **Status**: Proposed; superseded in part by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): FFI library and header assets are no longer published  
 > **Date**: 2026-01-17  
 > **Authors**: devlead, Architecture Council
 

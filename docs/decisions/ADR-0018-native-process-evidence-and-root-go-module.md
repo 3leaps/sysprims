@@ -4,7 +4,7 @@
 > **Date**: 2026-11-05
 > **Authors**: sysprims maintainers
 > **Supersedes**: none
-> **Superseded by**: none
+> **Superseded by**: [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md), in part (v0.5.0): the cgo binding module is retired
 
 ## Context
 

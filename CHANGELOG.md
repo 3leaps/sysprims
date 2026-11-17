@@ -10,6 +10,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
+### Added
+
+- Pure-Go `syserror` and `signal` packages (`github.com/3leaps/sysprims/syserror`,
+  `github.com/3leaps/sysprims/signal`, `CGO_ENABLED=0`): structured errors,
+  the signal catalog, PID/PGID validation, and signal and group dispatch.
+- `ProcessHandle` and `SignalBinding` across Rust (`sysprims-signal`, re-exported
+  from `sysprims-proc`), Go, Python, and TypeScript: OS-verified process handles
+  backed by `pidfd_open`/`pidfd_send_signal` on Linux (with an `ENOSYS` fallback
+  for kernels older than 5.3), `kqueue` `EVFILT_PROC` with `KERN_PROC_PID`
+  start-time verification on macOS, and `OpenProcess`/`GetProcessTimes` on
+  Windows.
+- Pure-Go `session` package (`github.com/3leaps/sysprims/session`): POSIX
+  session and process-group management (`RunSetsid`, `SpawnDetached`,
+  `RunNohup`, `SpawnInGroup`, `SpawnWithSessionReceipt`, and the
+  `Getpgid`/`Getsid`/`Setpgid`/`Setsid` primitives).
+- Pure-Go `timeout` package (`github.com/3leaps/sysprims/timeout`):
+  `RunWithTimeout`, `RunWithTimeoutContext`, `TerminateTree`, and
+  `SpawnContained`/`ContainedProcess` with containment completion receipts
+  (process groups on Unix, Job Objects on Windows).
+- Pure-Go `proc` package (`github.com/3leaps/sysprims/proc`): process snapshots
+  and filtering, `GetProcess`, `WaitPID`, ancestor and descendant traversal,
+  `KillDescendants`, guard steps, `ListFds`, `ListeningPorts`, and
+  `ProcessByPort` on Linux, macOS, and Windows.
+- Shared conformance vectors for `signal`, `session`, `timeout`, and `proc`
+  under `testdata/conformance/`: Go and Python RFC 8785 (JCS) NDJSON output is
+  diffed against Rust, and the TypeScript tests verify the same vectors.
+- `registry-publish.yml`: PyPI and npm Trusted Publishing (OIDC) directly from
+  the signed, immutable GitHub Release, without rebuilding artifacts.
+
+### Changed
+
+- All Go packages now live in the root module `github.com/3leaps/sysprims`
+  (`go 1.26.0`) and build with `CGO_ENABLED=0`; `go/recurrence` remains a
+  separate module.
+- npm CDN readiness polling during publication now waits up to 180 seconds.
+
+### Removed
+
+- The cgo Go bindings module `github.com/3leaps/sysprims/bindings/go/sysprims`
+  and its prebuilt native libraries. Use the root module packages instead.
+  Existing `bindings/go/sysprims/v0.4.0` and earlier tags remain resolvable.
+- The C-ABI crate `sysprims-ffi` (never published to crates.io), its generated
+  header, and `cbindgen.toml`. Release plans from 0.5.0 onward no longer carry
+  an `ffi` surface.
+
 ## [0.4.0] - 2026-11-08
 
 ### Added
@@ -905,7 +952,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/3leaps/sysprims/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/3leaps/sysprims/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/3leaps/sysprims/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/3leaps/sysprims/compare/v0.2.3...v0.2.4

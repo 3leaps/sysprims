@@ -30,20 +30,14 @@ OS-specific tests:
 - Golden JSON snapshots MUST include `schema_id`
 - Meta-validate schemas in CI
 
-### FFI Smoke Tests (Required)
+### Cross-Language Conformance (Required)
 
-**C**:
+Rust, Go, Python, and TypeScript verify the shared vectors under
+`testdata/conformance/` (`signal`, `session`, `timeout`, `proc`):
 
-- Compile/link against `libsysprims`
-- Call version function
-- Run minimal timeout call
-- Free returned string via `sysprims_free_string()`
-
-**Go/Python/TypeScript**:
-
-- Can call the library
-- UTF-8 strings round-trip correctly
-- Memory ownership/free is correct
+- `make signal-crosscheck`, `make session-crosscheck`, `make timeout-crosscheck`,
+  and `make proc-crosscheck` compare Rust and Go output
+- Python and TypeScript test suites verify the same vectors
 
 ## Non-Negotiable: Containment Test
 

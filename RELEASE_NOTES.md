@@ -6,6 +6,77 @@
 
 ---
 
+## v0.5.0 - 2026-11-16
+
+**Status:** Pure-Go Twins, Four-Language Conformance Vectors, and cgo/FFI Retirement
+
+v0.5.0 makes every sysprims Go package pure Go (`CGO_ENABLED=0`) under the root
+module `github.com/3leaps/sysprims`. New `syserror`, `signal`, `session`,
+`timeout`, and `proc` packages join the existing `evidence` and `procobserve`
+packages, so Go consumers no longer need a C toolchain or prebuilt native
+libraries. Rust, Go, Python, and TypeScript now share conformance vectors for
+`signal`, `session`, `timeout`, and `proc`. CI checks that Go and Python produce
+RFC 8785 (JCS) output identical to Rust for them, and the TypeScript tests
+verify the same vectors. The cgo Go bindings module (`bindings/go/sysprims`)
+and the C-ABI crate (`sysprims-ffi`) are retired.
+
+### Highlights
+
+- **OS-verified process handles (`ProcessHandle`, `SignalBinding`)** in Rust,
+  Go, Python, and TypeScript: `pidfd` on Linux (with a checked fallback for
+  kernels older than 5.3), `kqueue` `EVFILT_PROC` with start-time verification
+  on macOS, and `OpenProcess`/`GetProcessTimes` on Windows, so a signal reaches
+  the process that was opened rather than a reused PID.
+- **Pure-Go `signal` and `syserror`**: the signal catalog, PID/PGID validation,
+  name matching, and group dispatch, with structured errors shared by all
+  pure-Go packages.
+- **Pure-Go `session`**: `RunSetsid`, `SpawnDetached`, `RunNohup`,
+  `SpawnInGroup`, `SpawnWithSessionReceipt`, and the process-group and session
+  primitives.
+- **Pure-Go `timeout`**: `RunWithTimeout`, `TerminateTree`, and
+  `SpawnContained`/`ContainedProcess` with containment completion receipts
+  (process groups on Unix, Job Objects on Windows).
+- **Pure-Go `proc`**: snapshots and filtering, `GetProcess`, `WaitPID`,
+  ancestor and descendant traversal, `KillDescendants`, guard steps, `ListFds`,
+  `ListeningPorts`, and `ProcessByPort` on Linux, macOS, and Windows.
+- **Four-language conformance vectors** under `testdata/conformance/`
+  (`signal`, `session`, `timeout`, `proc`): Rust, Go, and Python output is
+  diffed in CI on Linux, macOS, and Windows, and the TypeScript tests verify
+  the same vectors.
+- **Registry publication from the immutable release**: PyPI and npm Trusted
+  Publishing (OIDC) run from the signed GitHub Release assets without
+  rebuilding them.
+
+### Release Coordinates
+
+- Rust crates: `sysprims-core`, `sysprims-evidence`, `sysprims-signal`,
+  `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and
+  `sysprims-recurrence` at `0.5.0`.
+- Rust workspace and root Go module (`github.com/3leaps/sysprims@v0.5.0`,
+  covering `syserror`, `signal`, `session`, `timeout`, `proc`, `evidence`, and
+  `procobserve`): repository tag `v0.5.0`.
+- Go recurrence module: path-prefixed tag `go/recurrence/v0.5.0` on the same
+  commit (`github.com/3leaps/sysprims/go/recurrence@v0.5.0`).
+- Python: `sysprims==0.5.0` on PyPI, published via GitHub Actions Trusted
+  Publishing with PEP 740 attestations from the verified core tag.
+- TypeScript: `@3leaps/sysprims@0.5.0`, published from the verified core tag.
+
+### Upgrade Notes
+
+- **Go bindings module retired.** There is no
+  `bindings/go/sysprims/v0.5.0` tag. Consumers of
+  `github.com/3leaps/sysprims/bindings/go/sysprims` should move to the root
+  module packages (`github.com/3leaps/sysprims/{signal,session,timeout,proc}`).
+  The `v0.4.0` and earlier bindings tags remain resolvable for existing pins.
+- The root module requires Go `1.26.0` or later. `go/recurrence` still targets
+  `go 1.21`.
+- **C-ABI retired.** `sysprims-ffi`, its generated `sysprims.h` header, and the
+  prebuilt static and shared libraries are no longer built or shipped.
+- `sysprims-cli`, `sysprims-ts-napi`, and `sysprims-py` remain
+  `publish = false` on crates.io.
+
+---
+
 ## v0.4.0 - 2026-11-08
 
 **Status:** Native Process Observation, Python Bindings, and Release Ceremony Hardening
@@ -146,56 +217,3 @@ credential-provider publication gate.
 - Release verification assets now include `expected-fingerprints.txt` and
   `expected-fingerprints.ndjson` alongside `SHA256SUMS`, `SHA512SUMS`, and the
   public signing keys.
-
----
-
-## v0.2.4 - 2026-09-19
-
-**Status:** Managed Containment Bindings
-
-v0.2.4 adds managed contained-process handles for Go and TypeScript. Each
-handle owns the native child lifecycle and exposes identity, polling, bounded
-waiting, termination, and deterministic close operations.
-
-### Highlights
-
-- **Managed Go lifecycle**: `SpawnContained` returns a `ContainedProcess` whose
-  `Identity`, `Poll`, `Wait`, `Terminate`, and `Close` methods operate through
-  an opaque native-owned capability.
-- **Managed TypeScript lifecycle**: `spawnContained` returns a disposable
-  `ContainedProcess` with async `identity`, `poll`, `wait`, `terminate`, and
-  `close` methods.
-- **Native execution deadlines**: optional deadlines are enforced by the native
-  owner without language-side polling. Cleanup retries preserve the deadline
-  until a terminal transition is confirmed.
-- **Explicit completion evidence**: natural completion remains distinct from
-  deadline enforcement, acquisition reliability, and boundary strength.
-- **Fail-closed lifecycle cleanup**: active handles retain their capability
-  until cleanup confirms that the child has been reaped, allowing failed close
-  attempts to be retried safely.
-- **Release integrity checks**: machine-readable surface plans and guards bind
-  release provenance, tag coordinates, generated bindings, downloaded assets,
-  checksums, signatures, remote draft contents, and publication state.
-
-### Release Coordinates
-
-- Rust crates: `sysprims-core`, `sysprims-signal`, `sysprims-session`,
-  `sysprims-proc`, and `sysprims-timeout` at `0.2.4`.
-- Rust workspace: repository tag `v0.2.4`.
-- Go module: path-prefixed tag `bindings/go/sysprims/v0.2.4` on the same
-  commit.
-- TypeScript: `@3leaps/sysprims@0.2.4`, published from the verified core tag.
-
-### Upgrade Notes
-
-- Go callers should always arrange `Close`, including on earlier errors. A
-  failed close keeps the handle active and may be retried.
-- TypeScript callers should use `await using` or call `close()` in a `finally`
-  block so native ownership is released deterministically.
-- A bounded `Wait`/`wait` timeout reports the current active state and does not
-  terminate the child. The execution deadline, when configured at spawn, is a
-  separate native policy.
-- Go `Wait` rejects negative durations. Positive sub-millisecond durations are
-  bounded waits rather than infinite waits.
-
-_Older releases are archived in `docs/releases/`._

@@ -33,13 +33,7 @@ sysprims is built on the following architectural principles, derived from the ra
                            ▼
 ┌─────────────────────────────────────────────────────────┐
 │                    Binding Layer                         │
-│      sysprims-go (CGo) │ sysprims-py (PyO3) │ sysprims-ts (NAPI-RS)   │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                      FFI Layer                           │
-│              sysprims-ffi (C-ABI via cbindgen)               │
+│   sysprims-py (PyO3) │ sysprims-ts-napi (napi-rs)        │
 └─────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -54,6 +48,12 @@ sysprims is built on the following architectural principles, derived from the ra
 │         libc (POSIX) │ windows-sys (Win32)              │
 └─────────────────────────────────────────────────────────┘
 ```
+
+Go consumers use pure-Go (`CGO_ENABLED=0`) packages in the root module
+`github.com/3leaps/sysprims` (`syserror`, `signal`, `session`, `timeout`,
+`proc`, `evidence`, `procobserve`). They implement the same primitives in Go
+(using `golang.org/x/sys`) and are held to Rust behavior by shared conformance
+vectors under `testdata/conformance/`.
 
 ### 2. Zero License Toxicity
 
@@ -88,9 +88,10 @@ sysprims-cli
 │   └── sysprims-core
 └── sysprims-core
 
-sysprims-ffi
+sysprims-py / sysprims-ts-napi (language bindings)
 ├── sysprims-timeout
 ├── sysprims-signal
+├── sysprims-session
 ├── sysprims-proc
 └── sysprims-core
 ```

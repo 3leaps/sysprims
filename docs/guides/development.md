@@ -14,14 +14,18 @@ sysprims/
 │   ├── sysprims-core/      # Shared errors, types, platform abstractions
 │   ├── sysprims-timeout/   # Group-by-default timeout engine
 │   ├── sysprims-signal/    # Signal mapping + terminate helpers
+│   ├── sysprims-session/   # Session and process-group spawn
 │   ├── sysprims-proc/      # Process snapshot/inspect
+│   ├── sysprims-evidence/  # Portable identity-evidence evaluation
+│   ├── sysprims-recurrence/ # Recurrence rules (recurrence/v0)
 │   └── sysprims-cli/       # CLI binaries (thin wrappers)
-├── ffi/
-│   └── sysprims-ffi/       # Stable C ABI surface
 ├── bindings/
-│   ├── go/
-│   ├── python/
-│   └── typescript/
+│   ├── python/             # PyO3 extension module
+│   └── typescript/         # napi-rs addon + TypeScript wrapper
+├── syserror/ signal/ session/ timeout/ proc/  # Pure-Go packages (root module)
+├── evidence/ procobserve/  # Pure-Go evidence packages (root module)
+├── go/recurrence/          # Pure-Go recurrence module
+├── testdata/conformance/   # Cross-language conformance vectors
 └── schemas/                # Local schema copies (Crucible is SSOT)
 ```
 
@@ -40,7 +44,7 @@ cargo deny check
 
 ```bash
 cargo test --workspace --tests              # Integration tests only
-cargo test -p sysprims-ffi                  # FFI boundary focus
+make signal-crosscheck                      # Cross-language parity (also session/timeout/proc)
 cargo test -p sysprims-timeout tree_escape  # Tree-escape tests
 ```
 
@@ -68,19 +72,20 @@ goneat validate-data --schema schemas/timeout-result/v1.0.0.schema.json output.j
 
 ## Binding Development
 
-**Rule**: Bindings MUST NOT re-implement business logic. They wrap `sysprims-ffi`.
+**Rule**: Python and TypeScript bindings MUST NOT re-implement business logic.
+They call the Rust crates directly. The Go packages are a pure-Go
+reimplementation and MUST match Rust behavior on the shared conformance vectors.
 
-| Binding    | Technology   | Key Functions                                |
-| ---------- | ------------ | -------------------------------------------- |
-| Go         | CGo          | `sysprims_timeout_run`, `sysprims_proc_list` |
-| Python     | PyO3/maturin | Same FFI surface                             |
-| TypeScript | NAPI-RS      | Same FFI surface                             |
+| Language   | Technology                | Source                                |
+| ---------- | ------------------------- | ------------------------------------- |
+| Go         | Pure Go (`CGO_ENABLED=0`) | Root module packages, `go/recurrence` |
+| Python     | PyO3/maturin              | `bindings/python`                     |
+| TypeScript | napi-rs                   | `bindings/typescript/sysprims`        |
 
-All bindings MUST:
+All languages MUST:
 
 - Follow UTF-8 string contracts
-- Use `sysprims_free_string()` for memory cleanup
-- Pass FFI smoke tests
+- Pass the conformance vectors under `testdata/conformance/`
 
 ## Adding a New CLI Flag
 

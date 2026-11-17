@@ -4,7 +4,7 @@
 > **Date**: 2026-10-22
 > **Authors**: sysprims maintainers
 > **Supersedes**: none
-> **Superseded by**: none
+> **Superseded by**: [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md), in part (v0.5.0): no `bindings/go/sysprims/vX.Y.Z` tag from v0.5.0
 
 ## Context
 

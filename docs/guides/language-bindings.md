@@ -1,67 +1,45 @@
 # Language Bindings Guide
 
-This guide covers building and using sysprims language bindings (Go, Python, TypeScript).
+This guide covers building and using sysprims language bindings and packages (Go, Python, TypeScript).
 
 ## Overview
 
-sysprims provides language bindings via prebuilt FFI libraries:
+sysprims exposes its primitives to three languages beyond Rust:
 
-- **Go**: Static libraries (`libsysprims_ffi.a`) linked at compile time
-- **TypeScript**: Node-API (N-API) native addon (`.node`) loaded by Node.js
+- **Go**: pure-Go (`CGO_ENABLED=0`) packages in the root module
+  `github.com/3leaps/sysprims` (`syserror`, `signal`, `session`, `timeout`,
+  `proc`, `evidence`, `procobserve`), plus the separate
+  `github.com/3leaps/sysprims/go/recurrence` module. No C toolchain or native
+  libraries are required.
+- **Python**: `sysprims` on PyPI, a PyO3 `cp310-abi3` extension module built
+  from the Rust crates (`bindings/python`).
+- **TypeScript**: `@3leaps/sysprims`, a Node-API (N-API) native addon built
+  with napi-rs (`bindings/typescript/sysprims`).
 
-Each binding ships with prebuilt libraries for all supported platforms and provides idiomatic API for the target language.
+Python and TypeScript link the Rust crates directly. Rust, Go, Python, and
+TypeScript share conformance vectors under `testdata/conformance/` (`signal`,
+`session`, `timeout`, `proc`).
 
 ## Platform Matrix
 
 See [Platform Support Matrix](../standards/platform-support.md) for the canonical reference.
 
-| Platform            | Rust Target                  | Library Name        | Linker Flags                  |
-| ------------------- | ---------------------------- | ------------------- | ----------------------------- |
-| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`   | `libsysprims_ffi.a` | `-lm -lpthread -ldl`          |
-| Linux x64 (musl)    | `x86_64-unknown-linux-musl`  | `libsysprims_ffi.a` | `-lm -lpthread`               |
-| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`  | `libsysprims_ffi.a` | `-lm -lpthread -ldl`          |
-| Linux arm64 (musl)  | `aarch64-unknown-linux-musl` | `libsysprims_ffi.a` | `-lm -lpthread`               |
-| macOS arm64         | `aarch64-apple-darwin`       | `libsysprims_ffi.a` | `-lm -lpthread`               |
-| Windows x64         | `x86_64-pc-windows-gnu`      | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
-| Windows arm64       | `aarch64-pc-windows-gnullvm` | `libsysprims_ffi.a` | `-lws2_32 -luserenv -lbcrypt` |
+| Platform            | Rust Target (TypeScript)     | Go `GOOS/GOARCH` |
+| ------------------- | ---------------------------- | ---------------- |
+| Linux x64 (glibc)   | `x86_64-unknown-linux-gnu`   | `linux/amd64`    |
+| Linux x64 (musl)    | `x86_64-unknown-linux-musl`  | `linux/amd64`    |
+| Linux arm64 (glibc) | `aarch64-unknown-linux-gnu`  | `linux/arm64`    |
+| Linux arm64 (musl)  | `aarch64-unknown-linux-musl` | `linux/arm64`    |
+| macOS arm64         | `aarch64-apple-darwin`       | `darwin/arm64`   |
+| Windows x64         | `x86_64-pc-windows-msvc`     | `windows/amd64`  |
+| Windows arm64       | `aarch64-pc-windows-msvc`    | `windows/arm64`  |
 
 **Not supported**: macOS x64 (Intel Macs) - end-of-life hardware as of v0.1.7.
 
-## Windows: Go cgo toolchain
-
-**Important**: Go bindings on Windows use a GNU-ABI C toolchain, not MSVC. Which GNU toolchain depends on the architecture:
-
-| Arch   | Rust target                  | Toolchain                                                                        | Consumer install                                                          |
-| ------ | ---------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| x86_64 | `x86_64-pc-windows-gnu`      | msys2/MinGW-w64 (`mingw-w64-x86_64-gcc`)                                         | `pacman -S mingw-w64-x86_64-gcc` in msys2                                 |
-| arm64  | `aarch64-pc-windows-gnullvm` | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-gcc`) | Download `*-ucrt-aarch64.zip` release, add `bin/` to PATH (since v0.1.16) |
-
-### Why a GNU toolchain for Go?
-
-Go's cgo driver on Windows is GCC-compatible. MSVC-produced `.lib` files use a different ABI/format than GNU `.a` files and won't link with cgo. msys2/MinGW-w64 ships the x86_64 toolchain but does not provide an aarch64 target; llvm-mingw fills that gap with an LLVM-based GNU-ABI toolchain for both architectures.
-
-### What this means for Go users
-
-- The FFI library is `libsysprims_ffi.a` (not `.lib`) on Windows, for both architectures.
-- The Go binary you build is a native Windows executable; the GNU toolchain is only required at build time.
-- To build against sysprims on Windows, install the matching toolchain and ensure the GCC driver is on `PATH`.
-
-### TypeScript on Windows
-
-TypeScript bindings use a Node-API native addon and do not require a GNU toolchain — they're built with MSVC on both x64 and arm64.
-
-### Licensing
-
-The GNU-ABI toolchains are GPL-free for our use:
-
-| Component                 | License                   | Static Link Safe?           |
-| ------------------------- | ------------------------- | --------------------------- |
-| MinGW-w64 runtime         | ZPL / Public Domain / BSD | ✅ Yes                      |
-| llvm-mingw runtime (LLVM) | Apache 2.0 with exception | ✅ Yes                      |
-| Wine-imported headers     | LGPL                      | ✅ Headers only - no effect |
-| GCC / clang compiler      | GPL / Apache 2.0          | ✅ Output not covered       |
-
-No GPL license toxicity with static linking.
+Go packages are pure Go, so a Go build needs no C toolchain on any platform,
+including Windows. TypeScript native addons are built with MSVC on Windows x64
+and arm64. Python wheel coverage is listed in the
+[Platform Support Matrix](../standards/platform-support.md).
 
 ## Managed contained spawn
 
@@ -92,121 +70,63 @@ Always close explicitly (`defer` in Go, `try/finally` or async disposal in
 TypeScript). Successful close is idempotent; failed close retains the token for
 retry. Finalizers are leak backstops, not deterministic disposal. TypeScript
 wait cancellation ends the caller's wait, not native ownership or cleanup.
-See the [Go README](../../bindings/go/sysprims/README.md) and
+See the `timeout` package documentation
+(`github.com/3leaps/sysprims/timeout`) and the
 [TypeScript README](../../bindings/typescript/sysprims/README.md) for examples.
 
-## Go Bindings
+## Go Packages
 
 For port-to-process mapping (listening ports), see `docs/guides/port-bindings-getting-started.md`.
+
+### Installation
+
+```bash
+go get github.com/3leaps/sysprims@vX.Y.Z
+# Recurrence rules live in their own module:
+go get github.com/3leaps/sysprims/go/recurrence@vX.Y.Z
+```
+
+The root module requires Go 1.26.0 or later; `go/recurrence` targets Go 1.21.
+Import the packages you need, for example `github.com/3leaps/sysprims/proc`
+or `github.com/3leaps/sysprims/signal`.
 
 ### Local Development
 
 ```bash
-# Build FFI for your platform
-make build-local-go
-
-# Run tests
+# vet and test the root module and go/recurrence with GOWORK=off CGO_ENABLED=0
 make go-test
 ```
 
-### Using Prebuilt Libraries
-
-Prebuilt libraries are committed to the repository at release tags:
-
-```
-bindings/go/sysprims/lib/
-├── darwin-arm64/libsysprims_ffi.a
-├── linux-amd64/libsysprims_ffi.a
-├── linux-amd64-musl/libsysprims_ffi.a
-├── linux-arm64/libsysprims_ffi.a
-├── linux-arm64-musl/libsysprims_ffi.a
-├── windows-amd64/libsysprims_ffi.a
-└── windows-arm64/libsysprims_ffi.a
-```
-
-**Note**: macOS x64 (darwin-amd64) is not supported as of v0.1.7.
-
-### CGo Configuration
-
-Each platform has a dedicated CGo file with correct build tags and linker flags:
-
-```go
-//go:build darwin && arm64
-
-package sysprims
-
-/*
-#cgo CFLAGS: -I${SRCDIR}/include
-#cgo LDFLAGS: -L${SRCDIR}/lib/local/darwin-arm64 -L${SRCDIR}/lib/darwin-arm64 -lsysprims_ffi -lm -lpthread
-#include "sysprims.h"
-*/
-import "C"
-```
-
-The `lib/local/` path is checked first (for development), then `lib/<platform>/` (prebuilt).
-
 ## CI/CD Integration
 
-### CI: Testing Go Bindings
+### CI: Testing Go Packages
 
-Note: sysprims is a Rust repo with Go bindings in a submodule (`bindings/go/sysprims`).
-We keep a minimal root `go.mod` plus a `go.work` that lists `bindings/go/sysprims` so
-repo-root tooling (e.g. goneat / golangci-lint) can lint and typecheck the Go module.
-
-We also include a tiny placeholder Go package under `internal/gowork/` so repo-root
-`./...` patterns resolve to at least one package.
+The repository root `go.mod` declares `module github.com/3leaps/sysprims`. A
+`go.work` lists `.` and `./go/recurrence` so repo-root tooling (e.g. goneat /
+golangci-lint) can lint and typecheck both modules. A tiny placeholder package
+under `internal/gowork/` keeps repo-root `./...` patterns resolvable.
 
 For TypeScript bindings, we keep a minimal repo-root `package.json` as a tooling shim.
 This is not a published npm package; it exists so repo-root tools that invoke npm (e.g.
 goneat in `--package-mode`) do not error when run from the repository root.
 
-The CI workflow builds the FFI library and runs Go tests on all platforms:
+The CI `test-go` job runs `go vet ./...` and `go test ./...` with `GOWORK=off`
+and `CGO_ENABLED=0` on Linux, macOS, Windows x64, and Windows arm64.
 
-```yaml
-# .github/workflows/ci.yml
-test-go:
-  strategy:
-    matrix:
-      include:
-        - os: ubuntu-latest
-        - os: macos-latest
-        - os: windows-latest # Uses MinGW via msys2/setup-msys2
-```
+### Go Release Tags
 
-### Release: Updating Prebuilt Libraries
-
-Prebuilt libraries must be present in the repository at the commit a tag points to
-so `go get` works without requiring Rust.
-
-The Go bindings prep workflow builds artifacts and creates a PR with updated prebuilt libs:
-
-1. Builds FFI libraries for all 7 platforms
-2. Creates a PR with updated prebuilt libs in `bindings/go/sysprims/lib/`
-3. PR is reviewed and merged BEFORE tagging so `go get` works at the release tag
-
-After the PR is merged, create the release tag so it points at the commit that contains
-the binding artifacts (tags remain immutable; if you already tagged, publish a patch
-version that includes the merged artifacts).
-
-### Go Submodule Tags (Required)
-
-Because the Go module lives in a subdirectory (`bindings/go/sysprims`), Go expects a
-path-prefixed tag for semantic version resolution.
-
-For every release `vX.Y.Z`, create BOTH tags pointing at the same commit:
-
-- `vX.Y.Z`
-- `bindings/go/sysprims/vX.Y.Z`
-
-This is required so consumers can do:
+The root module resolves from the canonical `vX.Y.Z` release tag. The
+`go/recurrence` module lives in a subdirectory, so it resolves from the
+path-prefixed tag `go/recurrence/vX.Y.Z` on the same commit (ADR-0017):
 
 ```bash
-go get github.com/3leaps/sysprims/bindings/go/sysprims@vX.Y.Z
+go get github.com/3leaps/sysprims@vX.Y.Z
+go get github.com/3leaps/sysprims/go/recurrence@vX.Y.Z
 ```
 
-and get a proper semantic version instead of a pseudo-version.
-
-See `docs/decisions/ADR-0012-language-bindings-distribution.md` for the policy.
+Releases through v0.4.0 also published a cgo module at `bindings/go/sysprims`
+with `bindings/go/sysprims/vX.Y.Z` tags. That module was retired in v0.5.0
+(ADR-0019); its existing tags remain resolvable for existing pins.
 
 ## TypeScript Bindings
 
@@ -266,8 +186,8 @@ No build tools required when using npm prebuilds.
 The intended TypeScript surface is recorded in the
 [capability intent matrix](../../bindings/typescript/sysprims/docs/capability-intent-matrix.md)
 and the generated [public API reference](../../bindings/typescript/sysprims/docs/public-api.md).
-CI checks emitted declarations, N-API exports, the public C comparison surface,
-and generated documentation for drift.
+CI checks emitted declarations, N-API exports, and generated documentation for
+drift.
 
 | Function                                  | Description                                                        |
 | ----------------------------------------- | ------------------------------------------------------------------ |
@@ -303,7 +223,7 @@ Rust timeout runner or adopt lifecycle ownership from a PID.
 
 ### Filter Conventions
 
-Filter fields use **snake_case** to match FFI/schema conventions directly:
+Filter fields use **snake_case** to match schema conventions directly:
 
 ```typescript
 // ProcessFilter
@@ -405,35 +325,21 @@ npm test
 
 ## Adding New Features
 
-When adding new FFI functions:
+When adding a new primitive:
 
-1. **Rust FFI**: Add function to `ffi/sysprims-ffi/src/`
-2. **Regenerate header**: `make cbindgen` or `make header-go`
-3. **Go wrapper**: Add wrapper function in appropriate Go file
-4. **Tests**: Add tests in `sysprims_test.go`
-5. **Documentation**: Update this guide if platform-specific behavior
-
-## Troubleshooting
-
-### "undefined reference" on Linux
-
-Missing system libraries. Ensure linker flags include `-ldl` for glibc targets.
-
-### Windows build fails with MSVC errors
-
-Ensure you're using the GNU-ABI target and matching toolchain:
-
-- Windows x64: `x86_64-pc-windows-gnu` + msys2/MinGW-w64 (`mingw-w64-x86_64-gcc`)
-- Windows arm64: `aarch64-pc-windows-gnullvm` + [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (`aarch64-w64-mingw32-gcc`)
-
-See the [Windows: Go cgo toolchain](#windows-go-cgo-toolchain) section above.
-
-### CGo can't find library
-
-Check that the library is in `lib/local/<platform>/` or `lib/<platform>/`.
-Verify build tags match your platform.
+1. **Rust**: Implement it in the owning crate under `crates/`.
+2. **Go**: Add the pure-Go twin to the matching root-module package
+   (`signal`, `session`, `timeout`, `proc`, ...).
+3. **Python / TypeScript**: Expose it in `bindings/python/src/` and
+   `bindings/typescript/sysprims/native/src/` (plus the TypeScript wrapper in
+   `bindings/typescript/sysprims/src/`).
+4. **Conformance**: Add or extend vectors under `testdata/conformance/` so all
+   four languages verify the same behavior.
+5. **Documentation**: Update this guide if behavior is platform-specific.
 
 ## References
 
-- [ADR-0004: FFI Design](../architecture/adr/0004-ffi-design.md)
-- [ADR-0012: Language Bindings Distribution](../architecture/adr/0012-language-bindings-distribution.md)
+- [ADR-0012: Language Bindings Distribution](../decisions/ADR-0012-language-bindings-distribution.md)
+- [ADR-0017: Recurrence Go Module and Release Tag Set](../decisions/ADR-0017-recurrence-go-module-and-release-tags.md)
+- [ADR-0018: Native Process Evidence Surfaces and Root Pure-Go Module](../decisions/ADR-0018-native-process-evidence-and-root-go-module.md)
+- [ADR-0019: Retire the cgo Go Bindings and the C-ABI](../decisions/ADR-0019-retire-cgo-bindings-and-c-abi.md)

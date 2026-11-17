@@ -233,7 +233,7 @@ Example output showing the extension state files:
     {
       "fd": 5,
       "kind": "file",
-      "path": "/Users/.../saoudrizwan.claude-dev/state/taskHistory.json"
+      "path": "/Users/someone/saoudrizwan.claude-dev/state/taskHistory.json"
     }
   ],
   "warnings": []

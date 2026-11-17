@@ -1,0 +1,23 @@
+{
+  "schema": "sysprims-release-plan/v1",
+  "version": "0.5.0",
+  "provenance_policy": "commit_footer",
+  "surfaces": {
+    "rust": {
+      "disposition": "publish"
+    },
+    "cli": {
+      "disposition": "publish"
+    },
+    "go": {
+      "disposition": "publish",
+      "lock_phase": "resolved"
+    },
+    "python": {
+      "disposition": "publish"
+    },
+    "typescript": {
+      "disposition": "publish"
+    }
+  }
+}

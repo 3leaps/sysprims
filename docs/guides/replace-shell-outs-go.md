@@ -7,6 +7,7 @@ last_updated: "2026-02-24"
 # Replace Your Shell-outs with sysprims (Go)
 
 This guide is for Go platform engineers who currently shell out to `ps`, `lsof`, and `kill`.
+The examples use the pure-Go (`CGO_ENABLED=0`) packages in `github.com/3leaps/sysprims`.
 The goal is to replace brittle text parsing and process-control edge cases with typed APIs that
 work consistently across Linux, macOS, and Windows.
 
@@ -24,13 +25,13 @@ license-clean (MIT/Apache-2.0, no copyleft utilities embedded into your applicat
 
 ## Before and after
 
-| Before (shell-out)                                  | After (sysprims Go)                                                 |
-| --------------------------------------------------- | ------------------------------------------------------------------- |
-| `exec.Command("ps", "eww", "-p", pid)` + parse env  | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeEnv: true})`     |
-| `exec.Command("ps", "-M", "-p", pid)` + count lines | `ProcessGetWithOptions(pid, &ProcessOptions{IncludeThreads: true})` |
-| `exec.Command("lsof", "-p", pid)` + text parse      | `ListFds(pid, nil)`                                                 |
-| `exec.Command("kill", "-9", pid)`                   | `Kill(pid, SIGKILL)`                                                |
-| manual loops over descendants + `kill -TERM`        | `KillDescendantsWithOptions(...)` with filter + `CpuModeMonitor`    |
+| Before (shell-out)                                  | After (sysprims Go)                                                           |
+| --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `exec.Command("ps", "eww", "-p", pid)` + parse env  | `proc.ProcessGetWithOptions(pid, &proc.ProcessOptions{IncludeEnv: true})`     |
+| `exec.Command("ps", "-M", "-p", pid)` + count lines | `proc.ProcessGetWithOptions(pid, &proc.ProcessOptions{IncludeThreads: true})` |
+| `exec.Command("lsof", "-p", pid)` + text parse      | `proc.ListFds(pid, nil)`                                                      |
+| `exec.Command("kill", "-9", pid)`                   | `signal.Kill(pid, signal.SIGKILL)`                                            |
+| manual loops over descendants + `kill -TERM`        | `proc.KillDescendantsWithOptions(...)` with filter + `proc.CpuModeMonitor`    |
 
 ## 1) Process metadata without `ps` parsing
 
@@ -42,11 +43,11 @@ package main
 import (
     "fmt"
 
-    "github.com/3leaps/sysprims/bindings/go/sysprims"
+    "github.com/3leaps/sysprims/proc"
 )
 
 func inspect(pid uint32) error {
-    info, err := sysprims.ProcessGetWithOptions(pid, &sysprims.ProcessOptions{
+    info, err := proc.ProcessGetWithOptions(pid, &proc.ProcessOptions{
         IncludeEnv:     true,
         IncludeThreads: true,
     })
@@ -78,11 +79,11 @@ package main
 import (
     "fmt"
 
-    "github.com/3leaps/sysprims/bindings/go/sysprims"
+    "github.com/3leaps/sysprims/proc"
 )
 
 func listFDs(pid uint32) error {
-    snap, err := sysprims.ListFds(pid, nil)
+    snap, err := proc.ListFds(pid, nil)
     if err != nil {
         return err
     }
@@ -114,17 +115,18 @@ import (
     "fmt"
     "time"
 
-    "github.com/3leaps/sysprims/bindings/go/sysprims"
+    "github.com/3leaps/sysprims/proc"
+    "github.com/3leaps/sysprims/signal"
 )
 
 func killHotDescendants(rootPID uint32) error {
     cpuThreshold := 90.0
 
     // Preview matches first (recommended)
-    preview, err := sysprims.DescendantsWithOptions(rootPID, &sysprims.DescendantsOptions{
-        CpuMode:        sysprims.CpuModeMonitor,
+    preview, err := proc.DescendantsWithOptions(rootPID, &proc.DescendantsOptions{
+        CpuMode:        proc.CpuModeMonitor,
         SampleDuration: 3 * time.Second,
-        Filter: &sysprims.ProcessFilter{
+        Filter: &proc.ProcessFilter{
             CPUAbove: &cpuThreshold,
         },
     })
@@ -134,11 +136,11 @@ func killHotDescendants(rootPID uint32) error {
     fmt.Printf("matched descendants: %d\n", preview.MatchedByFilter)
 
     // Then terminate matching descendants only.
-    result, err := sysprims.KillDescendantsWithOptions(rootPID, &sysprims.KillDescendantsOptions{
-        Signal:         sysprims.SIGKILL,
-        CpuMode:        sysprims.CpuModeMonitor,
+    result, err := proc.KillDescendantsWithOptions(rootPID, &proc.KillDescendantsOptions{
+        Signal:         signal.SIGKILL,
+        CpuMode:        proc.CpuModeMonitor,
         SampleDuration: 3 * time.Second,
-        Filter: &sysprims.ProcessFilter{
+        Filter: &proc.ProcessFilter{
             CPUAbove: &cpuThreshold,
         },
     })
@@ -158,8 +160,8 @@ runaway loops, lifetime averages can under-report active CPU consumers.
 ## Error handling model
 
 With shell-outs, you usually branch on `exit != 0` and parse stderr. With `sysprims`, errors are
-typed (`ErrNotFound`, `ErrPermissionDenied`, `ErrInvalidArgument`, etc.), so call sites can make
-reliable decisions without brittle string matching.
+typed (`syserror.ErrNotFound`, `syserror.ErrPermissionDenied`, `syserror.ErrInvalidArgument`, etc.,
+checked with `syserror.IsCode`), so call sites can make reliable decisions without brittle string matching.
 
 ## License cleanliness note
 

@@ -26,7 +26,7 @@
 This repository is classified as **security-sensitive** because:
 
 - Process control utilities can affect system stability
-- FFI boundary requires careful memory safety
+- Native binding boundaries (PyO3, napi-rs) require careful memory safety
 - Signal handling has security implications
 - Cross-platform behavior must be predictable
 
@@ -57,7 +57,7 @@ See [agent-identity standard](https://crucible.3leaps.dev/repository/agent-ident
 ### Before Changes
 
 - Read relevant code and ADRs first
-- **Read [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) before any release-related work** — prebuilt native libraries (Go `.a` files, TypeScript `.node` files) are built by CI workflows, NOT locally. Do not manually build or commit prebuilt binaries; instead dispatch the appropriate CI workflow per the checklist.
+- **Read [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) before any release-related work** — prebuilt native artifacts (Python wheels, TypeScript `.node` files) are built by CI workflows, NOT locally. Do not manually build or commit prebuilt binaries; instead dispatch the appropriate CI workflow per the checklist.
 - Understand cross-platform implications of changes
 - Keep changes minimal and focused
 - Consider FFI boundary impacts
@@ -168,7 +168,7 @@ Before writing or modifying any code that **sends signals** or **terminates proc
 - **Use PID 0, 1, or u32::MAX in signal-sending tests** (see Safety Protocols above)
 - **Bypass PID validation in signal code without explicit maintainer approval**
 - **Run signal-sending tests without verifying target PIDs are safe**
-- **Locally build or commit prebuilt native libraries** (Go `.a`/`.so`/`.dylib`, TypeScript `.node`) — these come from CI workflows (`go-bindings.yml`, `typescript-napi-prebuilds.yml`); see `RELEASE_CHECKLIST.md`
+- **Locally build or commit prebuilt native libraries** (TypeScript `.node`) — these come from CI workflows (`typescript-napi-prebuilds.yml`); see `RELEASE_CHECKLIST.md`
 
 ## Critical Rules
 
@@ -195,12 +195,15 @@ See [ADR-0001](docs/decisions/ADR-0001-license-policy.md) for allowed licenses.
 
 ### FFI Safety
 
-FFI boundary changes require extra scrutiny:
+Native binding boundary changes (PyO3 in `bindings/python`, napi-rs in
+`bindings/typescript`) require extra scrutiny:
 
 - Memory ownership must be explicit
-- All returned strings freed via `sysprims_free_string()`
-- No complex structs across FFI (JSON strings only)
-- See [ADR-0004](docs/decisions/ADR-0004-ffi-design.md)
+- Validate inputs (PIDs, signals, durations) at the binding boundary
+- Keep Go, Python, and TypeScript behavior aligned through the conformance
+  vectors under `testdata/conformance/`
+- The C-ABI (`sysprims-ffi`) was retired in v0.5.0; see
+  [ADR-0019](docs/decisions/ADR-0019-retire-cgo-bindings-and-c-abi.md)
 
 ### Platform Parity
 
@@ -299,7 +302,7 @@ Delivery coordination — readiness assessments, spec-brief reconciliation, mile
 #### Key Extensions
 
 - Spec-brief vs codebase reconciliation at each milestone
-- Cross-crate delivery dependency tracking (core → proc → signal → timeout → cli → ffi → bindings)
+- Cross-crate delivery dependency tracking (core → proc → signal → timeout → cli → bindings)
 - 6-platform matrix verification per release
 - Safety protocol compliance gating (PID safety, signal-sending code review)
 - Binding release coordination (Go, TypeScript, Python)
@@ -369,8 +372,8 @@ FFI Architect - Bindings design and cross-language integration.
 
 #### Scope
 
-- C-ABI design and cbindgen configuration
-- Language binding implementation (Go, Python, TypeScript)
+- Python (PyO3) and TypeScript (napi-rs) binding design
+- Pure-Go package parity with Rust (Go root module)
 - Memory ownership contracts across FFI
 - JSON schema contracts for bindings
 
@@ -427,17 +430,19 @@ Enterprise Architect - Cross-system integration and Fulmen ecosystem alignment.
 
 Key architectural decisions:
 
-| ADR                                                      | Title                     | Relevance                                  |
-| -------------------------------------------------------- | ------------------------- | ------------------------------------------ |
-| [0001](docs/decisions/ADR-0001-license-policy.md)        | License Policy            | Dependency decisions                       |
-| [0002](docs/decisions/ADR-0002-crate-structure.md)       | Crate Structure           | Module organization                        |
-| [0003](docs/decisions/ADR-0003-group-by-default.md)      | Group-by-Default          | Core differentiator                        |
-| [0004](docs/decisions/ADR-0004-ffi-design.md)            | FFI Design                | Binding architecture                       |
-| [0005](docs/decisions/ADR-0005-schema-contracts.md)      | Schema Contracts          | JSON output stability                      |
-| [0006](docs/decisions/ADR-0006-dependency-governance.md) | Dependency Governance     | SBOM and compliance                        |
-| [0007](docs/decisions/ADR-0007-platform-abstraction.md)  | Platform Abstraction      | Cross-platform strategy                    |
-| [0008](docs/decisions/ADR-0008-error-handling.md)        | Error Handling            | Error taxonomy                             |
-| [0011](docs/decisions/ADR-0011-pid-validation-safety.md) | **PID Validation Safety** | **CRITICAL** - Prevents kill(-1) disasters |
+| ADR                                                                           | Title                         | Relevance                                  |
+| ----------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------ |
+| [0001](docs/decisions/ADR-0001-license-policy.md)                             | License Policy                | Dependency decisions                       |
+| [0002](docs/decisions/ADR-0002-crate-structure.md)                            | Crate Structure               | Module organization                        |
+| [0003](docs/decisions/ADR-0003-group-by-default.md)                           | Group-by-Default              | Core differentiator                        |
+| [0004](docs/decisions/ADR-0004-ffi-design.md)                                 | FFI Design                    | Historical; C-ABI retired by ADR-0019      |
+| [0005](docs/decisions/ADR-0005-schema-contracts.md)                           | Schema Contracts              | JSON output stability                      |
+| [0006](docs/decisions/ADR-0006-dependency-governance.md)                      | Dependency Governance         | SBOM and compliance                        |
+| [0007](docs/decisions/ADR-0007-platform-abstraction.md)                       | Platform Abstraction          | Cross-platform strategy                    |
+| [0008](docs/decisions/ADR-0008-error-handling.md)                             | Error Handling                | Error taxonomy                             |
+| [0011](docs/decisions/ADR-0011-pid-validation-safety.md)                      | **PID Validation Safety**     | **CRITICAL** - Prevents kill(-1) disasters |
+| [0018](docs/decisions/ADR-0018-native-process-evidence-and-root-go-module.md) | Root Pure-Go Module           | Go package layout                          |
+| [0019](docs/decisions/ADR-0019-retire-cgo-bindings-and-c-abi.md)              | Retire cgo Bindings and C-ABI | Current binding architecture               |
 
 ## Standards Reference
 

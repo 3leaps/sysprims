@@ -360,7 +360,7 @@ function taggedPlanFixture() {
   roots.push(root);
   const plan = (typescript, python = { disposition: "publish" }) => JSON.stringify({
     schema: "sysprims-release-plan/v1", version: "1.2.3", provenance_policy: "commit_footer",
-    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, ffi: { disposition: "publish" }, go: { disposition: "publish", lock_phase: "resolved" }, typescript, python },
+    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, go: { disposition: "publish", lock_phase: "resolved" }, typescript, python },
   });
   mkdirSync(join(root, "docs/releases"), { recursive: true });
   mkdirSync(join(root, "config/release"), { recursive: true });
@@ -930,7 +930,7 @@ test("publish verifies remote draft byte read-back, undrafts, and requires immut
   writeFileSync(join(f.root, "config/release/release-tags.txt"), "v\nbindings/go/sysprims/v\ngo/recurrence/v\n");
   writeFileSync(join(f.root, `docs/releases/v${f.version}.json`), JSON.stringify({
     schema: "sysprims-release-plan/v1", version: f.version, provenance_policy: "commit_footer",
-    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, ffi: { disposition: "publish" }, go: { disposition: "skip", retained_version: "1.2.2" }, typescript: { disposition: "publish", lock_phase: "resolved" } },
+    surfaces: { rust: { disposition: "publish" }, cli: { disposition: "publish" }, go: { disposition: "skip", retained_version: "1.2.2" }, typescript: { disposition: "publish", lock_phase: "resolved" } },
   }));
   must(f.root, "git", ["add", "-A"]);
   must(f.root, "git", ["commit", "-qm", `release\n\n${attributionFooter}`]);

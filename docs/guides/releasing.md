@@ -30,49 +30,43 @@
 
 ## Release Artifacts
 
-```
-sysprims-${VERSION}/
-├── bin/
-│   ├── sysprims-timeout
-│   ├── sysprims-kill
-│   └── sysprims-pstat
-├── lib/
-│   ├── libsysprims.a
-│   └── libsysprims.so (Linux) / .dylib (macOS)
-├── include/
-│   └── sysprims.h
-├── sbom-${VERSION}.cdx.json
-├── THIRD_PARTY_NOTICES.md
-├── LICENSE-MIT
-└── LICENSE-APACHE
-```
+GitHub release assets are flat and covered by the signed checksum manifests
+(see [Release Asset Policy](../standards/release-asset-policy.md)):
 
-## Binding Releases
+- CLI archives (`sysprims-${VERSION}-<platform>.tar.gz`, `.zip` on Windows)
+- SBOM (`sysprims-${VERSION}.cdx.json`)
+- Python `cp310-abi3` wheels and sdist
+- npm tarballs (`3leaps-sysprims*-${VERSION}.tgz`)
+- `LICENSE-MIT`, `LICENSE-APACHE`
+
+No native libraries or C headers are shipped; the C-ABI and the cgo Go
+bindings module were retired in v0.5.0.
+
+## Package Releases
+
+The authoritative procedure is [`RELEASE_CHECKLIST.md`](../../RELEASE_CHECKLIST.md).
 
 ### Go
 
+The root module (`github.com/3leaps/sysprims`) resolves from the signed
+`v${VERSION}` tag, and `go/recurrence` from the signed
+`go/recurrence/v${VERSION}` tag on the same commit:
+
 ```bash
-git tag bindings/go/v${VERSION}
-git push origin bindings/go/v${VERSION}
-# Verify: go get github.com/3leaps/sysprims/bindings/go@v${VERSION}
+# Verify:
+go list -m github.com/3leaps/sysprims@v${VERSION}
+go list -m github.com/3leaps/sysprims/go/recurrence@v${VERSION}
 ```
 
-### Python
+### Python and TypeScript
+
+`sysprims` (PyPI) and `@3leaps/sysprims` (npm) are published with Trusted
+Publishing (OIDC) from the signed GitHub Release assets, without rebuilding:
 
 ```bash
-cd bindings/python
-maturin build --release
-twine upload dist/*
-# Verify: pip install sysprims==${VERSION}
-```
-
-### TypeScript
-
-```bash
-cd bindings/typescript
-npm version ${VERSION}
-npm publish
-# Verify: npm install @3leaps/sysprims@${VERSION}
+# Verify:
+pip install sysprims==${VERSION}
+npm install @3leaps/sysprims@${VERSION}
 ```
 
 ## References

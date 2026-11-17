@@ -138,6 +138,17 @@ function requiresPythonSurface(version) {
   return minor === 3 && patch >= 1;
 }
 
+// The C-ABI FFI surface (ffi/sysprims-ffi) was retired in 0.5.0 together
+// with the cgo Go bindings. Plans before 0.5.0 must declare it as publish;
+// plans from 0.5.0 onward must not declare it.
+function requiresFfiSurface(version) {
+  const core = String(version).split(/[+-]/)[0] ?? "";
+  const parts = core.split(".").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) return true;
+  const [major, minor] = parts;
+  return major === 0 && minor < 5;
+}
+
 function validateReleasePlan(plan, version) {
   const errors = [];
   if (plan.schema !== "sysprims-release-plan/v1") errors.push("unknown release plan schema");
@@ -148,14 +159,13 @@ function validateReleasePlan(plan, version) {
     errors.push("release plan surfaces object is missing");
   } else {
     const hasPython = Object.hasOwn(surfaces, "python") || requiresPythonSurface(version);
-    const expectedSurfaceNames = hasPython
-      ? ["cli", "ffi", "go", "python", "rust", "typescript"]
-      : ["cli", "ffi", "go", "rust", "typescript"];
+    const hasFfi = requiresFfiSurface(version);
+    const expectedSurfaceNames = ["cli", ...(hasFfi ? ["ffi"] : []), "go", ...(hasPython ? ["python"] : []), "rust", "typescript"];
     const actualSurfaceNames = Object.keys(surfaces).sort();
     if (JSON.stringify(actualSurfaceNames) !== JSON.stringify(expectedSurfaceNames)) {
       errors.push(`release plan surface set must be exactly ${expectedSurfaceNames.join(", ")}`);
     }
-    for (const name of ["rust", "cli", "ffi"]) {
+    for (const name of hasFfi ? ["rust", "cli", "ffi"] : ["rust", "cli"]) {
       if (surfaces[name]?.disposition !== "publish") errors.push(`${name} disposition must be publish`);
     }
     const optionalSkipSurfaces = hasPython ? ["go", "python", "typescript"] : ["go", "typescript"];

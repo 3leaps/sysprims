@@ -131,14 +131,18 @@ sysprims/
 │   ├── sysprims-core/
 │   ├── sysprims-timeout/
 │   ├── sysprims-signal/
+│   ├── sysprims-session/
 │   ├── sysprims-proc/
+│   ├── sysprims-evidence/
+│   ├── sysprims-recurrence/
 │   └── sysprims-cli/
-├── ffi/                       # FFI exports
-│   └── sysprims-ffi/
-├── bindings/                  # Language bindings
-│   ├── go/
+├── bindings/                  # Language bindings (Rust-backed)
 │   ├── python/
 │   └── typescript/
+├── syserror/ signal/ session/ # Pure-Go packages (root module)
+├── timeout/ proc/ evidence/ procobserve/
+├── go/recurrence/             # Pure-Go recurrence module
+├── testdata/conformance/      # Cross-language conformance vectors
 ├── docs/                      # Documentation
 │   ├── architecture/
 │   │   └── adr/              # Architecture Decision Records

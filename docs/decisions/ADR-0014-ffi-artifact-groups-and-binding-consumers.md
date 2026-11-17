@@ -1,6 +1,6 @@
 # ADR-0014: FFI Artifact Groups and Binding Consumers
 
-> **Status**: Accepted
+> **Status**: Superseded by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): FFI artifact groups are no longer built or published
 > **Date**: 2026-01-21
 > **Authors**: entarch, ffiarch
 

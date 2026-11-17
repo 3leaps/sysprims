@@ -12,21 +12,23 @@ A PR is mergeable only if all gates pass.
 | License           | `cargo deny check licenses`                             | Block merge                      |
 | Advisories        | `cargo deny check advisories`                           | Block merge                      |
 | Schema validation | Golden tests + meta-validation                          | Block merge                      |
-| FFI smoke         | C + Go + Python + TypeScript                            | Block merge                      |
+| Conformance       | Rust + Go + Python + TypeScript vectors                 | Block merge                      |
 
 Note: The repo includes a minimal root `go.mod` plus `go.work` to support repo-root Go tooling (goneat/golangci-lint).
-Go sources live under `bindings/go/sysprims/`, plus a small placeholder package under `internal/gowork/`.
+Go sources are pure-Go packages in the root module (`syserror/`, `signal/`, `session/`, `timeout/`, `proc/`,
+`evidence/`, `procobserve/`) and the separate `go/recurrence/` module, plus a small placeholder package under
+`internal/gowork/`.
 
 Similarly, we include a minimal repo-root `package.json` as a tooling shim so repo-root npm invocations (from tooling like goneat) do not fail.
 
 ## Review Gates (Humans)
 
-### FFI Surface Changes
+### Binding Surface Changes
 
-Any change to FFI surface requires explicit reviewer sign-off from:
+Any change to a public Go, Python, or TypeScript surface requires explicit reviewer sign-off from:
 
 - Lead maintainer
-- Bindings maintainer (if it impacts a wrapper)
+- Bindings maintainer (if it impacts a binding)
 
 ### Schema Changes
 
@@ -48,7 +50,8 @@ Runs on every push to `main` and on PRs. Validates Rust code quality:
 
 ### Binding Workflows
 
-`go-bindings.yml` remains manually triggered. `typescript-bindings.yml` supports
+Pure-Go packages are tested by the `test-go` job in `ci.yml` (`CGO_ENABLED=0`);
+there is no separate Go bindings workflow. `typescript-bindings.yml` supports
 manual runs and also runs on pull requests that change the TypeScript binding or
 its Rust capability dependencies. The TypeScript PR matrix runs native behavior
 on Node 18, Node 22, and pinned Bun across Linux x64, macOS arm64, and Windows
@@ -56,16 +59,16 @@ x64, plus build/package-only checks for supported non-runtime targets.
 
 **Rationale:**
 
-- Binding validation requires building FFI shared libraries, which is expensive
+- Building native binding addons on every platform is expensive
 - Path-filtered TypeScript PR validation catches projection and runtime drift
   without running for unrelated changes
-- Go bindings remain validated as a pre-release step rather than on every commit
+- Pure-Go packages are cheap to test and run on every push and PR
 - This keeps the feedback loop fast for core Rust development
 
 **When to run binding workflows manually:**
 
-1. Before tagging a release (validates bindings work with current FFI)
-2. After significant FFI changes (manual verification)
+1. Before tagging a release (validates bindings against current Rust crates)
+2. After significant binding changes (manual verification)
 3. When debugging binding-specific issues
 
 ### Release Workflow (`release.yml`)

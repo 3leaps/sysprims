@@ -1,6 +1,6 @@
 # ADR-0016: Session Spawn FFI Contract
 
-> **Status**: Accepted
+> **Status**: Accepted; superseded in part by [ADR-0019](ADR-0019-retire-cgo-bindings-and-c-abi.md) (v0.5.0): the C-ABI exports are retired
 > **Date**: 2026-07-05
 > **Authors**: entarch
 

@@ -74,11 +74,16 @@ function requiresPythonSurface(version) {
   return minor === 3 && patch >= 1;
 }
 
+function requiresFfiSurface(version) {
+  const [major, minor] = String(version).split(/[+-]/)[0].split(".").map(Number);
+  return major === 0 && minor < 5;
+}
+
 function writePlan(root, version, { go = "publish", goLockPhase = "resolved", typescript = "publish", python = undefined, retained = "0.2.1" } = {}) {
   const surfaces = {
     rust: { disposition: "publish" },
     cli: { disposition: "publish" },
-    ffi: { disposition: "publish" },
+    ...(requiresFfiSurface(version) ? { ffi: { disposition: "publish" } } : {}),
     go: go === "publish" ? { disposition: "publish", lock_phase: goLockPhase } : { disposition: "skip", retained_version: retained, lock_phase: "resolved" },
     typescript: typescript === "publish" ? { disposition: "publish" } : { disposition: "skip", retained_version: retained },
   };
@@ -1150,4 +1155,30 @@ test("Python surfaces require plan entry from 0.3.1 onward and support publish a
     readFileSync(join(published, "bindings/python/pyproject.toml"), "utf8").replace('version = "0.4.0"', 'version = "0.3.9"'),
   );
   assert.match(version(published, "check").stderr, /Python pyproject \[project\]\.version is 0\.3\.9, expected 0\.4\.0/);
+});
+
+test("FFI surface is required before 0.5.0 and rejected from 0.5.0 onward", () => {
+  const surfaces = (withFfi) => ({
+    rust: { disposition: "publish" },
+    cli: { disposition: "publish" },
+    ...(withFfi ? { ffi: { disposition: "publish" } } : {}),
+    go: { disposition: "skip", retained_version: "0.2.1", lock_phase: "resolved" },
+    python: { disposition: "publish" },
+    typescript: { disposition: "publish" },
+  });
+  const plan = (v, withFfi) => ({ schema: "sysprims-release-plan/v1", version: v, provenance_policy: "commit_footer", surfaces: surfaces(withFfi) });
+
+  const legacyMissing = createFixture();
+  writeJson(join(legacyMissing, "docs/releases/v0.4.1.json"), plan("0.4.1", false));
+  assert.match(version(legacyMissing, "set", "0.4.1").stderr, /release plan surface set must be exactly cli, ffi, go, python, rust, typescript/);
+
+  const retiredPresent = createFixture();
+  writeJson(join(retiredPresent, "docs/releases/v0.5.0.json"), plan("0.5.0", true));
+  assert.match(version(retiredPresent, "set", "0.5.0").stderr, /release plan surface set must be exactly cli, go, python, rust, typescript/);
+
+  const retiredAbsent = createFixture();
+  writeJson(join(retiredAbsent, "docs/releases/v0.5.0.json"), plan("0.5.0", false));
+  const res = version(retiredAbsent, "set", "0.5.0");
+  assert.equal(res.status, 0, `${res.stderr}${res.stdout}`);
+  assert.equal(version(retiredAbsent, "check").status, 0);
 });

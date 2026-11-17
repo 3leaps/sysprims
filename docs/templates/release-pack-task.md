@@ -6,17 +6,17 @@ Replace every placeholder before review.
 ## Release
 
 - Version: `X.Y.Z`
-- Final target commit: recorded after Go Bindings Prep merges
+- Final target commit: recorded after the release pack merges
 - Surface plan: `docs/releases/vX.Y.Z.json`
 - Release notes: `docs/releases/vX.Y.Z.md`
 
 ## Surface plan
 
 - [ ] `provenance_policy` is `commit_footer`.
-- [ ] Rust, CLI, and FFI are `publish`.
+- [ ] Rust and CLI are `publish`; the plan declares no `ffi` surface.
 - [ ] Go is `publish` or `skip`; a skip names the retained version.
-- [ ] Go lock phase is `pre_build` for a pending publish build or `resolved`
-      for committed, hashed, and smoked prebuilts. A skip is `resolved`.
+- [ ] Go lock phase is `resolved` (pure Go, no prebuilt native libraries).
+- [ ] Python is `publish` or `skip`; a skip names the retained version.
 - [ ] TypeScript is `publish` or `skip`; a skip names the retained version.
 - [ ] TypeScript has no lock phase: platform packages are pinned at publish
       time, and the committed lock must not resolve them.
@@ -34,27 +34,24 @@ Replace every placeholder before review.
 
 ## Binding preparation
 
-- [ ] The version, changelog, notes, and surface plan are merged before Go Prep.
-- [ ] Go Bindings Prep rebuilds every required platform, smokes the reported
-      native version, updates the header/libraries/manifest atomically, changes
-      `go.lock_phase` to `resolved`, and passes the full version check.
-- [ ] The Go Prep PR uses an exact squash body with the complete attribution
-      footer; its merged commit is the intended tag target.
+- [ ] The version, changelog, notes, and surface plan are merged; the merged
+      release-pack commit is the intended tag target.
 - [ ] TypeScript validation runs on that same `main` before tags.
 
 ## Final pretag gate
 
 - [ ] Final `main` is synchronized and green.
 - [ ] `make release-preflight` passes with Go `resolved`.
-- [ ] Canonical and Go annotation message files are reviewed byte for byte.
+- [ ] Canonical and recurrence annotation message files are reviewed byte for
+      byte.
 - [ ] `SYSPRIMS_TAG_MESSAGE_DIR` points to those reviewed files, named
-      `vX.Y.Z.txt` and `bindings__go__sysprims__vX.Y.Z.txt`, for the post-tag
+      `vX.Y.Z.txt` and `go__recurrence__vX.Y.Z.txt`, for the post-tag
       stored-message comparison.
-- [ ] Both tags will be annotated, use those files, and peel to the same commit.
+- [ ] Every tag will be annotated, use those files, and peel to the same commit.
 
 ## Post-tag order
 
-- [ ] Exact remote tags and tagged Go prebuilts pass the shared guard.
+- [ ] Exact remote tags pass the shared guard.
 - [ ] Planned Rust crates are published and verified in dependency order.
 - [ ] GitHub assets are downloaded, notes copied, checksummed, signed, verified,
       and uploaded while the release remains draft.
