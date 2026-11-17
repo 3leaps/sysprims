@@ -190,8 +190,7 @@ jobs:
         with:
           name: cli-darwin-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz
-  # Build Windows targets using GNU toolchain for CGo compatibility
-  # CGo requires MinGW, so we build with x86_64-pc-windows-gnu target
+  # Build Windows x64 with the GNU target (MinGW). Windows arm64 (below) uses MSVC.
   build-windows:
     name: Build Windows
     runs-on: windows-2025  # pin:runner=windows-x64

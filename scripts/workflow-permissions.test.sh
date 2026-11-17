@@ -6,15 +6,11 @@
 #     behind the publish-pypi environment
 #   registry-publish.yml publish-npm: id-token (npm trusted publishing), only
 #     behind the publish-npm environment
-#   go-bindings.yml update-go-bindings: contents + pull-requests (opens the
-#     prebuilt-library pull request). Its steps may use only the actions listed
-#     below; the token reaches only the pull-request action's `with.token`,
-#     checkout does not persist credentials, and no shell step or environment
-#     names a token, so repository code run in that job never holds the write
-#     token.
+# No job receives a write token: TOKEN_ACTIONS is empty, so no step in a write
+# job may take a `with.token`.
 # Security boundary: permission and credential confinement (no `secrets.*`
-# anywhere in any workflow except the single `create-pull-request` `with.token`,
-# and no `github`/`secrets` expressions anywhere else in the write job). Bare
+# anywhere in any workflow, and no `github`/`secrets` expressions in a write
+# job). Bare
 # (non-`${{ }}`) `if:` conditions are boolean predicates only and are not
 # expression-scanned. `RELEASE_WRITERS` and `WRITE_JOB_FORBIDDEN_RUN` are
 # defence-in-depth lint checks, not a complete shell parser.

@@ -38,11 +38,17 @@ after(() => {
   }
 });
 
+// Fixtures never see the maintainer's release environment: every SYSPRIMS_*
+// variable a test needs is passed explicitly.
+const ambientEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !name.startsWith("SYSPRIMS_")),
+);
+
 function command(root, executable, args, options = {}) {
   return spawnSync(executable, args, {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, ...options.env },
+    env: { ...ambientEnv, ...options.env },
   });
 }
 
