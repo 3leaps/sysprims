@@ -7,7 +7,6 @@ const path = require("node:path");
 const ts = require("typescript-api");
 
 const packageRoot = path.resolve(__dirname, "..");
-const repoRoot = path.resolve(packageRoot, "../../..");
 const contract = require("./public-api-contract.json");
 const outputPath = path.join(packageRoot, "docs", "public-api.md");
 
@@ -132,35 +131,7 @@ function parseMatrix(markdown) {
 		};
 	}
 
-	const cAbi = {};
-	for (const row of tableRows(
-		markdown,
-		"C-ABI Runtime Export Classification",
-	)) {
-		const [name] = identifiers(row["C-ABI symbol"]);
-		if (!name) fail("C-ABI matrix row has no symbol identifier");
-		if (cAbi[name]) fail(`C-ABI matrix contains duplicate symbol: ${name}`);
-		let disposition;
-		if (row["TypeScript disposition"].startsWith("exposed"))
-			disposition = "exposed";
-		else if (row["TypeScript disposition"].startsWith("excluded"))
-			disposition = "excluded";
-		else {
-			fail(
-				`C-ABI matrix has unknown disposition for ${name}: ${row["TypeScript disposition"]}`,
-			);
-		}
-		cAbi[name] = {
-			disposition,
-			public:
-				disposition === "exposed"
-					? identifiers(row["TypeScript disposition"]).filter((candidate) =>
-							valueNames.has(candidate),
-						)
-					: [],
-		};
-	}
-	return { cAbi, capabilities, napi, typeNames, valueNames };
+	return { capabilities, napi, typeNames, valueNames };
 }
 
 function compareClassifiedSurface(label, actual, expected) {
@@ -205,11 +176,6 @@ function verifyMatrix() {
 		"manifest N-API inventory",
 		contract.napi,
 		matrix.napi,
-	);
-	compareClassifiedSurface(
-		"manifest C ABI inventory",
-		contract.cAbi,
-		matrix.cAbi,
 	);
 	for (const [name, capability] of [
 		...Object.entries(contract.publicValues),
@@ -334,60 +300,17 @@ function describeType(symbol) {
 		.join(" ");
 }
 
-function tokenizeHeader(source) {
-	const withoutComments = source
-		.replace(/\/\*[\s\S]*?\*\//g, " ")
-		.replace(/\/\/[^\n]*/g, " ")
-		.replace(/^\s*#.*$/gm, " ");
-	return withoutComments.match(/[A-Za-z_]\w*|\.\.\.|[^\s]/g) || [];
-}
-
-function parseCFunctions(headerPath) {
-	const tokens = tokenizeHeader(fs.readFileSync(headerPath, "utf8"));
-	const functions = [];
-	let braces = 0;
-	let statement = [];
-	for (const token of tokens) {
-		if (token === "{") braces += 1;
-		if (token === "}") braces -= 1;
-		statement.push(token);
-		if (token !== ";" || braces !== 0) continue;
-
-		if (!statement.includes("typedef")) {
-			let parens = 0;
-			for (let index = 0; index < statement.length; index += 1) {
-				const current = statement[index];
-				if (current === "(" && parens === 0) {
-					const name = statement[index - 1];
-					if (/^sysprims_[A-Za-z0-9_]+$/.test(name)) functions.push(name);
-				}
-				if (current === "(") parens += 1;
-				if (current === ")") parens -= 1;
-			}
-		}
-		statement = [];
-	}
-	return sorted(new Set(functions));
-}
-
 function validateMappings(publicValues) {
-	for (const [surface, entries] of [
-		["N-API", contract.napi],
-		["C ABI", contract.cAbi],
-	]) {
-		for (const [name, entry] of Object.entries(entries)) {
-			if (!entry.disposition || !Array.isArray(entry.public)) {
-				fail(`${surface} symbol ${name} is not classified and mapped`);
-			}
-			if (entry.disposition === "exposed" && entry.public.length === 0) {
-				fail(`${surface} symbol ${name} is exposed but has no public mapping`);
-			}
-			for (const publicName of entry.public) {
-				if (!publicValues.has(publicName)) {
-					fail(
-						`${surface} symbol ${name} maps to missing public value ${publicName}`,
-					);
-				}
+	for (const [name, entry] of Object.entries(contract.napi)) {
+		if (!entry.disposition || !Array.isArray(entry.public)) {
+			fail(`N-API symbol ${name} is not classified and mapped`);
+		}
+		if (entry.disposition === "exposed" && entry.public.length === 0) {
+			fail(`N-API symbol ${name} is exposed but has no public mapping`);
+		}
+		for (const publicName of entry.public) {
+			if (!publicValues.has(publicName)) {
+				fail(`N-API symbol ${name} maps to missing public value ${publicName}`);
 			}
 		}
 	}
@@ -460,7 +383,7 @@ function markdownCell(value) {
 	return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
-function renderDocument(exports, cFunctions) {
+function renderDocument(exports) {
 	const lines = [
 		"# TypeScript Public API",
 		"",
@@ -468,7 +391,7 @@ function renderDocument(exports, cFunctions) {
 		"",
 		"This document is generated from emitted package declarations and the reviewed native surface contract. See [Capability Intent Matrix](capability-intent-matrix.md) for policy and lifecycle rationale.",
 		"",
-		`Summary: ${exports.values.size} public values, ${exports.types.size} public types, ${Object.keys(contract.napi).length} N-API callables, and ${cFunctions.length} C-ABI functions.`,
+		`Summary: ${exports.values.size} public values, ${exports.types.size} public types, and ${Object.keys(contract.napi).length} N-API callables.`,
 		"",
 		"## Public Values",
 		"",
@@ -491,13 +414,6 @@ function renderDocument(exports, cFunctions) {
 			`- \`${name}\`: ${entry.disposition}; public mapping: ${entry.public.map((item) => `\`${item}\``).join(", ") || "none"}`,
 		);
 	}
-	lines.push("", "## C-ABI Comparison Functions", "");
-	for (const name of cFunctions) {
-		const entry = contract.cAbi[name];
-		lines.push(
-			`- \`${name}\`: ${entry.disposition}; public mapping: ${entry.public.map((item) => `\`${item}\``).join(", ") || "none"}`,
-		);
-	}
 	return `${lines.join("\n")}\n`;
 }
 
@@ -505,7 +421,7 @@ function main() {
 	const mode = process.argv[2];
 	if (mode !== "generate" && mode !== "check") {
 		fail(
-			"Usage: node scripts/public-api.js <generate|check> [--require-native] [--c-header <path>]",
+			"Usage: node scripts/public-api.js <generate|check> [--require-native]",
 		);
 	}
 	verifyMatrix();
@@ -527,34 +443,8 @@ function main() {
 		);
 		validateMappings(exports.values);
 
-		const headerOption = process.argv.indexOf("--c-header");
-		if (headerOption >= 0 && !process.argv[headerOption + 1]) {
-			fail("--c-header requires a path");
-		}
-		const explicitHeader =
-			headerOption >= 0
-				? process.argv[headerOption + 1]
-				: process.env.SYSPRIMS_C_HEADER;
-		const defaultHeader = path.join(
-			repoRoot,
-			"bindings",
-			"go",
-			"sysprims",
-			"include",
-			"sysprims.h",
-		);
-		const cFunctions = explicitHeader
-			? parseCFunctions(path.resolve(explicitHeader))
-			: fs.existsSync(defaultHeader)
-				? parseCFunctions(defaultHeader)
-				: sorted(Object.keys(contract.cAbi));
-		compareNames(
-			"C ABI function inventory",
-			cFunctions,
-			Object.keys(contract.cAbi),
-		);
 		const nativePath = inspectNative(process.argv.includes("--require-native"));
-		const generated = renderDocument(exports, cFunctions);
+		const generated = renderDocument(exports);
 
 		if (mode === "generate") {
 			fs.writeFileSync(outputPath, generated);

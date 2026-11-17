@@ -4,7 +4,7 @@
 
 This document is generated from emitted package declarations and the reviewed native surface contract. See [Capability Intent Matrix](capability-intent-matrix.md) for policy and lifecycle rationale.
 
-Summary: 47 public values, 51 public types, 36 N-API callables, and 41 C-ABI functions.
+Summary: 47 public values, 51 public types, and 36 N-API callables.
 
 ## Public Values
 
@@ -148,47 +148,3 @@ Summary: 47 public values, 51 public types, 36 N-API callables, and 41 C-ABI fun
 - `sysprimsSpawnInGroup`: exposed; public mapping: `spawnInGroup`
 - `sysprimsTerminate`: exposed; public mapping: `terminate`
 - `sysprimsTerminateTree`: exposed; public mapping: `terminateTree`
-
-## C-ABI Comparison Functions
-
-- `sysprims_abi_version`: excluded; public mapping: none
-- `sysprims_clear_error`: excluded; public mapping: none
-- `sysprims_containment_close`: exposed; public mapping: `ContainedProcess`
-- `sysprims_containment_identity`: exposed; public mapping: `ContainedProcess`
-- `sysprims_containment_poll`: exposed; public mapping: `ContainedProcess`
-- `sysprims_containment_spawn`: exposed; public mapping: `spawnContained`
-- `sysprims_containment_terminate`: exposed; public mapping: `ContainedProcess`
-- `sysprims_containment_wait`: exposed; public mapping: `ContainedProcess`
-- `sysprims_force_kill`: exposed; public mapping: `forceKill`
-- `sysprims_free_string`: excluded; public mapping: none
-- `sysprims_get_platform`: excluded; public mapping: none
-- `sysprims_last_error`: excluded; public mapping: none
-- `sysprims_last_error_code`: excluded; public mapping: none
-- `sysprims_proc_ancestors`: exposed; public mapping: `ancestors`
-- `sysprims_proc_descendants`: exposed; public mapping: `descendants`
-- `sysprims_proc_descendants_ex`: exposed; public mapping: `descendants`
-- `sysprims_proc_get`: excluded; public mapping: none
-- `sysprims_proc_get_ex`: exposed; public mapping: `procGet`
-- `sysprims_proc_guard_runner_create`: excluded; public mapping: none
-- `sysprims_proc_guard_runner_free`: excluded; public mapping: none
-- `sysprims_proc_guard_runner_stop`: excluded; public mapping: none
-- `sysprims_proc_guard_runner_tick`: excluded; public mapping: none
-- `sysprims_proc_guard_step`: exposed; public mapping: `guardStep`
-- `sysprims_proc_kill_descendants`: excluded; public mapping: none
-- `sysprims_proc_kill_descendants_ex`: exposed; public mapping: `killDescendants`
-- `sysprims_proc_list`: excluded; public mapping: none
-- `sysprims_proc_list_ex`: exposed; public mapping: `processList`
-- `sysprims_proc_list_fds`: exposed; public mapping: `listFds`
-- `sysprims_proc_listening_ports`: exposed; public mapping: `listeningPorts`
-- `sysprims_proc_wait_pid`: exposed; public mapping: `waitPID`
-- `sysprims_run_nohup`: exposed; public mapping: `runNohup`
-- `sysprims_run_setsid`: exposed; public mapping: `runSetsid`
-- `sysprims_self_getpgid`: exposed; public mapping: `selfPGID`
-- `sysprims_self_getsid`: exposed; public mapping: `selfSID`
-- `sysprims_signal_send`: exposed; public mapping: `signalSend`
-- `sysprims_signal_send_group`: exposed; public mapping: `signalSendGroup`
-- `sysprims_spawn_in_group`: exposed; public mapping: `spawnInGroup`
-- `sysprims_terminate`: exposed; public mapping: `terminate`
-- `sysprims_terminate_tree`: exposed; public mapping: `terminateTree`
-- `sysprims_timeout_run`: excluded; public mapping: none
-- `sysprims_version`: excluded; public mapping: none
