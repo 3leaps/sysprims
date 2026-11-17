@@ -6,9 +6,12 @@ set -euo pipefail
 source "$(dirname "$0")/release-tag-common.sh"
 # shellcheck source=scripts/release-decernor.sh
 source "$(dirname "$0")/release-decernor.sh"
+# shellcheck source=scripts/release-yamlprims.sh
+source "$(dirname "$0")/release-yamlprims.sh"
 cd "$tag_root"
 tag_version
 resolve_release_decernor
+resolve_release_yamlprims
 export RELEASE_DECERNOR_BIN
 canonical="$(git rev-parse --verify --quiet "refs/tags/$SYSPRIMS_RELEASE_TAG")" || tag_die "local tag $SYSPRIMS_RELEASE_TAG is absent"
 tag_load_set "$(git rev-parse "${canonical}^{commit}")"

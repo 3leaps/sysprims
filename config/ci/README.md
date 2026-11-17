@@ -16,8 +16,11 @@ toolchain actions (`dtolnay/rust-toolchain`).
 2. `.github/actions/setup-rust/action.yml` — composite `bash` action that
    installs an exact `X.Y.Z` toolchain with `rustup --profile minimal --no-self-update`
    and optional targets/components, with zero third-party action dependencies.
-3. `scripts/ci-pins.py` — stdlib `tomllib` + `scripts/workflow_yaml.py` sync and
-   verification tool (`sync` and `check` modes).
+3. `scripts/ci-pins.py` — standard-library sync and verification tool (`sync`
+   and `check` modes): `tomllib` for the pins and `scripts/workflow_yaml.py` for
+   the workflows, which reads YAML through the yamlprims CLI pinned in
+   `config/yamlprims-cli.txt` (`scripts/yaml_json.py`; set
+   `SYSPRIMS_YAMLPRIMS_BIN` to its absolute path).
 
 ## Workflow Marker Syntax
 
@@ -64,7 +67,8 @@ containers), bind `RUST_TOOLCHAIN` in `env:` with `# pin:rust=msrv` and pass
 ## Adopting in Another Repository
 
 1. Copy `config/ci/pins.toml`, `.github/actions/setup-rust/action.yml`,
-   `scripts/ci-pins.py`, and `scripts/workflow_yaml.py` (if not already present).
+   `scripts/ci-pins.py`, `scripts/workflow_yaml.py`, `scripts/yaml_json.py` and
+   `config/yamlprims-cli.txt` (if not already present).
    Note: if the target repository uses `rust-toolchain.toml`, ensure its
    `channel` matches `[rust].msrv` or `[rust].stable`; repositories whose
    release-source policy forbids `rust-toolchain.toml` rely solely on

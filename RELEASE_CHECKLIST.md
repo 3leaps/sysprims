@@ -11,6 +11,10 @@ This document walks maintainers through the build/sign/publish flow for each sys
 - `limensafe` installed and `LIMENSAFE_CATALOG_PATH` exported from the
   maintainer's release environment (outside the repository). The PR final and
   release preflight gates require it; `make surface-scan` skips without it
+- The yamlprims CLI from the release pinned in `config/yamlprims-cli.txt`, with
+  `SYSPRIMS_YAMLPRIMS_BIN` set to its absolute path. The workflow checkers
+  (`make check`, release preflight, tagging and tag verification) read YAML
+  only through it and run it only if its SHA-256 matches the committed digest
 - All feature PRs for this release are merged and branch is `main`
 
 ## 1. Pre-Release Preparation
@@ -163,6 +167,7 @@ Targets that read no tag (for example `release-guard-provenance`,
   source ~/devsecops/vars/3leaps-sysprims-cicd.sh
   # SYSPRIMS_TAG_MESSAGE_DIR=$HOME/devsecops/releases/github/3leaps/sysprims/$SYSPRIMS_RELEASE_TAG
   # SYSPRIMS_DECERNOR_BIN=/absolute/path/to/decernor   (>= 0.1.8; no PATH fallback)
+  # SYSPRIMS_YAMLPRIMS_BIN=/absolute/path/to/yamlprims (config/yamlprims-cli.txt; no PATH fallback)
   # SYSPRIMS_TAGGER_NAME / SYSPRIMS_TAGGER_EMAIL       (config/release/tagger-identity.txt)
   # SYSPRIMS_PGP_KEY_ID="<signing subkey>!"            (config/release/signing-subkey.txt)
   # SYSPRIMS_GPG_HOMEDIR=/path/outside/the/repository

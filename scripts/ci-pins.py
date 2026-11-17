@@ -24,28 +24,36 @@ Modes:
 
 from __future__ import annotations
 
-import errno
-import hashlib
 import os
-import re
 import sys
-import tomllib
-from pathlib import Path
 
-# Keep the script directory off sys.path while importing PyYAML so a local
-# scripts/yaml.py can never execute, including when PyYAML is absent.
+# Keep this script's directory and the working directory off sys.path before
+# anything else is imported, so a module planted beside this script (or in the
+# working directory) is never imported; only the standard library and the
+# workflow reader loaded by path below run.
+_untrusted = {
+    os.path.realpath(p)
+    for p in (os.path.dirname(os.path.abspath(__file__)), os.getcwd())
+}
+sys.path[:] = [
+    p for p in sys.path if p not in ("", ".") and os.path.realpath(p) not in _untrusted
+]
+
+import errno  # noqa: E402
+import hashlib  # noqa: E402
+import importlib.util  # noqa: E402
+import re  # noqa: E402
+import tomllib  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+# The workflow reader: scripts/workflow_yaml.py, which runs the pinned yamlprims
+# CLI through scripts/yaml_json.py (standard library only).
 SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path = [entry for entry in sys.path if Path(entry or ".").resolve() != SCRIPT_DIR]
-try:
-    import yaml as _yaml  # noqa: E402
-except ModuleNotFoundError:
-    print(
-        "error: the workflow lints need PyYAML (python3-yaml / pip install pyyaml)",
-        file=sys.stderr,
-    )
-    raise SystemExit(1) from None
-sys.path.append(str(SCRIPT_DIR))
-import workflow_yaml as wy  # noqa: E402
+_wy_spec = importlib.util.spec_from_file_location(
+    "sysprims_workflow_yaml", SCRIPT_DIR / "workflow_yaml.py"
+)
+wy = importlib.util.module_from_spec(_wy_spec)
+_wy_spec.loader.exec_module(wy)
 
 PINS_REL = "config/ci/pins.toml"
 WORKFLOW_SHA_REL = "config/release/release-workflow.sha256"
@@ -221,48 +229,48 @@ def load_pins(root: Path) -> dict:
     }
 
 
-def _map_entries(node: _yaml.Node | None) -> dict[str, _yaml.Node]:
-    if not isinstance(node, _yaml.MappingNode):
+def _map_entries(node: wy.Node | None) -> dict[str, wy.Node]:
+    if not isinstance(node, wy.MappingNode):
         return {}
-    out: dict[str, _yaml.Node] = {}
+    out: dict[str, wy.Node] = {}
     for k_node, v_node in node.value:
-        if isinstance(k_node, _yaml.ScalarNode):
+        if isinstance(k_node, wy.ScalarNode):
             out[k_node.value] = v_node
     return out
 
 
-def _walk_scalars(node: _yaml.Node | None):
-    if isinstance(node, _yaml.ScalarNode):
+def _walk_scalars(node: wy.Node | None):
+    if isinstance(node, wy.ScalarNode):
         yield node
-    elif isinstance(node, _yaml.SequenceNode):
+    elif isinstance(node, wy.SequenceNode):
         for item in node.value:
             yield from _walk_scalars(item)
-    elif isinstance(node, _yaml.MappingNode):
+    elif isinstance(node, wy.MappingNode):
         for _, v_node in node.value:
             yield from _walk_scalars(v_node)
 
 
 def _resolve_matrix_var_nodes(
-    job_id: str, job_node: _yaml.MappingNode, var: str
-) -> list[_yaml.ScalarNode]:
+    job_id: str, job_node: wy.MappingNode, var: str
+) -> list[wy.ScalarNode]:
     job_fields = _map_entries(job_node)
     strategy_node = job_fields.get("strategy")
-    if not isinstance(strategy_node, _yaml.MappingNode):
+    if not isinstance(strategy_node, wy.MappingNode):
         raise PinError(f"job {job_id}: uses matrix.{var} without strategy.matrix")
     matrix_node = _map_entries(strategy_node).get("matrix")
-    if not isinstance(matrix_node, _yaml.MappingNode):
+    if not isinstance(matrix_node, wy.MappingNode):
         raise PinError(f"job {job_id}: strategy.matrix is not a mapping")
     matrix_fields = _map_entries(matrix_node)
-    nodes: list[_yaml.ScalarNode] = []
+    nodes: list[wy.ScalarNode] = []
 
     axis_node = matrix_fields.get(var)
     if axis_node is not None:
-        if not isinstance(axis_node, _yaml.SequenceNode) or not axis_node.value:
+        if not isinstance(axis_node, wy.SequenceNode) or not axis_node.value:
             raise PinError(
                 f"job {job_id}: strategy.matrix.{var} must be a non-empty list"
             )
         for item in axis_node.value:
-            if not isinstance(item, _yaml.ScalarNode) or item.tag not in (
+            if not isinstance(item, wy.ScalarNode) or item.tag not in (
                 "tag:yaml.org,2002:str",
             ):
                 raise PinError(
@@ -272,17 +280,17 @@ def _resolve_matrix_var_nodes(
 
     include_node = matrix_fields.get("include")
     if include_node is not None:
-        if not isinstance(include_node, _yaml.SequenceNode):
+        if not isinstance(include_node, wy.SequenceNode):
             raise PinError(f"job {job_id}: strategy.matrix.include must be a list")
         for entry_node in include_node.value:
-            if not isinstance(entry_node, _yaml.MappingNode):
+            if not isinstance(entry_node, wy.MappingNode):
                 raise PinError(
                     f"job {job_id}: strategy.matrix.include entry is not a mapping"
                 )
             entry_fields = _map_entries(entry_node)
             if var in entry_fields:
                 val_node = entry_fields[var]
-                if not isinstance(val_node, _yaml.ScalarNode) or val_node.tag not in (
+                if not isinstance(val_node, wy.ScalarNode) or val_node.tag not in (
                     "tag:yaml.org,2002:str",
                 ):
                     raise PinError(
@@ -300,13 +308,11 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
     try:
         doc = wy.load_text(text, name)
         wy.jobs(doc)
-        root_node = _yaml.compose(text, Loader=wy._Loader)
+        root_node = wy.compose(text, name)
     except wy.WorkflowError as error:
         return [str(error)]
-    except _yaml.YAMLError as error:
-        return [f"{name}: not valid YAML: {error}"]
 
-    if not isinstance(root_node, _yaml.MappingNode):
+    if not isinstance(root_node, wy.MappingNode):
         return [f"{name}: workflow is not a mapping"]
 
     hosted = pins["hosted"]
@@ -358,7 +364,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
     consumed_rust_lines: set[int] = set()
     visited_runner_nodes: set[int] = set()
 
-    def require_runner_marker(snode: _yaml.ScalarNode, where: str) -> None:
+    def require_runner_marker(snode: wy.ScalarNode, where: str) -> None:
         visited_runner_nodes.add(id(snode))
         lineno = snode.start_mark.line + 1
         node_span = (snode.start_mark.column, snode.end_mark.column)
@@ -384,7 +390,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                 f"{name}:{lineno}: {where} value {snode.value!r} does not match # pin:runner={key} ({hosted[key]!r})"
             )
 
-    def require_rust_marker(snode: _yaml.ScalarNode, where: str) -> None:
+    def require_rust_marker(snode: wy.ScalarNode, where: str) -> None:
         lineno = snode.start_mark.line + 1
         node_span = (snode.start_mark.column, snode.end_mark.column)
         if (
@@ -409,19 +415,17 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                 f"{name}:{lineno}: {where} value {snode.value!r} does not match # pin:rust={key} ({rust_pins[key]!r})"
             )
 
-    def check_env_mapping(env_node: _yaml.Node | None, scope: str) -> None:
-        if not isinstance(env_node, _yaml.MappingNode):
+    def check_env_mapping(env_node: wy.Node | None, scope: str) -> None:
+        if not isinstance(env_node, wy.MappingNode):
             return
         env_fields = _map_entries(env_node)
         if "RUSTUP_TOOLCHAIN" in env_fields:
             tc_node = env_fields["RUSTUP_TOOLCHAIN"]
             if (
-                not isinstance(tc_node, _yaml.ScalarNode)
+                not isinstance(tc_node, wy.ScalarNode)
                 or tc_node.value not in rust_values
             ):
-                got = (
-                    tc_node.value if isinstance(tc_node, _yaml.ScalarNode) else tc_node
-                )
+                got = tc_node.value if isinstance(tc_node, wy.ScalarNode) else tc_node
                 errors.append(
                     f"{name}: {scope} env.RUSTUP_TOOLCHAIN must come from {PINS_REL}, got {got!r}"
                 )
@@ -432,14 +436,14 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
     check_env_mapping(root_fields.get("env"), "workflow")
 
     jobs_node = root_fields.get("jobs")
-    if not isinstance(jobs_node, _yaml.MappingNode):
+    if not isinstance(jobs_node, wy.MappingNode):
         return [f"{name}: workflow has no jobs mapping"]
 
     for job_key_node, job_node in jobs_node.value:
-        if not isinstance(job_key_node, _yaml.ScalarNode):
+        if not isinstance(job_key_node, wy.ScalarNode):
             continue
         job_id = job_key_node.value
-        if not isinstance(job_node, _yaml.MappingNode):
+        if not isinstance(job_node, wy.MappingNode):
             errors.append(f"{name}: job {job_id!r} is not a mapping")
             continue
         job_fields = _map_entries(job_node)
@@ -450,18 +454,18 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                 errors.append(f"{name}: job {job_id}: missing runs-on")
             else:
                 runs_on_node = job_fields["runs-on"]
-                if isinstance(runs_on_node, _yaml.ScalarNode):
+                if isinstance(runs_on_node, wy.ScalarNode):
                     candidate_nodes = [runs_on_node]
-                elif isinstance(runs_on_node, _yaml.SequenceNode):
+                elif isinstance(runs_on_node, wy.SequenceNode):
                     candidate_nodes = list(runs_on_node.value)
                 else:
                     errors.append(f"{name}: job {job_id}: invalid runs-on structure")
                     candidate_nodes = []
 
-                resolved_nodes: list[_yaml.ScalarNode] = []
+                resolved_nodes: list[wy.ScalarNode] = []
                 for item_node in candidate_nodes:
                     if not isinstance(
-                        item_node, _yaml.ScalarNode
+                        item_node, wy.ScalarNode
                     ) or item_node.tag not in ("tag:yaml.org,2002:str",):
                         errors.append(f"{name}: job {job_id}: non-string runs-on value")
                         continue
@@ -495,7 +499,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
         # Also inspect all scalars in strategy.matrix so custom matrix axes
         # holding hosted runner labels cannot omit a synchronizable marker.
         strategy_node = job_fields.get("strategy")
-        if isinstance(strategy_node, _yaml.MappingNode):
+        if isinstance(strategy_node, wy.MappingNode):
             matrix_node = _map_entries(strategy_node).get("matrix")
             for snode in _walk_scalars(matrix_node):
                 if (
@@ -507,25 +511,25 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
 
         steps_node = job_fields.get("steps")
         if steps_node is None or (
-            isinstance(steps_node, _yaml.ScalarNode)
+            isinstance(steps_node, wy.ScalarNode)
             and steps_node.tag == "tag:yaml.org,2002:null"
         ):
-            step_nodes: list[_yaml.Node] = []
-        elif isinstance(steps_node, _yaml.SequenceNode):
+            step_nodes: list[wy.Node] = []
+        elif isinstance(steps_node, wy.SequenceNode):
             step_nodes = list(steps_node.value)
         else:
             errors.append(f"{name}: job {job_id}: steps is not a list")
             continue
 
         for idx, step_node in enumerate(step_nodes):
-            if not isinstance(step_node, _yaml.MappingNode):
+            if not isinstance(step_node, wy.MappingNode):
                 errors.append(f"{name}: job {job_id} step {idx}: step is not a mapping")
                 continue
             step_fields = _map_entries(step_node)
             check_env_mapping(step_fields.get("env"), f"job {job_id} step {idx}")
 
             uses_node = step_fields.get("uses")
-            if isinstance(uses_node, _yaml.ScalarNode):
+            if isinstance(uses_node, wy.ScalarNode):
                 ref = uses_node.value
                 if ref.startswith("dtolnay/rust-toolchain"):
                     errors.append(
@@ -539,12 +543,12 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                     with_fields = _map_entries(step_fields.get("with"))
                     tc_node = with_fields.get("toolchain")
                     if (
-                        not isinstance(tc_node, _yaml.ScalarNode)
+                        not isinstance(tc_node, wy.ScalarNode)
                         or tc_node.value not in rust_values
                     ):
                         got = (
                             tc_node.value
-                            if isinstance(tc_node, _yaml.ScalarNode)
+                            if isinstance(tc_node, wy.ScalarNode)
                             else None
                         )
                         errors.append(
@@ -557,7 +561,7 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
 
             run_node = step_fields.get("run")
             if (
-                isinstance(run_node, _yaml.ScalarNode)
+                isinstance(run_node, wy.ScalarNode)
                 and run_node.tag == "tag:yaml.org,2002:str"
             ):
                 run_cmd = run_node.value
@@ -580,12 +584,12 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                     step_env_fields = _map_entries(step_fields.get("env"))
                     env_tc_node = step_env_fields.get("RUST_TOOLCHAIN")
                     if (
-                        not isinstance(env_tc_node, _yaml.ScalarNode)
+                        not isinstance(env_tc_node, wy.ScalarNode)
                         or env_tc_node.value not in rust_values
                     ):
                         got = (
                             env_tc_node.value
-                            if isinstance(env_tc_node, _yaml.ScalarNode)
+                            if isinstance(env_tc_node, wy.ScalarNode)
                             else None
                         )
                         errors.append(
@@ -769,6 +773,6 @@ def main(argv: list[str]) -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
-    except PinError as exc:
+    except (PinError, wy.ReaderError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)

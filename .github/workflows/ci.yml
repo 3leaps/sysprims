@@ -45,12 +45,8 @@ jobs:
         run: bash scripts/check-planning-hygiene.sh
       - name: No local paths, keys, tokens or commit markers in tracked files
         run: python3 -I -B scripts/content-check.py
-      - name: Install PyYAML
-        run: |
-          set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q python3-yaml
-          python3 -P -E -c 'import yaml'
+      - name: Install the pinned yamlprims CLI
+        run: scripts/ci-install-yamlprims.sh python3
       - name: Workflow digest pins and read-only permissions
         run: |
           python3 -B -E scripts/release-workflow-pin.py check
@@ -66,13 +62,13 @@ jobs:
         run: |
           python3 -c 'import sys; assert sys.version_info >= (3, 11)'
           command -v gpg git node
-      - name: Install minisign and PyYAML
+      - name: Install minisign and the pinned yamlprims CLI
         run: |
           set -euo pipefail
           sudo apt-get update -q
-          sudo apt-get install -y -q minisign python3-yaml
+          sudo apt-get install -y -q minisign
           minisign -v
-          python3 -P -E -c 'import yaml'
+          scripts/ci-install-yamlprims.sh python3
       - name: Install checksum-pinned decernor
         run: |
           set -euo pipefail

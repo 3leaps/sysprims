@@ -227,13 +227,13 @@ ci_pin_controls = [
     (
         'same-line flow runs-on decoy',
         base
-        + '\n  pinctl: {runs-on: ubuntu-24.04, env: {DECOY: ubuntu-24.04  # pin:runner=linux-x64\n  }, steps: [{run: echo ok}]}\n',
+        + '\n  pinctl: {runs-on: ubuntu-24.04, env: {DECOY: ubuntu-24.04  # pin:runner=linux-x64\n    }, steps: [{run: echo ok}]}\n',
         'lacks # pin:runner=<key> marker',
     ),
     (
         'same-line flow matrix decoy',
         base
-        + '\n  pinctl:\n    runs-on: ${{ matrix.os }}\n    strategy: {matrix: {other: [ubuntu-24.04], os: [ubuntu-24.04  # pin:runner=linux-x64\n    ]}}\n    steps:\n      - run: echo ok\n',
+        + '\n  pinctl:\n    runs-on: ${{ matrix.os }}\n    strategy: {matrix: {other: [ubuntu-24.04], os: [ubuntu-24.04  # pin:runner=linux-x64\n      ]}}\n    steps:\n      - run: echo ok\n',
         'lacks # pin:runner=<key> marker',
     ),
     (
@@ -336,21 +336,23 @@ sed_in_place 's/^  workflow_dispatch:$/  push:\n  workflow_dispatch:/' "$repo/.g
 pin_with
 refused 'must trigger on workflow_dispatch only' check
 git -C "$repo" checkout -q -- .
-mkdir "$scratch/shadow"
-cp "$root/scripts/release-workflow-pin.py" "$root/scripts/ci-pins.py" "$root/scripts/workflow_yaml.py" "$scratch/shadow/"
-printf 'raise SystemExit("shadow yaml imported")\n' >"$scratch/shadow/yaml.py"
-(cd "$repo" && python3 -B -E "$scratch/shadow/release-workflow-pin.py" check) >"$scratch/out" 2>&1 || true
-if grep -q 'shadow yaml imported' "$scratch/out"; then
-	echo 'error: a yaml.py beside the pin checker was imported' >&2
-	exit 1
-fi
-grep -q 'every workflow matches' "$scratch/out" || {
+# Both checkers import only the standard library and the workflow reader they
+# load by path: modules planted beside them (including a yaml.py) or in the
+# working directory are never imported, and neither needs PyYAML.
+mkdir -p "$scratch/shadow/scripts" "$scratch/shadow/config"
+cp "$root/scripts/release-workflow-pin.py" "$root/scripts/ci-pins.py" "$root/scripts/workflow_yaml.py" "$root/scripts/yaml_json.py" "$scratch/shadow/scripts/"
+cp "$root/config/yamlprims-cli.txt" "$scratch/shadow/config/"
+for module in yaml json hashlib re subprocess tempfile tomllib importlib struct; do
+	printf 'raise SystemExit("SHADOW_%s_IMPORTED")\n' "$module" >"$scratch/shadow/scripts/$module.py"
+	printf 'raise SystemExit("SHADOW_%s_IMPORTED")\n' "$module" >"$repo/$module.py"
+done
+(cd "$repo" && python3 -B -E "$scratch/shadow/scripts/release-workflow-pin.py" check) >"$scratch/out" 2>&1 || true
+if grep -q 'SHADOW_' "$scratch/out" || ! grep -q 'every workflow matches' "$scratch/out"; then
+	echo 'error: the pin checker imported a planted module' >&2
 	cat "$scratch/out" >&2
 	exit 1
-}
-# Even when PyYAML is unavailable, ci-pins.py fails before restoring its script
-# directory to sys.path, so a local scripts/yaml.py never executes.
-python3 -B -P -E - "$scratch/shadow/ci-pins.py" "$repo" >"$scratch/out" 2>&1 <<'PY' || true
+fi
+python3 -B -E - "$scratch/shadow/scripts/ci-pins.py" "$root" >"$scratch/out" 2>&1 <<'PY' || true
 import importlib.abc, runpy, sys
 
 class BlockInstalledYaml(importlib.abc.MetaPathFinder):
@@ -363,14 +365,12 @@ sys.meta_path.insert(0, BlockInstalledYaml())
 sys.argv = [sys.argv[1], "--root", sys.argv[2], "check"]
 runpy.run_path(sys.argv[0], run_name="__main__")
 PY
-if grep -q 'shadow yaml imported' "$scratch/out"; then
-	echo 'error: ci-pins.py imported local yaml.py when PyYAML was missing' >&2
-	exit 1
-fi
-grep -q 'need PyYAML' "$scratch/out" || {
+if grep -q 'SHADOW_' "$scratch/out" || ! grep -q 'match config/ci/pins.toml' "$scratch/out"; then
+	echo 'error: ci-pins.py imported a planted module or needed PyYAML' >&2
 	cat "$scratch/out" >&2
 	exit 1
-}
+fi
+rm -f "$repo"/{yaml,json,hashlib,re,subprocess,tempfile,tomllib,importlib,struct}.py
 
 # Symlink refusal in ci-pins.py sync happens before any workflow or digest file
 # is modified on disk.

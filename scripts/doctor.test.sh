@@ -15,6 +15,12 @@ mkdir -p "$scratch/py" "$scratch/stubs"
 ln -s "$python" "$scratch/py/python3"
 config="$root/.goneat/tools.yaml"
 patterns="$root/config/doctor-versions.txt"
+# The pinned yamlprims release: the version the real binary must report.
+released_yamlprims="$(awk '$1 == "release" { print $2 }' "$root/config/yamlprims-cli.txt")"
+[[ "$released_yamlprims" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+	echo 'error: no pinned yamlprims release' >&2
+	exit 1
+}
 
 # Version output in each tool's own format, at or above its declared minimum.
 # (Plain functions, not associative arrays: macOS ships bash 3.2.)
@@ -56,12 +62,23 @@ reset_stubs() {
 	# check is exercised below through a config pointing at a stub.
 	for tool in $tools_stubbed; do stub "$tool" "$(good "$tool")"; done
 }
+# yamlprims is never looked up on PATH: its detect command (run from the
+# repository root) reads the binary named by SYSPRIMS_YAMLPRIMS_BIN, and only
+# if its SHA-256 is committed in config/yamlprims-cli.txt. A stub can never
+# pass, so the real binary is used (no older release exists to test the
+# minimum with; the comparison itself is the one every tool shares).
+yamlprims_real="${SYSPRIMS_YAMLPRIMS_BIN:-}"
+[[ "$yamlprims_real" == /* && -f "$yamlprims_real" ]] || {
+	echo 'error: the doctor test needs SYSPRIMS_YAMLPRIMS_BIN (absolute path to the yamlprims CLI)' >&2
+	exit 1
+}
+yamlprims_bin="$yamlprims_real"
 doctor() {
 	local scope="$1"
-	env -i PATH="$scratch/stubs:$scratch/py" HOME="$scratch" \
-		python3 -I -B "$root/scripts/doctor.py" "$config" "$patterns" "$scope" >"$scratch/out" 2>&1
+	(cd "$root" && env -i PATH="$scratch/stubs:$scratch/py" HOME="$scratch" SYSPRIMS_YAMLPRIMS_BIN="$yamlprims_bin" \
+		python3 -I -B "$root/scripts/doctor.py" "$config" "$patterns" "$scope") >"$scratch/out" 2>&1
 }
-direct() { env -i PATH="$scratch/stubs:$scratch/py" python3 -I -B "$root/scripts/doctor.py" "$1" "${3:-$patterns}" "$2" >"$scratch/out" 2>&1; }
+direct() { (cd "$root" && env -i PATH="$scratch/stubs:$scratch/py" SYSPRIMS_YAMLPRIMS_BIN="$yamlprims_bin" python3 -I -B "$root/scripts/doctor.py" "$1" "${3:-$patterns}" "$2") >"$scratch/out" 2>&1; }
 passes() {
 	doctor "$1" || {
 		echo "error: refused scope $1" >&2
@@ -93,7 +110,7 @@ passes release
 passes dev
 # Each tool's version format is parsed to the right number.
 doctor release
-for line in 'git 2.54.0' 'gh 2.94.0' 'jq 1.7.1' 'gpg 2.2.0' 'minisign 0.11' 'npm 11.19.0' 'uv 0.8.22'; do
+for line in 'git 2.54.0' 'gh 2.94.0' 'jq 1.7.1' 'gpg 2.2.0' 'minisign 0.11' 'npm 11.19.0' 'uv 0.8.22' "yamlprims $released_yamlprims"; do
 	grep -q "^\[ok\] $line (minimum" "$scratch/out" || {
 		echo "error: did not read '$line'" >&2
 		cat "$scratch/out" >&2
@@ -123,6 +140,17 @@ if direct "$scratch/oldpy.yaml" dev; then
 	exit 1
 fi
 grep -q 'python3 3.10.14 is below the recommended minimum 3.11.0' "$scratch/out"
+
+# The pinned yamlprims release reads as its own version. Any other binary,
+# even one printing a good version line, and an unset or relative variable,
+# are unreadable.
+reset_stubs
+passes dev
+grep -q "^\[ok\] yamlprims $released_yamlprims (minimum" "$scratch/out"
+stub yamlprims-stub 'yamlprims 0.1.0'
+yamlprims_bin="$scratch/stubs/yamlprims-stub" refused dev 'yamlprims: cannot read a version'
+yamlprims_bin='' refused dev 'yamlprims: cannot read a version'
+yamlprims_bin=stubs/yamlprims refused dev 'yamlprims: cannot read a version'
 
 # Unreadable version, failing detect command, missing tool.
 reset_stubs

@@ -12,7 +12,7 @@ count as 0). A tool that is missing, has no pattern, prints a first line that
 does not match, or is older than its minimum fails the run.
 
 The config is read with a small strict reader for this file's own shape (no
-PyYAML on maintainer hosts); anything it does not recognize is an error, not
+YAML library); anything it does not recognize is an error, not
 a skipped tool.
 """
 
