@@ -12,6 +12,8 @@ root="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "$root/scripts/release-tag-common.sh"
 # shellcheck source=scripts/release-decernor.sh
 source "$root/scripts/release-decernor.sh"
+# shellcheck source=scripts/release-yamlprims.sh
+source "$root/scripts/release-yamlprims.sh"
 die() {
 	echo "error: $*" >&2
 	exit 1
@@ -47,6 +49,7 @@ anchor="${out%/}.anchor"
 [[ ! -e "$anchor" && ! -L "$anchor" ]] || die "$anchor already exists; run make release-clean first"
 
 resolve_release_decernor
+resolve_release_yamlprims
 RELEASE_DECERNOR_BIN="$RELEASE_DECERNOR_BIN" "$root/scripts/verify-pinned-tag.sh" --published >/dev/null
 tag_object="$(git rev-parse --verify "refs/tags/$tag")"
 commit="$(git rev-parse "${tag_object}^{commit}")"

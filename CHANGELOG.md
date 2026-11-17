@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`go 1.26.0`) and build with `CGO_ENABLED=0`; `go/recurrence` remains a
   separate module.
 - npm CDN readiness polling during publication now waits up to 180 seconds.
+- The workflow digest, permission and CI-pin checkers use only the Python
+  standard library: they read YAML with the yamlprims CLI
+  (`SYSPRIMS_YAMLPRIMS_BIN`), run only if its SHA-256 matches a digest pinned
+  in `config/yamlprims-cli.txt`. PyYAML is no longer required.
 
 ### Removed
 

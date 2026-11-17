@@ -295,7 +295,10 @@ content-check: ## Refuse local paths, private keys, tokens and commit markers in
 		done; \
 	done
 
-workflow-pin: ## Every workflow matches its reviewed digest, CI pins, and read-only policy
+# The workflow checkers read YAML only through the yamlprims CLI named by
+# SYSPRIMS_YAMLPRIMS_BIN (absolute path; no PATH lookup, here or in CI and the
+# release ceremony), authenticated by the digests in config/yamlprims-cli.txt.
+workflow-pin: ## Every workflow matches its reviewed digest, CI pins, and read-only policy (needs SYSPRIMS_YAMLPRIMS_BIN)
 	@$(PYTHON) -B -E scripts/release-workflow-pin.py check
 	@$(PYTHON) -B -P -E scripts/ci-pins.py check
 
@@ -650,6 +653,7 @@ SYSPRIMS_GPG_HOMEDIR ?=
 #   SYSPRIMS_RELEASE_TAG      vX.Y.Z (explicit; never derived)
 #   SYSPRIMS_TAG_MESSAGE_DIR  per-release message directory ending in the tag
 #   SYSPRIMS_DECERNOR_BIN     absolute path to decernor >= 0.1.8 (no fallback)
+#   SYSPRIMS_YAMLPRIMS_BIN    absolute path to the yamlprims CLI pinned in config/yamlprims-cli.txt (no fallback)
 #   SYSPRIMS_TAGGER_NAME/EMAIL, SYSPRIMS_PGP_KEY_ID (<subkey>!), SYSPRIMS_GPG_HOMEDIR
 release-prepare-tag-message: release-require-tag ## Prepare the per-tag annotation messages (outside the repo)
 	./scripts/release-tag-operator.sh prepare-message
@@ -797,6 +801,8 @@ release-pack-npm-redirector: ## Build the bare-name npm redirector tarball (sysp
 release-preflight: release-require-tag release-plan-check version-check ## Verify all pre-tag requirements (REQUIRED before tagging)
 	@echo "Running release preflight checks..."
 	@echo ""
+	@# Check 0: the pinned YAML reader the workflow checkers need (config/yamlprims-cli.txt)
+	@$(PYTHON) -I -B scripts/yaml_json.py identify >/dev/null && echo "[ok] YAML reader $$SYSPRIMS_YAMLPRIMS_BIN"
 	@# Check 1: Working tree must be clean
 	@if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
 		echo "[!!] Working tree not clean - commit or stash changes first"; \

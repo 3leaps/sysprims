@@ -59,6 +59,14 @@ expect_fail_with 'SYSPRIMS_DECERNOR_BIN is required' tag_run -u SYSPRIMS_DECERNO
 nothing_signed
 expect_fail_with 'absolute executable' tag_run SYSPRIMS_DECERNOR_BIN=decernor PATH="$fixture_dir/spy:$PATH"
 nothing_signed
+# The workflow checkers' YAML reader is resolved before anything is signed, so
+# the post-tag verification can never be the first place it is missing.
+expect_fail_with 'SYSPRIMS_YAMLPRIMS_BIN is required' tag_run -u SYSPRIMS_YAMLPRIMS_BIN PATH="$fixture_dir/spy:$PATH"
+nothing_signed
+printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture_dir/fake-yamlprims"
+chmod +x "$fixture_dir/fake-yamlprims"
+expect_fail_with 'is not a released yamlprims binary' tag_run SYSPRIMS_YAMLPRIMS_BIN="$fixture_dir/fake-yamlprims" PATH="$fixture_dir/spy:$PATH"
+nothing_signed
 expect_fail_with 'differs from config/release/signing-subkey.txt' tag_run SYSPRIMS_PGP_KEY_ID="$(printf 'F%.0s' $(seq 40))!"
 no_tags
 expect_fail_with 'committed tagger identity' tag_run SYSPRIMS_TAGGER_NAME=Someone

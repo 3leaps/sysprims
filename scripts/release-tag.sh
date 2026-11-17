@@ -6,10 +6,13 @@ set -euo pipefail
 source "$(dirname "$0")/release-tag-common.sh"
 # shellcheck source=scripts/release-decernor.sh
 source "$(dirname "$0")/release-decernor.sh"
+# shellcheck source=scripts/release-yamlprims.sh
+source "$(dirname "$0")/release-yamlprims.sh"
 cd "$tag_root"
 # Every input is checked before anything is fetched or signed.
 tag_version
 resolve_release_decernor
+resolve_release_yamlprims
 tag_identity
 tag_selector
 tag_key_home

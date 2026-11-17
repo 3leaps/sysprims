@@ -24,6 +24,7 @@ scopes:
       - minisign
       - npm
       - uv
+      - yamlprims
   dev:
     description: Host tools for make check
     tools:
@@ -31,6 +32,7 @@ scopes:
       - jq
       - python3
       - go
+      - yamlprims
   # make bootstrap installs only this scope: exact pins via go install or a
   # reviewed cargo command, never a package manager. Installing other scopes
   # can fetch package managers (brew, bun), so bootstrap only checks them.
@@ -456,6 +458,29 @@ tools:
         - winget
     version_scheme: semver
     minimum_version: 2.2.0
+  # yamlprims is not looked up on PATH: its detect_command (run from the
+  # repository root) authenticates the binary named by SYSPRIMS_YAMLPRIMS_BIN
+  # against the SHA-256 digests committed in config/yamlprims-cli.txt, then
+  # reads the version of that authenticated copy (scripts/yaml_json.py). The
+  # minimum is the one scripts/yaml_json.py enforces.
+  yamlprims:
+    name: yamlprims
+    description: YAML reader for the workflow checkers (SYSPRIMS_YAMLPRIMS_BIN; CI and release validation only)
+    kind: system
+    detect_command: python3 -I -B scripts/yaml_json.py version
+    platforms:
+      - darwin
+      - linux
+      - windows
+    installer_priority:
+      darwin:
+        - manual
+      linux:
+        - manual
+      windows:
+        - manual
+    version_scheme: semver
+    minimum_version: 0.1.0
   minisign:
     name: minisign
     description: Release manifest signing and verification

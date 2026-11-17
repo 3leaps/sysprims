@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Synthetic release-tooling controls: throwaway keys and local fixtures only, no
-# operator keyring and no network. Needs gpg, minisign, git, node, python3 >= 3.11 with PyYAML and
+# operator keyring and no network. Needs gpg, minisign, git, node, python3 >= 3.11, the pinned yamlprims
+# CLI (SYSPRIMS_YAMLPRIMS_BIN, config/yamlprims-cli.txt) and
 # decernor >= 0.1.8 (SYSPRIMS_DECERNOR_BIN, or decernor on PATH for tests).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -9,7 +10,7 @@ for suite in release-tag-controls release-anchors release-validate-pin verify-pi
 	release-stage-public release-stage-published release-fetch-anchors release-materialize-tag-messages \
 	verify-signatures release-crates release-index-entry check-registry-config release-source-check release-cargo-provider \
 	release-fetch-ci-artifacts release-verify-registries \
-	workflow-permissions workflow-pins content-check doctor surface-scan; do
+	yaml-json workflow-permissions workflow-pins content-check doctor surface-scan; do
 	echo "== $suite"
 	"$root/scripts/$suite.test.sh"
 done

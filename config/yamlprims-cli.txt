@@ -1,0 +1,31 @@
+# The yamlprims CLI reads YAML for the workflow checkers
+# (scripts/release-workflow-pin.py, scripts/release-workflow-permissions.py)
+# through scripts/yaml_json.py. It is a host tool for CI and release
+# validation only: nothing built or shipped from this repository depends on
+# it.
+#
+# minimum: the oldest yamlprims the checkers accept (scripts/yaml_json.py,
+# .goneat/tools.yaml).
+minimum 0.1.0
+#
+# CI download (scripts/ci-install-yamlprims.sh): the release, then one line
+# per runner archive, "<sha256>  <archive>", each digest as listed in that
+# release's SHA256SUMS (signed with the 3 Leaps release minisign key,
+# docs/security/sysprims-minisign.pub).
+# https://github.com/3leaps/yamlprims/releases/tag/v0.2.1
+release 0.2.1
+430a80ae6b267b3d5066e32b7f1c0aa2509192dceceb4094b63f09b24a6e2cf4  yamlprims-0.2.1-darwin-arm64.tar.gz
+08decf02549acf6b0e15c56848d6030aedf8ccfabe6ec6ead8a6ef8ee45644a2  yamlprims-0.2.1-linux-amd64.tar.gz
+b4ccbcd42d97aff497c3759555a079e97d7ae39415591d256b33fd404a30f5b2  yamlprims-0.2.1-linux-arm64.tar.gz
+0da9b43a6b46854efd6e166373e18fb31ed0446c4bee0c5b4f850302d3fdd11f  yamlprims-0.2.1-windows-amd64.zip
+0146913d879d1bad4aa9dfb78be63dbcef04d399be8d7d1534c594485139c105  yamlprims-0.2.1-windows-arm64.zip
+#
+# The trust anchor for the binary itself: the SHA-256 of the executable in
+# each archive above (yamlprims, or yamlprims.exe in the zips). The checkers
+# copy the file named by SYSPRIMS_YAMLPRIMS_BIN and run the copy only if its
+# digest is listed here for a platform the host runs.
+binary darwin-arm64 c002c7871d785d4eca4f60b77c9ab0100a207fecb69721ae672676b709ab302f
+binary linux-amd64 fb14302dc442f26d4adaa09c93eb4d0cff514e1476850ff563daa44aeb63124a
+binary linux-arm64 5ed9769692761fa142c713551d818f5d5993e235b098aa30d9f18b070933af5f
+binary windows-amd64 be3170b1deb898105902e7f8ea3b41906572ff14d1a9ed3a36a6ae98d508cc8f
+binary windows-arm64 ef5ccbe47c892e3cd7e326a1c9a0f844101dbd75fda792e44d6f1b7e03aa15ca

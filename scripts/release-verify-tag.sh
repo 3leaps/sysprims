@@ -6,10 +6,13 @@ set -euo pipefail
 source "$(dirname "$0")/release-tag-common.sh"
 # shellcheck source=scripts/release-decernor.sh
 source "$(dirname "$0")/release-decernor.sh"
+# shellcheck source=scripts/release-yamlprims.sh
+source "$(dirname "$0")/release-yamlprims.sh"
 cd "$tag_root"
 tag_version
 tag_selector
 resolve_release_decernor
+resolve_release_yamlprims
 export RELEASE_DECERNOR_BIN
 tag_require_clean
 target="$(git rev-parse HEAD)"

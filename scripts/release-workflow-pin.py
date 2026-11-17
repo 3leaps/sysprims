@@ -17,20 +17,35 @@ Modes:
   verify-commit COMMIT  verify the committed tree at COMMIT against COMMIT:config/release/release-workflow.sha256
 """
 
-import hashlib
-import re
-import subprocess
+import os
 import sys
-from pathlib import Path
 
-# Keep the script directory off sys.path before importing PyYAML so a stray
-# scripts/yaml.py cannot shadow the installed module.
-sys.path = [
-    entry
-    for entry in sys.path
-    if Path(entry or ".").resolve() != Path(__file__).resolve().parent
+# Keep this script's directory and the working directory off sys.path before
+# anything else is imported, so a module planted beside this script (or in the
+# working directory) is never imported; only the standard library and the
+# workflow reader loaded by path below run.
+_untrusted = {
+    os.path.realpath(p)
+    for p in (os.path.dirname(os.path.abspath(__file__)), os.getcwd())
+}
+sys.path[:] = [
+    p for p in sys.path if p not in ("", ".") and os.path.realpath(p) not in _untrusted
 ]
-import yaml  # noqa: E402
+
+import hashlib  # noqa: E402
+import importlib.util  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+# The workflow reader: scripts/workflow_yaml.py, which runs the pinned yamlprims
+# CLI through scripts/yaml_json.py (standard library only).
+SCRIPT_DIR = Path(__file__).resolve().parent
+_wy_spec = importlib.util.spec_from_file_location(
+    "sysprims_workflow_yaml", SCRIPT_DIR / "workflow_yaml.py"
+)
+wy = importlib.util.module_from_spec(_wy_spec)
+_wy_spec.loader.exec_module(wy)
 
 PIN_PATH = "config/release/release-workflow.sha256"
 PINNED_DIRS = (".github/workflows", ".github/actions")
@@ -86,8 +101,8 @@ def parse_pins(text: str, source: str) -> dict[str, str]:
 def require_read_only(rel: str, content: bytes) -> None:
     try:
         text = content.decode("utf-8")
-        doc = yaml.safe_load(text)
-    except (UnicodeDecodeError, yaml.YAMLError) as error:
+        doc = wy.load_text(text, rel)
+    except (UnicodeDecodeError, wy.WorkflowError) as error:
         fail(f"{rel} is not valid UTF-8 YAML: {error}")
     if not isinstance(doc, dict):
         fail(f"{rel} must parse to a YAML mapping")
@@ -101,7 +116,7 @@ def require_read_only(rel: str, content: bytes) -> None:
             f"{rel} must declare read-only top-level permissions including contents: read"
         )
     if rel in WORKFLOW_DISPATCH_ONLY:
-        on_field = doc.get("on", doc.get(True))
+        on_field = doc.get("on")
         triggers = (
             list(on_field)
             if isinstance(on_field, dict)
@@ -225,4 +240,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except wy.ReaderError as error:
+        fail(f"the YAML reader failed: {error}")

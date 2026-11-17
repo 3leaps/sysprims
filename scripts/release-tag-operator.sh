@@ -55,16 +55,19 @@ export SYSPRIMS_RELEASE_TAG SYSPRIMS_TAG_MESSAGE_DIR
 if [[ "$mode" == prepare-message ]]; then
 	exec "$root/scripts/release-prepare-tag-message.py"
 fi
-export SYSPRIMS_TAGGER_NAME SYSPRIMS_TAGGER_EMAIL SYSPRIMS_PGP_KEY_ID SYSPRIMS_GPG_HOMEDIR SYSPRIMS_DECERNOR_BIN
+export SYSPRIMS_TAGGER_NAME SYSPRIMS_TAGGER_EMAIL SYSPRIMS_PGP_KEY_ID SYSPRIMS_GPG_HOMEDIR SYSPRIMS_DECERNOR_BIN SYSPRIMS_YAMLPRIMS_BIN
 
 # shellcheck source=scripts/release-tag-common.sh
 source "$root/scripts/release-tag-common.sh"
 # shellcheck source=scripts/release-decernor.sh
 source "$root/scripts/release-decernor.sh"
+# shellcheck source=scripts/release-yamlprims.sh
+source "$root/scripts/release-yamlprims.sh"
 # Every local input is checked before the first network or git side effect
-# (tag_checkout fetches): the checker, tag syntax, tagger, subkey selector,
+# (tag_checkout fetches): the checker, the YAML reader, tag syntax, tagger, subkey selector,
 # branch, clean tree, the tag set at HEAD and every message.
 resolve_release_decernor
+resolve_release_yamlprims
 tag_version
 tag_identity
 tag_selector
