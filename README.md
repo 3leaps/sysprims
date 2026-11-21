@@ -88,23 +88,23 @@ it.
 
 ## Quick Start
 
-### v0.5.0 Release Coordinates
+### v0.5.1 Release Coordinates
 
-The core release and its language packages share version `0.5.0`, but each
+The core release and its language packages share version `0.5.1`, but each
 ecosystem resolves that version through its own coordinate. Publication
 workflows run from the verified core tag.
 
 | Surface | Pin |
 | --- | --- |
-| Rust crates | `sysprims-core`, `sysprims-evidence`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and `sysprims-recurrence` at `0.5.0` |
-| Rust workspace | Repository tag `v0.5.0` |
-| Go module (pure Go, `CGO_ENABLED=0`) | `github.com/3leaps/sysprims/{syserror,signal,session,timeout,proc,evidence,procobserve}@v0.5.0` |
-| Go recurrence module | `github.com/3leaps/sysprims/go/recurrence@v0.5.0` |
-| Python | `pip install sysprims==0.5.0` |
-| TypeScript | `npm install @3leaps/sysprims@0.5.0` |
+| Rust crates | `sysprims-core`, `sysprims-evidence`, `sysprims-signal`, `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and `sysprims-recurrence` at `0.5.1` |
+| Rust workspace | Repository tag `v0.5.1` |
+| Go module (pure Go, `CGO_ENABLED=0`) | `github.com/3leaps/sysprims/{syserror,signal,session,timeout,proc,evidence,procobserve}@v0.5.1` |
+| Go recurrence module | `github.com/3leaps/sysprims/go/recurrence@v0.5.1` |
+| Python | `pip install sysprims==0.5.1` |
+| TypeScript | `npm install @3leaps/sysprims@0.5.1` |
 | PTY adapter | A separate [`sysprims-pty`](https://github.com/3leaps/sysprims-pty) release; use the core revision recorded by that companion release |
 
-The canonical `v0.5.0` and path-prefixed `go/recurrence/v0.5.0` tags identify the same
+The canonical `v0.5.1` and path-prefixed `go/recurrence/v0.5.1` tags identify the same
 core commit. `sysprims-pty` has an independent version and tag lifecycle; it is
 not included in the core tag. Only the seven Rust library crates are published
 to crates.io; the CLI, TypeScript N-API crate, and Python `PyO3`
@@ -117,9 +117,9 @@ Managed contained spawn is available in Go as `SpawnContained`, in Python as
 
 ```toml
 [dependencies]
-sysprims-timeout = "0.5.0"
-sysprims-signal = "0.5.0"
-sysprims-proc = "0.5.0"
+sysprims-timeout = "0.5.1"
+sysprims-signal = "0.5.1"
+sysprims-proc = "0.5.1"
 ```
 
 ```rust
@@ -420,9 +420,9 @@ See [Platform Support Matrix](docs/standards/platform-support.md) for the canoni
 
 | Language   | Implementation | Package                                                   |
 | ---------- | -------------- | --------------------------------------------------------- |
-| Go         | Pure Go (`CGO_ENABLED=0`) | `github.com/3leaps/sysprims/{syserror,signal,session,timeout,proc,evidence,procobserve}@v0.5.0` |
-| Python     | Native PyO3 (`cp310-abi3`) | `pip install sysprims==0.5.0`                             |
-| TypeScript | Native N-API (`napi-rs`) | `npm install @3leaps/sysprims@0.5.0`                      |
+| Go         | Pure Go (`CGO_ENABLED=0`) | `github.com/3leaps/sysprims/{syserror,signal,session,timeout,proc,evidence,procobserve}@v0.5.1` |
+| Python     | Native PyO3 (`cp310-abi3`) | `pip install sysprims==0.5.1`                             |
+| TypeScript | Native N-API (`napi-rs`) | `npm install @3leaps/sysprims@0.5.1`                      |
 
 ### As a Go Library
 

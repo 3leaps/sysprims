@@ -1,6 +1,6 @@
 {
   "name": "@3leaps/sysprims",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "GPL-free cross-platform process utilities (TypeScript bindings via Node-API native addon)",
   "license": "MIT OR Apache-2.0",
   "repository": {

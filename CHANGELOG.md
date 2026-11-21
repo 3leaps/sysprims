@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-20
+
+### Fixed
+
+- `registry-publish.yml` installs `decernor` from the committed pin
+  `config/release/decernor-ci-sha256.txt` and installs the pinned `yamlprims`
+  CLI, so PyPI and npm publication can verify the published release. PyPI and
+  npm go from `0.4.0` to `0.5.1`; `0.5.0` was not published to either.
+
+### Changed
+
+- `scripts/ci-install-decernor.sh` installs decernor for CI and registry
+  publication from the committed pin.
+- Workflow run steps carry no `${{ }}` expressions; values reach the shell
+  only through `env:`. A run line that plainly reaches the network, installs
+  a tool, carries a 64-hex digest, or calls a release-tool installer must
+  appear exactly in the committed `config/ci/reviewed-run-lines.txt`;
+  `make ci-pins-check` refuses anything else. Release tools are installed only
+  by `scripts/ci-install-<tool>.sh` from committed pin files, which CI runs on
+  every pull request. CI pins `cargo-audit` `0.23.0`, `govulncheck` `v1.9.0`,
+  and `gosec` `v2.29.0`.
+- `make release-download` reads `SYSPRIMS_RELEASE_RUN_ID` and
+  `SYSPRIMS_RELEASE_RUN_ATTEMPT`; the unprefixed names are refused.
+- New `make release-stage` (release notes, anchors, payload check, checksums);
+  release guard failures name the make target(s) to run next.
+- A `yamlprims` digest mismatch names the pinned release and a versioned
+  install path; `verify-signatures.sh` prints its usage when
+  `SYSPRIMS_RELEASE_TAG` is unset.
+
 ## [0.5.0] - 2026-11-16
 
 ### Added
@@ -956,7 +985,8 @@ TypeScript bindings parity release for proc/ports/signals. Node.js developers no
   - Signal tests now use deterministic patterns: reject pid=0, spawn-and-kill for terminate/forceKill
   - Eliminates flakiness from arbitrary PIDs that may exist on CI runners
 
-[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/3leaps/sysprims/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/3leaps/sysprims/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/3leaps/sysprims/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/3leaps/sysprims/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/3leaps/sysprims/compare/v0.2.4...v0.3.0
