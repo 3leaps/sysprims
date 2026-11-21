@@ -147,7 +147,7 @@ shim_make -u RELEASE_TAG SYSPRIMS_RELEASE_TAG=v1.2.3 make -s -C "$shim" release-
 # list is written by hand on purpose.
 for target in release-guard-downloaded release-guard-checksummed release-require-checksummed \
 	release-guard-signed release-guard-uploaded release-guard-remote release-publish \
-	release-download release-checksums release-sign release-export-keys release-notes \
+	release-download release-stage release-checksums release-sign release-export-keys release-notes \
 	release-create-draft release-verify release-verify-signatures release-crates-dry-run release-crates-publish \
 	release-tag release-push-tag release-verify-tag release-verify-remote-tag release-prepare-tag-message \
 	release-guard-tag-version release-guard-tag-version-post release-preflight release \

@@ -155,6 +155,10 @@ export function inventoryForTag(root, tag) {
   return inventoryForCommit(root, commit, version);
 }
 
+function entriesIn(directory) {
+  return existsSync(directory) ? readdirSync(directory).sort() : [];
+}
+
 function filesIn(directory) {
   if (!existsSync(directory)) fail(`release directory is missing: ${directory}`);
   return readdirSync(directory, { withFileTypes: true })
@@ -163,12 +167,63 @@ function filesIn(directory) {
     .sort();
 }
 
+// The make target that produces each staged file, in release order. A
+// mismatch names the targets that produce the missing files, so the operator
+// sees what to run next instead of a bare file list.
+const PRODUCER_ORDER = [
+  "release-download",
+  "release-notes",
+  "release-stage-anchors",
+  "release-checksums",
+  "release-sign",
+  "release-export-keys",
+];
+const STAGE_TARGETS = new Set(["release-notes", "release-stage-anchors", "release-checksums"]);
+
+export function producerOf(name) {
+  if (/^release-notes-v\d+\.\d+\.\d+\.md$/.test(name)) return "release-notes";
+  if (ANCHORS.some(([, anchor]) => anchor === name)) return "release-stage-anchors";
+  if (name === "SHA256SUMS" || name === "SHA512SUMS") return "release-checksums";
+  if (/^SHA(256|512)SUMS\.(asc|minisig)$/.test(name)) return "release-sign";
+  if (name === "sysprims-minisign.pub" || name === "sysprims-release-signing-key.asc") return "release-export-keys";
+  return "release-download";
+}
+
+export function nextStepHint(missing, extra, actual = []) {
+  if (extra.length) return "; remove the extra files (make release-clean starts over)";
+  if (!missing.length) return "";
+  const targets = new Set(missing.map(producerOf));
+  const ordered = PRODUCER_ORDER.filter((target) => targets.has(target));
+  if (ordered.includes("release-download")) return "; run make release-clean, then make release-download";
+  // actual lists every directory entry; a missing name that is present is a
+  // link or other non-regular entry, which no producer will overwrite.
+  if (missing.some((name) => actual.includes(name))) return "; a staged name is not a regular file: run make release-clean, then make release-download";
+  // Producers never overwrite later-phase files (checksums cover the payload
+  // they saw; signatures cover those checksums), so a missing earlier product
+  // with any later product present means starting over.
+  const earliest = Math.min(...ordered.map((target) => PRODUCER_ORDER.indexOf(target)));
+  if (actual.some((name) => PRODUCER_ORDER.indexOf(producerOf(name)) > earliest && !missing.includes(name))) {
+    return "; later-phase files are already staged: run make release-clean, then make release-download";
+  }
+  // release-stage-anchors refuses to overwrite, so a half-staged anchor pair
+  // cannot be completed in place.
+  const anchorNames = ANCHORS.map(([, name]) => name);
+  const anchorsMissing = anchorNames.filter((name) => missing.includes(name)).length;
+  if (anchorsMissing && anchorsMissing !== anchorNames.length) return "; one anchor is staged without the other: run make release-clean, then make release-download";
+  const steps = ordered.map((target) => `make ${target}`).join(", then ");
+  // release-stage is offered only from a fresh download: both anchors absent
+  // and no checksum, signature or key file present yet.
+  const laterPhase = actual.some((name) => !["release-download", "release-notes", "release-stage-anchors"].includes(producerOf(name)));
+  const stage = anchorsMissing === anchorNames.length && !laterPhase && ordered.every((target) => STAGE_TARGETS.has(target));
+  return stage ? `; run ${steps}, or make release-stage for all of them` : `; run ${steps}`;
+}
+
 export function assertInventory(directory, expected, phase) {
   const actual = filesIn(directory);
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     const missing = expected.filter((name) => !actual.includes(name));
     const extra = actual.filter((name) => !expected.includes(name));
-    fail(`${phase} inventory mismatch; missing=[${missing.join(", ")}], extra=[${extra.join(", ")}]`);
+    fail(`${phase} inventory mismatch; missing=[${missing.join(", ")}], extra=[${extra.join(", ")}]${nextStepHint(missing, extra, entriesIn(directory))}`);
   }
 }
 
@@ -312,7 +367,7 @@ function requireChecksummed(root, directory, version) {
   const actual = filesIn(directory);
   const missing = required.filter((name) => !actual.includes(name));
   const extra = actual.filter((name) => !allowed.includes(name));
-  if (missing.length || extra.length) fail(`required checksummed state mismatch; missing=[${missing.join(", ")}], extra=[${extra.join(", ")}]`);
+  if (missing.length || extra.length) fail(`required checksummed state mismatch; missing=[${missing.join(", ")}], extra=[${extra.join(", ")}]${nextStepHint(missing, extra, entriesIn(directory))}`);
   verifyTaggedAssets(root, directory, version);
   verifyFetchedPayload(root, directory, version);
   verifyChecksums(directory, base);

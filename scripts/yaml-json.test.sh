@@ -76,6 +76,13 @@ accepted "$scratch/noexec"
 cp "$real" "$scratch/tampered"
 printf '\0' >>"$scratch/tampered"
 refused 'is not a released yamlprims binary for this host' "$scratch/tampered"
+# The refusal names the pinned release and a versioned install path.
+pinned="$(sed -n 's/^release \([0-9][0-9.]*\)$/\1/p' "$root/config/yamlprims-cli.txt")"
+[[ -n "$pinned" ]] || {
+	echo 'error: config/yamlprims-cli.txt pins no release' >&2
+	exit 1
+}
+refused "this checkout pins yamlprims $pinned: install that release to a versioned path (for example ~/.local/share/yamlprims/$pinned/yamlprims)" "$scratch/tampered"
 printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$real" >"$scratch/wrapper"
 chmod +x "$scratch/wrapper"
 refused 'is not a released yamlprims binary for this host' "$scratch/wrapper"

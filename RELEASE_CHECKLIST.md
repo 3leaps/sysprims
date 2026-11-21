@@ -14,7 +14,11 @@ This document walks maintainers through the build/sign/publish flow for each sys
 - The yamlprims CLI from the release pinned in `config/yamlprims-cli.txt`, with
   `SYSPRIMS_YAMLPRIMS_BIN` set to its absolute path. The workflow checkers
   (`make check`, release preflight, tagging and tag verification) read YAML
-  only through it and run it only if its SHA-256 matches the committed digest
+  only through it and run it only if its SHA-256 matches the committed digest.
+  Every post-tag step runs from the tag checkout, so the binary must match the
+  **tag's** `config/yamlprims-cli.txt`, not a newer yamlprims on `PATH`; keep
+  each pinned release at a versioned path (for example
+  `~/.local/share/yamlprims/<version>/yamlprims`)
 - All feature PRs for this release are merged and branch is `main`
 
 ## 1. Pre-Release Preparation
@@ -231,10 +235,12 @@ After every release tag is pushed (three when the Go binding is published and
 the recurrence module is present), keep release execution in this order:
 
 1. Verify the tag-triggered release workflow and optional validation workflow.
-2. Fetch the CI payload, copy tagged notes, checksum, sign, verify, and create
-   the draft GitHub release with every asset (`make release-download` /
-   `release-sign` / `release-create-draft` run from this detached tag
-   checkout). The release stays a draft.
+2. From this detached tag checkout, fetch the CI payload and build the draft
+   GitHub release with every asset, in order: `make release-download`,
+   `release-stage` (`release-notes`, `release-stage-anchors`, the downloaded
+   payload check and `release-checksums`), `release-sign`,
+   `release-export-keys`, `release-verify`, `release-create-draft`. The
+   release stays a draft.
 3. Promote the verified draft to an immutable public GitHub release with
    `make release-publish` (which re-verifies every uploaded asset digest against
    local `dist/release`, promotes the draft, and requires `.draft == false && .immutable == true`),
@@ -270,7 +276,7 @@ next step.
   - Eight CLI archives (darwin-amd64, darwin-arm64, linux-amd64,
     linux-amd64-musl, linux-arm64, linux-arm64-musl, windows-amd64,
     windows-arm64)
-  - SBOM (sysprims-X.Y.Z.cdx.json)
+  - SBOM (sbom-X.Y.Z.cdx.json)
   - Five Python `cp310-abi3` wheels + sdist (`sysprims-X.Y.Z-*.whl`, `sysprims-X.Y.Z.tar.gz`)
   - Eight npm tarballs (`3leaps-sysprims*-X.Y.Z.tgz`)
   - Licenses (LICENSE-MIT, LICENSE-APACHE)
@@ -374,7 +380,7 @@ on HEAD.
 2. **Fetch the CI payload artifact**
 
    ```bash
-   make release-download RELEASE_RUN_ID=<run> RELEASE_RUN_ATTEMPT=<attempt>
+   make release-download SYSPRIMS_RELEASE_RUN_ID=<run> SYSPRIMS_RELEASE_RUN_ATTEMPT=<attempt>
    ```
 
    Verifies the pushed tags, requires the named attempt to be a successful
@@ -383,22 +389,22 @@ on HEAD.
    SHA-256 in `dist/release.anchor`. Later phases check the staged CI files
    against that record.
 
-3. **Copy the tagged release notes and stage the fingerprint anchors**
+3. **Copy the tagged release notes, stage the fingerprint anchors, and
+   generate exact checksum manifests**
 
    ```bash
-   make release-notes
-   make release-stage-anchors
-   make release-guard-downloaded
+   make release-stage
    ```
+
+   Runs, in order, `make release-notes`, `make release-stage-anchors` and
+   `make release-checksums` (which first runs `make release-guard-downloaded`).
+   Each can still be run on its own; when a guard finds files missing it names
+   the target(s) to run next.
 
    The copied note must be byte-identical to `docs/releases/vX.Y.Z.md` in the
    immutable tag tree. It is part of both signed checksum manifests.
 
-4. **Generate exact checksum manifests**
-
-   ```bash
-   make release-checksums
-   ```
+4. **What the staging step checks**
 
    `release-stage-anchors` copies `keys/expected-fingerprints.txt` and
    `keys/expected-fingerprints.ndjson` from the tagged commit's blobs; the
@@ -464,7 +470,8 @@ Run `.github/workflows/registry-publish.yml` only after the signed GitHub
 release is promoted to `.immutable == true` and crates.io publication is
 complete:
 
-1. Optional dry-run stage and registry comparison (no OIDC environment entered):
+1. Dry-run stage and registry comparison first (no OIDC environment entered).
+   Wait for it to pass before the live run:
 
    ```bash
    VERSION=$(cat VERSION)
@@ -486,7 +493,10 @@ The `stage` job runs outside the protected OIDC environments and without
 (`scripts/release-stage-published.sh --pypi-only`) and the signed npm `.tgz`
 tarballs (`scripts/release-stage-published.sh --npm-only`) directly from the
 immutable GitHub Release, verifying the `decernor` tag signature and both
-minisign and OpenPGP checksum signatures. A dry run ends after staging and
+minisign and OpenPGP checksum signatures. It installs decernor and the yamlprims
+CLI only from the tag's committed pins (`scripts/ci-install-decernor.sh` with
+`config/release/decernor-ci-sha256.txt`, `scripts/ci-install-yamlprims.sh` with
+`config/yamlprims-cli.txt`). A dry run ends after staging and
 registry comparison. The protected `publish-pypi` (`environment: publish-pypi`)
 and `publish-npm` (`environment: publish-npm`) jobs receive only the verified
 staged artifacts, re-verify their anchor digests against the tagged commit, and
@@ -568,6 +578,7 @@ git push origin main
 | `make release-clean`       | Remove dist/release contents                                                   |
 | `make release-plan-check`  | Validate the machine-readable per-cut surface plan                             |
 | `make release-download`    | Fetch the exact CI payload artifact (named run and attempt)                    |
+| `make release-stage`       | After download: notes, anchors, payload check, checksums (in order)            |
 | `make release-stage-anchors` | Stage the fingerprint anchors from the tagged commit (before checksums)      |
 | `make release-checksums`   | Generate SHA256SUMS and SHA512SUMS                                             |
 | `make release-sign`        | Sign checksums with minisign + PGP                                             |
@@ -615,7 +626,7 @@ mkdir -p docs/releases
 1. Check GitHub Actions logs.
 2. If the failure is transient, re-run the failed jobs of the same Release
    workflow run, then fetch with the new attempt number
-   (`make release-download RELEASE_RUN_ID=<run> RELEASE_RUN_ATTEMPT=<new>`).
+   (`make release-download SYSPRIMS_RELEASE_RUN_ID=<run> SYSPRIMS_RELEASE_RUN_ATTEMPT=<new>`).
 3. If the source needs a fix, fix it on main and release a new version. A
    pushed release tag is never deleted, moved, or reused.
 

@@ -132,6 +132,20 @@ def read_config(path=CONFIG):
     return minimum[0], digests
 
 
+def pinned_release(path=CONFIG):
+    """The 'release X.Y.Z' version the committed file pins for CI, or None."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            found = [
+                line.split()[1]
+                for line in handle
+                if re.fullmatch(r"release [0-9]+\.[0-9]+\.[0-9]+", line.rstrip("\n"))
+            ]
+    except OSError:
+        return None
+    return found[0] if len(found) == 1 else None
+
+
 def host_platforms():
     """The release platforms whose binaries this host runs."""
     machine = platform.machine().lower()
@@ -270,9 +284,19 @@ def authenticate(source):
         fail(f"{ENV} is larger than {MAX_BINARY} bytes")
     got = hashlib.sha256(data).hexdigest()
     if got not in allowed:
+        release = pinned_release()
+        hint = (
+            f"; this checkout pins yamlprims {release}: install that release to a "
+            f"versioned path (for example ~/.local/share/yamlprims/{release}/yamlprims) "
+            f"and set {ENV} to it. Post-tag release steps use the pin in the tag's "
+            f"own config/yamlprims-cli.txt"
+            if release
+            else ""
+        )
         fail(
             f"{ENV} is not a released yamlprims binary for this host: sha256 {got} "
             f"matches no binary digest for {', '.join(platforms)} in config/yamlprims-cli.txt"
+            f"{hint}"
         )
     if _private is None:
         _private = tempfile.mkdtemp(prefix="sysprims-yamlprims.")
