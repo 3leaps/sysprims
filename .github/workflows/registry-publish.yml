@@ -92,17 +92,8 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends minisign
-          DECERNOR_URL="https://github.com/3leaps/decernor/releases/download/v0.2.3/decernor-0.2.3-linux-amd64.tar.gz"
-          DECERNOR_SHA256="ab7f0bb947353991bbab2945ab17cf49e5807c07ed392978d4a7de08eb804776"
-          TMP_DIR="$(mktemp -d)"
-          trap 'rm -rf "$TMP_DIR"' EXIT
-          curl -fsSL "$DECERNOR_URL" -o "$TMP_DIR/decernor.tar.gz"
-          echo "${DECERNOR_SHA256}  $TMP_DIR/decernor.tar.gz" | sha256sum -c -
-          tar -xzf "$TMP_DIR/decernor.tar.gz" -C "$TMP_DIR"
-          DECERNOR_BIN="$(find "$TMP_DIR" -type f -name decernor -perm -u+x | head -n 1)"
-          test -n "$DECERNOR_BIN"
-          sudo install -m 0755 "$DECERNOR_BIN" /usr/local/bin/decernor
-          decernor --version
+          scripts/ci-install-yamlprims.sh python3
+          scripts/ci-install-decernor.sh
       - name: Stage and verify signed PyPI distributions from immutable GitHub Release
         if: ${{ steps.version.outputs.stage_pypi == 'true' }}
         env:
