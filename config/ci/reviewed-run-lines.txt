@@ -1,0 +1,75 @@
+# Reviewed workflow run lines (scripts/ci-pins.py check).
+#
+# Every logical line in a workflow or local composite action run step that
+# plainly reaches the network, installs a tool, carries a 64-hex digest, or
+# calls a release-tool installer must appear here exactly (continuations
+# joined, whitespace collapsed). Adding a line is a review decision: pin the
+# version, and install release tools only through scripts/ci-install-<tool>.sh
+# with a committed digest. A line that no longer appears in any run step must
+# be removed.
+#
+# Each entry is preceded by a comment naming where it is used.
+# ci.yml:container-tests
+docker build -t sysprims-test-fixture -f Dockerfile.container .
+# ci.yml:container-tests
+docker run --rm -v "$GITHUB_WORKSPACE:/workspace:ro" -v "$GITHUB_WORKSPACE/target:/workspace/target" sysprims-test-fixture
+# ci.yml:evidence, ci.yml:recurrence
+go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+# ci.yml:evidence, ci.yml:recurrence, ci.yml:test-go
+go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+# ci.yml:planning-hygiene, ci.yml:release-tooling, registry-publish.yml:stage
+scripts/ci-install-yamlprims.sh python3
+# ci.yml:release-tooling, registry-publish.yml:stage
+scripts/ci-install-decernor.sh
+# ci.yml:release-tooling
+sudo apt-get install -y -q minisign
+# ci.yml:release-tooling
+sudo apt-get update -q
+# ci.yml:security-audit
+cargo install cargo-audit --locked --version 0.23.0
+# ci.yml:test-musl
+sudo apt-get update && sudo apt-get install -y musl-tools
+# registry-publish.yml:publish-npm
+npm install -g "npm@${MIN_TRUSTED_PUBLISH_NPM}"
+# registry-publish.yml:publish-npm
+printf '%s\n' 'registry=https://registry.npmjs.org/' 'always-auth=false' > "$NPM_CONFIG_USERCONFIG"
+# registry-publish.yml:stage
+sudo apt-get install -y --no-install-recommends minisign
+# registry-publish.yml:stage
+sudo apt-get update
+# release.yml:build-ts-linux-arm64, release.yml:build-ts-macos-arm64, release.yml:build-ts-windows, release.yml:build-ts-windows-arm64, typescript-napi-prebuilds.yml:build-linux-arm64, typescript-napi-prebuilds.yml:build-macos-arm64, typescript-napi-prebuilds.yml:build-windows, typescript-napi-prebuilds.yml:build-windows-arm64
+npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds
+# release.yml:build-ts-linux, typescript-bindings.yml:package-only, typescript-napi-prebuilds.yml:build-linux
+cargo install cargo-zigbuild --locked --version 0.23.4
+# release.yml:build-ts-linux, typescript-napi-prebuilds.yml:build-linux
+npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds --target aarch64-unknown-linux-musl --cross-compile
+# release.yml:build-ts-linux, typescript-napi-prebuilds.yml:build-linux
+npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds --target x86_64-unknown-linux-gnu --use-napi-cross
+# release.yml:build-ts-linux, typescript-napi-prebuilds.yml:build-linux
+npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir prebuilds --target x86_64-unknown-linux-musl --cross-compile
+# release.yml:build-wheel-linux-amd64, release.yml:build-wheel-linux-arm64
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -v "$PWD:/src" -v "$PWD/dist/wheel:/out" -w /src quay.io/pypa/manylinux2014_aarch64@sha256:d41ea3e9c9ad7a47e393673d0e8acba58fa411ceff58bc6b88bca38795ec938e bash -c 'mkdir -p "$HOME" && git config --global --add safe.directory /src &&
+# release.yml:build-wheel-linux-amd64, release.yml:build-wheel-linux-arm64
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -v "$PWD:/src" -v "$PWD/dist/wheel:/out" -w /src quay.io/pypa/manylinux2014_x86_64@sha256:d6b5342c73e51b8eacd114cb41733798b749494d0a749cef0bd76c99fb47d5c6 bash -c 'mkdir -p "$HOME" && git config --global --add safe.directory /src &&
+# release.yml:package-npm-tarballs, typescript-bindings.yml:package-only, typescript-napi-prebuilds.yml:package
+npx napi create-npm-dirs
+# setup-rust
+echo "error: invalid rustup component token: ${c}" >&2
+# setup-rust
+rustup component add --toolchain "$INPUT_TOOLCHAIN" "${filtered_comps[@]}"
+# setup-rust
+rustup default "$INPUT_TOOLCHAIN"
+# setup-rust
+rustup target add --toolchain "$INPUT_TOOLCHAIN" "${filtered_tgts[@]}"
+# setup-rust
+rustup toolchain install "$INPUT_TOOLCHAIN" --profile minimal --no-self-update
+# typescript-bindings.yml:package-only
+npx napi build --manifest-path native/Cargo.toml --release --platform --no-js --strip --output-dir . --target "$TARGET" "${extra[@]}"
+# typescript-bindings.yml:test-musl, validate-release.yml:validate-typescript-musl
+apk add --no-cache bash curl build-base python3 git
+# typescript-bindings.yml:test-musl, validate-release.yml:validate-typescript-musl
+curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
+# validate-release.yml:validate-go
+echo "Testing: go get ${GO_MODULE}@${GO_VERSION}"
+# validate-release.yml:validate-go
+go get "${GO_MODULE}@${GO_VERSION}"

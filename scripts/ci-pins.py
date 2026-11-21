@@ -19,7 +19,18 @@ Modes:
          workflow runner label (including `matrix` expansions) and Rust
          toolchain step is governed by `pins.toml`, and refuse moving runner
          labels, third-party Rust toolchain actions, floating channels, or
-         known Node 20 action pins
+         known Node 20 action pins; refuse ${{ }} expressions in workflow
+         and local composite action run steps (values reach the shell only
+         through env:); require every run line that plainly reaches the
+         network, installs a tool, carries a 64-hex digest or calls a
+         release-tool installer to appear exactly in
+         `config/ci/reviewed-run-lines.txt`
+         (and every entry there to still be used, with installers committed
+         as executable `scripts/ci-install-<tool>.sh`); and refuse URLs,
+         download commands, digests and shell-startup keys in env values.
+         The run-line rules target an honest maintainer's mistakes; the
+         boundary against a hostile workflow author is the per-file workflow
+         digest and review
 """
 
 from __future__ import annotations
@@ -89,6 +100,209 @@ class PinError(Exception):
     pass
 
 
+# Run-line review. This gate targets an honest maintainer's mistakes, not an
+# adversary who already has workflow write access (that boundary is the
+# per-file workflow digest, required review and branch protection). Rules:
+#   - Workflow and local composite run steps carry no ${{ }} expressions;
+#     values reach the shell only through env:.
+#   - A run line that plainly reaches the network, installs a tool, carries a
+#     64-hex digest or calls a release-tool installer must equal a line in
+#     REVIEWED_LINES_REL (continuations joined, whitespace collapsed).
+#   - Env values are plain tokens with no URL, download command or digest,
+#     and keys that change shell startup are refused.
+# Release tools are installed only by scripts/ci-install-<tool>.sh from
+# committed pin files; CI runs those installers on every pull request, so a
+# missing or wrong pin fails there for every workflow that reads it.
+REVIEWED_LINES_REL = "config/ci/reviewed-run-lines.txt"
+SENSITIVE_RE = re.compile(
+    r"(?i)(?:\b(?:https?|ftps?|sftp|s3|gs|hkps?)://|releases/download/"
+    r"|\b(?:curl|wget|aria2c|scp|sftp|rsync|ssh|nc|ncat|socat|invoke-webrequest"
+    r"|invoke-restmethod|iwr|irm|start-bitstransfer|bitsadmin)\b"
+    r"|\bgit\b[^\n]*\b(?:clone|fetch|pull|push|submodule|ls-remote|archive)\b|\bgh\b"
+    r"|\bcargo\b[^\n]*\b(?:install|binstall|update|fetch|publish|add)\b"
+    r"|\bgo\b[^\n]*\b(?:install|get|run)\b|\bgo\b[^\n]*\bmod\b[^\n]*\b(?:download|tidy|vendor)\b"
+    r"|\brustup\b|\b(?:docker|podman|nerdctl|npx|uvx|pipx|corepack|dotnet|snap|brew|gem"
+    r"|choco|winget|scoop|conda|mamba|dnf|yum|zypper|pacman|apk|svn|hg)\b"
+    r"|\b(?:apt|apt-get)\b[^\n]*\b(?:install|update|upgrade|download|source)\b"
+    r"|(?:^|[;&|(]|\s)(?:pip|pip3|uv|npm|pnpm|yarn)\s+(?!(?:run|ci|test|pack|freeze|--version|-v)\b)\S"
+    r"|--keyserver\b|--recv-keys?\b"
+    r"|ci-install|(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f]))"
+)
+# The shells a step (or defaults.run) may name.
+ALLOWED_SHELLS = frozenset({"bash", "sh", "pwsh", "msys2 {0}"})
+# A literal env value is a plain token: no quoting, spaces or shell
+# metacharacters, so it cannot change the shape of a line it expands into.
+ENV_LITERAL_RE = re.compile(r"^[A-Za-z0-9._/+:=@%,-]*$")
+HEX64_RE = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f])")
+CI_INSTALL_NAME_RE = re.compile(r"ci-install-[A-Za-z0-9_-]+\.sh")
+CI_INSTALL_PATH_RE = re.compile(r"^(?:\./)?scripts/(ci-install-[A-Za-z0-9_-]+\.sh)$")
+CONTAINER_OPTIONS_RE = re.compile(r"(?:--user[ =][A-Za-z0-9_][A-Za-z0-9_.:-]*)?")
+# Variables that make a shell run other code before or around a step.
+SHELL_STARTUP_ENV = frozenset(
+    {
+        "BASH_ENV",
+        "ENV",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "PROMPT_COMMAND",
+        "PS4",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "IFS",
+        "CDPATH",
+        "PATH",
+    }
+)
+
+
+def logical_lines(text: str, shell: str | None = None) -> list[str]:
+    """Run text as logical lines: a trailing backslash (bash, sh) or backtick
+    (PowerShell, joined with a space) continues a line; whitespace collapsed;
+    blank lines dropped."""
+    pwsh = (shell or "").split(" ")[0].lower() in ("pwsh", "powershell")
+    char = "`" if pwsh else "\\"
+    out: list[str] = []
+    pending = ""
+    for raw in text.splitlines():
+        raw = raw.rstrip("\r")
+        if raw.endswith(char):
+            pending += raw[:-1] + (" " if pwsh else "")
+            continue
+        line = " ".join((pending + raw).split())
+        pending = ""
+        if line:
+            out.append(line)
+    if pending.strip():
+        out.append(" ".join(pending.split()))
+    return out
+
+
+def load_reviewed_lines(root: Path) -> frozenset[str]:
+    path = _check_rel_no_symlinks(root, REVIEWED_LINES_REL)
+    if not path.is_file():
+        raise PinError(f"missing {REVIEWED_LINES_REL}")
+    lines = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        line = " ".join(raw.split())
+        if line in lines:
+            raise PinError(f"{REVIEWED_LINES_REL}: duplicate line: {line[:80]}")
+        lines.add(line)
+    return frozenset(lines)
+
+
+def check_shell(shell: str | None, where: str) -> list[str]:
+    if shell is None or shell in ALLOWED_SHELLS:
+        return []
+    return [f"{where}: shell {shell!r} is not one of {sorted(ALLOWED_SHELLS)}"]
+
+
+def check_env_values(env: dict[str, str], where: str) -> list[str]:
+    """Env values are plain tokens (or ${{ }} expressions) with no URL,
+    download command or 64-hex digest; shell-startup keys are refused."""
+    errors = []
+    for key, value in env.items():
+        if key in SHELL_STARTUP_ENV or key.startswith("BASH_FUNC_"):
+            errors.append(
+                f"{where}: env.{key} changes what the shell runs before a step; it is not allowed"
+            )
+        if "${{" not in value and not ENV_LITERAL_RE.fullmatch(value):
+            errors.append(
+                f"{where}: env.{key} must be a plain token (no spaces, quotes or shell metacharacters) or a ${{{{ }}}} expression"
+            )
+        if HEX64_RE.search(value):
+            errors.append(
+                f"{where}: env.{key} carries an inline SHA-256; keep digests in a committed pin file"
+            )
+        elif SENSITIVE_RE.search(value):
+            errors.append(
+                f"{where}: env.{key} carries a URL or download command; fetch release tools with scripts/ci-install-<tool>.sh"
+            )
+    return errors
+
+
+def check_run_text(
+    run_cmd: str,
+    where: str,
+    reviewed: frozenset[str],
+    used: set[str] | None = None,
+    shell: str | None = None,
+) -> list[str]:
+    """Refuse run-step expressions and unreviewed sensitive lines."""
+    errors: list[str] = []
+    if "${{" in run_cmd:
+        errors.append(
+            f"{where}: ${{{{ }}}} expression in a run step; pass the value through env:"
+        )
+    for line in logical_lines(run_cmd, shell):
+        if not SENSITIVE_RE.search(line):
+            continue
+        if used is not None:
+            used.add(line)
+        if line not in reviewed:
+            errors.append(
+                f"{where}: line is not in {REVIEWED_LINES_REL} (network, install, digest or installer): {line[:120]}"
+            )
+    return errors
+
+
+def check_reviewed_lines_used(reviewed: frozenset[str], used: set[str]) -> list[str]:
+    """Every reviewed line still appears in some run step."""
+    return [
+        f"{REVIEWED_LINES_REL}: line no longer appears in any run step: {line[:80]}"
+        for line in sorted(reviewed - used)
+    ]
+
+
+def check_reviewed_installers(root: Path, reviewed: frozenset[str]) -> list[str]:
+    """Each reviewed line that names an installer names it exactly as
+    scripts/ci-install-<tool>.sh (optionally ./), committed in HEAD as an
+    executable regular file."""
+    errors = []
+    committed = _committed_installers(root)
+    for line in sorted(reviewed):
+        if "ci-install" not in line.lower():
+            continue
+        tokens = [tok for tok in line.split() if "ci-install" in tok.lower()]
+        for token in tokens:
+            match = CI_INSTALL_PATH_RE.fullmatch(token)
+            if match is None or match.group(1) not in committed:
+                errors.append(
+                    f"{REVIEWED_LINES_REL}: installer {token[:80]} is not scripts/ci-install-<tool>.sh committed in HEAD as an executable regular file"
+                )
+    return errors
+
+
+def _committed_installers(root: Path) -> set[str]:
+    """Names of scripts/ci-install-*.sh committed in HEAD as regular executables."""
+    import subprocess
+
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "HEAD", "--", "scripts/"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    names = set()
+    for row in listing.splitlines():
+        meta, _, path = row.partition("\t")
+        parts = meta.split()
+        name = path.rpartition("/")[2]
+        if (
+            len(parts) == 3
+            and parts[0] == "100755"
+            and parts[1] == "blob"
+            and CI_INSTALL_NAME_RE.fullmatch(name)
+        ):
+            names.add(name)
+    return names
+
+
 def _check_rel_no_symlinks(root: Path, rel: str) -> Path:
     current = root
     if current.is_symlink():
@@ -108,6 +322,7 @@ def validate_repo_tree_no_symlinks(root: Path) -> None:
         "config",
         "config/ci",
         PINS_REL,
+        REVIEWED_LINES_REL,
         "config/release",
         WORKFLOW_SHA_REL,
         ".github",
@@ -226,6 +441,8 @@ def load_pins(root: Path) -> dict:
         "hosted": dict(hosted),
         "allowlist": set(allowlist),
         "rust": dict(rust),
+        "reviewed": load_reviewed_lines(root),
+        "used": set(),
     }
 
 
@@ -303,7 +520,9 @@ def _resolve_matrix_var_nodes(
     return nodes
 
 
-def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
+def check_workflow_text(
+    name: str, text: str, pins: dict, root: Path | None = None
+) -> list[str]:
     errors: list[str] = []
     try:
         doc = wy.load_text(text, name)
@@ -435,6 +654,23 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
     root_fields = _map_entries(root_node)
     check_env_mapping(root_fields.get("env"), "workflow")
 
+    def scalar_env(node: wy.Node | None) -> dict[str, str]:
+        return {
+            key: value.value
+            for key, value in _map_entries(node).items()
+            if isinstance(value, wy.ScalarNode)
+        }
+
+    def run_defaults(fields: dict) -> str | None:
+        defaults = _map_entries(_map_entries(fields.get("defaults")).get("run"))
+        shell_node = defaults.get("shell")
+        return shell_node.value if isinstance(shell_node, wy.ScalarNode) else None
+
+    workflow_shell = run_defaults(root_fields)
+    errors.extend(check_shell(workflow_shell, f"{name}: workflow defaults.run"))
+    workflow_env = scalar_env(root_fields.get("env"))
+    errors.extend(check_env_values(workflow_env, f"{name}: workflow"))
+
     jobs_node = root_fields.get("jobs")
     if not isinstance(jobs_node, wy.MappingNode):
         return [f"{name}: workflow has no jobs mapping"]
@@ -448,6 +684,31 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
             continue
         job_fields = _map_entries(job_node)
         check_env_mapping(job_fields.get("env"), f"job {job_id}")
+        job_env = scalar_env(job_fields.get("env"))
+        # A job container (and service containers) may carry env only under
+        # the same rules, and options only `--user <name>`: anything else can
+        # set BASH_ENV, PATH or a preload before a step runs.
+        containers = [("container", job_fields.get("container"))]
+        services = _map_entries(job_fields.get("services"))
+        containers += [(f"services.{key}", node) for key, node in services.items()]
+        for label, node in containers:
+            fields = _map_entries(node)
+            errors.extend(
+                check_env_values(
+                    scalar_env(fields.get("env")), f"{name}: job {job_id} {label}"
+                )
+            )
+            options = fields.get("options")
+            if options is not None and not (
+                isinstance(options, wy.ScalarNode)
+                and CONTAINER_OPTIONS_RE.fullmatch(options.value.strip())
+            ):
+                errors.append(
+                    f"{name}: job {job_id} {label}.options may only be --user <name>"
+                )
+        job_shell = run_defaults(job_fields)
+        errors.extend(check_shell(job_shell, f"{name}: job {job_id} defaults.run"))
+        errors.extend(check_env_values(job_env, f"{name}: job {job_id}"))
 
         if "uses" not in job_fields:
             if "runs-on" not in job_fields:
@@ -527,10 +788,18 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                 continue
             step_fields = _map_entries(step_node)
             check_env_mapping(step_fields.get("env"), f"job {job_id} step {idx}")
+            step_env = scalar_env(step_fields.get("env"))
+            errors.extend(
+                check_env_values(step_env, f"{name}: job {job_id} step {idx}")
+            )
 
             uses_node = step_fields.get("uses")
             if isinstance(uses_node, wy.ScalarNode):
                 ref = uses_node.value
+                if not local_action_ref_ok(ref):
+                    errors.append(
+                        f"{name}: job {job_id} step {idx}: local actions must be ./.github/actions/<name> ({ref})"
+                    )
                 if ref.startswith("dtolnay/rust-toolchain"):
                     errors.append(
                         f"{name}: job {job_id} step {idx}: third-party Rust toolchain action is forbidden: {ref}"
@@ -565,6 +834,22 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
                 and run_node.tag == "tag:yaml.org,2002:str"
             ):
                 run_cmd = run_node.value
+                shell_node = step_fields.get("shell")
+                step_shell = (
+                    shell_node.value if isinstance(shell_node, wy.ScalarNode) else None
+                )
+                errors.extend(
+                    check_shell(step_shell, f"{name}: job {job_id} step {idx}")
+                )
+                errors.extend(
+                    check_run_text(
+                        run_cmd,
+                        f"{name}: job {job_id} step {idx}",
+                        pins.get("reviewed", frozenset()),
+                        pins.get("used"),
+                        step_shell or job_shell or workflow_shell,
+                    )
+                )
                 if FLOATING_RUST_RE.search(run_cmd):
                     errors.append(
                         f"{name}: job {job_id} step {idx}: floating Rust channel in run step"
@@ -612,7 +897,95 @@ def check_workflow_text(name: str, text: str, pins: dict) -> list[str]:
     return errors
 
 
-def check_setup_rust_action(root: Path) -> list[str]:
+PINNED_REMOTE_REF_RE = re.compile(
+    r"^(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}|docker://[^@\s]+@sha256:[0-9a-f]{64})$"
+)
+LOCAL_ACTION_REF_RE = re.compile(r"^\./\.github/actions/[A-Za-z0-9_-][A-Za-z0-9._-]*$")
+
+
+def local_action_ref_ok(ref: str) -> bool:
+    """A step `uses` that is not a remote owner/repo@ref or docker:// image is
+    a local action, and must name a direct child of ./.github/actions with no
+    `..` or nesting, so it is always one of the scanned, digest-pinned actions."""
+    if ref.startswith("."):
+        return LOCAL_ACTION_REF_RE.fullmatch(ref) is not None and ".." not in ref
+    if ref.startswith("docker://") or "@" in ref:
+        return True
+    return False
+
+
+def check_local_actions(root: Path, pins: dict) -> list[str]:
+    """Every local action under .github/actions is a composite whose run
+    steps and env values pass the same review rules as workflow steps, and
+    whose own local uses stay under ./.github/actions/."""
+    errors: list[str] = []
+    base = root / ".github/actions"
+    if not base.is_dir():
+        return errors
+    for nested in sorted(base.rglob("action.y*ml")):
+        if len(nested.relative_to(base).parts) != 2:
+            errors.append(
+                f"{nested.relative_to(root).as_posix()}: local actions must be direct children of .github/actions"
+            )
+    for entry in sorted(base.iterdir()):
+        rel = entry.relative_to(root).as_posix()
+        manifests = [entry / "action.yml", entry / "action.yaml"]
+        present = [m for m in manifests if m.is_file()]
+        if not entry.is_dir() or len(present) != 1:
+            errors.append(f"{rel}: each local action needs exactly one action.yml")
+            continue
+        manifest = present[0].relative_to(root).as_posix()
+        try:
+            doc = wy.load_text(present[0].read_text(encoding="utf-8"), manifest)
+        except wy.WorkflowError as error:
+            errors.append(str(error))
+            continue
+        runs = doc.get("runs")
+        if not isinstance(runs, dict) or runs.get("using") != "composite":
+            errors.append(f"{manifest}: local actions must be composite")
+            continue
+        for idx, step in enumerate(runs.get("steps") or []):
+            if not isinstance(step, dict):
+                errors.append(f"{manifest}: step {idx} is not a mapping")
+                continue
+            where = f"{manifest}: step {idx}"
+            uses = step.get("uses")
+            if isinstance(uses, str) and not local_action_ref_ok(uses):
+                errors.append(
+                    f"{where}: local actions must be ./.github/actions/<name> ({uses})"
+                )
+            elif (
+                isinstance(uses, str)
+                and not uses.startswith(".")
+                and not PINNED_REMOTE_REF_RE.fullmatch(uses)
+            ):
+                errors.append(
+                    f"{where}: remote uses must be pinned to a full commit SHA or an image digest ({uses})"
+                )
+            env = step.get("env")
+            if isinstance(env, dict):
+                errors.extend(
+                    check_env_values({k: str(v) for k, v in env.items()}, where)
+                )
+            run_body = step.get("run")
+            if isinstance(run_body, str):
+                shell = (
+                    step.get("shell") if isinstance(step.get("shell"), str) else None
+                )
+                errors.extend(check_shell(shell, where))
+                errors.extend(
+                    check_run_text(
+                        run_body,
+                        where,
+                        pins.get("reviewed", frozenset()),
+                        pins.get("used"),
+                        shell,
+                    )
+                )
+    return errors
+
+
+def check_setup_rust_action(root: Path, pins: dict) -> list[str]:
     try:
         action_path = _check_rel_no_symlinks(root, SETUP_RUST_REL)
     except PinError as exc:
@@ -701,7 +1074,7 @@ def write_workflow_sha256(root: Path) -> int:
 def run_sync(root: Path) -> None:
     validate_repo_tree_no_symlinks(root)
     pins = load_pins(root)
-    errors = check_setup_rust_action(root)
+    errors = check_setup_rust_action(root, pins) + check_local_actions(root, pins)
     workflows_dir = root / ".github/workflows"
     paths = sorted(workflows_dir.glob("*.y*ml"))
     if not paths:
@@ -738,15 +1111,17 @@ def run_sync(root: Path) -> None:
 def run_check(root: Path) -> None:
     validate_repo_tree_no_symlinks(root)
     pins = load_pins(root)
-    errors = check_setup_rust_action(root)
+    errors = check_setup_rust_action(root, pins) + check_local_actions(root, pins)
     workflows_dir = root / ".github/workflows"
     paths = sorted(workflows_dir.glob("*.y*ml"))
     if not paths:
         raise PinError("no workflow files found under .github/workflows")
     for path in paths:
         errors.extend(
-            check_workflow_text(path.name, path.read_text(encoding="utf-8"), pins)
+            check_workflow_text(path.name, path.read_text(encoding="utf-8"), pins, root)
         )
+    errors.extend(check_reviewed_lines_used(pins["reviewed"], pins["used"]))
+    errors.extend(check_reviewed_installers(root, pins["reviewed"]))
     if errors:
         raise PinError("\n".join(errors))
 
@@ -765,7 +1140,9 @@ def main(argv: list[str]) -> int:
         return 0
     if args == ["check"]:
         run_check(root)
-        print("[ok] CI runner labels and Rust toolchain pins match config/ci/pins.toml")
+        print(
+            "[ok] CI runner labels, Rust toolchain pins and tool fetches match committed pins"
+        )
         return 0
     raise PinError("usage: ci-pins.py [--root PATH] <sync|check>")
 

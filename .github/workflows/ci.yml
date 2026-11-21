@@ -7,8 +7,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
-  GOVULNCHECK_VERSION: 'v1.9.0'
-  GOSEC_VERSION: 'v2.29.0'
 permissions:
   contents: read
 jobs:
@@ -70,17 +68,7 @@ jobs:
           minisign -v
           scripts/ci-install-yamlprims.sh python3
       - name: Install checksum-pinned decernor
-        run: |
-          set -euo pipefail
-          tool_dir="$(mktemp -d "$RUNNER_TEMP/decernor.XXXXXX")"
-          archive="$(awk '{print $2}' config/release/decernor-ci-sha256.txt)"
-          tag="v$(sed -E 's/^decernor_([0-9.]+)_linux_amd64\.tar\.gz$/\1/' <<<"$archive")"
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            "https://github.com/3leaps/decernor/releases/download/${tag}/${archive}" \
-            --output "$tool_dir/$archive"
-          (cd "$tool_dir" && sha256sum --check "$GITHUB_WORKSPACE/config/release/decernor-ci-sha256.txt")
-          tar -xzf "$tool_dir/$archive" -C "$tool_dir" decernor
-          echo "SYSPRIMS_DECERNOR_BIN=$tool_dir/decernor" >> "$GITHUB_ENV"
+        run: scripts/ci-install-decernor.sh
       - name: Synthetic release-tooling controls
         run: make release-tooling-test
   typescript-api-drift:
@@ -224,7 +212,7 @@ jobs:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$(go env GOPATH)/bin/govulncheck" ./...
   recurrence:
     # Rust crate and pure-Go module for contract recurrence/v0: each passes the
@@ -274,8 +262,8 @@ jobs:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
-          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$(go env GOPATH)/bin/gosec" ./...
           "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Go module alone (outside the repository, no SKIP allowed)
@@ -345,8 +333,8 @@ jobs:
           GOWORK: 'off'
           CGO_ENABLED: '0'
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
-          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           pkgs=(./evidence/... ./procobserve/... ./syserror/... ./signal/... ./session/... ./timeout/... ./proc/...)
           "$(go env GOPATH)/bin/gosec" "${pkgs[@]}"
           "$(go env GOPATH)/bin/govulncheck" "${pkgs[@]}"
@@ -426,7 +414,7 @@ jobs:
         with:
           toolchain: 1.98.1  # pin:rust=stable
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --locked --version 0.23.0
       - name: Security audit
         run: |
           cargo audit
@@ -505,8 +493,8 @@ jobs:
       - name: Run container tests
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}:/workspace:ro \
-            -v ${{ github.workspace }}/target:/workspace/target \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$GITHUB_WORKSPACE/target:/workspace/target" \
             sysprims-test-fixture
 
 # NOTE: MSRV and Miri checks available locally via `make msrv` and `make miri`

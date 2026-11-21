@@ -243,19 +243,204 @@ ci_pin_controls = [
         + '      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4\n',
         'deprecated Node 20',
     ),
+    (
+        'inline release download',
+        base + marked_job + '      - run: |\n          curl -fsSL "https://github.com/o/t/releases/download/v1.0.0/t.tar.gz" -o t.tgz\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'inline file digest',
+        base + marked_job + '      - run: |\n          echo "abababababababababababababababababababababababababababababababab  t.tgz" | sha256sum -c -\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'curl through a variable URL',
+        base + marked_job + '      - run: |\n          curl -fsSL "$TOOL_URL" -o t.tgz\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'wget',
+        base + marked_job + '      - run: |\n          wget -q "$TOOL_URL"\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'pwsh Invoke-WebRequest',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Invoke-WebRequest -Uri $env:U -OutFile t.zip\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'pwsh backtick-continued download',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Invoke-WebRequest `\n          -Uri $env:U -OutFile t.zip\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'git clone',
+        base + marked_job + '      - run: |\n          git clone --depth 1 "$REPO" tool\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'gh release download',
+        base + marked_job + '      - run: |\n          gh release download v1.0.0 -R o/t\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'unpinned cargo install',
+        base + marked_job + '      - run: |\n          cargo install cargo-audit --locked\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'go install @latest',
+        base + marked_job + '      - run: |\n          go install golang.org/x/vuln/cmd/govulncheck@latest\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'pip install',
+        base + marked_job + '      - run: |\n          pip install requests\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'npm install -g',
+        base + marked_job + '      - run: |\n          npm install -g some-tool\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'npx of a remote package',
+        base + marked_job + '      - run: |\n          npx cowsay hello\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'docker pull',
+        base + marked_job + '      - run: |\n          docker pull alpine:latest\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'apt-get install',
+        base + marked_job + '      - run: |\n          sudo apt-get install -y jq\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'brew install',
+        base + marked_job + '      - run: |\n          brew install jq\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'rustup outside setup-rust',
+        base + marked_job + '      - run: |\n          rustup toolchain install stable\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'installer line not reviewed',
+        base + marked_job + '      - run: |\n          scripts/ci-install-newtool.sh\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'backslash-continued download',
+        base + marked_job + '      - run: |\n          curl -fsSL \\\n          "$TOOL_URL" -o t\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'expression in a run step',
+        base + marked_job + '      - run: |\n          echo "${{ inputs.value }}"\n',
+        'expression in a run step',
+    ),
+    (
+        'expression as a command',
+        base + marked_job + '      - run: |\n          ${{ inputs.command }}\n',
+        'expression in a run step',
+    ),
+    (
+        'custom shell',
+        base + marked_job + '      - shell: "bash -c \\"echo {0}\\""\n        run: |\n          echo ok\n',
+        'is not one of',
+    ),
+    (
+        'URL in step env',
+        base + marked_job + '      - env:\n          TOOL_URL: https://example.invalid/t.tgz\n        run: |\n          echo ok\n',
+        'carries a URL or download command',
+    ),
+    (
+        'digest in step env',
+        base + marked_job + '      - env:\n          TOOL_SHA256: abababababababababababababababababababababababababababababababab\n        run: |\n          echo ok\n',
+        'carries an inline SHA-256',
+    ),
+    (
+        'env value with shell syntax',
+        base + marked_job + '      - env:\n          V: \'1.0" && echo x\'\n        run: |\n          echo ok\n',
+        'must be a plain token',
+    ),
+    (
+        'BASH_ENV in step env',
+        base + marked_job + '      - env:\n          BASH_ENV: scripts/startup.sh\n        run: |\n          echo ok\n',
+        'changes what the shell runs before a step',
+    ),
+    (
+        'PATH in step env',
+        base + marked_job + '      - env:\n          PATH: /tmp/bin\n        run: |\n          echo ok\n',
+        'changes what the shell runs before a step',
+    ),
+    (
+        'local action outside .github/actions',
+        base + marked_job + '      - uses: ./scripts/act\n',
+        'local actions must be ./.github/actions/<name>',
+    ),
+    (
+        'local action escaping with ..',
+        base + marked_job + '      - uses: ./.github/actions/../../outside\n',
+        'local actions must be ./.github/actions/<name>',
+    ),
+    (
+        'container options injecting env',
+        base + '\n  pinctl:\n    runs-on: ubuntu-24.04  # pin:runner=linux-x64\n    container:\n      image: alpine@sha256:abababababababababababababababababababababababababababababababab\n      options: --env BASH_ENV=x\n    steps:\n      - run: echo ok\n',
+        'options may only be --user <name>',
+    ),
 ]
 for label, text, expected in ci_pin_controls:
-    found = ci_pins.check_workflow_text('ci.yml', text, pins)
+    found = ci_pins.check_workflow_text('ci.yml', text, pins, repo_root)
     if not any(expected in error for error in found):
         raise SystemExit(
             f'error: ci-pins mutation control did not fail as intended: {label} '
             f'(expected {expected!r}, got {found})'
         )
 
+# Accepted: every reviewed line passes on its own; ordinary lines and a
+# lockfile-governed npm ci need no entry; a stale entry and an installer entry
+# that is not a committed executable are refused.
+reviewed = pins['reviewed']
+for line in sorted(reviewed):
+    found = ci_pins.check_run_text(line + '\n', 'reviewed', reviewed)
+    if found:
+        raise SystemExit(f'error: ci-pins refused a reviewed line: {found}')
+if ci_pins.check_run_text('cargo test --workspace\nnpm ci\nnpm run build\nmake check\n', 'plain', reviewed):
+    raise SystemExit('error: ci-pins refused an ordinary line')
+if not ci_pins.check_reviewed_lines_used(reviewed, set(reviewed) - {'scripts/ci-install-decernor.sh'}):
+    raise SystemExit('error: ci-pins accepted a stale reviewed line')
+if len(ci_pins.check_reviewed_installers(repo_root, frozenset({'scripts/ci-install-nonexistent.sh'}))) != 1:
+    raise SystemExit('error: ci-pins accepted an uncommitted reviewed installer')
+
+# Local composite actions are scanned like workflow steps and must pin remote uses.
+import tempfile  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    fake = pathlib.Path(tmp)
+    (fake / '.github/actions/unreviewed').mkdir(parents=True)
+    (fake / '.github/actions/unreviewed/action.yml').write_text(
+        'name: x\ndescription: x\nruns:\n  using: composite\n  steps:\n'
+        '    - uses: attacker/action@main\n'
+        '    - shell: bash\n      env:\n        U: https://example.invalid\n'
+        '      run: |\n        curl -fsSL "$U" -o t\n'
+    )
+    found = ci_pins.check_local_actions(fake, {'reviewed': frozenset(), 'used': set()})
+    for expected in ('carries a URL or download command', 'is not in config/ci/reviewed-run-lines.txt',
+                     'remote uses must be pinned to a full commit SHA'):
+        if not any(expected in error for error in found):
+            raise SystemExit(f'error: local action scan missed {expected!r}: {found}')
+
 bumped_pins = {
     'hosted': dict(pins['hosted'], **{'linux-x64': 'ubuntu-26.04'}),
     'allowlist': set(pins['allowlist']),
     'rust': dict(pins['rust'], stable='1.99.0'),
+    'reviewed': pins['reviewed'],
+    'used': set(),
 }
 synced_ci, updated_count = ci_pins.sync_text(base, bumped_pins, 'ci.yml')
 if updated_count == 0 or 'ubuntu-26.04  # pin:runner=linux-x64' not in synced_ci or '1.99.0  # pin:rust=stable' not in synced_ci:
@@ -365,7 +550,7 @@ sys.meta_path.insert(0, BlockInstalledYaml())
 sys.argv = [sys.argv[1], "--root", sys.argv[2], "check"]
 runpy.run_path(sys.argv[0], run_name="__main__")
 PY
-if grep -q 'SHADOW_' "$scratch/out" || ! grep -q 'match config/ci/pins.toml' "$scratch/out"; then
+if grep -q 'SHADOW_' "$scratch/out" || ! grep -q 'tool fetches match committed pins' "$scratch/out"; then
 	echo 'error: ci-pins.py imported a planted module or needed PyYAML' >&2
 	cat "$scratch/out" >&2
 	exit 1

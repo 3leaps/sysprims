@@ -43,9 +43,11 @@ jobs:
         with:
           go-version: '1.26.10'
       - name: Test Go modules are fetchable
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.tag }}"
+          TAG="$INPUT_TAG"
           VERSION="${TAG#v}"
           GO_VERSION="v${VERSION}"
 
