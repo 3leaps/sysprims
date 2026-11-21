@@ -124,7 +124,11 @@ SENSITIVE_RE = re.compile(
     r"|\brustup\b|\b(?:docker|podman|nerdctl|npx|uvx|pipx|corepack|dotnet|snap|brew|gem"
     r"|choco|winget|scoop|conda|mamba|dnf|yum|zypper|pacman|apk|svn|hg)\b"
     r"|\b(?:apt|apt-get)\b[^\n]*\b(?:install|update|upgrade|download|source)\b"
-    r"|(?:^|[;&|(]|\s)(?:pip|pip3|uv|npm|pnpm|yarn)\s+(?!(?:run|ci|test|pack|freeze|--version|-v)\b)\S"
+    r"|(?:^|[;&|(]|\s)(?:pip|pip3|npm|pnpm|yarn)\s+(?!(?:run|ci|test|pack|freeze|--version|-v)\b)\S"
+    # uv resolves and fetches on every subcommand but --version (uv run --with).
+    r"|(?:^|[;&|(]|\s)uv\s+(?!--version\b)\S"
+    r"|\bbun\b[^\n]*\b(?:install|i|add|x|create|update|upgrade|link)\b|\bbunx\b"
+    r"|\b(?:install|save|update)-(?:module|script|package|psresource)\b"
     r"|--keyserver\b|--recv-keys?\b"
     r"|ci-install|(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f]))"
 )

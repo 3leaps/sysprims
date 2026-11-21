@@ -354,6 +354,61 @@ ci_pin_controls = [
         'is not one of',
     ),
     (
+        'bun add --global',
+        base + marked_job + '      - run: |\n          bun add --global @biomejs/biome\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'bun x',
+        base + marked_job + '      - run: |\n          bun x cowsay\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'bunx',
+        base + marked_job + '      - run: |\n          bunx cowsay\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'Install-Module',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Install-Module -Name Pester -Force\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'Install-Script',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Install-Script -Name Foo\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'Install-Package',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Install-Package NuGet.Versioning -Force\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'Save-Module',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Save-Module -Name Pester -Path .\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'Update-Module',
+        base + marked_job + '      - shell: pwsh\n        run: |\n          Update-Module -Name Pester\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'uv run --with',
+        base + marked_job + '      - run: |\n          uv run --with ruff ruff check .\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'uv run --no-project --with',
+        base + marked_job + '      - run: |\n          uv run --no-project --with check-wheel-contents check-wheel-contents dist/*.whl\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
+        'uv run -w',
+        base + marked_job + '      - run: |\n          uv run -w ruff ruff check .\n',
+        'is not in config/ci/reviewed-run-lines.txt',
+    ),
+    (
         'URL in step env',
         base + marked_job + '      - env:\n          TOOL_URL: https://example.invalid/t.tgz\n        run: |\n          echo ok\n',
         'carries a URL or download command',
@@ -648,4 +703,14 @@ git -C "$repo" add .github/workflows/release.yml
 git -C "$repo" commit -qm unreviewed
 git -C "$repo" checkout -q HEAD~1 -- .github/workflows/release.yml
 refused 'differs from its reviewed digest' verify-commit HEAD
+# The npm trusted-publishing guard refuses a floating npm version, since the
+# workflow installs exactly MIN_TRUSTED_PUBLISH_NPM.
+npmguard="$scratch/npm-guard"
+mkdir -p "$npmguard/.github/workflows" "$npmguard/scripts"
+cp "$root/scripts/check-npm-trusted-publish-runtime.sh" "$npmguard/scripts/"
+sed "s/MIN_TRUSTED_PUBLISH_NPM: '[^']*'/MIN_TRUSTED_PUBLISH_NPM: '11'/" "$root/.github/workflows/registry-publish.yml" >"$npmguard/.github/workflows/registry-publish.yml"
+if (cd "$npmguard" && bash scripts/check-npm-trusted-publish-runtime.sh) >/dev/null 2>&1; then
+	echo 'error: npm trusted-publishing guard accepted a floating npm version' >&2
+	exit 1
+fi
 echo '[ok] workflow digest pins and verify-commit controls passed'

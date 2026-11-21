@@ -51,12 +51,17 @@ declared_min_node="$(
 	sed -nE "s/.*MIN_TRUSTED_PUBLISH_NODE:[[:space:]]*['\"]?([^'\"]+)['\"]?.*/\1/p" "$workflow" | head -n 1
 )"
 [[ -n "$declared_min_node" ]] || fail "workflow does not declare MIN_TRUSTED_PUBLISH_NODE"
+[[ "$declared_min_node" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+	fail "MIN_TRUSTED_PUBLISH_NODE must be an exact X.Y.Z version, got $declared_min_node"
 version_ge "$declared_min_node" "$min_node" || fail "MIN_TRUSTED_PUBLISH_NODE is $declared_min_node, need >= $min_node"
 
 declared_min_npm="$(
 	sed -nE "s/.*MIN_TRUSTED_PUBLISH_NPM:[[:space:]]*['\"]?([^'\"]+)['\"]?.*/\1/p" "$workflow" | head -n 1
 )"
 [[ -n "$declared_min_npm" ]] || fail "workflow does not declare MIN_TRUSTED_PUBLISH_NPM"
+# The workflow installs exactly this npm version, so it must not float.
+[[ "$declared_min_npm" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+	fail "MIN_TRUSTED_PUBLISH_NPM must be an exact X.Y.Z version, got $declared_min_npm"
 version_ge "$declared_min_npm" "$min_npm" || fail "MIN_TRUSTED_PUBLISH_NPM is $declared_min_npm, need >= $min_npm"
 
 # shellcheck disable=SC2016
