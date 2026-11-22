@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `rsfulmen` `0.1.7` loads its embedded foundry catalogs with `yamlprims`
+  instead of `serde_yaml_ng`. `unsafe-libyaml` (RUSTSEC-2024-0449) is no
+  longer in the dependency tree, and `deny.toml` no longer ignores that
+  advisory.
+- `sysprims-timeout` no longer declares an unused `rsfulmen` dependency.
 - `scripts/ci-install-decernor.sh` installs decernor for CI and registry
   publication from the committed pin.
 - Workflow run steps carry no `${{ }}` expressions; values reach the shell

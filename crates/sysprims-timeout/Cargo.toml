@@ -23,7 +23,6 @@ cross-user-tests = []
 sysprims-core.workspace = true
 sysprims-proc.workspace = true
 sysprims-signal.workspace = true
-rsfulmen = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
