@@ -41,6 +41,10 @@ cooling:
       reason: "Internal packages"
     - pattern: "github.com/fulmenhq/*"
       reason: "Fulmen ecosystem packages"
+    - pattern: "rsfulmen"
+      reason: "Fulmen ecosystem package"
+    - pattern: "yamlprims"
+      reason: "Internal package"
 # Policy engine configuration
 policy_engine:
   type: embedded
