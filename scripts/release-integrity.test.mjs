@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { existsSync as existsSyncLocal } from "node:fs";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
-import { ANCHORS, NPM_TARBALL_PACKAGES, PYTHON_WHEEL_TAGS, assertInventory, checkRemote, expectedInventory, inventoryForCommit, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyPublishedStage, verifyTaggedAssets } from "./release-integrity.mjs";
+import { ANCHORS, NPM_TARBALL_PACKAGES, PYTHON_WHEEL_TAGS, assertInventory, checkRemote, expectedInventory, nextStepHint, producerOf, inventoryForCommit, provenance, remoteRegistries, remoteRequirements, requiredTags, verifyChecksums, verifyPublishedStage, verifyTaggedAssets } from "./release-integrity.mjs";
 
 const roots = [];
 after(() => {
@@ -236,6 +236,47 @@ test("phase inventory and checksum manifests reject leftovers and wrong hashes",
   rmSync(join(root, "leftover-v9.9.9.zip"));
   writeFileSync(join(root, base[0]), "changed\n");
   assert.throws(() => verifyChecksums(root, base), /digest mismatch/);
+});
+
+test("inventory mismatches name the make target(s) to run next", () => {
+  const { base, signed } = expectedInventory("0.2.3");
+  const produced = new Map(signed.map((name) => [name, producerOf(name)]));
+  assert.equal(produced.get("release-notes-v0.2.3.md"), "release-notes");
+  for (const [, name] of ANCHORS) assert.equal(produced.get(name), "release-stage-anchors");
+  assert.equal(produced.get("SHA256SUMS"), "release-checksums");
+  assert.equal(produced.get("SHA512SUMS.minisig"), "release-sign");
+  assert.equal(produced.get("sysprims-release-signing-key.asc"), "release-export-keys");
+  assert.equal(produced.get("sbom-0.2.3.cdx.json"), "release-download");
+  // Fresh download: notes and anchors missing, in release order, with the
+  // release-stage shortcut offered while the anchors are still absent.
+  const root = mkdtempSync(join(tmpdir(), "sysprims-next-step-test-")); roots.push(root);
+  const staged = new Set(["release-notes-v0.2.3.md", ...ANCHORS.map(([, name]) => name)]);
+  for (const name of base) if (!staged.has(name)) writeFileSync(join(root, name), `${name}\n`);
+  assert.throws(
+    () => assertInventory(root, base, "downloaded"),
+    /missing=\[.*\], extra=\[\]; run make release-notes, then make release-stage-anchors, or make release-stage for all of them$/,
+  );
+  assert.equal(nextStepHint(["SHA256SUMS", "SHA512SUMS"], []), "; run make release-checksums");
+  assert.equal(nextStepHint(["sysprims-minisign.pub", "SHA256SUMS.asc"], []), "; run make release-sign, then make release-export-keys");
+  assert.equal(nextStepHint(["sysprims-0.2.3-linux-amd64.tar.gz", "SHA256SUMS"], []), "; run make release-clean, then make release-download");
+  assert.equal(nextStepHint([], ["leftover"]), "; remove the extra files (make release-clean starts over)");
+  assert.equal(nextStepHint([], []), "");
+  // One anchor staged: release-stage-anchors would refuse, so start over.
+  const [first, second] = ANCHORS.map(([, name]) => name);
+  assert.equal(nextStepHint([second], [], [first]), "; one anchor is staged without the other: run make release-clean, then make release-download");
+  // Both anchors missing but checksums already written, or signatures present
+  // with the manifests missing: no producer can finish, so start over.
+  assert.equal(nextStepHint([first, second], [], ["SHA256SUMS"]), "; later-phase files are already staged: run make release-clean, then make release-download");
+  assert.equal(nextStepHint(["SHA256SUMS", "SHA512SUMS"], [], ["SHA256SUMS.minisig"]), "; later-phase files are already staged: run make release-clean, then make release-download");
+  // Earlier products present do not count as later-phase.
+  assert.equal(nextStepHint(["SHA256SUMS", "SHA512SUMS"], [], ["release-notes-v0.2.3.md", first, second]), "; run make release-checksums");
+  assert.equal(nextStepHint([first, second], [], []), "; run make release-stage-anchors, or make release-stage for all of them");
+  // A symlink in an anchor's place is not offered release-stage.
+  assert.equal(nextStepHint([first, second], [], [first]), "; a staged name is not a regular file: run make release-clean, then make release-download");
+  const linked = mkdtempSync(join(tmpdir(), "sysprims-next-step-link-")); roots.push(linked);
+  for (const name of base) if (!staged.has(name)) writeFileSync(join(linked, name), `${name}\n`);
+  symlinkSync(join(linked, base.find((name) => !staged.has(name))), join(linked, first));
+  assert.throws(() => assertInventory(linked, base, "downloaded"), /a staged name is not a regular file/);
 });
 
 test("release leaves are guard-wired and only release-publish can undraft", () => {

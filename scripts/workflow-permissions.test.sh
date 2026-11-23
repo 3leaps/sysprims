@@ -6,15 +6,10 @@
 #     behind the publish-pypi environment
 #   registry-publish.yml publish-npm: id-token (npm trusted publishing), only
 #     behind the publish-npm environment
-#   go-bindings.yml update-go-bindings: contents + pull-requests (opens the
-#     prebuilt-library pull request). Its steps may use only the actions listed
-#     below; the token reaches only the pull-request action's `with.token`,
-#     checkout does not persist credentials, and no shell step or environment
-#     names a token, so repository code run in that job never holds the write
-#     token.
+# No step in a write job may take a `with.token` unless TOKEN_ACTIONS lists a
+# reviewed action for that job; TOKEN_ACTIONS is empty, so none may.
 # Security boundary: permission and credential confinement (no `secrets.*`
-# anywhere in any workflow except the single `create-pull-request` `with.token`,
-# and no `github`/`secrets` expressions anywhere else in the write job). Bare
+# anywhere in any workflow, and no `with.token` in a write job). Bare
 # (non-`${{ }}`) `if:` conditions are boolean predicates only and are not
 # expression-scanned. `RELEASE_WRITERS` and `WRITE_JOB_FORBIDDEN_RUN` are
 # defence-in-depth lint checks, not a complete shell parser.
@@ -40,9 +35,10 @@ REQUIRED_ENVIRONMENT = {
 }
 WRITER_ACTIONS = {}
 TOKEN_ACTIONS = {}
-# Expressions in a write job may read only these contexts outside the one
-# token-receiving `with.token`; `secrets` and `github` (which holds the token,
-# by name, by index, or serialised whole) never appear.
+# Expressions in a write job listed in WRITER_ACTIONS may read only these
+# contexts outside a reviewed token-receiving `with.token`; `secrets` and
+# `github` (which holds the token, by name, by index, or serialised whole)
+# never appear.
 SAFE_CONTEXTS = {'needs', 'matrix', 'inputs', 'env', 'steps', 'runner', 'job', 'strategy', 'vars'}
 TOP_IDENTIFIER = re.compile(r"(?<![\w.])([A-Za-z_][\w-]*)")
 LITERALS = {'true', 'false', 'null'}
@@ -248,6 +244,13 @@ def check(name, doc, text):
                 for step in wy.steps(job):
                     if secrets_expressions(step):
                         errors.append(f'{where}: step reads a token context')
+                    # A write job hands a token to a step only through a
+                    # reviewed TOKEN_ACTIONS entry; any other with.token
+                    # (github.token, a literal, or anything else) is refused.
+                    if granted and (name, job_id) not in TOKEN_ACTIONS and isinstance(step, dict):
+                        with_ = step.get('with')
+                        if isinstance(with_, dict) and any(str(k).strip().lower() == 'token' for k in with_):
+                            errors.append(f'{where}: step with.token in a write job with no reviewed token action')
             for step in wy.steps(job):
                 if isinstance(step, dict) and 'run' in step:
                     if RELEASE_WRITERS.search(fold_continuations(step.get('run'))):
@@ -312,6 +315,7 @@ TOP = 'workflow-level permissions must be read-only'
 JOB = 'unreviewed write permission'
 UNREC = 'unrecognised permission'
 TOKEN = 'reads a token context'
+WRITE_TOKEN = 'with.token in a write job'
 WRITER = 'release-creating or release-editing construct'
 PARSE = 'not accepted in workflows'
 
@@ -346,6 +350,9 @@ controls = [
     ('pypi publish loses environment', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-pypi\n', ''), 'outside environment'),
     ('npm publish loses environment', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-npm\n', ''), 'outside environment'),
     ('npm publish gains contents write', 'registry-publish.yml', replace_once('registry-publish.yml', '    environment: publish-npm\n    permissions:\n      contents: read\n      id-token: write\n', '    environment: publish-npm\n    permissions:\n      contents: write\n      id-token: write\n'), JOB),
+    ('pypi publish step with.token github.token', 'registry-publish.yml', append_step('registry-publish.yml', 'publish-pypi', '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7\n        with:\n          token: ${{ github.token }}\n'), WRITE_TOKEN),
+    ('npm publish step with.token literal', 'registry-publish.yml', append_step('registry-publish.yml', 'publish-npm', '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7\n        with:\n          token: ghp_literalvalue\n'), WRITE_TOKEN),
+    ('npm publish step quoted Token key', 'registry-publish.yml', append_step('registry-publish.yml', 'publish-npm', '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7\n        with:\n          "Token": ${{ github.token }}\n'), WRITE_TOKEN),
     ('read-only job env reads secret PAT', 'ci.yml', writer_job('echo ok\n    env:\n      GH_TOKEN: ${{ secrets.RELEASE_PAT }}'), TOKEN),
     ('read-only step with reads secret PAT', 'ci.yml', writer_job('echo ok\n        with:\n          token: ${{ secrets.RELEASE_PAT }}'), TOKEN),
     ('read-only workflow top-level env reads secret', 'ci.yml', replace_once('ci.yml', "  CARGO_TERM_COLOR: always\n", "  CARGO_TERM_COLOR: always\n  GH_TOKEN: ${{ secrets.RELEASE_PAT }}\n"), TOKEN),

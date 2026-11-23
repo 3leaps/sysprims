@@ -108,22 +108,30 @@ jobs:
         with:
           ref: ${{ github.ref }}
       - name: Build CLI
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_GLIBC: ${{ matrix.glibc }}
         run: |
-          if [ -n "${{ matrix.glibc }}" ]; then
-            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }} -p sysprims-cli
+          if [ -n "$BUILD_GLIBC" ]; then
+            cargo zigbuild --release --target "${BUILD_TARGET}.${BUILD_GLIBC}" -p sysprims-cli
           else
-            cargo zigbuild --release --target ${{ matrix.target }} -p sysprims-cli
+            cargo zigbuild --release --target "$BUILD_TARGET" -p sysprims-cli
           fi
       - name: Package CLI
         shell: bash
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_GLIBC: ${{ matrix.glibc }}
+          BUILD_VERSION: ${{ needs.validate-version.outputs.version }}
+          ARTIFACT_SUFFIX: ${{ matrix.artifact_suffix }}
         run: |
           set -euo pipefail
 
           resolve_target() {
             file="$1"
-            candidates=("${{ matrix.target }}")
-            if [ -n "${{ matrix.glibc }}" ]; then
-              candidates+=("${{ matrix.target }}.${{ matrix.glibc }}")
+            candidates=("$BUILD_TARGET")
+            if [ -n "$BUILD_GLIBC" ]; then
+              candidates+=("${BUILD_TARGET}.${BUILD_GLIBC}")
             fi
             for c in "${candidates[@]}"; do
               if [ -f "target/${c}/release/${file}" ]; then
@@ -141,8 +149,7 @@ jobs:
           mkdir -p dist/cli
           cp "target/${TARGET_DIR}/release/sysprims" dist/cli/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
-          VERSION=${{ needs.validate-version.outputs.version }}
-          tar -czf sysprims-${VERSION}-${{ matrix.artifact_suffix }}.tar.gz -C dist/cli .
+          tar -czf "sysprims-${BUILD_VERSION}-${ARTIFACT_SUFFIX}.tar.gz" -C dist/cli .
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -169,17 +176,21 @@ jobs:
           cargo build --release --target x86_64-apple-darwin -p sysprims-cli
           cargo build --release --target aarch64-apple-darwin -p sysprims-cli
       - name: Package CLI (darwin-amd64)
+        env:
+          BUILD_VERSION: ${{ needs.validate-version.outputs.version }}
         run: |
           mkdir -p dist/cli-amd64
           cp target/x86_64-apple-darwin/release/sysprims dist/cli-amd64/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli-amd64/
-          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-amd64.tar.gz -C dist/cli-amd64 .
+          tar -czf "sysprims-${BUILD_VERSION}-darwin-amd64.tar.gz" -C dist/cli-amd64 .
       - name: Package CLI (darwin-arm64)
+        env:
+          BUILD_VERSION: ${{ needs.validate-version.outputs.version }}
         run: |
           mkdir -p dist/cli-arm64
           cp target/aarch64-apple-darwin/release/sysprims dist/cli-arm64/sysprims
           cp LICENSE-MIT LICENSE-APACHE dist/cli-arm64/
-          tar -czf sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz -C dist/cli-arm64 .
+          tar -czf "sysprims-${BUILD_VERSION}-darwin-arm64.tar.gz" -C dist/cli-arm64 .
       - name: Upload CLI artifact (darwin-amd64)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -190,8 +201,7 @@ jobs:
         with:
           name: cli-darwin-arm64
           path: sysprims-${{ needs.validate-version.outputs.version }}-darwin-arm64.tar.gz
-  # Build Windows targets using GNU toolchain for CGo compatibility
-  # CGo requires MinGW, so we build with x86_64-pc-windows-gnu target
+  # Build Windows x64 with the GNU target (MinGW). Windows arm64 (below) uses MSVC.
   build-windows:
     name: Build Windows
     runs-on: windows-2025  # pin:runner=windows-x64
@@ -217,11 +227,13 @@ jobs:
         run: cargo build --release --target x86_64-pc-windows-gnu -p sysprims-cli
       - name: Package CLI
         shell: bash
+        env:
+          BUILD_VERSION: ${{ needs.validate-version.outputs.version }}
         run: |
           mkdir -p dist/cli
           cp target/x86_64-pc-windows-gnu/release/sysprims.exe dist/cli/sysprims.exe
           cp LICENSE-MIT LICENSE-APACHE dist/cli/
-          cd dist/cli && 7z a -tzip ../../sysprims-${{ needs.validate-version.outputs.version }}-windows-amd64.zip .
+          cd dist/cli && 7z a -tzip "../../sysprims-${BUILD_VERSION}-windows-amd64.zip" .
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -246,12 +258,14 @@ jobs:
         run: cargo build --release --target aarch64-pc-windows-msvc -p sysprims-cli
       - name: Package CLI
         shell: pwsh
+        env:
+          BUILD_VERSION: ${{ needs.validate-version.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist/cli | Out-Null
           Copy-Item target/aarch64-pc-windows-msvc/release/sysprims.exe dist/cli/
           Copy-Item LICENSE-MIT, LICENSE-APACHE dist/cli/
-          $version = "${{ needs.validate-version.outputs.version }}"
+          $version = $env:BUILD_VERSION
           Compress-Archive -Path dist/cli/* -DestinationPath "sysprims-${version}-windows-arm64.zip"
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
@@ -271,8 +285,10 @@ jobs:
         with:
           ref: ${{ github.ref }}
       - name: Generate SBOM (CycloneDX)
+        env:
+          BUILD_VERSION: ${{ needs.validate-version.outputs.version }}
         run: |
-          syft dir:. -o cyclonedx-json > sbom-${{ needs.validate-version.outputs.version }}.cdx.json
+          syft dir:. -o cyclonedx-json > "sbom-${BUILD_VERSION}.cdx.json"
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -643,18 +659,20 @@ jobs:
           node scripts/set-platform-packages.js npm
       - name: Stage and compare all 8 npm tarballs
         shell: bash
+        env:
+          BUILD_COMMIT: ${{ needs.validate-version.outputs.commit }}
         run: |
           set -euo pipefail
           node scripts/npm-release.mjs stage \
             --stage dist/npm-stage \
             --native-dir bindings/typescript/sysprims/npm \
             --root-package bindings/typescript/sysprims \
-            --tag "${{ github.ref_name }}" \
-            --commit "${{ needs.validate-version.outputs.commit }}"
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$BUILD_COMMIT"
           node scripts/npm-release.mjs compare \
             --stage dist/npm-stage \
-            --tag "${{ github.ref_name }}" \
-            --commit "${{ needs.validate-version.outputs.commit }}"
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$BUILD_COMMIT"
       - name: Upload npm tarballs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -748,7 +766,7 @@ jobs:
             mv release-sdist/*.tar.gz release/
           fi
 
-          # npm tarballs
+          # Node package tarballs
           if [ -d release-npm ]; then
             mv release-npm/*.tgz release/
           fi

@@ -4,7 +4,7 @@
 # no write authority; the draft release is created locally afterwards.
 #
 #   release-fetch-ci-artifacts.sh [dest_dir]
-#       Requires RELEASE_RUN_ID and RELEASE_RUN_ATTEMPT. Stages the files and
+#       Requires SYSPRIMS_RELEASE_RUN_ID and SYSPRIMS_RELEASE_RUN_ATTEMPT. Stages the files and
 #       writes dest_dir.anchor (tag, object, commit, run, attempt, artifact,
 #       digest, and each file's SHA-256).
 #   release-fetch-ci-artifacts.sh --verify ANCHOR
@@ -27,6 +27,9 @@ if [[ "${1:-}" == --verify ]]; then
 else
 	dest="${1:-dist/release}"
 fi
+for old in RELEASE_RUN_ID RELEASE_RUN_ATTEMPT; do
+	[[ -z "${!old+set}" ]] || die "$old is not accepted; set SYSPRIMS_$old"
+done
 tag="${SYSPRIMS_RELEASE_TAG:-}"
 [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required'
 for tool in gh jq python3 shasum git; do
@@ -42,8 +45,8 @@ if [[ "$mode" == fetch ]]; then
 	mkdir -p "$dest"
 	[[ -d "$dest" && ! -L "$dest" ]] || die "$dest is not a directory"
 	[[ -z "$(find "$dest" -mindepth 1 -maxdepth 1 2>/dev/null)" ]] || die "$dest is not empty; run make release-clean first"
-	run_id="${RELEASE_RUN_ID:-}"
-	run_attempt="${RELEASE_RUN_ATTEMPT:-}"
+	run_id="${SYSPRIMS_RELEASE_RUN_ID:-}"
+	run_attempt="${SYSPRIMS_RELEASE_RUN_ATTEMPT:-}"
 else
 	[[ -f "$anchor_in" && ! -L "$anchor_in" ]] || die "anchor $anchor_in is missing or not a regular file"
 	field() { awk -F= -v k="$1" '$1==k {print substr($0, length(k) + 2); n++} END {exit n != 1}' "$anchor_in"; }
@@ -69,8 +72,8 @@ fi
 
 # The named attempt must be a successful push-triggered release.yml run for
 # this tag on the tagged commit (re-runs share a run id).
-[[ "$run_id" =~ ^[1-9][0-9]*$ ]] || die 'RELEASE_RUN_ID required (the Release workflow run for this tag)'
-[[ "$run_attempt" =~ ^[1-9][0-9]*$ ]] || die 'RELEASE_RUN_ATTEMPT required (the successful attempt of that run)'
+[[ "$run_id" =~ ^[1-9][0-9]*$ ]] || die 'SYSPRIMS_RELEASE_RUN_ID required (the Release workflow run for this tag)'
+[[ "$run_attempt" =~ ^[1-9][0-9]*$ ]] || die 'SYSPRIMS_RELEASE_RUN_ATTEMPT required (the successful attempt of that run)'
 run="$(gh api "repos/$repo/actions/runs/$run_id/attempts/$run_attempt" \
 	--jq '{path, event, head_branch, head_sha, status, conclusion, run_attempt}')" ||
 	die "could not read run $run_id attempt $run_attempt"

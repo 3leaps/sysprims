@@ -54,10 +54,6 @@ the addon automatically when one is available and otherwise validates the
 static, source-independent N-API contract used by pull requests without native
 artifacts.
 
-To inventory a freshly generated header instead of the committed default, set
-`SYSPRIMS_C_HEADER=/path/to/sysprims.h` or pass `--c-header /path/to/sysprims.h`
-directly to `node scripts/public-api.js check`.
-
 `make typescript-api-check` remains a standalone repository target rather than
 part of `make check`: the general Rust gate does not install Node dependencies.
 Pull-request CI installs dev tooling with `npm install --omit=optional` before

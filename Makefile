@@ -34,7 +34,7 @@
 
 # Every target that reads the release tag runs its prerequisites serially, so
 # release-require-tag (always first) finishes before any other prerequisite.
-.NOTPARALLEL: release release-checksums release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-stage-published release-stage-published-pypi release-stage-published-npm release-tag release-create-draft release-verify release-verify-registries release-verify-remote-tag release-verify-signatures release-verify-tag
+.NOTPARALLEL: release release-checksums release-stage release-stage-anchors release-fetch-anchors release-crates-dry-run release-crates-publish release-download release-export-keys release-guard-checksummed release-guard-downloaded release-guard-provenance release-guard-remote release-guard-signed release-guard-tag-version release-guard-tag-version-post release-guard-uploaded release-notes release-preflight release-prepare-tag-message release-publish release-push-tag release-require-checksummed release-sign release-stage-published release-stage-published-pypi release-stage-published-npm release-tag release-create-draft release-verify release-verify-registries release-verify-remote-tag release-verify-signatures release-verify-tag
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -98,7 +98,8 @@ help: ## Show available targets
 	@echo "Release (manual signing workflow):"
 	@echo "  release-preflight     Verify all pre-tag requirements (REQUIRED before tagging)"
 	@echo "  release-check         Version consistency + cargo package (does not publish)"
-	@echo "  release-download      Fetch the CI payload artifact (RELEASE_RUN_ID, RELEASE_RUN_ATTEMPT)"
+	@echo "  release-download      Fetch the CI payload artifact (SYSPRIMS_RELEASE_RUN_ID, SYSPRIMS_RELEASE_RUN_ATTEMPT)"
+	@echo "  release-stage         After download: notes, anchors, payload check, checksums (in order)"
 	@echo "  release-checksums     Generate SHA256SUMS and SHA512SUMS"
 	@echo "  release-sign          Sign checksums (requires SYSPRIMS_MINISIGN_KEY)"
 	@echo "  release-stage-anchors Stage the fingerprint anchors (release-fetch-anchors: pull, verified)"
@@ -305,7 +306,7 @@ workflow-pin: ## Every workflow matches its reviewed digest, CI pins, and read-o
 ci-pins-sync: ## Propagate config/ci/pins.toml to workflow pin markers and refresh workflow digests
 	@$(PYTHON) -B -P -E scripts/ci-pins.py sync
 
-ci-pins-check: ## Verify CI runner labels and Rust toolchain pins match config/ci/pins.toml
+ci-pins-check: ## Verify CI runner labels and Rust toolchain pins match config/ci/pins.toml, and tool fetches come from committed pins
 	@$(PYTHON) -B -P -E scripts/ci-pins.py check
 
 doctor: ## Report host tool versions against the recommended minimums (DOCTOR_SCOPE=release|dev)
@@ -608,13 +609,13 @@ version: ## Print current version
 # maintainer verifies, signs, creates the draft and publishes locally):
 #
 # 1. CI uploads the unsigned payload as a workflow artifact on tag push
-# 2. Fetch it: make release-download RELEASE_RUN_ID=<run> RELEASE_RUN_ATTEMPT=<n>
-# 3. Stage tagged notes and anchors: make release-notes release-stage-anchors
-# 4. Generate checksums: make release-checksums
-# 5. Sign checksums: make release-sign (requires SYSPRIMS_MINISIGN_KEY)
-# 6. Export public keys: make release-export-keys
-# 7. Verify everything: make release-verify
-# 8. Create the draft with every asset (draft remains): make release-create-draft
+# 2. Fetch it: make release-download SYSPRIMS_RELEASE_RUN_ID=<run> SYSPRIMS_RELEASE_RUN_ATTEMPT=<n>
+# 3. Stage tagged notes and anchors, then checksums: make release-stage
+#    (release-notes, release-stage-anchors, release-checksums in order)
+# 4. Sign checksums: make release-sign (requires SYSPRIMS_MINISIGN_KEY)
+# 5. Export public keys: make release-export-keys
+# 6. Verify everything: make release-verify
+# 7. Create the draft with every asset (draft remains): make release-create-draft
 
 DIST_RELEASE := dist/release
 DIST_PUBLISHED := dist/published
@@ -704,7 +705,7 @@ dist-local-clean: ## Remove dist/local contents
 	rm -rf $(DIST_LOCAL)
 	@echo "[ok] Local dist directory cleaned"
 
-release-download: release-require-tag release-guard-tag-version-post release-guard-provenance ## Fetch the CI release payload (RELEASE_RUN_ID, RELEASE_RUN_ATTEMPT)
+release-download: release-require-tag release-guard-tag-version-post release-guard-provenance ## Fetch the CI release payload (SYSPRIMS_RELEASE_RUN_ID, SYSPRIMS_RELEASE_RUN_ATTEMPT)
 	./scripts/release-fetch-ci-artifacts.sh $(DIST_RELEASE)
 
 release-stage-anchors: release-require-tag release-guard-tag-version-post ## Stage the fingerprint anchors from the tagged commit (before checksums)
@@ -716,6 +717,11 @@ release-fetch-anchors: release-require-tag ## Fetch a published release's verifi
 		echo "error: ANCHORS_TRUST_LOCAL_TAG is accepted only on the make command line, for one run (make release-fetch-anchors ... ANCHORS_TRUST_LOCAL_TAG=1)"; exit 1;; esac
 	env -u ANCHORS_TRUST_LOCAL_TAG SYSPRIMS_FETCH_TRUST_LOCAL="$(ANCHORS_TRUST_LOCAL_TAG)" \
 		./scripts/release-fetch-anchors.sh "$(ANCHORS_DIR)"
+
+release-stage: release-require-tag ## After release-download: copy notes, stage anchors, verify the payload, write checksums
+	@$(MAKE) release-notes
+	@$(MAKE) release-stage-anchors
+	@$(MAKE) release-checksums
 
 release-checksums: release-require-tag release-guard-downloaded ## Generate SHA256SUMS and SHA512SUMS
 	./scripts/generate-checksums.sh $(DIST_RELEASE) $(SYSPRIMS_RELEASE_TAG)
@@ -848,9 +854,7 @@ release-preflight: release-require-tag release-plan-check version-check ## Verif
 release: release-require-tag ## Fetch, sign and create the draft release; it remains unpublished
 	@$(MAKE) release-clean
 	@$(MAKE) release-download
-	@$(MAKE) release-notes
-	@$(MAKE) release-stage-anchors
-	@$(MAKE) release-checksums
+	@$(MAKE) release-stage
 	@$(MAKE) release-sign
 	@$(MAKE) release-export-keys
 	@$(MAKE) release-verify

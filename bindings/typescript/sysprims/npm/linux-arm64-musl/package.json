@@ -1,6 +1,6 @@
 {
   "name": "@3leaps/sysprims-linux-arm64-musl",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "os": [
     "linux"
   ],

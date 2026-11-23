@@ -45,7 +45,7 @@ refuse() {
 # Allowlisted unpublished N-API crate must remain unpublished.
 printf '[package]\nname = "sysprims-ts-napi"\npublish = true\n\n[lib]\npath = "src/lib.rs"\n' >"$repo/bindings/typescript/sysprims/native/Cargo.toml"
 fixture_commit "$repo" napi-publish-true
-refuse 'allowlisted FFI/binding crate must set publish = false'
+refuse 'allowlisted binding crate must set publish = false'
 printf '[package]\nname = "sysprims-ts-napi"\npublish.workspace = true\nbuild = "tools/gen.rs"\n' >"$repo/bindings/typescript/sysprims/native/Cargo.toml"
 fixture_commit "$repo" napi-custom-build
 refuse 'build script'

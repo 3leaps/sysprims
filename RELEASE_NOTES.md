@@ -6,6 +6,83 @@
 
 ---
 
+## v0.5.1 - 2026-11-20
+
+**Status:** Registry Publication Fix and Release Tooling Hardening
+
+v0.5.1 is a patch release. It contains no library, binding, or CLI behavior
+changes from v0.5.0. It fixes the PyPI and npm publication workflow, so the
+Python and TypeScript packages for this release ship from the signed,
+immutable GitHub Release. PyPI and npm go straight from `0.4.0` to `0.5.1`;
+`0.5.0` was not published to either registry. The v0.5.0 GitHub Release,
+crates.io crates, and Go modules are unaffected.
+
+### Fixes
+
+- **Registry publication**: `registry-publish.yml` installs `decernor` from
+  the committed pin `config/release/decernor-ci-sha256.txt` (the pin CI already
+  used) and installs the pinned `yamlprims` CLI. Both are required to verify
+  the published release before PyPI and npm upload.
+
+### Dependencies
+
+- `rsfulmen` `0.1.7` loads its embedded foundry catalogs with `yamlprims`
+  instead of `serde_yaml_ng`. `unsafe-libyaml` (RUSTSEC-2024-0449) is no
+  longer in the dependency tree, and `deny.toml` no longer ignores that
+  advisory.
+- `sysprims-timeout` no longer declares an unused `rsfulmen` dependency.
+
+### Release Tooling
+
+- `scripts/ci-install-decernor.sh` is the single installer for decernor in CI
+  and in the publication workflow: one pinned archive, a SHA-256 check, only
+  the binary extracted, and an absolute `SYSPRIMS_DECERNOR_BIN`.
+- Workflow run steps carry no `${{ }}` expressions; values reach the shell
+  only through `env:`. A run line that plainly reaches the network, installs
+  a tool, carries a 64-hex digest, or calls a release-tool installer must
+  appear exactly in the committed `config/ci/reviewed-run-lines.txt`;
+  `make ci-pins-check` refuses anything else. Release tools are installed only
+  by `scripts/ci-install-<tool>.sh` from committed pin files, which CI runs on
+  every pull request. CI pins `cargo-audit` `0.23.0`, `govulncheck` `v1.9.0`,
+  and `gosec` `v2.29.0`.
+- `make release-download` reads `SYSPRIMS_RELEASE_RUN_ID` and
+  `SYSPRIMS_RELEASE_RUN_ATTEMPT`; the unprefixed names are refused.
+- `make release-stage` runs `release-notes`, `release-stage-anchors`, and
+  `release-checksums` in order after the download. Guard failures name the
+  make target(s) to run next.
+- A `yamlprims` digest mismatch names the pinned release and a versioned
+  install path.
+
+### Conformance records
+
+The conformance vector files, the `identity-evidence/v0` and `recurrence/v0`
+sources, contract pins, and corpora are unchanged from v0.5.0 (see
+`docs/releases/v0.5.0.md`).
+
+### Release Coordinates
+
+- Rust crates: `sysprims-core`, `sysprims-evidence`, `sysprims-signal`,
+  `sysprims-session`, `sysprims-proc`, `sysprims-timeout`, and
+  `sysprims-recurrence` at `0.5.1`.
+- Rust workspace and root Go module (`github.com/3leaps/sysprims@v0.5.1`,
+  covering `syserror`, `signal`, `session`, `timeout`, `proc`, `evidence`, and
+  `procobserve`): repository tag `v0.5.1`.
+- Go recurrence module: path-prefixed tag `go/recurrence/v0.5.1` on the same
+  commit (`github.com/3leaps/sysprims/go/recurrence@v0.5.1`).
+- Python: `sysprims==0.5.1` on PyPI, published via GitHub Actions Trusted
+  Publishing with PEP 740 attestations from the verified core tag.
+- TypeScript: `@3leaps/sysprims@0.5.1`, published from the verified core tag.
+
+### Upgrade Notes
+
+- No API changes from v0.5.0. Python and TypeScript users on `0.4.0` should
+  read the v0.5.0 upgrade notes (`docs/releases/v0.5.0.md`) when moving to
+  `0.5.1`.
+- `sysprims-cli`, `sysprims-ts-napi`, and `sysprims-py` remain
+  `publish = false` on crates.io.
+
+---
+
 ## v0.5.0 - 2026-11-16
 
 **Status:** Pure-Go Twins, Four-Language Conformance Vectors, and cgo/FFI Retirement
@@ -156,64 +233,3 @@ verified npm `.tgz` release tarballs.
   `/proc/sys/kernel`. In unprivileged OCI containers whose runtime bind-mounts
   `/proc/sys` read-only over `/proc`, observation calls fail closed with
   `procfs-confinement-violation`.
-
----
-
-## v0.3.0 - 2026-11-02
-
-**Status:** Recurrence and Release Integrity Hardening
-
-v0.3.0 adds `contract: recurrence/v0` in Rust (`sysprims-recurrence`) and in
-pure Go (`go/recurrence`). The two implementations agree on the pinned
-conformance corpus and on generated rules. This release also hardens the
-release ceremony with committed public signing-key pins and fingerprint
-anchors, read-only CI artifact builds, immutable GitHub Release promotion,
-Sigstore SLSA provenance verification for npm packages, and a Cargo
-credential-provider publication gate.
-
-### Highlights
-
-- **Rust recurrence crate (`sysprims-recurrence`)**: RFC 5545 recurrence rules
-  under `contract: recurrence/v0` with canonical JSON (RFC 8785), SHA-256
-  digest, canonical RFC 5545 text, and expansion into UTC instants over an
-  embedded `tzdb` `2026e` bundle.
-- **Pure-Go recurrence module (`go/recurrence`)**: standard-library-only Go
-  implementation (`github.com/3leaps/sysprims/go/recurrence`, no `cgo`) backed
-  by the same embedded `tzdb` `2026e` bundle and verified byte-for-byte against
-  the Rust implementation.
-- **Committed release identity and signed tag ceremony**: public OpenPGP and
-  minisign signing keys and `decernor` fingerprint anchors are committed in-tree
-  and verified across the three coordinated release tags (`v0.3.0`,
-  `bindings/go/sysprims/v0.3.0`, and `go/recurrence/v0.3.0`).
-- **Read-only release workflows and immutable GitHub Releases**: CI release
-  workflows run with read-only permissions and upload unsigned workflow
-  artifacts; draft creation, dual signing, immutable release promotion, and
-  post-publish verification run through maintainer-gated targets.
-- **Cargo credential-provider publication gate**: `make release-crates-publish`
-  exports the tagged commit to an isolated directory, verifies tag and release
-  immutability, checks publishable crate sources, and requires per-crate
-  interactive confirmation before releasing a `crates.io` credential.
-- **Timeout CLI documentation and positioning**: clarifies GNU `timeout` 9.11
-  and uutils group-by-default behavior versus `sysprims` differentiators
-  (Windows Job Objects, typed reliability receipts, and MIT/Apache-2.0 library
-  embedding) and adds `docs/guides/timeout-cli.md`.
-
-### Release Coordinates
-
-- Rust crates: `sysprims-core`, `sysprims-signal`, `sysprims-session`,
-  `sysprims-proc`, `sysprims-timeout`, and `sysprims-recurrence` at `0.3.0`.
-- Rust workspace: repository tag `v0.3.0`.
-- Go bindings module: path-prefixed tag `bindings/go/sysprims/v0.3.0` on the
-  same commit (`github.com/3leaps/sysprims/bindings/go/sysprims@v0.3.0`).
-- Go recurrence module: path-prefixed tag `go/recurrence/v0.3.0` on the same
-  commit (`github.com/3leaps/sysprims/go/recurrence@v0.3.0`).
-- TypeScript: `@3leaps/sysprims@0.3.0`, published from the verified core tag.
-
-### Upgrade Notes
-
-- `sysprims-recurrence` (`0.3.0`) and
-  `github.com/3leaps/sysprims/go/recurrence@v0.3.0` are available as standalone
-  recurrence libraries with no host tzdata dependency.
-- Release verification assets now include `expected-fingerprints.txt` and
-  `expected-fingerprints.ndjson` alongside `SHA256SUMS`, `SHA512SUMS`, and the
-  public signing keys.

@@ -5,7 +5,7 @@
 Cargo and rustup act on files in the tree they run in: toolchain selectors,
 .cargo configuration, build scripts, and manifest paths that point elsewhere.
 Rather than enumerate what each could do, the release source must contain none
-of them (except the exact unpublished FFI/N-API binding crates allowlisted
+of them (except the exact unpublished N-API binding crate allowlisted
 below). The commit is read with git plumbing only; no file from it executes.
 
 Usage: release-source-check.py <commit> [--repo DIR]
@@ -15,7 +15,7 @@ Refuses, anywhere in the commit's tree:
   - a symlink or a submodule;
   - rust-toolchain or rust-toolchain.toml;
   - any path under a .cargo directory;
-  - a build.rs outside the allowlisted unpublished FFI/N-API binding crates;
+  - a build.rs outside the allowlisted unpublished N-API binding crate;
   - a Cargo.toml whose [package] build, readme, license-file, include or
     exclude, or whose [lib]/[[bin]]/[[test]]/[[bench]]/[[example]] paths, are
     absolute or climb out with "..";
@@ -24,7 +24,7 @@ Refuses, anywhere in the commit's tree:
   - readme, license-file, include, exclude or build inherited from the
     workspace, and escaping [workspace.package] values;
   - a workspace member outside crates/ other than the allowlisted unpublished
-    FFI/N-API binding crates;
+    N-API binding crate;
   - a dependency (any table, including target-specific and workspace) from
     git or another registry, or with a path that is not a crate in the tree;
     [patch], [replace] and package.workspace.
@@ -41,7 +41,6 @@ import tomllib
 TARGET_TABLES = ("lib", "bin", "test", "bench", "example")
 ALLOWED_UNPUBLISHED_MEMBERS = {
     "bindings/typescript/sysprims/native",
-    "ffi/sysprims-ffi",
 }
 ALLOWED_BUILD_SCRIPTS = {
     "bindings/typescript/sysprims/native/build.rs",
@@ -300,7 +299,7 @@ def check(repo, commit):
         path = f"{member}/Cargo.toml"
         if path in parsed and not is_unpublished(parsed[path], ws_publish):
             raise ValueError(
-                f"{path}: allowlisted FFI/binding crate must set publish = false"
+                f"{path}: allowlisted binding crate must set publish = false"
             )
     plan = (
         git(repo, "cat-file", "blob", f"{commit}:config/release/publishable-crates.txt")

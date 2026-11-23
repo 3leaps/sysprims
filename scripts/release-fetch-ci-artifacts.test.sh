@@ -129,16 +129,22 @@ attempt_json() { # conclusion event head_sha attempt [path] [branch]
 		"${5:-.github/workflows/release.yml}" "$2" "${6:-v1.2.3}" "$3" "$1" "$4"
 }
 good="$(attempt_json success push "$commit" 2)"
-export RELEASE_RUN_ID=11 RELEASE_RUN_ATTEMPT=2 FIXTURE_LATEST=2
+export SYSPRIMS_RELEASE_RUN_ID=11 SYSPRIMS_RELEASE_RUN_ATTEMPT=2 FIXTURE_LATEST=2
 
 # Fetch: refuses a non-canonical tag, a missing local tag, a missing run id or
 # attempt, and any named attempt that is not a successful push-triggered
 # release run for this tag on the tagged commit or is not the latest attempt.
 SYSPRIMS_RELEASE_TAG=1.2.3 fail 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required' ./scripts/release-fetch-ci-artifacts.sh "$scratch/d0"
 SYSPRIMS_RELEASE_TAG=v9.9.9 fail 'published tag v9.9.9 failed verification' ./scripts/release-fetch-ci-artifacts.sh "$scratch/d0"
-RELEASE_RUN_ID='' FIXTURE_ATTEMPT="$good" fail 'RELEASE_RUN_ID required' \
+SYSPRIMS_RELEASE_RUN_ID='' FIXTURE_ATTEMPT="$good" fail 'SYSPRIMS_RELEASE_RUN_ID required' \
 	env SYSPRIMS_RELEASE_TAG=v1.2.3 ./scripts/release-fetch-ci-artifacts.sh "$scratch/d1"
-RELEASE_RUN_ATTEMPT='' FIXTURE_ATTEMPT="$good" fail 'RELEASE_RUN_ATTEMPT required' \
+SYSPRIMS_RELEASE_RUN_ATTEMPT='' FIXTURE_ATTEMPT="$good" fail 'SYSPRIMS_RELEASE_RUN_ATTEMPT required' \
+	env SYSPRIMS_RELEASE_TAG=v1.2.3 ./scripts/release-fetch-ci-artifacts.sh "$scratch/d1"
+# The unprefixed names are refused, even when empty, so an old command line
+# cannot silently fall through to a missing-value error.
+RELEASE_RUN_ID=11 FIXTURE_ATTEMPT="$good" fail 'RELEASE_RUN_ID is not accepted; set SYSPRIMS_RELEASE_RUN_ID' \
+	env SYSPRIMS_RELEASE_TAG=v1.2.3 ./scripts/release-fetch-ci-artifacts.sh "$scratch/d1"
+RELEASE_RUN_ATTEMPT='' FIXTURE_ATTEMPT="$good" fail 'RELEASE_RUN_ATTEMPT is not accepted; set SYSPRIMS_RELEASE_RUN_ATTEMPT' \
 	env SYSPRIMS_RELEASE_TAG=v1.2.3 ./scripts/release-fetch-ci-artifacts.sh "$scratch/d1"
 for bad in \
 	"$(attempt_json failure push "$commit" 2)" \

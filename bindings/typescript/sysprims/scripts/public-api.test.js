@@ -4,7 +4,6 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const contract = require("./public-api-contract.json");
 const {
 	emitDeclarations,
 	inspectPublicExports,
@@ -27,10 +26,7 @@ test("generated API changes when an exported member or union changes", () => {
 	try {
 		emitDeclarations(tempRoot);
 		const baseline = inspectPublicExports(tempRoot);
-		const baselineDocument = renderDocument(
-			baseline,
-			Object.keys(contract.cAbi).sort(),
-		);
+		const baselineDocument = renderDocument(baseline);
 		const typesPath = path.join(tempRoot, "types.d.ts");
 		const declarations = fs.readFileSync(typesPath, "utf8");
 		const changed = declarations
@@ -47,10 +43,7 @@ test("generated API changes when an exported member or union changes", () => {
 		fs.writeFileSync(typesPath, changed);
 
 		const mutated = inspectPublicExports(tempRoot);
-		const mutatedDocument = renderDocument(
-			mutated,
-			Object.keys(contract.cAbi).sort(),
-		);
+		const mutatedDocument = renderDocument(mutated);
 		assert.notEqual(
 			mutated.types.get("ProcessOptions"),
 			baseline.types.get("ProcessOptions"),

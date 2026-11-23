@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verify the minisign and PGP signatures on both checksum manifests.
-# Usage: verify-signatures.sh [dir]   (SYSPRIMS_RELEASE_TAG=vX.Y.Z required)
+# Usage: SYSPRIMS_RELEASE_TAG=vX.Y.Z verify-signatures.sh [dir]
+#        (make release-verify-signatures passes the tag from the environment)
 #
 # The keys used are the public pins committed in the tagged commit, read as git
 # blobs. The staged copies in the directory must match them byte-for-byte; they
@@ -12,8 +13,9 @@ die() {
 	echo "error: $*" >&2
 	exit 1
 }
+[[ -n "${SYSPRIMS_RELEASE_TAG:-}" ]] ||
+	die 'SYSPRIMS_RELEASE_TAG=vX.Y.Z is required (usage: SYSPRIMS_RELEASE_TAG=vX.Y.Z scripts/verify-signatures.sh [dir], or make release-verify-signatures)'
 [[ -d "$dir" ]] || die "directory $dir does not exist"
-: "${SYSPRIMS_RELEASE_TAG:?SYSPRIMS_RELEASE_TAG=vX.Y.Z is required}"
 object="$(git -C "$root" rev-parse --verify --quiet "refs/tags/$SYSPRIMS_RELEASE_TAG")" || die "$SYSPRIMS_RELEASE_TAG is absent"
 commit="$(git -C "$root" rev-parse "${object}^{commit}")"
 

@@ -199,7 +199,10 @@ jobs:
         if: endsWith(matrix.target, '-musl')
         run: cargo install cargo-zigbuild --locked --version 0.23.4
       - name: Check native target
-        run: cargo check -p sysprims-ts-napi --target ${{ matrix.target }}
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo check -p sysprims-ts-napi --target "$TARGET"
       - name: Build target native addon
         working-directory: bindings/typescript/sysprims
         shell: bash
@@ -220,7 +223,10 @@ jobs:
           node scripts/stage-platform-package.js
       - name: Inspect target package
         working-directory: bindings/typescript/sysprims
-        run: node scripts/verify-platform-packages.js "${{ matrix.package-dir }}"
+        shell: bash
+        env:
+          PACKAGE_DIR: ${{ matrix.package-dir }}
+        run: node scripts/verify-platform-packages.js "$PACKAGE_DIR"
   test-musl:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
